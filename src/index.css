@@ -1,0 +1,111 @@
+@import "tailwindcss";
+
+body {
+  @apply bg-gray-50 text-gray-800 font-sans;
+}
+
+.card {
+  @apply bg-white rounded-2xl shadow-md p-6 transition hover:shadow-lg;
+}
+
+.btn {
+  @apply px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition;
+}
+
+.input {
+  @apply border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-400;
+}
+
+.rainbow-text {
+  /* Màu đậm hơn một chút nhưng vẫn mềm */
+  background: linear-gradient(90deg,
+      #ff616b,
+      /* đỏ hồng đậm hơn */
+      #f47c97,
+      /* hồng pastel đậm hơn */
+      #f056d4,
+      /* tím hồng rực */
+      #5a97ff,
+      /* xanh dương đậm */
+      #3fbfff,
+      /* xanh cyan tươi hơn */
+      #b4ef2a,
+      /* xanh lá neon nhẹ */
+      #3ecf6e
+      /* xanh lá ngọc đậm hơn */
+    );
+  background-size: 300% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+
+  /* Animation nhẹ nhàng */
+  animation: rainbow-move-soft 12s linear infinite;
+}
+
+@keyframes rainbow-move-soft {
+  0% {
+    background-position: 0% 50%;
+  }
+
+  100% {
+    background-position: 300% 50%;
+  }
+}
+
+.box-input-mess{
+  width: 100%;
+  position: relative;
+  display: flex;
+  justify-content: center;
+  height: 60px;
+  align-items: center;
+}
+.input-wrapper {
+  display: flex;
+  align-items: center;
+  background-color: #ffffff;
+  border: 1px solid #d1d5db;
+  border-radius: 24px;
+  padding: 4px 6px 4px 16px;   
+  width: 90%; 
+}
+
+.input-wrapper input[type="text"] {
+  flex: 1;
+  border: none;
+  background: transparent;
+  outline: none;
+  font-size: 14px;
+  color: var(--chat-text);
+  padding: 8px 10px !important;
+}
+
+.input-wrapper input[type="text"]::placeholder {
+  color: #a1a1aa;
+}
+
+.send-btn {
+  background-color: #f1f5f9;
+  color: #64748b;
+  border: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.send-btn:hover:not(:disabled) {
+  background-color: var(--chat-primary);
+  color: white;
+}
+
+.send-btn svg {
+  width: 16px;
+  height: 16px;
+  fill: currentColor;
+}
