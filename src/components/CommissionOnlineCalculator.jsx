@@ -1,5 +1,4 @@
-﻿// src/components/CommissionOnlineCalculator.jsx
-import { useMemo, useState } from "react";
+﻿import { useMemo, useState } from "react";
 import {
   Calculator,
   Download,
@@ -1664,11 +1663,11 @@ export default function CommissionOnlineCalculator() {
                     );
                   })}
               </div>
-                  {(groupSelected.length < 2 || groupSelected.length > 3) && (
-                    <div className="mt-2 text-xs text-slate-500">
-                      Chọn 2 hoặc 3 nhân viên Online để hiển thị tổng gộp.
-                    </div>
-                  )}
+              {(groupSelected.length < 2 || groupSelected.length > 3) && (
+                <div className="mt-2 text-xs text-slate-500">
+                  Chọn 2 hoặc 3 nhân viên Online để hiển thị tổng gộp.
+                </div>
+              )}
             </div>
 
             {groupAdjustedMembers.length === 3 && groupSummary && (
