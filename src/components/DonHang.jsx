@@ -98,15 +98,19 @@ function DonHang() {
 
       const chat = await chatRes.json();
       const threadId = chat?.threadId;
+      const conversationId = chat?.conversationId;
 
-      if (!threadId) {
-        setChatPopupError("Chat có tồn tại nhưng chưa có threadId.");
+      if (!threadId && !conversationId) {
+        setChatPopupError("Chat có tồn tại nhưng chưa có threadId hoặc conversationId.");
         return;
       }
+      let endpointInfo = `/chatweb/history?threadId=${encodeURIComponent(threadId)}`;
+      if (conversationId) endpointInfo = `/chatweb/history?conversationId=${encodeURIComponent(conversationId)}`;   
 
+     
       // ✅ 2) lấy lịch sử bằng threadId
       const hisRes = await fetch(
-        `/chatweb/history?threadId=${encodeURIComponent(threadId)}`,
+        endpointInfo,
         {
           signal: controller.signal,
           headers: { Authorization: `Bearer ${token}` }, // nếu backend yêu cầu
