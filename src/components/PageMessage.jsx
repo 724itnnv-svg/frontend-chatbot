@@ -239,7 +239,7 @@ function PageMessage() {
       return;
     }
 
-    setSelectedChat(chat);
+    setSelectedChat(chat);   
     if(!chat.conversationId){
       setActiveThreadId(chat.threadId);
     }else{
