@@ -113,7 +113,7 @@ function DonHang() {
         endpointInfo,
         {
           signal: controller.signal,
-          headers: { Authorization: `Bearer ${token}` }, // nếu backend yêu cầu
+          headers: { Authorization: `Bearer ${token}` }, 
         },
       );
 
