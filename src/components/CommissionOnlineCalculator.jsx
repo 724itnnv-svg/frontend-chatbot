@@ -11,6 +11,7 @@ import * as XLSX from "xlsx";
 
 const UNIT_CONVERSION = {
   "20KG": 1,
+  "17KG": 1,
   "22KG": 1,
   "25KG": 1,
   "15KG": 2,
@@ -38,7 +39,7 @@ const FILE_DEFS = [
   {
     key: "returns",
     label: "File Danh Sách Trả Hàng (Returns)",
-    headers: ["Người bán", "Mã hàng", "Số lượng", "Giá bán", "Giá nhập lại", "Ghi chú"],
+    headers: ["Người bán", "Người nhận trả", "Mã hàng", "Số lượng", "Giá bán", "Giá nhập lại", "Ghi chú"],
   },
   {
     key: "invoice",
@@ -80,8 +81,9 @@ const BASE_STATS = {
 
 const EMPLOYEE_TYPES = [
   { value: "online", label: "Online" },
-  { value: "market", label: "Thị trường" },
+  // { value: "market", label: "Thị trường" },
   { value: "admin", label: "Sale Admin" },
+  { value: "mkt", label: "Marketing" },
 ];
 
 const VN_LOCALE = "vi-VN";
@@ -370,7 +372,7 @@ export default function CommissionOnlineCalculator() {
     { itemCode: "NNV22", price: "0" },
   ]);
 
-  const allFilesReady = FILE_DEFS.every((def) => files[def.key]);
+  const allFilesReady = ["cashflow", "returns", "invoice"].every((key) => files[key]);
 
   const totals = useMemo(() => {
     return results.reduce(
@@ -535,7 +537,7 @@ export default function CommissionOnlineCalculator() {
       const set = new Set();
       rows.forEach((row) => {
         const name = normalizeText(getCell(row, headerMap, "Nhân viên"));
-        if (name) set.add(name);
+        if (name && /[a-zA-ZÀ-ỹ]/.test(name)) set.add(name);
       });
       const list = Array.from(set).sort((a, b) => a.localeCompare(b));
       setCashflowEmployees(list);
@@ -677,7 +679,9 @@ export default function CommissionOnlineCalculator() {
       for (const def of FILE_DEFS) {
         const file = files[def.key];
         if (!file) {
-          newErrors.push(`${def.label}: Chưa chọn file.`);
+          if (def.key !== "adcost") {
+            newErrors.push(`${def.label}: Chưa chọn file.`);
+          }
           continue;
         }
         workbooks[def.key] = await readWorkbook(file);
@@ -709,8 +713,9 @@ export default function CommissionOnlineCalculator() {
               sourceEmployees.cashflow.add(employee);
               const value = parseNumber(getCell(row, headerMap, "Giá trị"));
               const note = normalizeText(getCell(row, headerMap, "Ghi chú")).toUpperCase();
+              const payer = normalizeText(getCell(row, headerMap, "Người nộp/nhận")).toUpperCase();
               const isAgency =
-                empType !== "online" ? true : note.startsWith("DL");
+                empType === "admin" ? true : note.startsWith("DL") || payer.startsWith("DL");
               const isCTDB = note.includes("CTDB");
               const stats = getStats(employeeMap, employee);
               const log = getLog(employee);
@@ -778,7 +783,7 @@ export default function CommissionOnlineCalculator() {
               );
               const normalizedPriceList = priceList.replace(/\s+/g, " ").trim();
               const isAgency =
-                empType !== "online"
+                empType === "admin"
                   ? true
                   : normalizedPriceList === "BẢNG GIÁ CHUNG" ||
                   normalizedPriceList.startsWith("BẢNG GIÁ CHUNG") ||
@@ -804,67 +809,41 @@ export default function CommissionOnlineCalculator() {
               const overrideGift = hasOverrideGift
                 ? overrideGiftPrices[itemCode]
                 : undefined;
-              if (salePrice === 0) {
-                if (itemCode !== "NNV22") {
-                  const needsManualPrice =
-                    unitPrice <= 0 &&
-                    unit !== "BAO" &&
-                    unit !== "CUỐN" &&
-                    unit !== "CUON" &&
-                    unit !== "CÁI" &&
-                    unit !== "CAI";
-                  if (needsManualPrice && !hasOverrideGift) {
-                    missingGiftsLocal.push({
-                      employee,
-                      itemCode,
-                      itemName,
-                      unit,
-                      qty,
-                      invoiceId,
-                    });
-                    return;
-                  }
-                  const effectiveUnitPrice = hasOverrideGift
-                    ? overrideGift
-                    : unitPrice;
-                  const giftValue =
-                    unit === "BAO"
-                      ? parseBaoValue(itemName) * (qty || 1)
-                      : effectiveUnitPrice * qty;
-                  if (giftValue) {
-                    stats[deductKey] -= giftValue;
-                    if (isAgency) {
-                      if (isCTDB) {
-                        log.giftDeductionAgencyCTDB += giftValue;
-                      } else {
-                        log.giftDeductionAgency += giftValue;
-                      }
-                    } else if (isCTDB) {
-                      log.giftDeductionRetailCTDB += giftValue;
+              if (salePrice === 0 && unitPrice > 0) {
+                const value = unitPrice * qty;
+                if (value > 0) {
+                  stats[deductKey] -= value;
+                  if (isAgency) {
+                    if (isCTDB) {
+                      log.giftDeductionAgencyCTDB += value;
                     } else {
-                      log.giftDeductionRetail += giftValue;
+                      log.giftDeductionAgency += value;
                     }
-                    const giftRow = [
-                      invoiceId,
-                      customerCode,
-                      customerName,
-                      priceListRaw,
-                      note,
-                      itemCode,
-                      itemName,
-                      unit,
-                      qty,
-                      unitPrice,
-                      salePrice,
-                      giftValue,
-                    ];
-                    if (isAgency) {
-                      details.giftAgency.push(giftRow);
-                    } else {
-                      details.giftRetail.push(giftRow);
-                    }
-                    pipelineTotals.giftDeduction += giftValue;
+                  } else if (isCTDB) {
+                    log.giftDeductionRetailCTDB += value;
+                  } else {
+                    log.giftDeductionRetail += value;
                   }
+                  const giftRow = [
+                    invoiceId,
+                    customerCode,
+                    customerName,
+                    priceListRaw,
+                    note,
+                    itemCode,
+                    itemName,
+                    unit,
+                    qty,
+                    unitPrice,
+                    salePrice,
+                    value,
+                  ];
+                  if (isAgency) {
+                    details.giftAgency.push(giftRow);
+                  } else {
+                    details.giftRetail.push(giftRow);
+                  }
+                  pipelineTotals.giftDeduction += value;
                 }
               }
 
@@ -939,7 +918,7 @@ export default function CommissionOnlineCalculator() {
             newErrors.push(`${def.label}: Thiếu cột ${need.join(", ")}.`);
           } else {
             rows.forEach((row) => {
-              const employee = normalizeText(getCell(row, headerMap, "Người bán"));
+              const employee = normalizeText(getCell(row, headerMap, "Người nhận trả"));
               if (!employee) return;
               if (!shouldProcess(employee)) return;
               sourceEmployees.returns.add(employee);
@@ -978,7 +957,7 @@ export default function CommissionOnlineCalculator() {
               const log = getLog(employee);
               const details = getDetails(employee);
               const isAgencyReturn =
-                empType !== "online" ? true : customer.startsWith("DL");
+                empType === "admin" ? true : customer.startsWith("DL");
               const customerTypeLabel = isAgencyReturn ? "Đại lý" : "Khách lẻ";
               if (salePrice > 0 || returnPrice > 0) {
                 const priceUsed = returnPrice > 0 ? returnPrice : salePrice;
@@ -1054,8 +1033,8 @@ export default function CommissionOnlineCalculator() {
         }
       }
 
-      // Step 4: Ad Cost
-      {
+      // Step 4: Ad Cost (optional — skip if file not uploaded)
+      if (workbooks.adcost) {
         const def = FILE_DEFS[3];
         const { rows, headers, sheetMissing, sheetName } = readSheetRows(
           workbooks[def.key]
@@ -1148,8 +1127,8 @@ export default function CommissionOnlineCalculator() {
         return;
       }
 
-      if (forceModal) {
-        setMissingReturns([]);
+      if (forceModal && (missingReturnsLocal.length > 0 || missingGiftsLocal.length > 0)) {
+        setMissingReturns(missingReturnsLocal);
         setMissingGifts([]);
         setMissingPriceModalOpen(true);
         return;
@@ -1171,13 +1150,19 @@ export default function CommissionOnlineCalculator() {
         let agencyCommission = 0;
         let totalCommission = 0;
 
-        if (empType === "market" || empType === "admin") {
-          const fixedRate = empType === "market" ? 0.1 : 0.03;
+        if (empType === "admin") {
           retailRate = 0;
-          agencyRate = fixedRate;
-          agencyCommission = combinedTotal * fixedRate;
+          agencyRate = 0.03;
+          agencyCommission = combinedTotal * agencyRate;
           totalCommission = agencyCommission;
-        } else {
+        }
+        else if (empType === "mkt") {
+          retailRate = 0.05;
+          agencyRate = totalAgency >= 30000000 ? 0.015 : 0.005;
+          retailCommission = combinedTotal * retailRate;
+          totalCommission = retailCommission;
+        }
+        else {
           retailRate = totalRetail < 100000000 ? 0.07 : 0.1;
           agencyRate = totalAgency < 30000000 ? 0.01 : 0.03;
           const retailCommissionable = Math.max(
@@ -1364,8 +1349,7 @@ export default function CommissionOnlineCalculator() {
                   Tính Hoa Hồng Online
                 </h1>
                 <p className="mt-1 text-sm text-slate-500">
-                  Tải 4 file Excel/CSV theo đúng format để hệ thống tự tính doanh số
-                  & hoa hồng.
+                  Tải 3 file bắt buộc (Sổ Quỹ, Trả Hàng, Chi Tiết Hóa Đơn) và tùy chọn file Chi Phí Quảng Cáo để tính hoa hồng. Nếu không có file quảng cáo, ROAS sẽ được tính là 0.
                 </p>
               </div>
             </div>
@@ -1578,10 +1562,10 @@ export default function CommissionOnlineCalculator() {
                         {formatMoney(r.agencyCTDB)}
                       </td>
                       <td className="px-3 py-2 text-right">
-                        {(r.retailRate * 100).toFixed(0)}%
+                        {parseFloat((r.retailRate * 100).toFixed(2)).toLocaleString(VN_LOCALE)}%
                       </td>
                       <td className="px-3 py-2 text-right">
-                        {(r.agencyRate * 100).toFixed(0)}%
+                        {parseFloat((r.agencyRate * 100).toFixed(2)).toLocaleString(VN_LOCALE)}%
                       </td>
                       <td className="px-3 py-2 text-right">
                         {formatMoney(r.retailCommission)}
@@ -1759,31 +1743,54 @@ export default function CommissionOnlineCalculator() {
                     </tr>
                   </thead>
                   <tbody>
-                    {missingReturns.map((item, idx) => (
-                      <tr key={`${item.sku}-${idx}`} className="border-t">
-                        <td className="px-3 py-2">{item.employee}</td>
-                        <td className="px-3 py-2">{item.sku}</td>
-                        <td className="px-3 py-2">
-                          {item.group === "agency" ? "Đại lý" : "Khách lẻ"}
-                        </td>
-                        <td className="px-3 py-2 text-right">{item.qty}</td>
-                        <td className="px-3 py-2 text-right">{item.salePrice}</td>
-                        <td className="px-3 py-2 text-right">
-                          <input
-                            className="w-24 rounded border px-2 py-1 text-right"
-                            value={item.manualPrice || ""}
-                            onChange={(e) => {
-                              const value = e.target.value;
-                              setMissingReturns((prev) => {
-                                const next = [...prev];
-                                next[idx] = { ...next[idx], manualPrice: value };
-                                return next;
-                              });
-                            }}
-                          />
-                        </td>
-                      </tr>
-                    ))}
+                    {(() => {
+                      const seen = new Set();
+                      return missingReturns
+                        .filter((item) => {
+                          if (seen.has(item.priceKey)) return false;
+                          seen.add(item.priceKey);
+                          return true;
+                        })
+                        .map((item) => {
+                          const group = missingReturns.filter(
+                            (r) => r.priceKey === item.priceKey
+                          );
+                          const employees = [
+                            ...new Set(group.map((r) => r.employee)),
+                          ].join(", ");
+                          const totalQty = group.reduce(
+                            (sum, r) => sum + (r.qty || 0),
+                            0
+                          );
+                          return (
+                            <tr key={item.priceKey} className="border-t">
+                              <td className="px-3 py-2">{employees}</td>
+                              <td className="px-3 py-2">{item.sku}</td>
+                              <td className="px-3 py-2">
+                                {item.group === "agency" ? "Đại lý" : "Khách lẻ"}
+                              </td>
+                              <td className="px-3 py-2 text-right">{totalQty}</td>
+                              <td className="px-3 py-2 text-right">{item.salePrice}</td>
+                              <td className="px-3 py-2 text-right">
+                                <input
+                                  className="w-24 rounded border px-2 py-1 text-right"
+                                  value={item.manualPrice || ""}
+                                  onChange={(e) => {
+                                    const value = e.target.value;
+                                    setMissingReturns((prev) =>
+                                      prev.map((r) =>
+                                        r.priceKey === item.priceKey
+                                          ? { ...r, manualPrice: value }
+                                          : r
+                                      )
+                                    );
+                                  }}
+                                />
+                              </td>
+                            </tr>
+                          );
+                        });
+                    })()}
                   </tbody>
                 </table>
               </div>
@@ -1841,7 +1848,7 @@ export default function CommissionOnlineCalculator() {
             </div>
           )}
 
-          <div>
+          {/* <div>
             <div className="text-sm font-semibold text-slate-800">
               Nhập giá trừ hàng tặng đặc biệt theo mã hàng (áp dụng cho lần tính này)
             </div>
@@ -1900,7 +1907,7 @@ export default function CommissionOnlineCalculator() {
                 Thêm mã hàng đặc biệt
               </button>
             </div>
-          </div>
+          </div> */}
 
           <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">
             <button

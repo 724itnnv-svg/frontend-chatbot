@@ -74,20 +74,20 @@ function DonHang() {
     popupFetchRef.current = controller;
 
     try {
-      setLoadingChatPopup(true);    
-      if (!order.threadId) throw new Error("Không lấy được threadId");      
+      setLoadingChatPopup(true);
+      if (!order.threadId) throw new Error("Không lấy được threadId");
       const hisRes = await fetch(
         `/chatweb/history?threadId=${encodeURIComponent(order.threadId)}`,
         {
           signal: controller.signal,
           headers: { Authorization: `Bearer ${token}` }, // nếu backend yêu cầu
         },
-      );      
+      );
       if (!hisRes.ok) throw new Error("Không lấy được lịch sử tin nhắn");
-      const data = await hisRes.json();      
+      const data = await hisRes.json();
       let msgs = [];
       if (Array.isArray(data)) msgs = data;
-      else if (data && Array.isArray(data.messages)) msgs = data.messages; 
+      else if (data && Array.isArray(data.messages)) msgs = data.messages;
       setChatPopupMessages(msgs);
     } catch (err) {
       if (err.name === "AbortError") return;
@@ -159,8 +159,8 @@ function DonHang() {
             image:
               "https://phanbonvietnhat.com.vn/wp-content/uploads/2024/12/logo_VN-1024x636.png",
           },
-        ];            
-        
+        ];
+
         setPages(list);
 
         // Nếu selectedPage đang không còn nằm trong list (đổi account) -> reset
@@ -194,7 +194,7 @@ function DonHang() {
     try {
       setLoading(true);
       const [from, to] = range || [];
-      const params = new URLSearchParams();           
+      const params = new URLSearchParams();
       params.set("teamID", String(page.id || ""));
 
       // ✅ chỉ gửi from/to khi user đã chọn đủ range
