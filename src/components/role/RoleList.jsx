@@ -194,9 +194,16 @@ export default function RoleList() {
 
                   <div className="mb-4">
                     <h3 className="text-lg font-black text-slate-800 mb-1">{role.roles}</h3>
-                    <code className="text-[10px] font-bold text-indigo-500 bg-indigo-50 px-2 py-0.5 rounded uppercase tracking-wider">
-                      {role.roleID}
-                    </code>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <code className="text-[10px] font-bold text-indigo-500 bg-indigo-50 px-2 py-0.5 rounded uppercase tracking-wider">
+                        {role.roleID}
+                      </code>
+                      {role.allpage === 1 && (
+                        <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded uppercase tracking-wider">
+                          All Page
+                        </span>
+                      )}
+                    </div>
                   </div>
 
                   <p className="text-sm text-slate-500 leading-relaxed mb-6 line-clamp-2 h-10">

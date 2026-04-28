@@ -11,6 +11,7 @@ export default function RoleModal({ isOpen, onClose, onSave, initialData }) {
   const [screenDefault, setScreenDefault] = useState("");
   const [selectedScreens, setSelectedScreens] = useState([]);
   const [permissions, setPermissions] = useState({});
+  const [allPage, setAllPage] = useState(0);
 
   // Khởi tạo dữ liệu khi mở Modal hoặc nhận initialData
   useEffect(() => {
@@ -21,6 +22,7 @@ export default function RoleModal({ isOpen, onClose, onSave, initialData }) {
       setSelectedScreens(initialData.screen || []);
       setPermissions(initialData.action || {});
       setScreenDefault(initialData.screenDefault || "");
+      setAllPage(initialData.allpage ?? 0);
     } else {
       setRoleName("");
       setRoleCode("");
@@ -28,6 +30,7 @@ export default function RoleModal({ isOpen, onClose, onSave, initialData }) {
       setSelectedScreens([]);
       setPermissions({});
       setScreenDefault("");
+      setAllPage(0);
     }
   }, [initialData, isOpen]);
 
@@ -111,7 +114,8 @@ export default function RoleModal({ isOpen, onClose, onSave, initialData }) {
       screen: selectedScreens,
       action: permissions,
       note: roleDesc,
-      screenDefault: screenDefault
+      screenDefault: screenDefault,
+      allpage: allPage,
     });
   };
 
@@ -185,6 +189,31 @@ export default function RoleModal({ isOpen, onClose, onSave, initialData }) {
             <section>
               <label className="text-[10px] font-bold text-slate-500 mb-1.5 block uppercase">Mô tả nhiệm vụ</label>
               <textarea rows={4} value={roleDesc} onChange={(e) => setRoleDesc(e.target.value)} className="w-full px-4 py-3 bg-white border border-slate-200 rounded-sm outline-none text-xs text-slate-600 resize-none" placeholder="Phạm vi công việc..." />
+            </section>
+
+            <section>
+              <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4">Phạm vi Page</h3>
+              <label className="flex items-center gap-3 cursor-pointer group">
+                <button
+                  type="button"
+                  onClick={() => setAllPage(prev => prev === 1 ? 0 : 1)}
+                  className={`w-10 h-5 border relative transition-all flex-shrink-0 ${
+                    allPage === 1 ? "bg-indigo-600 border-indigo-600" : "bg-white border-slate-200"
+                  }`}
+                >
+                  <div className={`absolute top-0 w-4 h-full transition-all ${
+                    allPage === 1 ? "left-5 bg-white" : "left-0 bg-slate-200"
+                  }`} />
+                </button>
+                <div>
+                  <p className={`text-xs font-bold transition-colors ${allPage === 1 ? "text-indigo-600" : "text-slate-400"}`}>
+                    Truy cập tất cả Page
+                  </p>
+                  <p className="text-[10px] text-slate-400 mt-0.5">
+                    {allPage === 1 ? "Xem & thao tác mọi page" : "Chỉ page được phân quyền"}
+                  </p>
+                </div>
+              </label>
             </section>
           </div>
 

@@ -525,12 +525,6 @@ function DonHang() {
 
   // Xóa đơn
   const handleDelete = async (orderId) => {
-    // 🔐 User thường không được xóa đơn
-    if (!isAdmin) {
-      alert("⚠️ Bạn không có quyền xóa đơn hàng");
-      return;
-    }
-
     if (!window.confirm("Bạn chắc chắn muốn xóa đơn hàng này?")) return;
     try {
       setLoading(true);

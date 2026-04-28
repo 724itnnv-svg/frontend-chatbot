@@ -19,6 +19,7 @@ function initials(name = "") {
 
 export default function ChatMessagesPanelReply({ messages, threadId, setMessages }) {
   const bottomRef = useRef(null);
+  const prevLengthRef = useRef(0);
   const [input, setInput] = useState("");
   function handleKeyDown(e) {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -27,9 +28,9 @@ export default function ChatMessagesPanelReply({ messages, threadId, setMessages
     }
   }
   async function sendMessage() {
-    const text = `Admin: ${input.trim()}`;    
+    const text = `Admin: ${input.trim()}`;
     if (!text) return;
-    
+
     const tempId = `tmp_${Date.now()}`;
     const newMsg = {
       id: tempId,
@@ -42,7 +43,7 @@ export default function ChatMessagesPanelReply({ messages, threadId, setMessages
     // ✅ Push ngay lên UI
     setMessages((prev) => [...prev, newMsg]);
     setInput(""); // clear input after successful send       
-    const API_BASE_URL = 'https://chatbot-zhpy.onrender.com/chatwebpopup';   
+    const API_BASE_URL = 'https://chatbot-zhpy.onrender.com/chatwebpopup';
     // const API_BASE_URL = 'http://localhost:5000/chatwebpopup';
     let requestBody = { threadId: threadId, text: text };
     const response = await fetch(`${API_BASE_URL}/reply`, {
@@ -52,33 +53,29 @@ export default function ChatMessagesPanelReply({ messages, threadId, setMessages
     });
     const data = await response.json();
     if (data.success) {
-        // ✅ remove pending
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === tempId ? { ...m, pending: false } : m
-          )
-        );
+      // ✅ remove pending
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === tempId ? { ...m, pending: false } : m
+        )
+      );
 
-        // ✅ push bot reply
-        if (data.reply) {
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: `bot_${Date.now()}`,
-              role: "user",
-              text: data.reply,
-              createdAt: new Date().toISOString(),
-            },
-          ]);
-        }
+      // ✅ push bot reply
+      if (data.reply) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `bot_${Date.now()}`,
+            role: "user",
+            text: data.reply,
+            createdAt: new Date().toISOString(),
+          },
+        ]);
+      }
     } else {
       console.log('Send mess failed');
     }
   }
-
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
 
   const chatItems = useMemo(() => {
     const sorted = [...(messages || [])].sort((a, b) => {
@@ -89,8 +86,8 @@ export default function ChatMessagesPanelReply({ messages, threadId, setMessages
 
     const out = [];
 
-
-    for (const m of sorted) {
+    for (let i = 0; i < sorted.length; i++) {
+      const m = sorted[i];
       const role = m?.role;
 
       const rawText =
@@ -98,15 +95,14 @@ export default function ChatMessagesPanelReply({ messages, threadId, setMessages
         m?.content?.[0]?.text?.value ||
         (typeof m?.content === "string" ? m.content : "");
 
-      // ✅ dùng sanitizer để dọn rác + bóc JSON {text, image_url}
       const { text: cleanedText, imageUrl } = extractCleanTextAndImage(rawText);
 
-      // ✅ ADMIN notice
+      // ADMIN notice
       if (cleanedText && /^\s*admin\s*:/i.test(cleanedText)) {
         const adminText = cleanedText.replace(/^\s*admin\s*:\s*/i, "").trim();
         if (adminText) {
           out.push({
-            id: m?._id || m?.id || `${Date.now()}_${Math.random()}`,
+            id: m?._id || m?.id || `admin_${i}`,
             kind: "admin",
             text: adminText,
             ts: m?.createdAt || m?.created_at,
@@ -115,14 +111,11 @@ export default function ChatMessagesPanelReply({ messages, threadId, setMessages
         continue;
       }
 
-      // ✅ chỉ render user/assistant
       if (role !== "user" && role !== "assistant") continue;
-
-      // ✅ nếu không có text nhưng có ảnh vẫn hiển thị
       if (!cleanedText && !imageUrl) continue;
 
       out.push({
-        id: m?._id || m?.id || `${Date.now()}_${Math.random()}`,
+        id: m?._id || m?.id || `msg_${i}`,
         kind: "chat",
         role,
         text: cleanedText,
@@ -132,9 +125,15 @@ export default function ChatMessagesPanelReply({ messages, threadId, setMessages
       });
     }
 
-
     return out;
   }, [messages]);
+
+  useEffect(() => {
+    if (chatItems.length > prevLengthRef.current) {
+      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+    prevLengthRef.current = chatItems.length;
+  }, [chatItems.length]);
 
 
   return (
