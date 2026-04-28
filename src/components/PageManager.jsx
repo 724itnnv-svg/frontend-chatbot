@@ -480,7 +480,7 @@ export default function PageManager() {
                           Xóa
                         </button>
                       </div>
-                    ) : isUser ? (
+                    ) : (
                       <button
                         onClick={() => {
                           setSelectedPage(page);
@@ -491,8 +491,6 @@ export default function PageManager() {
                         <Pencil className="h-3.5 w-3.5" />
                         Sửa
                       </button>
-                    ) : (
-                      <span className="text-xs italic text-slate-400">Chỉ xem</span>
                     )}
                   </td>
                 </tr>
@@ -600,7 +598,7 @@ export default function PageManager() {
         </div>
       </div>
 
-      {showForm && (isAdmin || isUser) && (
+      {showForm && (
         <PageForm
           page={selectedPage}
           onClose={() => setShowForm(false)}

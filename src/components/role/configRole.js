@@ -15,8 +15,6 @@ const APP_PERMISSIONS = {
     { id: "admin_vectorstore_tool", name: "Quản Trị Vector DB" },
     { id: "admin_agent", name: "Quản Trị Agent" },
     { id: "admin_logs", name: "Log Hệ Thống" },
-    { id: "payroll", name: "Bảng Lương" },
-    { id: "routes", name: "Lộ Trình" },
   ],
   actions: [
     { id: "view", name: "Xem", color: "blue" },
