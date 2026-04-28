@@ -233,10 +233,6 @@ function PageMessage() {
 
   // ✅ Chọn khách → load lịch sử theo threadId
   const handleSelectChat = async (chat) => {
-    if (!chat?.threadId) {
-      alert("⚠️ Chat này chưa có threadId để xem lịch sử");
-      return;
-    }
 
     setSelectedChat(chat);
     setActiveThreadId(chat.threadId);

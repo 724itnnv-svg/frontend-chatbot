@@ -73,11 +73,7 @@ function ChatwebManager() {
 
 
   // 🔐 Lấy thông tin user + role
-  const { user, logout } = useAuth();
-  const rawRole = user?.role;
-  const roleLower = rawRole?.toLowerCase?.();
-  const roleCode = rawRole?.toUpperCase?.(); // ví dụ: NNV, ABC, KF, VN
-  const isAdmin = roleLower === "admin";
+  const { logout } = useAuth();
 
   const [isDesktop, setIsDesktop] = useState(() =>
     typeof window !== "undefined" ? window.matchMedia("(min-width: 768px)").matches : true
@@ -120,11 +116,7 @@ function ChatwebManager() {
     fetchAllChats();
   }, []);
 
-  // Bộ chatbot được phép xem
-  const visibleBots = useMemo(() => {
-    if (isAdmin || !roleCode) return WEB_BOTS;
-    return WEB_BOTS.filter((b) => b.id === roleCode);
-  }, [isAdmin, roleCode]);
+  const visibleBots = WEB_BOTS;
 
   // ✅ Convert danh sách bot thành format PageList cần
   const botPages = useMemo(() => {
@@ -158,9 +150,6 @@ function ChatwebManager() {
     );
 
     setChats(filtered);
-    setTimeout(() => {
-      if (filtered.length > 0) handleSelectChat(filtered[0]);
-    }, 0);
 
   };
 
@@ -221,7 +210,7 @@ function ChatwebManager() {
       else if (data && Array.isArray(data.messages)) msgs = data.messages;
 
       // ✅ chỉ set nếu thread vẫn là thread hiện tại    
-      
+
       setCurrentMessages(msgs);
     } catch (err) {
       if (err.name === "AbortError") return;
@@ -437,7 +426,7 @@ function ChatwebManager() {
 
             <div className="flex-1 overflow-y-auto">
               {selectedChat ? (
-                <ChatMessagesPanelReply messages={currentMessages}  threadId={activeThreadId} setMessages={setCurrentMessages}/>
+                <ChatMessagesPanelReply messages={currentMessages} threadId={activeThreadId} setMessages={setCurrentMessages} />
               ) : (
                 <div className="h-full flex items-center justify-center text-gray-400">
                   👈 Chọn khách để xem hội thoại
