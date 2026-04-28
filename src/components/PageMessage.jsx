@@ -233,9 +233,18 @@ function PageMessage() {
 
   // ✅ Chọn khách → load lịch sử theo threadId
   const handleSelectChat = async (chat) => {
+    
+    if (!chat?.threadId && !chat?.conversationId) {
+      alert("⚠️ Chat này chưa có threadId để xem lịch sử");
+      return;
+    }
 
-    setSelectedChat(chat);
-    setActiveThreadId(chat.threadId);
+    setSelectedChat(chat);   
+    if(!chat.conversationId){
+      setActiveThreadId(chat.threadId);
+    }else{
+      setActiveThreadId(chat.conversationId);
+    }
     setCurrentMessages([]);
     setMobileTab("messages");
     if (!isDesktop) setIsPageListOpen(false);
@@ -246,9 +255,12 @@ function PageMessage() {
 
     try {
       setLoadingMessages(true);
-
+      let endpoint = `${HISTORY_ENDPOINT}?threadId=${encodeURIComponent(chat.threadId)}`;
+      if(chat.conversationId){
+        endpoint = `${HISTORY_ENDPOINT}?conversationId=${encodeURIComponent(chat.conversationId)}`;
+      }
       const res = await fetch(
-        `${HISTORY_ENDPOINT}?threadId=${encodeURIComponent(chat.threadId)}`,
+        endpoint,
         {
           signal: controller.signal,
           headers: {
