@@ -73,7 +73,7 @@ const AdvancedLogManager = () => {
                 order: sortConfig.direction
             });
 
-            const response = await fetch(`api/logs?${params.toString()}`, {
+            const response = await fetch(`/api/logs?${params.toString()}`, {
                 headers: { Authorization: `Bearer ${token}` },
             });
 

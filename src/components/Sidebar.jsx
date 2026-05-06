@@ -32,9 +32,10 @@ const MENU_CONFIG = [
   { id: "commission_abc", path: "/admin/commission-abc", label: "Tính Hoa Hồng ABC", icon: Calculator },
   { id: "admin_dashboard", path: "/admin/dashboard", label: "Quản Trị Hệ Thống", icon: ShieldCheck },
   { id: "admin_products_tool", path: "/admin/products", label: "Quản Trị Sản Phẩm", icon: BotMessageSquare },
-  { id: "admin_event_promo", path: "/admin/promotions", label: "Chương Trình Khuyến Mãi Chung", icon: BotMessageSquare },
-  { id: "admin_vectorstore_tool", path: "/admin/vector-stores", label: "Quản Trị Vector DB", icon: Database },
+  // { id: "admin_event_promo", path: "/admin/promotions", label: "Chương Trình Khuyến Mãi Chung", icon: BotMessageSquare },
+  // { id: "admin_vectorstore_tool", path: "/admin/vector-stores", label: "Quản Trị Vector DB", icon: Database },
   { id: "admin_agent", path: "/admin/agents", label: "Quản Trị Agent", icon: BotMessageSquare },
+  { id: "admin_testcase", path: "/admin/test-chat", label: "Test ChatBot", icon: BotMessageSquare },
   { id: "admin_logs", path: "/admin/logs", label: "Log Hệ Thống", icon: Database },
 ];
 

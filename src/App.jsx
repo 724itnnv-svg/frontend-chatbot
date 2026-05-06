@@ -34,7 +34,7 @@ const AgentManage = lazy(() => import("./components/agentAI/AgentManage"));
 const LogsManage = lazy(() => import("./components/logs/LogsManager"));
 const PayrollManager = lazy(() => import("./components/PayrollManager"));
 const RouteManager = lazy(() => import("./components/RouteManager"));
-
+const TestCaseChatBotManager = lazy(() => import("./components/testChatBot/TestChatBot"));
 const ADMIN_ROUTE_BY_SCREEN = {
   pages: "/admin/pages",
   pagesmessage: "/admin/page-messages",
@@ -51,8 +51,9 @@ const ADMIN_ROUTE_BY_SCREEN = {
   admin_event_promo: "/admin/promotions",
   admin_vectorstore_tool: "/admin/vector-stores",
   admin_agent: "/admin/agents",
+  admin_test_chatbot_v2: "/admin/test-chatbot-v2", // New route for TestChatBotV2
+  admin_testcase: "/admin/test-chat",
   admin_logs: "/admin/logs",
-
 };
 
 const adminRoutes = [
@@ -70,7 +71,8 @@ const adminRoutes = [
   { path: "products", screenId: "admin_products_tool", element: <ProductTool /> },
   { path: "promotions", screenId: "admin_event_promo", element: <PromoManager /> },
   { path: "vector-stores", screenId: "admin_vectorstore_tool", element: <VectorStoreManage /> },
-  { path: "agents", screenId: "admin_agent", element: <AgentManage /> },
+  { path: "agents", screenId: "admin_agent", element: <AgentManage /> },// New route
+  { path: "test-chat", screenId: "admin_testcase", element: <TestCaseChatBotManager /> },
   { path: "logs", screenId: "admin_logs", element: <LogsManage /> },
 
 ];

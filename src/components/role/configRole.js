@@ -14,6 +14,7 @@ const APP_PERMISSIONS = {
     { id: "admin_event_promo", name: "Chương Trình Khuyến Mãi Chung" },
     { id: "admin_vectorstore_tool", name: "Quản Trị Vector DB" },
     { id: "admin_agent", name: "Quản Trị Agent" },
+    { id: "admin_testcase", name: "Quản Trị Test Case ChatBot" },
     { id: "admin_logs", name: "Log Hệ Thống" },
   ],
   actions: [
