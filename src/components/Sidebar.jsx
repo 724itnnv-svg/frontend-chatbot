@@ -1,46 +1,87 @@
 // src/components/Sidebar.jsx
-import React, { useCallback, useEffect, useMemo, useRef, useState, memo } from "react";
+import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import {
-  ChevronRight,
-  ChevronLeft,
-  LayoutDashboard,
-  MessageCircle,
-  Users,
-  LogOut,
   BotMessageSquare,
-  ClipboardList,
   Calculator,
-  ShieldCheck,
+  CalendarCheck,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  ClipboardList,
   Database,
-  Route,
-  WalletCards,
+  LayoutDashboard,
+  LogOut,
+  MapPin,
+  MessageCircle,
+  ShieldCheck,
+  UserCheck,
+  Users,
+  Wallet,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 
 const ACTIVE_TAB_KEY = "dashboard_active_tab";
 
 const MENU_CONFIG = [
-  { id: "pages", path: "/admin/pages", label: "Quản Lý Page", icon: LayoutDashboard },
-  { id: "pagesmessage", path: "/admin/page-messages", label: "Tin Nhắn Page", icon: MessageCircle },
+  { id: "pages", path: "/admin/pages", label: "Quản lý Page", icon: LayoutDashboard },
+  { id: "pagesmessage", path: "/admin/page-messages", label: "Tin nhắn Page", icon: MessageCircle },
   { id: "chatweb", path: "/admin/chatweb", label: "Chatbot Web", icon: BotMessageSquare },
-  { id: "donhang", path: "/admin/orders", label: "Đơn Hàng", icon: ClipboardList },
-  { id: "donhangWeb", path: "/admin/orders-web", label: "Đơn Hàng Web", icon: ClipboardList },
-  { id: "users", path: "/admin/users", label: "Người Dùng", icon: Users },
+  { id: "donhang", path: "/admin/orders", label: "Đơn hàng", icon: ClipboardList },
+  { id: "donhangWeb", path: "/admin/orders-web", label: "Đơn hàng Web", icon: ClipboardList },
+  { id: "users", path: "/admin/users", label: "Người dùng", icon: Users },
   { id: "roles", path: "/admin/roles", label: "Phân quyền", icon: Users },
-  { id: "commission_online", path: "/admin/commission-online", label: "Tính Hoa Hồng Online", icon: Calculator },
-  { id: "commission_abc", path: "/admin/commission-abc", label: "Tính Hoa Hồng ABC", icon: Calculator },
-  { id: "admin_dashboard", path: "/admin/dashboard", label: "Quản Trị Hệ Thống", icon: ShieldCheck },
-  { id: "admin_products_tool", path: "/admin/products", label: "Quản Trị Sản Phẩm", icon: BotMessageSquare },
-  { id: "admin_event_promo", path: "/admin/promotions", label: "Chương Trình Khuyến Mãi Chung", icon: BotMessageSquare },
-  { id: "admin_vectorstore_tool", path: "/admin/vector-stores", label: "Quản Trị Vector DB", icon: Database },
-  { id: "admin_agent", path: "/admin/agents", label: "Quản Trị Agent", icon: BotMessageSquare },
-  { id: "admin_logs", path: "/admin/logs", label: "Log Hệ Thống", icon: Database },
+  { id: "commission_online", path: "/admin/commission-online", label: "Tính hoa hồng Online", icon: Calculator },
+  { id: "commission_abc", path: "/admin/commission-abc", label: "Tính hoa hồng ABC", icon: Calculator },
+  { id: "admin_dashboard", path: "/admin/dashboard", label: "Quản trị hệ thống", icon: ShieldCheck },
+  { id: "admin_products_tool", path: "/admin/products", label: "Quản trị sản phẩm", icon: BotMessageSquare },
+  { id: "admin_event_promo", path: "/admin/promotions", label: "Chương trình khuyến mãi", icon: BotMessageSquare },
+  { id: "admin_vectorstore_tool", path: "/admin/vector-stores", label: "Quản trị Vector DB", icon: Database },
+  { id: "admin_agent", path: "/admin/agents", label: "Quản trị Agent", icon: BotMessageSquare },
+  { id: "admin_logs", path: "/admin/logs", label: "Log hệ thống", icon: Database },
+  { id: "attendance_self", path: "/admin/my-attendance", label: "Chấm công của tôi", icon: CalendarCheck },
+  { id: "attendance", path: "/admin/attendance", label: "Quản lý chấm công", icon: UserCheck },
+  { id: "attendance_locations", path: "/admin/attendance-locations", label: "Vị trí chấm công", icon: MapPin },
+];
+
+MENU_CONFIG.push({ id: "payroll", path: "/admin/payroll", label: "Bảng lương", icon: Wallet });
+
+const MENU_GROUPS = [
+  {
+    id: "business",
+    label: "Kinh doanh",
+    icon: MessageCircle,
+    items: ["pages", "pagesmessage", "chatweb", "donhang", "donhangWeb", "admin_event_promo"],
+  },
+  {
+    id: "attendance",
+    label: "Chấm công",
+    icon: CalendarCheck,
+    items: ["attendance_self", "attendance", "attendance_locations", "payroll"],
+  },
+  {
+    id: "people",
+    label: "Nhân sự",
+    icon: Users,
+    items: ["users", "roles"],
+  },
+  {
+    id: "finance",
+    label: "Tính toán",
+    icon: Calculator,
+    items: ["commission_online", "commission_abc"],
+  },
+  {
+    id: "system",
+    label: "Hệ thống & AI",
+    icon: ShieldCheck,
+    items: ["admin_dashboard", "admin_products_tool", "admin_vectorstore_tool", "admin_agent", "admin_logs"],
+  },
 ];
 
 function getLinkClass({ isActive, isFocused, isCollapsed }) {
   return [
-    "flex w-full min-w-0 items-center gap-3 rounded-2xl px-3 py-3 transition",
+    "flex w-full min-w-0 items-center gap-3 rounded-xl px-3 py-2.5 transition",
     isCollapsed ? "md:justify-center md:gap-0 md:px-2" : "text-left",
     isActive
       ? "border border-rose-200 bg-gradient-to-r from-rose-50 to-amber-50 text-rose-700 shadow-[0_10px_20px_rgba(244,63,94,0.10)]"
@@ -50,16 +91,19 @@ function getLinkClass({ isActive, isFocused, isCollapsed }) {
   ].join(" ");
 }
 
+function isPathActive(pathname, path) {
+  return pathname === path || pathname.startsWith(`${path}/`);
+}
+
 const Sidebar = memo(() => {
   const { logout, user } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
   const [isOpen, setIsOpen] = useState(false);
-  const [isCollapsed, setIsCollapsed] = useState(() => {
-    return localStorage.getItem("sidebar_collapsed") === "1";
-  });
+  const [isCollapsed, setIsCollapsed] = useState(() => localStorage.getItem("sidebar_collapsed") === "1");
   const [focusedIndex, setFocusedIndex] = useState(-1);
+  const [openGroups, setOpenGroups] = useState({});
   const focusedIndexRef = useRef(-1);
   const menuItemRefs = useRef([]);
   const navRef = useRef(null);
@@ -68,9 +112,8 @@ const Sidebar = memo(() => {
     localStorage.setItem("sidebar_collapsed", isCollapsed ? "1" : "0");
   }, [isCollapsed]);
 
-  const role = user?.role?.toLowerCase?.();
-  const isAdmin = role === "admin";
-  const roleDetails = user?.screen || [];
+  const isAdmin = Number(user?.allpage) === 1;
+  const roleDetails = Array.isArray(user?.screen) ? user.screen : [];
   const roleKey = roleDetails.join("|");
 
   const filteredMenus = useMemo(() => {
@@ -80,10 +123,34 @@ const Sidebar = memo(() => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAdmin, roleKey]);
 
+  const groupedMenus = useMemo(() => {
+    const menuById = new Map(filteredMenus.map((item) => [item.id, item]));
+    const groupedIds = new Set(MENU_GROUPS.flatMap((group) => group.items));
+    const groups = MENU_GROUPS.map((group) => ({
+      ...group,
+      menus: group.items.map((id) => menuById.get(id)).filter(Boolean),
+    })).filter((group) => group.menus.length > 0);
+    const otherMenus = filteredMenus.filter((item) => !groupedIds.has(item.id));
+    if (otherMenus.length > 0) {
+      groups.push({ id: "other", label: "Khác", icon: LayoutDashboard, menus: otherMenus });
+    }
+    return groups;
+  }, [filteredMenus]);
+
+  const flatMenus = useMemo(() => groupedMenus.flatMap((group) => group.menus), [groupedMenus]);
+
+  useEffect(() => {
+    const activeGroup = groupedMenus.find((group) =>
+      group.menus.some((item) => isPathActive(location.pathname, item.path))
+    );
+    if (!activeGroup) return;
+    setOpenGroups((current) => ({ ...current, [activeGroup.id]: true }));
+  }, [groupedMenus, location.pathname]);
+
   useEffect(() => {
     focusedIndexRef.current = -1;
     setFocusedIndex(-1);
-  }, [filteredMenus.length]);
+  }, [flatMenus.length]);
 
   const handleNavigate = useCallback((item) => {
     localStorage.setItem(ACTIVE_TAB_KEY, item.id);
@@ -101,7 +168,7 @@ const Sidebar = memo(() => {
       if (!["ArrowUp", "ArrowDown", "Enter"].includes(e.key)) return;
       e.preventDefault();
 
-      const len = filteredMenus.length;
+      const len = flatMenus.length;
       if (!len) return;
 
       if (e.key === "ArrowDown") {
@@ -121,14 +188,14 @@ const Sidebar = memo(() => {
       }
 
       if (focusedIndexRef.current >= 0) {
-        const item = filteredMenus[focusedIndexRef.current];
+        const item = flatMenus[focusedIndexRef.current];
         if (item) handleNavigate(item);
       }
     };
 
     el.addEventListener("keydown", handleKeyDown);
     return () => el.removeEventListener("keydown", handleKeyDown);
-  }, [filteredMenus, handleNavigate]);
+  }, [flatMenus, handleNavigate]);
 
   const displayName = user?.fullName || user?.name || user?.email || "Người dùng";
   const avatarInitial = displayName?.trim()?.charAt(0)?.toUpperCase?.() || "?";
@@ -136,8 +203,8 @@ const Sidebar = memo(() => {
 
   const handleLogout = () => {
     localStorage.removeItem(ACTIVE_TAB_KEY);
-    logout();
-    navigate("/login");
+    logout(false);
+    navigate("/login", { replace: true });
   };
 
   return (
@@ -165,7 +232,7 @@ const Sidebar = memo(() => {
               <button onClick={() => setIsCollapsed(!isCollapsed)} className="hidden rounded-xl bg-slate-100 p-2 md:inline-flex hover:bg-slate-200">
                 {isCollapsed ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
               </button>
-              <button onClick={() => setIsOpen(false)} className="inline-flex rounded-xl bg-slate-100 p-2 md:hidden">×</button>
+              <button onClick={() => setIsOpen(false)} className="inline-flex rounded-xl bg-slate-100 px-3 py-2 md:hidden">x</button>
             </div>
           </div>
 
@@ -194,36 +261,68 @@ const Sidebar = memo(() => {
           </NavLink>
         </div>
 
-        <nav ref={navRef} tabIndex={0} className="flex-1 min-h-0 overflow-y-auto px-3 pb-3 outline-none" title="Dùng phím ↑ / ↓ để di chuyển menu">
-          <div className="space-y-1">
-            {filteredMenus.map((m, idx) => {
-              const isFocused = focusedIndex === idx;
-              const Icon = m.icon;
+        <nav ref={navRef} tabIndex={0} className="flex-1 min-h-0 overflow-y-auto px-3 pb-3 outline-none" title="Dùng phím lên/xuống để di chuyển menu">
+          <div className="space-y-2">
+            {groupedMenus.map((group) => {
+              const GroupIcon = group.icon;
+              const groupActive = group.menus.some((item) => isPathActive(location.pathname, item.path));
+              const isGroupOpen = isCollapsed || openGroups[group.id] || groupActive;
 
               return (
-                <NavLink
-                  key={m.id}
-                  to={m.path}
-                  ref={(el) => (menuItemRefs.current[idx] = el)}
-                  onClick={() => {
-                    localStorage.setItem(ACTIVE_TAB_KEY, m.id);
-                    setIsOpen(false);
-                    focusedIndexRef.current = -1;
-                    setFocusedIndex(-1);
-                  }}
-                  className={({ isActive }) => getLinkClass({ isActive, isFocused, isCollapsed })}
-                >
-                  {({ isActive }) => (
-                    <>
-                      <Icon size={20} className={`flex-shrink-0 ${isActive ? "text-rose-600" : isFocused ? "text-slate-700" : "text-slate-500"}`} />
-                      <span className={`min-w-0 whitespace-nowrap overflow-hidden text-ellipsis transition-all duration-300 ${isCollapsed ? "md:w-0 md:opacity-0" : "md:w-auto md:opacity-100"}`}>
-                        <span className={isActive || isFocused ? "font-semibold" : "font-medium"}>{m.label}</span>
-                      </span>
-                      {!isCollapsed && isActive && <span className="ml-auto h-2 w-2 rounded-full bg-rose-500" />}
-                      {!isCollapsed && isFocused && !isActive && <span className="ml-auto text-[10px] text-slate-400">↵</span>}
-                    </>
+                <div key={group.id} className="rounded-2xl border border-slate-100 bg-white/70 p-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setOpenGroups((current) => ({ ...current, [group.id]: !isGroupOpen }))}
+                    className={`flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-xs font-bold transition ${groupActive ? "bg-slate-100 text-slate-900" : "text-slate-500 hover:bg-slate-50"
+                      } ${isCollapsed ? "md:justify-center" : ""}`}
+                    title={group.label}
+                  >
+                    <GroupIcon size={17} className={groupActive ? "text-rose-500" : "text-slate-400"} />
+                    <span className={`min-w-0 flex-1 truncate uppercase tracking-wide transition-all duration-300 ${isCollapsed ? "md:w-0 md:opacity-0" : "md:w-auto md:opacity-100"}`}>
+                      {group.label}
+                    </span>
+                    {!isCollapsed && (
+                      <ChevronDown size={15} className={`transition-transform ${isGroupOpen ? "rotate-180" : ""}`} />
+                    )}
+                  </button>
+
+                  {isGroupOpen && (
+                    <div className="mt-1 space-y-1">
+                      {group.menus.map((m) => {
+                        const idx = flatMenus.findIndex((item) => item.id === m.id);
+                        const isFocused = focusedIndex === idx;
+                        const Icon = m.icon;
+
+                        return (
+                          <NavLink
+                            key={m.id}
+                            to={m.path}
+                            ref={(el) => (menuItemRefs.current[idx] = el)}
+                            onClick={() => {
+                              localStorage.setItem(ACTIVE_TAB_KEY, m.id);
+                              setIsOpen(false);
+                              focusedIndexRef.current = -1;
+                              setFocusedIndex(-1);
+                            }}
+                            title={m.label}
+                            className={({ isActive }) => getLinkClass({ isActive, isFocused, isCollapsed })}
+                          >
+                            {({ isActive }) => (
+                              <>
+                                <Icon size={19} className={`flex-shrink-0 ${isActive ? "text-rose-600" : isFocused ? "text-slate-700" : "text-slate-500"}`} />
+                                <span className={`min-w-0 whitespace-nowrap overflow-hidden text-ellipsis transition-all duration-300 ${isCollapsed ? "md:w-0 md:opacity-0" : "md:w-auto md:opacity-100"}`}>
+                                  <span className={isActive || isFocused ? "font-semibold" : "font-medium"}>{m.label}</span>
+                                </span>
+                                {!isCollapsed && isActive && <span className="ml-auto h-2 w-2 rounded-full bg-rose-500" />}
+                                {!isCollapsed && isFocused && !isActive && <span className="ml-auto text-[10px] text-slate-400">Enter</span>}
+                              </>
+                            )}
+                          </NavLink>
+                        );
+                      })}
+                    </div>
                   )}
-                </NavLink>
+                </div>
               );
             })}
           </div>

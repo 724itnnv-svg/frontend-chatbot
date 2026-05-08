@@ -1,6 +1,6 @@
 // src/App.jsx
 import { lazy, Suspense } from "react";
-import { Routes, Route, Navigate } from "react-router-dom";
+import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "./context/AuthContext";
 
 import DashboardLayout from "./components/DashboardLayout";
@@ -33,7 +33,12 @@ const VectorStoreManage = lazy(() => import("./components/vectorstores/VectorSto
 const AgentManage = lazy(() => import("./components/agentAI/AgentManage"));
 const LogsManage = lazy(() => import("./components/logs/LogsManager"));
 const PayrollManager = lazy(() => import("./components/PayrollManager"));
+const EmployeePayrollLookup = lazy(() => import("./components/EmployeePayrollLookup"));
 const RouteManager = lazy(() => import("./components/RouteManager"));
+const AttendancePage = lazy(() => import("./components/attendance/AttendancePage"));
+const WorkLocationManager = lazy(() => import("./components/attendance/WorkLocationManager"));
+const AttendanceManager = lazy(() => import("./components/attendance/AttendanceManager"));
+const StandaloneAttendance = lazy(() => import("./components/attendance/StandaloneAttendance"));
 
 const ADMIN_ROUTE_BY_SCREEN = {
   pages: "/admin/pages",
@@ -52,7 +57,10 @@ const ADMIN_ROUTE_BY_SCREEN = {
   admin_vectorstore_tool: "/admin/vector-stores",
   admin_agent: "/admin/agents",
   admin_logs: "/admin/logs",
-
+  attendance: "/admin/attendance",
+  attendance_locations: "/admin/attendance-locations",
+  attendance_self: "/admin/my-attendance",
+  payroll: "/admin/payroll",
 };
 
 const adminRoutes = [
@@ -72,8 +80,44 @@ const adminRoutes = [
   { path: "vector-stores", screenId: "admin_vectorstore_tool", element: <VectorStoreManage /> },
   { path: "agents", screenId: "admin_agent", element: <AgentManage /> },
   { path: "logs", screenId: "admin_logs", element: <LogsManage /> },
-
+  { path: "my-attendance", screenId: "attendance_self", element: <AttendancePage /> },
+  { path: "attendance", screenId: "attendance", element: <AttendanceManager /> },
+  { path: "attendance-locations", screenId: "attendance_locations", element: <WorkLocationManager /> },
+  { path: "payroll", screenId: "payroll", element: <PayrollManager /> },
 ];
+
+// Guard cho trang độc lập: chưa login → /login?redirect=<current>
+function getSafeRedirect(search) {
+  try {
+    const redirect = new URLSearchParams(search).get("redirect");
+    if (!redirect || !redirect.startsWith("/") || redirect.startsWith("//")) return null;
+    return redirect;
+  } catch {
+    return null;
+  }
+}
+
+function RequireAuth({ children }) {
+  const { isLoggedIn } = useAuth();
+  const location = useLocation();
+  if (!isLoggedIn) {
+    const currentPath = `${location.pathname}${location.search || ""}${location.hash || ""}`;
+    return <Navigate to={`/login?redirect=${encodeURIComponent(currentPath)}`} replace />;
+  }
+  return children;
+}
+
+function LoginRoute() {
+  const { isLoggedIn } = useAuth();
+  const location = useLocation();
+  const redirectTo = getSafeRedirect(location.search);
+
+  if (isLoggedIn) {
+    return <Navigate to={redirectTo || "/admin"} replace />;
+  }
+
+  return <Login />;
+}
 
 function AppLoader() {
   return (
@@ -83,16 +127,19 @@ function AppLoader() {
   );
 }
 
+function hasFullAccess(user) {
+  return Number(user?.allpage) === 1;
+}
+
 function AdminDefaultRedirect() {
   const { user } = useAuth();
-  const role = user?.role?.toLowerCase?.();
-  const isAdmin = role === "admin";
+  const fullAccess = hasFullAccess(user);
   const saved = localStorage.getItem("dashboard_active_tab");
   const preferred = saved || user?.screenDefault || "pages";
 
   if (
     ADMIN_ROUTE_BY_SCREEN[preferred] &&
-    (isAdmin || preferred === "profile" || user?.screen?.includes(preferred))
+    (fullAccess || preferred === "profile" || user?.screen?.includes(preferred))
   ) {
     return <Navigate to={ADMIN_ROUTE_BY_SCREEN[preferred]} replace />;
   }
@@ -103,9 +150,8 @@ function AdminDefaultRedirect() {
 
 function RequireScreen({ screenId, children }) {
   const { user } = useAuth();
-  const role = user?.role?.toLowerCase?.();
 
-  if (role === "admin" || screenId === "profile" || user?.screen?.includes(screenId)) {
+  if (hasFullAccess(user) || screenId === "profile" || user?.screen?.includes(screenId)) {
     return children;
   }
 
@@ -120,12 +166,14 @@ export default function App() {
       <Routes>
         <Route path="/" element={<WelcomePage />} />
         <Route path="/user" element={<UserDashboard />} />
+        <Route path="/tra-cuu-luong" element={<EmployeePayrollLookup />} />
+        <Route path="/tra-cuu-luong/:employeeCode" element={<EmployeePayrollLookup />} />
 
         <Route path="/forgot-password" element={<ForgotPassword />} />
 
         <Route
           path="/login"
-          element={!isLoggedIn ? <Login /> : <Navigate to="/admin" replace />}
+          element={<LoginRoute />}
         />
         <Route
           path="/register"
@@ -149,6 +197,16 @@ export default function App() {
             />
           ))}
         </Route>
+
+        {/* Trang chấm công độc lập — không cần sidebar admin */}
+        <Route
+          path="/cham-cong"
+          element={
+            <RequireAuth>
+              <StandaloneAttendance />
+            </RequireAuth>
+          }
+        />
 
         <Route path="/policy" element={<PolicyPage />} />
         <Route path="/terms-of-service" element={<TermsOfServicePage />} />

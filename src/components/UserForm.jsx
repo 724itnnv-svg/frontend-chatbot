@@ -8,10 +8,12 @@ export default function UserForm({ user, onClose, onSaved }) {
   const isEdit = !!user;
 
   const [form, setForm] = useState({
+    code: "",
     fullName: "",
     email: "",
     password: "",
     role: "user",
+    teamId: "",
     approveStatus: 0,
     avatarUrl: "",
     pageIds: [], // mảng page id
@@ -34,25 +36,29 @@ export default function UserForm({ user, onClose, onSaved }) {
       const rawRole = user.role || "user";
 
       setForm({
+        code: user.code || "",
         fullName: user.fullName || "",
         email: user.email || "",
         password: "",
         // ✅ ÉP role về lowercase để khớp option và điều kiện form.role === "user"
         role: rawRole.toLowerCase(),
+        teamId: user.teamId || "",
         approveStatus: user.approveStatus ?? 0,
         avatarUrl: user.avatarUrl || "",
         pageIds: Array.isArray(user.pageId)
-          ? user.pageId
+          ? user.pageId.map(String)
           : user.pageId
-            ? [user.pageId]
+            ? [String(user.pageId)]
             : [],
       });
     } else {
       setForm({
+        code: "",
         fullName: "",
         email: "",
         password: "",
         role: "user",
+        teamId: "",
         approveStatus: 0,
         avatarUrl: "",
         pageIds: [],
@@ -75,7 +81,7 @@ export default function UserForm({ user, onClose, onSaved }) {
           console.error("Lỗi load pages:", data);
           return;
         }
-        setPages(data);
+        setPages(Array.isArray(data) ? data : data?.data || []);
       } catch (err) {
         console.error("Không lấy được danh sách page:", err);
       } finally {
@@ -106,25 +112,40 @@ export default function UserForm({ user, onClose, onSaved }) {
 
     fetchPages();
     fetchRoles();
-    console.log(3213213213);
-    
+
   }, []);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
-    setForm((prev) => ({ ...prev, [name]: value }));
+    setForm((prev) => ({ ...prev, [name]: name === "code" ? value.trimStart().toUpperCase() : value }));
   };
 
+  const getPageId = (page) => String(page?.facebookId || page?.pageId || page?._id || "");
+
   const handleTogglePage = (pageId) => {
+    if (!pageId) return;
     setForm((prev) => {
-      const exists = prev.pageIds.includes(pageId);
+      const normalizedPageId = String(pageId);
+      const exists = prev.pageIds.includes(normalizedPageId);
       return {
         ...prev,
         pageIds: exists
-          ? prev.pageIds.filter((id) => id !== pageId)
-          : [...prev.pageIds, pageId],
+          ? prev.pageIds.filter((id) => id !== normalizedPageId)
+          : [...prev.pageIds, normalizedPageId],
       };
     });
+  };
+
+  const handleSelectFilteredPages = () => {
+    const filteredIds = filteredPages.map(getPageId).filter(Boolean);
+    setForm((prev) => ({
+      ...prev,
+      pageIds: Array.from(new Set([...prev.pageIds, ...filteredIds])),
+    }));
+  };
+
+  const handleClearPages = () => {
+    setForm((prev) => ({ ...prev, pageIds: [] }));
   };
 
   const handleSubmit = async (e) => {
@@ -137,9 +158,11 @@ export default function UserForm({ user, onClose, onSaved }) {
       const method = isEdit ? "PUT" : "POST";
 
       const body = {
+        code: form.code.trim(),
         fullName: form.fullName,
         email: form.email,
         role: form.role,
+        teamId: form.teamId,
         approveStatus: Number(form.approveStatus),
         avatarUrl: form.avatarUrl,
         pageId: form.pageIds, // gửi mảng pageId lên backend
@@ -253,6 +276,20 @@ export default function UserForm({ user, onClose, onSaved }) {
             />
           </div>
 
+          <div className="md:col-span-1">
+            <label className="block text-xs font-medium text-gray-700 mb-1">
+              Mã nhân viên
+            </label>
+            <input
+              type="text"
+              name="code"
+              value={form.code}
+              onChange={handleChange}
+              placeholder="VD: NV001"
+              className="w-full border rounded-md px-3 py-2 text-xs uppercase focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            />
+          </div>
+
           {/* Email */}
           <div className="md:col-span-1">
             <label className="block text-xs font-medium text-gray-700 mb-1">
@@ -303,6 +340,24 @@ export default function UserForm({ user, onClose, onSaved }) {
             </select>
           </div>
 
+          <div className="md:col-span-1">
+            <label className="block text-xs font-medium text-gray-700 mb-1">
+              Team ID chấm công
+            </label>
+            <select
+              name="teamId"
+              value={form.teamId}
+              onChange={handleChange}
+              className="w-full border rounded-md px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            >
+              <option value="">Chọn Team</option>
+              <option value="NNV">Nông Nghiệp Việt (NNV)</option>
+              <option value="ABC">ABC</option>
+              <option value="VN">Việt Nhật (VN)</option>
+              <option value="KF">KingFarm (KF)</option>
+            </select>
+          </div>
+
           {/* Trạng thái duyệt */}
           <div className="md:col-span-1">
             <label className="block text-xs font-medium text-gray-700 mb-1">
@@ -322,7 +377,7 @@ export default function UserForm({ user, onClose, onSaved }) {
           {/* Chọn Page khi role = user (tràn 2 cột) */}
           {form.role !== "admin" && (
             <div className="md:col-span-2">
-              <div className="flex items-center justify-between mb-1">
+              <div className="flex items-center justify-between gap-3 mb-1">
                 <label className="block text-xs font-medium text-gray-700">
                   Page được phép quản lý
                 </label>
@@ -332,6 +387,23 @@ export default function UserForm({ user, onClose, onSaved }) {
                   className="text-[11px] text-emerald-600 hover:underline"
                 >
                   {showPageDropdown ? "Ẩn" : "Hiện"}
+                </button>
+              </div>
+
+              <div className="mb-2 flex flex-wrap items-center gap-3 text-[11px]">
+                <button
+                  type="button"
+                  onClick={handleSelectFilteredPages}
+                  className="text-emerald-600 hover:underline"
+                >
+                  Chọn tất cả kết quả lọc
+                </button>
+                <button
+                  type="button"
+                  onClick={handleClearPages}
+                  className="text-rose-600 hover:underline"
+                >
+                  Bỏ chọn tất cả
                 </button>
               </div>
 
@@ -370,20 +442,22 @@ export default function UserForm({ user, onClose, onSaved }) {
                         const pageName = p.pageName || p.name || "(Không tên)";
                         const facebookId = p.facebookId || ""; // hoặc p.pageId nếu backend lưu kiểu khác
 
+                        const pageId = getPageId(p);
                         const labelText = facebookId
                           ? `${pageName} (${facebookId})`
                           : pageName;
 
                         return (
                           <label
-                            key={facebookId || pageName}
+                            key={pageId || pageName}
                             className="flex items-center gap-2 text-xs py-1 cursor-pointer"
                           >
                             <input
                               type="checkbox"
                               className="w-3 h-3"
-                              checked={facebookId && form.pageIds.includes(facebookId)}
-                              onChange={() => handleTogglePage(facebookId)}
+                              disabled={!pageId}
+                              checked={Boolean(pageId && form.pageIds.includes(pageId))}
+                              onChange={() => handleTogglePage(pageId)}
                             />
                             <span className="truncate">{labelText}</span>
                           </label>

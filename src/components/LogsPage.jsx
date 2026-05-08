@@ -1,14 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Search, Snowflake, ShieldCheck, Filter, RefreshCcw } from "lucide-react";
 
-/**
- * LogsPage.jsx
- * - UI Noel giống style Page Management bạn đưa
- * - Gọi API: GET /api/audit-logs?limit=200 (bạn đổi endpoint cho đúng server)
- * - Log schema bạn đang dùng:
- *   { userId, userName, role, action, entity, entityId, data, note, ip, createdAt }
- */
-
 function SnowfallLayer({ count = 36 }) {
     const flakes = useMemo(() => {
         return Array.from({ length: count }).map((_, i) => {
@@ -59,7 +51,6 @@ function Badge({ children, tone = "slate" }) {
 function formatTime(iso) {
     if (!iso) return "—";
     const d = new Date(iso);
-    // hiển thị kiểu VN
     return d.toLocaleString("vi-VN", {
         hour: "2-digit",
         minute: "2-digit",
@@ -70,19 +61,29 @@ function formatTime(iso) {
     });
 }
 
-function actionTone(action = "") {
-    const a = String(action).toUpperCase();
-    if (a.includes("DELETE") || a.includes("REMOVE")) return "rose";
-    if (a.includes("CREATE") || a.includes("ADD")) return "emerald";
-    if (a.includes("UPDATE") || a.includes("EDIT")) return "sky";
-    if (a.includes("TOGGLE") || a.includes("SWITCH")) return "amber";
+function levelTone(level = "") {
+    const l = String(level).toLowerCase();
+    if (l === "error") return "rose";
+    if (l === "warn" || l === "warning") return "amber";
+    if (l === "info") return "emerald";
+    if (l === "debug") return "violet";
     return "slate";
 }
 
-function roleTone(role = "") {
-    const r = String(role).toLowerCase();
-    if (r === "admin") return "emerald";
-    if (r === "user") return "sky";
+function methodTone(method = "") {
+    const m = String(method).toUpperCase();
+    if (m === "DELETE") return "rose";
+    if (m === "POST") return "emerald";
+    if (m === "PUT" || m === "PATCH") return "amber";
+    if (m === "GET") return "sky";
+    return "slate";
+}
+
+function statusTone(status) {
+    const s = parseInt(status);
+    if (s >= 500) return "rose";
+    if (s >= 400) return "amber";
+    if (s >= 200 && s < 300) return "emerald";
     return "slate";
 }
 
@@ -99,13 +100,12 @@ export default function LogsPage() {
     const [loading, setLoading] = useState(false);
 
     const [search, setSearch] = useState("");
-    const [actionFilter, setActionFilter] = useState("ALL");
-    const [entityFilter, setEntityFilter] = useState("ALL");
-    const [roleFilter, setRoleFilter] = useState("ALL");
+    const [levelFilter, setLevelFilter] = useState("ALL");
+    const [methodFilter, setMethodFilter] = useState("ALL");
+    const [serviceFilter, setServiceFilter] = useState("ALL");
 
-    const [selected, setSelected] = useState(null); // log selected to view detail
+    const [selected, setSelected] = useState(null);
 
-    // ✅ đổi endpoint cho đúng dự án bạn
     const API_URL = "/api/logs";
 
     async function fetchLogs() {
@@ -116,10 +116,6 @@ export default function LogsPage() {
                 headers: token ? { Authorization: `Bearer ${token}` } : {},
             });
             const data = await res.json();
-
-            // Hỗ trợ cả 2 kiểu trả về:
-            // 1) { ok:true, data:[...] }
-            // 2) [...]
             const list = Array.isArray(data) ? data : data?.data || [];
             setLogs(list);
         } catch (e) {
@@ -135,18 +131,18 @@ export default function LogsPage() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
-    const actionOptions = useMemo(() => {
-        const set = new Set(logs.map((l) => l.action).filter(Boolean));
+    const levelOptions = useMemo(() => {
+        const set = new Set(logs.map((l) => l.level).filter(Boolean));
         return ["ALL", ...Array.from(set).sort()];
     }, [logs]);
 
-    const entityOptions = useMemo(() => {
-        const set = new Set(logs.map((l) => l.entity).filter(Boolean));
+    const methodOptions = useMemo(() => {
+        const set = new Set(logs.map((l) => l.metadata?.method).filter(Boolean));
         return ["ALL", ...Array.from(set).sort()];
     }, [logs]);
 
-    const roleOptions = useMemo(() => {
-        const set = new Set(logs.map((l) => l.role).filter(Boolean));
+    const serviceOptions = useMemo(() => {
+        const set = new Set(logs.map((l) => l.service).filter(Boolean));
         return ["ALL", ...Array.from(set).sort()];
     }, [logs]);
 
@@ -154,23 +150,21 @@ export default function LogsPage() {
         const q = search.trim().toLowerCase();
 
         return logs.filter((l) => {
-            if (actionFilter !== "ALL" && l.action !== actionFilter) return false;
-            if (entityFilter !== "ALL" && l.entity !== entityFilter) return false;
-            if (roleFilter !== "ALL" && l.role !== roleFilter) return false;
+            if (levelFilter !== "ALL" && l.level !== levelFilter) return false;
+            if (methodFilter !== "ALL" && l.metadata?.method !== methodFilter) return false;
+            if (serviceFilter !== "ALL" && l.service !== serviceFilter) return false;
 
             if (!q) return true;
 
             const blob = [
-                l.userName,
-                l.role,
-                l.action,
-                l.entity,
-                l.note,
-                l.ip,
-                l.entityId,
-                l.userId,
-                l.createdAt,
-                l.updatedAt,
+                l.metadata?.username,
+                l.metadata?.ip,
+                l.metadata?.url,
+                l.metadata?.method,
+                l.message,
+                l.level,
+                l.service,
+                String(l.metadata?.status ?? ""),
             ]
                 .filter(Boolean)
                 .join(" | ")
@@ -178,7 +172,7 @@ export default function LogsPage() {
 
             return blob.includes(q);
         });
-    }, [logs, search, actionFilter, entityFilter, roleFilter]);
+    }, [logs, search, levelFilter, methodFilter, serviceFilter]);
 
     return (
         <div className="relative h-full overflow-x-hidden bg-gradient-to-br from-slate-50 via-white to-sky-50 text-slate-800">
@@ -209,7 +203,7 @@ export default function LogsPage() {
                                 <div className="mt-2 flex flex-wrap items-center gap-2">
                                     <span className="inline-flex items-center gap-1 rounded-full border bg-white/70 px-2.5 py-1 text-xs text-slate-600">
                                         <ShieldCheck className="h-3.5 w-3.5 text-emerald-600" />
-                                        Theo dõi thêm/sửa/xóa/toggle...
+                                        Theo dõi HTTP access log
                                     </span>
                                     <span className="inline-flex rounded-full border bg-white/70 px-2.5 py-1 text-xs text-slate-600">
                                         Tổng: <b className="ml-1 text-slate-800">{filtered.length}</b>
@@ -231,7 +225,7 @@ export default function LogsPage() {
                                 </div>
                                 <input
                                     type="text"
-                                    placeholder="Tìm theo user, action, entity, IP, note…"
+                                    placeholder="Tìm theo user, URL, IP, message…"
                                     value={search}
                                     onChange={(e) => setSearch(e.target.value)}
                                     className="w-full rounded-2xl border border-white/60 bg-white/75 pl-9 pr-4 py-2.5 text-sm shadow-sm outline-none transition focus:border-sky-200 focus:ring-4 focus:ring-sky-100"
@@ -241,40 +235,40 @@ export default function LogsPage() {
                             {/* Filters */}
                             <div className="flex w-full flex-col gap-2 md:w-auto md:flex-row">
                                 <select
-                                    value={actionFilter}
-                                    onChange={(e) => setActionFilter(e.target.value)}
-                                    className="w-full md:w-[220px] rounded-2xl border border-white/60 bg-white/75 px-3 py-2.5 text-sm shadow-sm outline-none transition focus:border-sky-200 focus:ring-4 focus:ring-sky-100"
-                                    title="Lọc theo action"
+                                    value={levelFilter}
+                                    onChange={(e) => setLevelFilter(e.target.value)}
+                                    className="w-full md:w-[160px] rounded-2xl border border-white/60 bg-white/75 px-3 py-2.5 text-sm shadow-sm outline-none transition focus:border-sky-200 focus:ring-4 focus:ring-sky-100"
+                                    title="Lọc theo level"
                                 >
-                                    {actionOptions.map((a) => (
+                                    {levelOptions.map((a) => (
                                         <option key={a} value={a}>
-                                            {a === "ALL" ? "Tất cả hành động" : a}
+                                            {a === "ALL" ? "Tất cả level" : a.toUpperCase()}
                                         </option>
                                     ))}
                                 </select>
 
                                 <select
-                                    value={entityFilter}
-                                    onChange={(e) => setEntityFilter(e.target.value)}
+                                    value={methodFilter}
+                                    onChange={(e) => setMethodFilter(e.target.value)}
                                     className="w-full md:w-[160px] rounded-2xl border border-white/60 bg-white/75 px-3 py-2.5 text-sm shadow-sm outline-none transition focus:border-sky-200 focus:ring-4 focus:ring-sky-100"
-                                    title="Lọc theo entity"
+                                    title="Lọc theo method"
                                 >
-                                    {entityOptions.map((t) => (
-                                        <option key={t} value={t}>
-                                            {t === "ALL" ? "Tất cả entity" : t}
+                                    {methodOptions.map((m) => (
+                                        <option key={m} value={m}>
+                                            {m === "ALL" ? "Tất cả method" : m}
                                         </option>
                                     ))}
                                 </select>
 
                                 <select
-                                    value={roleFilter}
-                                    onChange={(e) => setRoleFilter(e.target.value)}
+                                    value={serviceFilter}
+                                    onChange={(e) => setServiceFilter(e.target.value)}
                                     className="w-full md:w-[160px] rounded-2xl border border-white/60 bg-white/75 px-3 py-2.5 text-sm shadow-sm outline-none transition focus:border-sky-200 focus:ring-4 focus:ring-sky-100"
-                                    title="Lọc theo role"
+                                    title="Lọc theo service"
                                 >
-                                    {roleOptions.map((r) => (
-                                        <option key={r} value={r}>
-                                            {r === "ALL" ? "Tất cả role" : r}
+                                    {serviceOptions.map((s) => (
+                                        <option key={s} value={s}>
+                                            {s === "ALL" ? "Tất cả service" : s}
                                         </option>
                                     ))}
                                 </select>
@@ -298,13 +292,13 @@ export default function LogsPage() {
                         <thead className="sticky top-0 z-10 bg-gradient-to-r from-white/70 to-sky-50/70 text-xs uppercase tracking-wide text-slate-500 backdrop-blur">
                             <tr>
                                 <th className="w-[170px] px-5 py-4 text-left font-semibold">Thời gian</th>
-                                <th className="w-[170px] px-5 py-4 text-left font-semibold">Người dùng</th>
-                                <th className="w-[130px] px-5 py-4 text-center font-semibold">Role</th>
-                                <th className="w-[220px] px-5 py-4 text-left font-semibold">Hành động</th>
-                                <th className="w-[140px] px-5 py-4 text-center font-semibold">Entity</th>
-                                <th className="px-5 py-4 text-left font-semibold">Ghi chú</th>
-                                <th className="w-[160px] px-5 py-4 text-center font-semibold">IP</th>
-                                <th className="w-[130px] px-5 py-4 text-center font-semibold">Chi tiết</th>
+                                <th className="w-[150px] px-5 py-4 text-left font-semibold">Người dùng</th>
+                                <th className="w-[100px] px-5 py-4 text-center font-semibold">Level</th>
+                                <th className="w-[100px] px-5 py-4 text-center font-semibold">Method</th>
+                                <th className="px-5 py-4 text-left font-semibold">URL</th>
+                                <th className="w-[90px] px-5 py-4 text-center font-semibold">Status</th>
+                                <th className="w-[150px] px-5 py-4 text-center font-semibold">IP</th>
+                                <th className="w-[110px] px-5 py-4 text-center font-semibold">Chi tiết</th>
                             </tr>
                         </thead>
 
@@ -315,48 +309,43 @@ export default function LogsPage() {
                                     className="group border-t border-white/50 transition hover:bg-sky-50/40"
                                 >
                                     <td className="px-5 py-4 text-left text-slate-700">
-                                        <div className="font-semibold">{formatTime(l.createdAt)}</div>
-                                        <div className="mt-0.5 text-xs text-slate-500 font-mono truncate" title={l._id}>
-                                            {l._id}
+                                        <div className="font-semibold">{formatTime(l.timestamp)}</div>
+                                        <div className="mt-0.5 text-xs text-slate-400 font-mono">
+                                            {l.metadata?.responseTime || "—"}
                                         </div>
                                     </td>
 
                                     <td className="px-5 py-4">
-                                        <div className="min-w-0">
-                                            <div className="truncate font-semibold text-slate-800 transition group-hover:text-sky-700" title={l.userName}>
-                                                {l.userName || "—"}
-                                            </div>
-                                            <div className="mt-0.5 text-xs text-slate-500 font-mono truncate" title={l.userId}>
-                                                {l.userId || "—"}
-                                            </div>
+                                        <div className="truncate font-semibold text-slate-800 transition group-hover:text-sky-700" title={l.metadata?.username}>
+                                            {l.metadata?.username || "Guest"}
                                         </div>
                                     </td>
 
                                     <td className="px-5 py-4 text-center">
-                                        <Badge tone={roleTone(l.role)}>{l.role || "—"}</Badge>
-                                    </td>
-
-                                    <td className="px-5 py-4">
-                                        <Badge tone={actionTone(l.action)}>{l.action}</Badge>
+                                        <Badge tone={levelTone(l.level)}>{(l.level || "—").toUpperCase()}</Badge>
                                     </td>
 
                                     <td className="px-5 py-4 text-center">
-                                        <span className="inline-flex rounded-full border bg-white/70 px-2.5 py-1 text-xs text-slate-600">
-                                            {l.entity}
-                                        </span>
+                                        <Badge tone={methodTone(l.metadata?.method)}>{l.metadata?.method || "—"}</Badge>
                                     </td>
 
                                     <td className="px-5 py-4">
-                                        <div className="truncate text-slate-700" title={l.note}>
-                                            {l.note || "—"}
+                                        <div className="truncate text-slate-700 font-mono text-xs" title={l.metadata?.url || l.message}>
+                                            {l.metadata?.url || l.message || "—"}
                                         </div>
-                                        <div className="mt-1 text-xs text-slate-500 font-mono truncate" title={l.entityId}>
-                                            {l.entityId ? `#${String(l.entityId).slice(-8)}` : "—"}
+                                        <div className="mt-0.5 truncate text-xs text-slate-400" title={l.service}>
+                                            {l.service}
                                         </div>
+                                    </td>
+
+                                    <td className="px-5 py-4 text-center">
+                                        <Badge tone={statusTone(l.metadata?.status)}>
+                                            {l.metadata?.status || "—"}
+                                        </Badge>
                                     </td>
 
                                     <td className="px-5 py-4 text-center font-mono text-xs text-slate-600">
-                                        {l.ip || "—"}
+                                        {l.metadata?.ip || "—"}
                                     </td>
 
                                     <td className="px-5 py-4 text-center">
@@ -388,46 +377,44 @@ export default function LogsPage() {
                         >
                             <div className="flex items-start justify-between gap-3">
                                 <div className="min-w-0">
-                                    <div className="text-sm font-semibold text-slate-800 truncate" title={l.action}>
-                                        {l.action}
+                                    <div className="truncate font-mono text-xs text-slate-700" title={l.metadata?.url || l.message}>
+                                        {l.metadata?.method && (
+                                            <span className="mr-1 font-semibold">{l.metadata.method}</span>
+                                        )}
+                                        {l.metadata?.url || l.message}
                                     </div>
                                     <div className="mt-1 text-xs text-slate-500">
-                                        {formatTime(l.createdAt)}
+                                        {formatTime(l.timestamp)}
                                     </div>
                                 </div>
 
-                                <Badge tone={actionTone(l.action)}>{l.entity}</Badge>
+                                <Badge tone={levelTone(l.level)}>{(l.level || "—").toUpperCase()}</Badge>
                             </div>
 
                             <div className="mt-3 grid grid-cols-2 gap-2">
                                 <div className="rounded-2xl border bg-white/70 p-3">
                                     <div className="text-[11px] text-slate-500">Người dùng</div>
                                     <div className="mt-0.5 truncate text-sm font-semibold text-slate-800">
-                                        {l.userName || "—"}
-                                    </div>
-                                    <div className="mt-1 truncate text-[11px] font-mono text-slate-500">
-                                        {l.userId || "—"}
+                                        {l.metadata?.username || "Guest"}
                                     </div>
                                 </div>
 
                                 <div className="rounded-2xl border bg-white/70 p-3">
-                                    <div className="text-[11px] text-slate-500">Role / IP</div>
+                                    <div className="text-[11px] text-slate-500">Status / Method</div>
                                     <div className="mt-0.5 flex flex-wrap gap-2">
-                                        <Badge tone={roleTone(l.role)}>{l.role || "—"}</Badge>
-                                        <span className="text-[11px] font-mono text-slate-600 truncate" title={l.ip}>
-                                            {l.ip || "—"}
-                                        </span>
+                                        <Badge tone={statusTone(l.metadata?.status)}>{l.metadata?.status || "—"}</Badge>
+                                        <Badge tone={methodTone(l.metadata?.method)}>{l.metadata?.method || "—"}</Badge>
                                     </div>
                                 </div>
                             </div>
 
                             <div className="mt-3 rounded-2xl border bg-white/70 p-3">
-                                <div className="text-[11px] text-slate-500">Ghi chú</div>
-                                <div className="mt-0.5 text-sm text-slate-700 break-words">
-                                    {l.note || "—"}
-                                </div>
-                                <div className="mt-2 text-[11px] font-mono text-slate-500 break-all">
-                                    entityId: {l.entityId || "—"}
+                                <div className="text-[11px] text-slate-500">IP / Response time</div>
+                                <div className="mt-0.5 font-mono text-sm text-slate-700">
+                                    {l.metadata?.ip || "—"}
+                                    {l.metadata?.responseTime && (
+                                        <span className="ml-2 text-xs text-slate-400">{l.metadata.responseTime}</span>
+                                    )}
                                 </div>
                             </div>
 
@@ -457,17 +444,18 @@ export default function LogsPage() {
                         <div className="flex items-start justify-between gap-3 border-b border-white/50 p-5">
                             <div className="min-w-0">
                                 <div className="flex flex-wrap items-center gap-2">
-                                    <Badge tone={actionTone(selected.action)}>{selected.action}</Badge>
-                                    <Badge tone="violet">{selected.entity}</Badge>
-                                    <Badge tone={roleTone(selected.role)}>{selected.role || "—"}</Badge>
+                                    <Badge tone={levelTone(selected.level)}>{(selected.level || "—").toUpperCase()}</Badge>
+                                    <Badge tone={methodTone(selected.metadata?.method)}>{selected.metadata?.method || "—"}</Badge>
+                                    <Badge tone={statusTone(selected.metadata?.status)}>{selected.metadata?.status || "—"}</Badge>
                                 </div>
-                                <div className="mt-2 text-sm text-slate-700">
-                                    <b>{selected.userName || "—"}</b>{" "}
-                                    <span className="text-slate-500">•</span>{" "}
-                                    <span className="text-slate-600">{formatTime(selected.createdAt)}</span>
+                                <div className="mt-2 font-mono text-xs text-slate-700 break-all">
+                                    {selected.metadata?.url || selected.message}
                                 </div>
-                                <div className="mt-1 text-xs font-mono text-slate-500 break-all">
-                                    logId: {selected._id} • entityId: {selected.entityId || "—"}
+                                <div className="mt-1 text-xs text-slate-500">
+                                    {formatTime(selected.timestamp)}
+                                    {selected.metadata?.responseTime && (
+                                        <span className="ml-2">{selected.metadata.responseTime}</span>
+                                    )}
                                 </div>
                             </div>
 
@@ -483,27 +471,27 @@ export default function LogsPage() {
                             <div className="grid gap-3 md:grid-cols-3">
                                 <div className="rounded-2xl border bg-white/70 p-4">
                                     <div className="text-xs text-slate-500">IP</div>
-                                    <div className="mt-1 font-mono text-sm text-slate-700 break-all">{selected.ip || "—"}</div>
+                                    <div className="mt-1 font-mono text-sm text-slate-700 break-all">{selected.metadata?.ip || "—"}</div>
                                 </div>
 
                                 <div className="rounded-2xl border bg-white/70 p-4">
-                                    <div className="text-xs text-slate-500">UserId</div>
-                                    <div className="mt-1 font-mono text-sm text-slate-700 break-all">{selected.userId || "—"}</div>
+                                    <div className="text-xs text-slate-500">Người dùng</div>
+                                    <div className="mt-1 text-sm text-slate-700 break-all">{selected.metadata?.username || "Guest"}</div>
                                 </div>
 
                                 <div className="rounded-2xl border bg-white/70 p-4">
-                                    <div className="text-xs text-slate-500">Note</div>
-                                    <div className="mt-1 text-sm text-slate-700 break-words">{selected.note || "—"}</div>
+                                    <div className="text-xs text-slate-500">Service</div>
+                                    <div className="mt-1 text-sm text-slate-700">{selected.service || "—"}</div>
                                 </div>
                             </div>
 
                             <div className="mt-4 rounded-2xl border bg-white/70">
                                 <div className="flex items-center gap-2 border-b border-white/60 p-3">
                                     <Filter className="h-4 w-4 text-slate-500" />
-                                    <div className="text-sm font-semibold text-slate-700">Data snapshot</div>
+                                    <div className="text-sm font-semibold text-slate-700">Metadata</div>
                                 </div>
                                 <pre className="max-h-[55vh] overflow-auto p-4 text-xs leading-5 text-slate-700">
-                                    {prettyJSON(selected.data)}
+                                    {prettyJSON(selected.metadata)}
                                 </pre>
                             </div>
                         </div>

@@ -307,6 +307,7 @@ export default function UsersPage() {
                     <th className="px-3 py-3 text-left">Họ tên</th>
                     <th className="px-3 py-3 text-left">Email</th>
                     <th className="px-3 py-3 text-left">Role</th>
+                    <th className="px-3 py-3 text-left">Team ID</th>
 
                     <th className="px-3 py-3 text-center hidden md:table-cell">
                       Page quản lý
@@ -368,6 +369,12 @@ export default function UsersPage() {
                         <td className="px-3 py-3">
                           <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold border bg-sky-50 border-sky-200 text-sky-700">
                             {u.role}
+                          </span>
+                        </td>
+
+                        <td className="px-3 py-3">
+                          <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold border bg-slate-50 border-slate-200 text-slate-700">
+                            {u.teamId || "Chưa gán"}
                           </span>
                         </td>
 

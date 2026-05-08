@@ -87,6 +87,17 @@ export default function Login() {
   const { login } = useAuth();
   const navigate = useNavigate();
 
+  // đọc ?redirect= để sau login quay lại trang đúng
+  const redirectTo = (() => {
+    try {
+      const r = new URLSearchParams(window.location.search).get("redirect");
+      // chỉ chấp nhận path nội bộ (bắt đầu bằng /) để tránh open redirect
+      return r && r.startsWith("/") && !r.startsWith("//") ? r : null;
+    } catch {
+      return null;
+    }
+  })();
+
   const [showPassword, setShowPassword] = useState(false);
 
   // ✅ Khởi tạo form từ localStorage (dạng đã mã hóa)
@@ -162,10 +173,10 @@ export default function Login() {
         localStorage.removeItem(REMEMBER_KEY);
       }
      
-      if(data && data.user && data.user.screenDefault){
-        localStorage.setItem('dashboard_active_tab', data.user.screenDefault);
-      }      
-      navigate("/admin", { replace: true });
+      if (data && data.user && data.user.screenDefault) {
+        localStorage.setItem("dashboard_active_tab", data.user.screenDefault);
+      }
+      navigate(redirectTo || "/admin", { replace: true });
     } catch (err) {
       console.error(err);
       setError("Có lỗi xảy ra, vui lòng thử lại");

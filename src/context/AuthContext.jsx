@@ -19,6 +19,7 @@ export function AuthProvider({ children }) {
   const isLoggedIn = !!token;
 
   function login(userData, tokenData) {
+    didLogoutRef.current = false;
     setUser(userData);
     setToken(tokenData);
 
@@ -57,6 +58,10 @@ export function AuthProvider({ children }) {
     didLogoutRef.current = true;
     logout(redirect);
   };
+
+  useEffect(() => {
+    if (token) didLogoutRef.current = false;
+  }, [token]);
 
   // ✅ Sync state với localStorage
   // - Nếu token/user bị mất => logout về login
@@ -129,7 +134,7 @@ export function AuthProvider({ children }) {
 
         if (!cancelled && data?.ok && data?.user) {
           // optional: đồng bộ user từ server cho chắc
-          setUser((prev) => (prev?._id === data.user?._id ? prev : data.user));
+          setUser(data.user);
           localStorage.setItem("authUser", JSON.stringify(data.user));
         }
       } catch (err) {
