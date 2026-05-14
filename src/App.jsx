@@ -42,6 +42,7 @@ const AttendanceShiftManager = lazy(() => import("./components/attendance/Attend
 const WorkLocationManager = lazy(() => import("./components/attendance/WorkLocationManager"));
 const AttendanceManager = lazy(() => import("./components/attendance/AttendanceManager"));
 const StandaloneAttendance = lazy(() => import("./components/attendance/StandaloneAttendance"));
+const TestCaseChatBotManager = lazy(() => import("./components/testChatBot/TestChatBot"));
 
 const ADMIN_ROUTE_BY_SCREEN = {
   pages: "/admin/pages",
