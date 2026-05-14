@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useState } from "react";
 import QRCode from "qrcode";
 import * as XLSX from "xlsx";
+import ExcelJS from 'exceljs';
+import { saveAs } from 'file-saver';
 import {
   ArrowDown,
   ArrowUp,
@@ -32,6 +34,7 @@ const STORAGE_PAYROLL_FORMULAS = "payroll_formula_settings_v1";
 const STORAGE_PAYROLL_PERIOD = "payroll_manager_period_v1";
 const STATUS_OPTIONS = ["DRAFT", "APPROVED", "PAID"];
 const COMPUTED_PAYROLL_KEYS = new Set([
+  "dataTinhLuong.mucDongBHXH",
   "dataTinhLuong.luongDangApDung",
   "thuNhapTheoNgayCong.luongTheoNgayCong",
   "thuNhapTheoNgayCong.phuCapComThucTe",
@@ -43,12 +46,15 @@ const COMPUTED_PAYROLL_KEYS = new Set([
   "thuNhapTheoNgayCong.luongPhepNam",
   "thuNhapTheoNgayCong.luongTangCaThuong",
   "thuNhapTheoNgayCong.luongTangCaChuNhat",
+  "thuNhapTheoNgayCong.comTangCa",
   "thuNhapTheoNgayCong.luongTangCaLeTet",
   "thuNhapTheoNgayCong.thuongKPI",
   "thuNhapTheoNgayCong.tongThuNhap",
   "khauTru.bhxh",
   "khauTru.congDoan",
   "khauTru.tongKhauTru",
+  "tinhThueTNCN.tongThuNhapChiuThue",
+  "tinhThueTNCN.thuNhapTinhThue",
   "tinhThueTNCN.thueTNCNTamTinh",
   "luongThucLinh",
 ]);
@@ -98,7 +104,7 @@ const PAYROLL_COLUMNS = [
   { key: "thuNhapTheoNgayCong.tangCaLeTet", label: "TC lễ tết", width: 120, type: "number" },
   { key: "thuNhapTheoNgayCong.luongTangCaLeTet", label: "Lương TC lễ", width: 150, type: "number" },
   { key: "thuNhapTheoNgayCong.comTangCa", label: "Cơm tăng ca", width: 140, type: "number" },
-  { key: "thuNhapTheoNgayCong.traGiamLuong", label: "Trả giảm lương", width: 150, type: "number" },
+  { key: "thuNhapTheoNgayCong.traGiamLuong", label: "Trả giam lương", width: 150, type: "number" },
   { key: "thuNhapTheoNgayCong.diemKPI", label: "Điểm KPI", width: 120, type: "number" },
   { key: "thuNhapTheoNgayCong.thuongKPI", label: "Thưởng KPI", width: 140, type: "number" },
   { key: "thuNhapTheoNgayCong.doanhSo", label: "Doanh số", width: 140, type: "number" },
@@ -107,7 +113,7 @@ const PAYROLL_COLUMNS = [
   { key: "thuNhapTheoNgayCong.tongThuNhap", label: "Tổng thu nhập", width: 160, type: "number" },
   { key: "khauTru.bhxh", label: "BHXH", width: 120, type: "number" },
   { key: "khauTru.congDoan", label: "Công đoàn", width: 130, type: "number" },
-  { key: "khauTru.giamLuong", label: "Giảm lương", width: 140, type: "number" },
+  { key: "khauTru.giamLuong", label: "Giam lương", width: 140, type: "number" },
   { key: "khauTru.tamUng", label: "Tạm ứng", width: 130, type: "number" },
   { key: "khauTru.phiDienThoai", label: "Phí điện thoại", width: 150, type: "number" },
   { key: "khauTru.truKhac", label: "Trừ khác", width: 130, type: "number" },
@@ -178,6 +184,10 @@ const LUONG_DANG_AP_DUNG_KEYS = [
   "dataTinhLuong.phuCapNhiemVu",
 ];
 const LUONG_DANG_AP_DUNG_KEY_SET = new Set(LUONG_DANG_AP_DUNG_KEYS);
+const OLD_KPI_BONUS_EXPRESSION =
+  "iff(thuNhapTheoNgayCong.diemKPI > 0, iff(thuNhapTheoNgayCong.diemKPI <= 100, dataTinhLuong.luongCoBan * settings.tyLeKPINhoHonBang100, dataTinhLuong.luongCoBan * settings.tyLeKPILonHon100), thuNhapTheoNgayCong.thuongKPI)";
+const KPI_BONUS_EXPRESSION =
+  "iff(thuNhapTheoNgayCong.diemKPI > 0, iff(thuNhapTheoNgayCong.diemKPI <= 100, dataTinhLuong.luongCoBan * settings.tyLeKPINhoHonBang100, dataTinhLuong.luongCoBan * settings.tyLeKPILonHon100), 0)";
 
 const DEFAULT_PAYROLL_FORMULA_SETTINGS = {
   settings: {
@@ -198,6 +208,12 @@ const DEFAULT_PAYROLL_FORMULA_SETTINGS = {
       expression:
         "dataTinhLuong.luongCoBan + dataTinhLuong.phuCapCom + dataTinhLuong.phuCapChuyenCan + dataTinhLuong.phuCapXangXe + dataTinhLuong.phuCapDienThoai + dataTinhLuong.phuCapNhiemVu",
       note: "Tong luong va phu cap dang ap dung",
+    },
+    {
+      target: "dataTinhLuong.mucDongBHXH",
+      enabled: true,
+      expression: "dataTinhLuong.luongCoBan",
+      note: "Muc dong BHXH bang luong co ban",
     },
     {
       target: "thuNhapTheoNgayCong.luongTheoNgayCong",
@@ -271,9 +287,8 @@ const DEFAULT_PAYROLL_FORMULA_SETTINGS = {
     {
       target: "thuNhapTheoNgayCong.thuongKPI",
       enabled: true,
-      expression:
-        "iff(thuNhapTheoNgayCong.diemKPI > 0, iff(thuNhapTheoNgayCong.diemKPI <= 100, dataTinhLuong.luongCoBan * settings.tyLeKPINhoHonBang100, dataTinhLuong.luongCoBan * settings.tyLeKPILonHon100), thuNhapTheoNgayCong.thuongKPI)",
-      note: "Logic cu: KPI <= 100 thuong 6%, > 100 thuong 12%",
+      expression: KPI_BONUS_EXPRESSION,
+      note: "KPI = 0 thuong 0; KPI <= 100 thuong 6%, > 100 thuong 12%",
     },
     {
       target: "thuNhapTheoNgayCong.tongThuNhap",
@@ -299,6 +314,12 @@ const DEFAULT_PAYROLL_FORMULA_SETTINGS = {
       enabled: true,
       expression: "khauTru.bhxh + khauTru.congDoan + khauTru.giamLuong + khauTru.tamUng + khauTru.phiDienThoai + khauTru.truKhac",
       note: "Tong khau tru",
+    },
+    {
+      target: "tinhThueTNCN.thuNhapTinhThue",
+      enabled: true,
+      expression: "tinhThueTNCN.tongThuNhapChiuThue - tinhThueTNCN.giamTruBanThan - tinhThueTNCN.giamTruPhuThuoc",
+      note: "TN tinh thue = TN chiu thue - GT ban than - GT phu thuoc",
     },
     {
       target: "tinhThueTNCN.thueTNCNTamTinh",
@@ -384,10 +405,18 @@ function mergeFormulaSettings(value) {
   const savedByTarget = new Map((value.formulas || []).map((formula) => [formula.target, formula]));
   return {
     settings: { ...base.settings, ...(value.settings || {}) },
-    formulas: base.formulas.map((formula) => ({
-      ...formula,
-      ...(savedByTarget.get(formula.target) || {}),
-    })),
+    formulas: base.formulas.map((formula) => {
+      const savedFormula = savedByTarget.get(formula.target) || {};
+      const migratedFormula =
+        formula.target === "thuNhapTheoNgayCong.thuongKPI" &&
+          savedFormula.expression === OLD_KPI_BONUS_EXPRESSION
+          ? { ...savedFormula, expression: KPI_BONUS_EXPRESSION }
+          : savedFormula;
+      return {
+        ...formula,
+        ...migratedFormula,
+      };
+    }),
   };
 }
 
@@ -542,6 +571,7 @@ function fmtMoney(value) {
   return toNumber(value).toLocaleString("vi-VN");
 }
 
+
 function escapeHtml(value) {
   return String(value ?? "")
     .replace(/&/g, "&amp;")
@@ -553,10 +583,8 @@ function escapeHtml(value) {
 
 function getPayrollLookupUrl(row) {
   const origin = window.location.origin;
-  const employeeCode = encodeURIComponent(String(row?.maNhanVien || row?.employeeCode || "").trim());
-  // const rowPeriod = String(row?.period || "").trim();
-  // const periodQuery = rowPeriod ? `?period=${encodeURIComponent(rowPeriod)}` : "";
-  return `${origin}/tra-cuu-luong/${employeeCode}`;
+  void row;
+  return `${origin}/cham-cong?tab=payroll`;
 }
 
 function getDefaultPayrollPeriod() {
@@ -713,22 +741,140 @@ function downloadPayrollInputTemplate(rows = [], fallbackPeriod = "") {
   XLSX.writeFile(workbook, `mau-nhap-lieu-payroll_${fallbackPeriod || new Date().toISOString().slice(0, 10)}.xlsx`);
 }
 
-function exportPayrollExcel(rows, columns) {
-  const headers = columns.map((column) => column.label || column.key);
-  const data = rows.map((row) =>
-    columns.map((column) => {
-      const value = getDeep(row, column.key);
-      return column.type === "number" ? roundPayrollNumber(value) : value ?? "";
-    })
-  );
-  const sheet = XLSX.utils.aoa_to_sheet([headers, ...data]);
-  sheet["!cols"] = columns.map((column) => ({
-    wch: Math.max(12, Math.min(32, String(column.label || column.key).length + 2)),
+// Hàm phụ trợ: Chuyển đổi số chỉ mục cột thành chữ cái Excel (VD: 0 -> A, 1 -> B, 26 -> AA)
+const getExcelColumnLetter = (index) => {
+  let letter = '';
+  while (index >= 0) {
+    letter = String.fromCharCode((index % 26) + 65) + letter;
+    index = Math.floor(index / 26) - 1;
+  }
+  return letter;
+};
+
+async function exportPayrollExcel(rows, columns) {
+  const workbook = new ExcelJS.Workbook();
+
+  // ==========================================
+  // 1. SHEET DATA (Chứa toàn bộ dữ liệu gốc)
+  // ==========================================
+  const dataSheet = workbook.addWorksheet('Data');
+  dataSheet.columns = columns.map(col => ({
+    header: col.label || col.key,
+    key: col.key,
+    width: 15
   }));
-  const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, sheet, "Payroll");
-  XLSX.writeFile(workbook, `bang-luong_${new Date().toISOString().slice(0, 10)}.xlsx`);
+
+  rows.forEach(row => {
+    const rowData = {};
+    columns.forEach(col => {
+      const value = getDeep(row, col.key);
+      rowData[col.key] = col.type === "number" ? roundPayrollNumber(value) : (value ?? "");
+    });
+    dataSheet.addRow(rowData);
+  });
+
+  // ==========================================
+  // 2. SHEET BÁO CÁO (Dropdown + Lọc tự động)
+  // ==========================================
+  const reportSheet = workbook.addWorksheet('Bao_Cao');
+
+  // Tìm vị trí cột chính xác tên là 'Cty đóng BHXH'
+  const companyColIndex = columns.findIndex(c => c.label?.trim() === 'Cty đóng BHXH');
+  if (companyColIndex === -1) {
+    console.error("Không tìm thấy cột 'Cty đóng BHXH'");
+    return;
+  }
+
+  const colLetter = getExcelColumnLetter(companyColIndex);
+  const lastColLetter = getExcelColumnLetter(columns.length - 1);
+  const totalRows = rows.length + 1;
+
+  // --- DÒNG 1: CÔNG THỨC ĐỔI TÊN TIÊU ĐỀ (Ô A1:H1) ---
+  reportSheet.mergeCells(`A1:H1`);
+  const titleCell = reportSheet.getCell('A1');
+  titleCell.value = {
+    // Chú ý: Đã đổi tham chiếu từ B2 thành B4
+    formula: `IF(TRIM(B4)="NNV","CÔNG TY TNHH SX TM DV NÔNG NGHIỆP VIỆT",IF(TRIM(B4)="ABC","CÔNG TY TNHH SX TM DV ABC VIỆT NAM",IF(TRIM(B4)="VN","CÔNG TY TNHH PHÂN BÓN HÓA NÔNG VIỆT NHẬT",IF(TRIM(B4)="KF","CÔNG TY TNHH SX TM DV KING FARM","CHƯA CHỌN CÔNG TY"))))`
+  };
+  titleCell.font = { bold: true, size: 16, color: { argb: 'FF0B5394' } };
+  titleCell.alignment = { horizontal: 'left', vertical: 'middle' };
+  titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD9EAD3' } };
+
+  // --- DÒNG 2: CÔNG THỨC ĐỊA CHỈ CÔNG TY (Ô A2:H2) ---
+  reportSheet.mergeCells(`A2:H2`);
+  const addressCell = reportSheet.getCell('A2');
+  addressCell.value = {
+    // Chú ý: Đã đổi tham chiếu từ B2 thành B4
+    formula: `IF(TRIM(B4)="NNV","Địa chỉ: TẦNG 19, KHU A, INDOCHINA PARK TOWER, SỐ 4 NGUYỄN ĐÌNH CHIỂU, PHƯỜNG TÂN ĐỊNH, TPHCM",IF(TRIM(B4)="ABC","Địa chỉ: THỬA ĐẤT SỐ 72, TỜ BẢN ĐỒ SỐ 6, ẤP ĐA CẦN, PHƯỜNG HÒA THUẬN, TỈNH VĨNH LONG",IF(TRIM(B4)="VN","Địa chỉ: SỐ 79 NGUYỄN THIỆN THÀNH, KHÓM 4, PHƯỜNG HÒA THUẬN, TỈNH VĨNH LONG",IF(TRIM(B4)="KF","Địa chỉ: SỐ 79 NGUYỄN THIỆN THÀNH, KHÓM 4, PHƯỜNG HÒA THUẬN, TỈNH VĨNH LONG",""))))`
+  };
+  addressCell.font = { italic: true, size: 11, color: { argb: 'FF333333' } };
+  addressCell.alignment = { horizontal: 'left', vertical: 'middle' };
+
+  // --- DÒNG 3: CÔNG THỨC MÃ SỐ THUẾ (Ô A3:H3) ---
+  reportSheet.mergeCells(`A3:H3`);
+  const taxCell = reportSheet.getCell('A3');
+  taxCell.value = {
+    // Chú ý: Đã đổi tham chiếu từ B2 thành B4
+    formula: `IF(TRIM(B4)="NNV","Mã số thuế: 0312891224",IF(TRIM(B4)="ABC","Mã số thuế: 2100663269",IF(TRIM(B4)="VN","Mã số thuế: 2100598958",IF(TRIM(B4)="KF","Mã số thuế: 2100618315",""))))`
+  };
+  taxCell.font = { italic: true, size: 11, color: { argb: 'FF333333' } };
+  taxCell.alignment = { horizontal: 'left', vertical: 'middle' };
+
+  // --- DÒNG 4: DROPDOWN LỌC TẠI Ô B4 ---
+  reportSheet.getCell('A4').value = "Chọn công ty lọc:";
+  reportSheet.getCell('A4').font = { italic: true };
+
+  const dropdownCell = reportSheet.getCell('B4');
+  dropdownCell.value = 'NNV';
+  dropdownCell.dataValidation = {
+    type: 'list',
+    allowBlank: true,
+    formulae: ['"NNV,ABC,VN,KF"']
+  };
+  dropdownCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF2CC' } };
+
+  // --- DÒNG 5: TIÊU ĐỀ CỘT DỮ LIỆU ---
+  columns.forEach((col, index) => {
+    const cell = reportSheet.getCell(5, index + 1);
+    cell.value = col.label || col.key;
+    cell.font = { bold: true };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEFEFEF' } };
+    reportSheet.getColumn(index + 1).width = 15;
+  });
+
+  // --- DÒNG 6: CÔNG THỨC FILTER LỌC DỮ LIỆU ---
+  // Chú ý: Đã đổi điều kiện bằng B4 thay vì B2
+  const filterFormula = `_xlfn._xlws.FILTER(Data!A2:${lastColLetter}${totalRows}, Data!${colLetter}2:${colLetter}${totalRows}=B4, "Không có dữ liệu")`;
+
+  reportSheet.getCell('A6').value = {
+    formula: filterFormula,
+    shareType: 'array',  // Khai báo bắt buộc để bỏ chữ @
+    ref: 'A6:A6'         // Tham chiếu mảng ngay tại chính ô A6
+  };
+
+  // ==========================================
+  // XUẤT FILE
+  // ==========================================
+  const buffer = await workbook.xlsx.writeBuffer();
+  saveAs(new Blob([buffer]), `Bang_Luong_${new Date().toISOString().slice(0, 10)}.xlsx`);
 }
+
+// function exportPayrollExcel(rows, columns) {
+//   const headers = columns.map((column) => column.label || column.key);
+//   const data = rows.map((row) =>
+//     columns.map((column) => {
+//       const value = getDeep(row, column.key);
+//       return column.type === "number" ? roundPayrollNumber(value) : value ?? "";
+//     })
+//   );
+//   const sheet = XLSX.utils.aoa_to_sheet([headers, ...data]);
+//   sheet["!cols"] = columns.map((column) => ({
+//     wch: Math.max(12, Math.min(32, String(column.label || column.key).length + 2)),
+//   }));
+//   const workbook = XLSX.utils.book_new();
+//   XLSX.utils.book_append_sheet(workbook, sheet, "Payroll");
+//   XLSX.writeFile(workbook, `bang-luong_${new Date().toISOString().slice(0, 10)}.xlsx`);
+// }
 
 async function exportPayrollQrCards(rows) {
   const validRows = rows.filter((row) => String(row?.maNhanVien || "").trim());
@@ -1040,7 +1186,13 @@ function Modal({ open, title, children, onClose }) {
 
 export default function PayrollManager() {
   const { user, token } = useAuth();
-  const isAdmin = Number(user?.allpage) === 1 || String(user?.role || "").toLowerCase() === "admin";
+  const hasFullAccess = Number(user?.allpage) === 1;
+  const payrollPerms = hasFullAccess
+    ? { view: true, create: true, edit: true, delete: true, export: true }
+    : (user?.action?.payroll || {});
+  const canEdit = payrollPerms.edit === true;
+  const canCreate = payrollPerms.create === true;
+  const canDelete = payrollPerms.delete === true;
   const authHeader = useMemo(
     () => ({ Authorization: `Bearer ${token || localStorage.getItem("token") || ""}` }),
     [token]
@@ -1319,7 +1471,7 @@ export default function PayrollManager() {
   };
 
   const updateCell = (rowId, key, value) => {
-    if (!isAdmin) return;
+    if (!canEdit) return;
     setRows((current) =>
       current.map((row) => {
         if (row.__clientId !== rowId) return row;
@@ -1333,6 +1485,7 @@ export default function PayrollManager() {
   };
 
   const addRow = () => {
+    if (!canCreate) return;
     const newRow = normalizePayrollRow(
       {
         period,
@@ -1351,7 +1504,7 @@ export default function PayrollManager() {
   };
 
   const saveRows = async (targetRows) => {
-    if (!isAdmin || targetRows.length === 0) return;
+    if (!(canEdit || canCreate) || targetRows.length === 0) return;
     const invalid = targetRows
       .map((row) => ({ row, missing: validateRow(row) }))
       .find((item) => item.missing);
@@ -1398,7 +1551,7 @@ export default function PayrollManager() {
   };
 
   const deleteRow = async (row) => {
-    if (!isAdmin) return;
+    if (!canDelete) return;
     if (!row._id) {
       setRows((current) => current.filter((item) => item.__clientId !== row.__clientId));
       setDirtyIds((current) => {
@@ -1425,7 +1578,7 @@ export default function PayrollManager() {
   };
 
   const deleteCurrentPeriodPayrolls = async () => {
-    if (!isAdmin || !period) return;
+    if (!canDelete || !period) return;
     const count = rows.length;
     if (
       !window.confirm(
@@ -1494,6 +1647,7 @@ export default function PayrollManager() {
   };
 
   const importPayroll = async () => {
+    if (!(canCreate || canEdit)) return;
     if (!importRows.length) return;
     const updateFields = Array.from(selectedImportColumns);
     if (!updateFields.length) {
@@ -1524,6 +1678,7 @@ export default function PayrollManager() {
   };
 
   const clonePayroll = async () => {
+    if (!canCreate) return;
     if (!period) {
       setMessage("Vui lòng chọn kỳ lương để nhân bản.");
       return;
@@ -1596,6 +1751,7 @@ export default function PayrollManager() {
   };
 
   const importAttendance = async () => {
+    if (!canEdit) return;
     if (!validAttendanceRows.length) return;
     setAttendanceImporting(true);
     try {
@@ -1661,7 +1817,7 @@ export default function PayrollManager() {
   };
 
   const applyBulkEdit = () => {
-    if (!isAdmin || !bulkColumn || !bulkTargetRows.length) return;
+    if (!canEdit || !bulkColumn || !bulkTargetRows.length) return;
     const targetIds = new Set(bulkTargetRows.map((row) => row.__clientId));
     const nextValue = bulkColumn.type === "number"
       ? parsePayrollNumberInput(bulkValue)
@@ -1794,7 +1950,7 @@ export default function PayrollManager() {
                 <Wallet className="h-5 w-5" />
               </span>
               <div>
-                <h1 className="text-xl font-semibold tracking-tight">Bảng lương nhân viên</h1>
+                <h1 className="text-xl font-semibold tracking-tight">Chấm công tính lương</h1>
                 <p className="text-sm text-slate-500">Chỉnh trực tiếp như Excel, lưu từng dòng hoặc lưu tất cả.</p>
               </div>
             </div>
@@ -1821,58 +1977,70 @@ export default function PayrollManager() {
               <Columns3 className="h-4 w-4" />
               Ẩn/hiện cột
             </button>
-            {isAdmin && (
-              <>
-                <button onClick={openFormulaSettings} className="inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-50">
-                  <Calculator className="h-4 w-4" />
-                  Công thức
-                </button>
-                <button
-                  onClick={openBulkEdit}
-                  disabled={!sortedRows.length}
-                  className="inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-50 disabled:opacity-50"
-                >
-                  <ListChecks className="h-4 w-4" />
-                  Nhap hang loat
-                </button>
-                <button onClick={() => setShowImport(true)} className="inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-50">
-                  <UploadCloud className="h-4 w-4" />
-                  Import
-                </button>
-                <button onClick={() => setShowAttendanceImport(true)} className="inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-50">
-                  <FileSpreadsheet className="h-4 w-4" />
-                  Import KiotViet
-                </button>
-                <button
-                  onClick={clonePayroll}
-                  disabled={isCloning}
-                  title="Tạo bảng lương cho tháng tiếp theo dựa trên dữ liệu tháng hiện tại"
-                  className="inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-50 disabled:opacity-50"
-                >
-                  {isCloning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Copy className="h-4 w-4" />}
-                  Tạo bảng lương
-                </button>
-                <button
-                  onClick={deleteCurrentPeriodPayrolls}
-                  disabled={isDeletingMonth || loading || rows.length === 0}
-                  className="inline-flex items-center gap-2 rounded-xl border border-rose-200 bg-white px-3 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-50"
-                >
-                  {isDeletingMonth ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
-                  Xóa kỳ lương
-                </button>
-                <button onClick={addRow} className="inline-flex items-center gap-2 rounded-xl bg-sky-600 px-3 py-2 text-sm font-semibold text-white hover:bg-sky-700">
-                  <Plus className="h-4 w-4" />
-                  Thêm nhân viên
-                </button>
-                <button
-                  disabled={!dirtyRows.length}
-                  onClick={() => saveRows(dirtyRows)}
-                  className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
-                >
-                  <Save className="h-4 w-4" />
-                  Lưu tất cả ({dirtyRows.length})
-                </button>
-              </>
+            {canEdit && (
+              <button onClick={openFormulaSettings} className="inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-50">
+                <Calculator className="h-4 w-4" />
+                Công thức
+              </button>
+            )}
+            {canEdit && (
+              <button
+                onClick={openBulkEdit}
+                disabled={!sortedRows.length}
+                className="inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-50 disabled:opacity-50"
+              >
+                <ListChecks className="h-4 w-4" />
+                Nhap hang loat
+              </button>
+            )}
+            {(canCreate || canEdit) && (
+              <button onClick={() => setShowImport(true)} className="inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-50">
+                <UploadCloud className="h-4 w-4" />
+                Import
+              </button>
+            )}
+            {canEdit && (
+              <button onClick={() => setShowAttendanceImport(true)} className="inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-50">
+                <FileSpreadsheet className="h-4 w-4" />
+                Import KiotViet
+              </button>
+            )}
+            {canCreate && (
+              <button
+                onClick={clonePayroll}
+                disabled={isCloning}
+                title="Tạo bảng lương cho tháng tiếp theo dựa trên dữ liệu tháng hiện tại"
+                className="inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-50 disabled:opacity-50"
+              >
+                {isCloning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Copy className="h-4 w-4" />}
+                Tạo bảng lương
+              </button>
+            )}
+            {canDelete && (
+              <button
+                onClick={deleteCurrentPeriodPayrolls}
+                disabled={isDeletingMonth || loading || rows.length === 0}
+                className="inline-flex items-center gap-2 rounded-xl border border-rose-200 bg-white px-3 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-50"
+              >
+                {isDeletingMonth ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                Xóa kỳ lương
+              </button>
+            )}
+            {canCreate && (
+              <button onClick={addRow} className="inline-flex items-center gap-2 rounded-xl bg-sky-600 px-3 py-2 text-sm font-semibold text-white hover:bg-sky-700">
+                <Plus className="h-4 w-4" />
+                Thêm nhân viên
+              </button>
+            )}
+            {(canEdit || canCreate) && (
+              <button
+                disabled={!dirtyRows.length}
+                onClick={() => saveRows(dirtyRows)}
+                className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
+              >
+                <Save className="h-4 w-4" />
+                Lưu tất cả ({dirtyRows.length})
+              </button>
             )}
           </div>
         </div>
@@ -1981,7 +2149,7 @@ export default function PayrollManager() {
                           <CellInput
                             column={column}
                             value={getDeep(row, column.key)}
-                            readOnly={!isAdmin || isSaving || column.readOnly}
+                            readOnly={!canEdit || isSaving || column.readOnly}
                             onChange={(value) => updateCell(row.__clientId, column.key, value)}
                           />
                         </td>
@@ -1989,19 +2157,23 @@ export default function PayrollManager() {
                     })}
                     <td className="sticky right-0 z-10 border-b border-l bg-inherit px-2 py-1">
                       <div className="flex items-center justify-center gap-1">
-                        {isAdmin ? (
+                        {(canEdit || canDelete) ? (
                           <>
-                            <button
-                              disabled={!isDirty || isSaving}
-                              onClick={() => saveRows([row])}
-                              className="rounded-lg p-2 text-emerald-700 hover:bg-emerald-50 disabled:text-slate-300"
-                              title="Lưu dòng"
-                            >
-                              {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                            </button>
-                            <button onClick={() => deleteRow(row)} disabled={isSaving} className="rounded-lg p-2 text-rose-700 hover:bg-rose-50 disabled:text-slate-300" title="Xóa dòng">
-                              <Trash2 className="h-4 w-4" />
-                            </button>
+                            {canEdit && (
+                              <button
+                                disabled={!isDirty || isSaving}
+                                onClick={() => saveRows([row])}
+                                className="rounded-lg p-2 text-emerald-700 hover:bg-emerald-50 disabled:text-slate-300"
+                                title="Lưu dòng"
+                              >
+                                {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                              </button>
+                            )}
+                            {canDelete && (
+                              <button onClick={() => deleteRow(row)} disabled={isSaving} className="rounded-lg p-2 text-rose-700 hover:bg-rose-50 disabled:text-slate-300" title="Xóa dòng">
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            )}
                           </>
                         ) : (
                           <span className="text-xs text-slate-400">Chỉ xem</span>

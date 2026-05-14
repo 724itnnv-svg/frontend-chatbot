@@ -14,14 +14,14 @@ export default function StandaloneAttendance() {
 
   function handleLogout() {
     logout(false);
-    navigate("/login", { replace: true });
+    navigate("/login?redirect=/cham-cong", { replace: true });
   }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-sky-50/30">
       {/* Header tối giản */}
       <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/90 backdrop-blur-md">
-        <div className="mx-auto flex max-w-2xl items-center gap-3 px-4 py-3">
+        <div className="mx-auto flex max-w-6xl items-center gap-3 px-4 py-3">
           {/* Logo / tiêu đề */}
           <div className="flex items-center gap-2">
             <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-to-br from-sky-500 to-sky-400 text-white shadow-sm">

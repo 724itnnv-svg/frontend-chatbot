@@ -18,6 +18,7 @@ import {
   UserCheck,
   Users,
   Wallet,
+  Workflow,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 
@@ -41,10 +42,11 @@ const MENU_CONFIG = [
   { id: "admin_logs", path: "/admin/logs", label: "Log hệ thống", icon: Database },
   { id: "attendance_self", path: "/admin/my-attendance", label: "Chấm công của tôi", icon: CalendarCheck },
   { id: "attendance", path: "/admin/attendance", label: "Quản lý chấm công", icon: UserCheck },
+  { id: "attendance_shifts", path: "/admin/attendance-shifts", label: "Ca làm", icon: Workflow },
   { id: "attendance_locations", path: "/admin/attendance-locations", label: "Vị trí chấm công", icon: MapPin },
 ];
 
-MENU_CONFIG.push({ id: "payroll", path: "/admin/payroll", label: "Bảng lương", icon: Wallet });
+MENU_CONFIG.push({ id: "payroll", path: "/admin/payroll", label: "Chấm công tính lương", icon: Wallet });
 
 const MENU_GROUPS = [
   {
@@ -57,7 +59,7 @@ const MENU_GROUPS = [
     id: "attendance",
     label: "Chấm công",
     icon: CalendarCheck,
-    items: ["attendance_self", "attendance", "attendance_locations", "payroll"],
+    items: ["attendance_self", "attendance", "attendance_shifts", "attendance_locations", "payroll"],
   },
   {
     id: "people",
@@ -84,10 +86,10 @@ function getLinkClass({ isActive, isFocused, isCollapsed }) {
     "flex w-full min-w-0 items-center gap-3 rounded-xl px-3 py-2.5 transition",
     isCollapsed ? "md:justify-center md:gap-0 md:px-2" : "text-left",
     isActive
-      ? "border border-rose-200 bg-gradient-to-r from-rose-50 to-amber-50 text-rose-700 shadow-[0_10px_20px_rgba(244,63,94,0.10)]"
+      ? "border border-cyan-200 bg-gradient-to-r from-cyan-50 via-sky-50 to-teal-50 text-cyan-800 shadow-[0_12px_28px_rgba(6,182,212,0.16)]"
       : isFocused
-        ? "border border-slate-300 bg-slate-100 text-slate-900"
-        : "text-slate-700 hover:bg-slate-100",
+        ? "border border-cyan-200 bg-cyan-50 text-cyan-950"
+        : "text-slate-700 hover:bg-cyan-50/70 hover:text-cyan-900",
   ].join(" ");
 }
 
@@ -215,10 +217,10 @@ const Sidebar = memo(() => {
           isOpen ? "translate-x-0" : "-translate-x-full",
           "md:translate-x-0 md:static",
           isCollapsed ? "md:w-20" : "md:w-72",
-          "bg-white/85 backdrop-blur-xl border-r border-slate-200 shadow-[0_10px_30px_rgba(15,23,42,0.08)]",
+          "bg-gradient-to-b from-white/95 via-cyan-50/90 to-sky-50/95 backdrop-blur-xl border-r border-cyan-100 shadow-[0_18px_50px_rgba(8,145,178,0.16)]",
         ].join(" ")}
       >
-        <div className="h-1 w-full bg-gradient-to-r from-rose-500 via-rose-400 to-amber-300" />
+        <div className="h-1 w-full bg-gradient-to-r from-cyan-400 via-sky-400 to-teal-300" />
 
         <div className="p-4 pb-3">
           <div className="mb-3 flex items-center justify-between gap-2">
@@ -229,10 +231,10 @@ const Sidebar = memo(() => {
               </div>
             </div>
             <div className="flex items-center gap-2">
-              <button onClick={() => setIsCollapsed(!isCollapsed)} className="hidden rounded-xl bg-slate-100 p-2 md:inline-flex hover:bg-slate-200">
+              <button onClick={() => setIsCollapsed(!isCollapsed)} className="hidden rounded-xl bg-cyan-50 p-2 text-cyan-800 md:inline-flex hover:bg-cyan-100">
                 {isCollapsed ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
               </button>
-              <button onClick={() => setIsOpen(false)} className="inline-flex rounded-xl bg-slate-100 px-3 py-2 md:hidden">x</button>
+              <button onClick={() => setIsOpen(false)} className="inline-flex rounded-xl bg-cyan-50 px-3 py-2 text-cyan-800 md:hidden">x</button>
             </div>
           </div>
 
@@ -242,18 +244,18 @@ const Sidebar = memo(() => {
               localStorage.setItem(ACTIVE_TAB_KEY, "profile");
               setIsOpen(false);
             }}
-            className={`flex min-w-0 cursor-pointer items-center gap-3 rounded-2xl border bg-white p-2 transition shadow-[0_10px_20px_rgba(15,23,42,0.06)] hover:border-slate-300 ${isProfileActive ? "border-rose-200 ring-2 ring-rose-100" : "border-slate-200"
+            className={`flex min-w-0 cursor-pointer items-center gap-3 rounded-2xl border bg-white/90 p-2 transition shadow-[0_12px_28px_rgba(8,145,178,0.10)] hover:border-cyan-200 hover:bg-cyan-50/60 ${isProfileActive ? "border-cyan-200 ring-2 ring-cyan-100" : "border-cyan-100"
               } ${isCollapsed ? "md:justify-center md:gap-0" : ""}`}
           >
             <img
               alt="avatar"
               src={user?.avatarUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(avatarInitial)}&background=random&size=64`}
-              className={`rounded-2xl border border-slate-200 object-cover flex-shrink-0 aspect-square ${isCollapsed ? "h-11 w-11 min-w-[2.75rem]" : "h-10 w-10 min-w-[2.5rem]"}`}
+              className={`rounded-2xl border border-cyan-100 object-cover flex-shrink-0 aspect-square ${isCollapsed ? "h-11 w-11 min-w-[2.75rem]" : "h-10 w-10 min-w-[2.5rem]"}`}
             />
             <div className={`min-w-0 overflow-hidden transition-all duration-300 ${isCollapsed ? "md:w-0 md:opacity-0" : "md:w-auto md:opacity-100"}`}>
               <div className="rainbow-text whitespace-nowrap overflow-hidden text-ellipsis text-sm font-semibold text-slate-900">{displayName}</div>
               <div className="mt-1">
-                <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold ${isAdmin ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-slate-200 bg-slate-100 text-slate-600"}`}>
+                <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold ${isAdmin ? "border-cyan-200 bg-cyan-50 text-cyan-700" : "border-sky-200 bg-sky-50 text-sky-700"}`}>
                   {isAdmin ? "Admin" : "User"}
                 </span>
               </div>
@@ -269,15 +271,15 @@ const Sidebar = memo(() => {
               const isGroupOpen = isCollapsed || openGroups[group.id] || groupActive;
 
               return (
-                <div key={group.id} className="rounded-2xl border border-slate-100 bg-white/70 p-1.5">
+                <div key={group.id} className="rounded-2xl border border-cyan-100/80 bg-white/70 p-1.5 shadow-[0_8px_24px_rgba(8,145,178,0.06)]">
                   <button
                     type="button"
                     onClick={() => setOpenGroups((current) => ({ ...current, [group.id]: !isGroupOpen }))}
-                    className={`flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-xs font-bold transition ${groupActive ? "bg-slate-100 text-slate-900" : "text-slate-500 hover:bg-slate-50"
+                    className={`flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-xs font-bold transition ${groupActive ? "bg-cyan-50 text-cyan-950" : "text-slate-500 hover:bg-cyan-50/70 hover:text-cyan-900"
                       } ${isCollapsed ? "md:justify-center" : ""}`}
                     title={group.label}
                   >
-                    <GroupIcon size={17} className={groupActive ? "text-rose-500" : "text-slate-400"} />
+                    <GroupIcon size={17} className={groupActive ? "text-cyan-500" : "text-slate-400"} />
                     <span className={`min-w-0 flex-1 truncate uppercase tracking-wide transition-all duration-300 ${isCollapsed ? "md:w-0 md:opacity-0" : "md:w-auto md:opacity-100"}`}>
                       {group.label}
                     </span>
@@ -309,11 +311,11 @@ const Sidebar = memo(() => {
                           >
                             {({ isActive }) => (
                               <>
-                                <Icon size={19} className={`flex-shrink-0 ${isActive ? "text-rose-600" : isFocused ? "text-slate-700" : "text-slate-500"}`} />
+                                <Icon size={19} className={`flex-shrink-0 ${isActive ? "text-cyan-600" : isFocused ? "text-cyan-800" : "text-slate-500"}`} />
                                 <span className={`min-w-0 whitespace-nowrap overflow-hidden text-ellipsis transition-all duration-300 ${isCollapsed ? "md:w-0 md:opacity-0" : "md:w-auto md:opacity-100"}`}>
                                   <span className={isActive || isFocused ? "font-semibold" : "font-medium"}>{m.label}</span>
                                 </span>
-                                {!isCollapsed && isActive && <span className="ml-auto h-2 w-2 rounded-full bg-rose-500" />}
+                                {!isCollapsed && isActive && <span className="ml-auto h-2 w-2 rounded-full bg-cyan-500 shadow-[0_0_12px_rgba(6,182,212,0.65)]" />}
                                 {!isCollapsed && isFocused && !isActive && <span className="ml-auto text-[10px] text-slate-400">Enter</span>}
                               </>
                             )}
@@ -328,10 +330,10 @@ const Sidebar = memo(() => {
           </div>
         </nav>
 
-        <div className="shrink-0 border-t border-slate-200 bg-white/70 p-4 pt-3 backdrop-blur">
+        <div className="shrink-0 border-t border-cyan-100 bg-white/70 p-4 pt-3 backdrop-blur">
           <button
             onClick={handleLogout}
-            className={`flex w-full items-center justify-between gap-2 rounded-2xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-sm font-semibold text-rose-600 transition hover:bg-rose-100 ${isCollapsed ? "md:justify-center" : ""}`}
+            className={`flex w-full items-center justify-between gap-2 rounded-2xl border border-cyan-200 bg-cyan-50 px-3 py-2.5 text-sm font-semibold text-cyan-700 transition hover:bg-cyan-100 ${isCollapsed ? "md:justify-center" : ""}`}
           >
             <span className={isCollapsed ? "md:hidden" : ""}>Đăng xuất</span>
             <LogOut size={18} />
@@ -342,7 +344,7 @@ const Sidebar = memo(() => {
       {!isOpen && (
         <button
           onClick={() => setIsOpen(true)}
-          className="fixed top-3 left-3 z-50 rounded-2xl bg-gradient-to-r from-rose-500 via-rose-400 to-amber-300 p-2 text-white shadow-md md:hidden"
+          className="fixed top-3 left-3 z-50 rounded-2xl bg-gradient-to-r from-cyan-500 via-sky-400 to-teal-300 p-2 text-white shadow-[0_12px_30px_rgba(6,182,212,0.35)] md:hidden"
         >
           <ChevronRight size={18} />
         </button>

@@ -368,7 +368,7 @@ export default function CommissionOnlineCalculator() {
   const [missingPriceModalOpen, setMissingPriceModalOpen] = useState(false);
   const [missingReturns, setMissingReturns] = useState([]);
   const [missingGifts, setMissingGifts] = useState([]);
-  const [excludedGiftCodes, setExcludedGiftCodes] = useState(["NNV22"]);
+  const [excludedGiftCodes, setExcludedGiftCodes] = useState([]);
   const [newGiftCode, setNewGiftCode] = useState("");
 
   const allFilesReady = ["cashflow", "returns", "invoice"].every((key) => files[key]);
@@ -1360,7 +1360,7 @@ export default function CommissionOnlineCalculator() {
 
           <div className="mt-4 rounded-2xl border border-slate-200 bg-white/60 p-4">
             <div className="text-sm font-semibold text-slate-800">
-              Mã hàng tặng không trừ doanh thu
+              Mã sản phẩm hàng tặng không trừ doanh thu
             </div>
             <div className="mt-2 flex flex-wrap gap-2">
               {excludedGiftCodes.map((code) => (

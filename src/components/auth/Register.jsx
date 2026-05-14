@@ -48,6 +48,7 @@ export default function Register() {
   const [form, setForm] = useState({
     fullName: "",
     email: "",
+    phone: "",
     password: "",
     role: "user",
   });
@@ -69,6 +70,7 @@ export default function Register() {
         body: JSON.stringify({
           fullName: form.fullName,
           email: form.email,
+          phone: form.phone,
           password: form.password,
           role: form.role,
         }),
@@ -182,6 +184,20 @@ export default function Register() {
                   placeholder="name@gmail.com"
                   required
                   value={form.email}
+                  onChange={handleChange}
+                  className="w-full rounded-2xl border border-white/70 bg-white/75 px-4 py-3 text-sm text-slate-900 shadow-sm outline-none transition focus:border-sky-200 focus:ring-4 focus:ring-sky-100"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-xs font-semibold text-slate-600">
+                  Số điện thoại
+                </label>
+                <input
+                  type="tel"
+                  name="phone"
+                  placeholder="VD: 0949015724"
+                  value={form.phone}
                   onChange={handleChange}
                   className="w-full rounded-2xl border border-white/70 bg-white/75 px-4 py-3 text-sm text-slate-900 shadow-sm outline-none transition focus:border-sky-200 focus:ring-4 focus:ring-sky-100"
                 />

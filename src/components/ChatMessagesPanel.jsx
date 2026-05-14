@@ -1,5 +1,6 @@
 // src/components/ChatMessagesPanel.jsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { apiUrl } from "../api/baseUrl";
 import { extractCleanTextAndImage } from "../utils/chatSanitizer";
 
 
@@ -42,8 +43,7 @@ export default function ChatMessagesPanel({ messages, threadId, setMessages }) {
     // ✅ Push ngay lên UI
     setMessages((prev) => [...prev, newMsg]);
     setInput(""); // clear input after successful send       
-    const API_BASE_URL = 'https://chatbot-zhpy.onrender.com/chatwebpopup';   
-    // const API_BASE_URL = 'http://localhost:5000/chatwebpopup';
+    const API_BASE_URL = apiUrl("/chatwebpopup");
     let requestBody = { threadId: threadId, text: text };
     const response = await fetch(`${API_BASE_URL}/reply`, {
       method: 'POST',

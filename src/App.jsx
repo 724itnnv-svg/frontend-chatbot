@@ -1,5 +1,6 @@
 // src/App.jsx
 import { lazy, Suspense } from "react";
+import { Capacitor } from "@capacitor/core";
 import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "./context/AuthContext";
 
@@ -8,6 +9,8 @@ import DashboardLayout from "./components/DashboardLayout";
 const Login = lazy(() => import("./components/auth/Login"));
 const Register = lazy(() => import("./components/auth/Register"));
 const ForgotPassword = lazy(() => import("./components/auth/ForgotPassword"));
+const ResetPassword = lazy(() => import("./components/auth/ResetPassword"));
+const QrLogin = lazy(() => import("./components/auth/QrLogin"));
 
 const UserDashboard = lazy(() => import("./components/UserDashboard"));
 const WelcomePage = lazy(() => import("./components/home/WelcomePage"));
@@ -24,8 +27,8 @@ const DonHangWeb = lazy(() => import("./components/DonHangWeb"));
 const UsersPage = lazy(() => import("./components/UserManager"));
 const RolePage = lazy(() => import("./components/role/RoleList"));
 const UserProfile = lazy(() => import("./components/UserProfile"));
-const CommissionOnlineCalculator = lazy(() => import("./components/CommissionOnlineCalculator"));
-const CommissionABCCalculator = lazy(() => import("./components/CommissionABCCalculator"));
+const CommissionOnlineCalculator = lazy(() => import("./components/calculators/CommissionOnlineCalculator"));
+const CommissionABCCalculator = lazy(() => import("./components/calculators/CommissionABCCalculator"));
 const AdminDashboard = lazy(() => import("./components/AdminDashboard"));
 const ProductTool = lazy(() => import("./components/products/ProductsTool"));
 const PromoManager = lazy(() => import("./components/event_promo/PromoManager"));
@@ -33,9 +36,9 @@ const VectorStoreManage = lazy(() => import("./components/vectorstores/VectorSto
 const AgentManage = lazy(() => import("./components/agentAI/AgentManage"));
 const LogsManage = lazy(() => import("./components/logs/LogsManager"));
 const PayrollManager = lazy(() => import("./components/PayrollManager"));
-const EmployeePayrollLookup = lazy(() => import("./components/EmployeePayrollLookup"));
 const RouteManager = lazy(() => import("./components/RouteManager"));
 const AttendancePage = lazy(() => import("./components/attendance/AttendancePage"));
+const AttendanceShiftManager = lazy(() => import("./components/attendance/AttendanceShiftManager"));
 const WorkLocationManager = lazy(() => import("./components/attendance/WorkLocationManager"));
 const AttendanceManager = lazy(() => import("./components/attendance/AttendanceManager"));
 const StandaloneAttendance = lazy(() => import("./components/attendance/StandaloneAttendance"));
@@ -58,6 +61,7 @@ const ADMIN_ROUTE_BY_SCREEN = {
   admin_agent: "/admin/agents",
   admin_logs: "/admin/logs",
   attendance: "/admin/attendance",
+  attendance_shifts: "/admin/attendance-shifts",
   attendance_locations: "/admin/attendance-locations",
   attendance_self: "/admin/my-attendance",
   payroll: "/admin/payroll",
@@ -82,6 +86,7 @@ const adminRoutes = [
   { path: "logs", screenId: "admin_logs", element: <LogsManage /> },
   { path: "my-attendance", screenId: "attendance_self", element: <AttendancePage /> },
   { path: "attendance", screenId: "attendance", element: <AttendanceManager /> },
+  { path: "attendance-shifts", screenId: "attendance_shifts", element: <AttendanceShiftManager /> },
   { path: "attendance-locations", screenId: "attendance_locations", element: <WorkLocationManager /> },
   { path: "payroll", screenId: "payroll", element: <PayrollManager /> },
 ];
@@ -158,18 +163,26 @@ function RequireScreen({ screenId, children }) {
   return <Navigate to="/404" replace />;
 }
 
+function HomeRoute() {
+  if (Capacitor.isNativePlatform()) {
+    return <Navigate to="/cham-cong" replace />;
+  }
+
+  return <WelcomePage />;
+}
+
 export default function App() {
   const { isLoggedIn } = useAuth();
 
   return (
     <Suspense fallback={<AppLoader />}>
       <Routes>
-        <Route path="/" element={<WelcomePage />} />
+        <Route path="/" element={<HomeRoute />} />
         <Route path="/user" element={<UserDashboard />} />
-        <Route path="/tra-cuu-luong" element={<EmployeePayrollLookup />} />
-        <Route path="/tra-cuu-luong/:employeeCode" element={<EmployeePayrollLookup />} />
 
         <Route path="/forgot-password" element={<ForgotPassword />} />
+        <Route path="/reset-password" element={<ResetPassword />} />
+        <Route path="/qr-login" element={<QrLogin />} />
 
         <Route
           path="/login"

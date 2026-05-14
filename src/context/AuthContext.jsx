@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { createApi } from "../api/api";
+import { scheduleAttendanceReminder } from "../utils/attendanceReminder";
 
 const AuthContext = createContext();
 
@@ -61,6 +62,14 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     if (token) didLogoutRef.current = false;
+  }, [token]);
+
+  useEffect(() => {
+    if (!token) return;
+
+    scheduleAttendanceReminder().catch((err) => {
+      console.warn("Không thể lên lịch nhắc chấm công:", err);
+    });
   }, [token]);
 
   // ✅ Sync state với localStorage
