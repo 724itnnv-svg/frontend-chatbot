@@ -5,17 +5,21 @@ export default function InstructionModal({ isOpen, onClose, onSave, editing, set
     if (!isOpen) return null;
 
     const [promptExpanded, setPromptExpanded] = useState(false);
+    const [promptExpanded1, setPromptExpanded1] = useState(false);
+    const [promptExpanded2, setPromptExpanded2] = useState(false);
+    const [promptExpanded3, setPromptExpanded3] = useState(false);
+    const [promptExpanded4, setPromptExpanded4] = useState(false);
 
-    const isCreate     = !editing._id;
-    const isPromo      = editing.type === "promo";
+    const isCreate = !editing._id;
+    const isPromo = editing.type === "promo";
     const isSimplified = editing.teamId === "Intent" || isPromo;
     const visibleTeams = isPromo ? teams.filter(t => t.id !== "Intent") : teams;
-    const set    = (field, value) => setEditing({ ...editing, [field]: value });
-    const setOpt = (key, value)   => setEditing({ ...editing, options: { ...editing.options, [key]: value } });
+    const set = (field, value) => setEditing({ ...editing, [field]: value });
+    const setOpt = (key, value) => setEditing({ ...editing, options: { ...editing.options, [key]: value } });
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 md:p-8 bg-slate-900/60 backdrop-blur-sm">
-            <div className="bg-white w-full max-w-4xl max-h-[90vh] rounded-[2rem] shadow-2xl overflow-hidden flex flex-col">
+            <div className="bg-white w-full max-w-7xl max-h-[90vh] min-h-[80vh] rounded-[2rem] shadow-2xl overflow-hidden flex flex-col">
 
                 {/* HEADER */}
                 <div className="px-8 py-5 border-b flex justify-between items-center bg-white flex-shrink-0">
@@ -169,51 +173,129 @@ export default function InstructionModal({ isOpen, onClose, onSave, editing, set
                     </div>
 
                     {/* RIGHT PANEL */}
-                    <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+                    <div className="flex-1 flex flex-col min-h-0 max-h-[900px] overflow-hidden">
+                        {!isSimplified && <div className="flex-1 min-h-0 overflow-y-auto">
 
-                        {/* Options block — hidden when teamId is picked in create mode */}
-                        {!isSimplified && <div className="flex-shrink-0 p-6 border-b border-slate-100 bg-white">
-                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">
-                                Thông tin đơn vị (Options)
-                            </p>
-                            <div className="grid grid-cols-1 gap-3">
-                                <div className="space-y-1.5">
-                                    <label className="text-[10px] font-bold text-slate-500 flex items-center gap-1.5">
-                                        <Tag size={10} /> Tên đơn vị <span className="text-red-400">*</span>
-                                    </label>
-                                    <input
-                                        type="text"
-                                        value={editing.options.title}
-                                        onChange={e => setOpt("title", e.target.value)}
-                                        placeholder="VD: Công ty TNHH Phân Bón Nông Nghiệp Việt"
-                                        className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none shadow-sm text-sm"
+                            {/* Options block — hidden when teamId is picked in create mode */}
+                            {!isSimplified && <div className="flex-shrink-0 p-6 border-b border-slate-100 bg-white">
+                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">
+                                    Thông tin đơn vị (Options)
+                                </p>
+                                <div className="grid grid-cols-1 gap-3">
+                                    <div className="space-y-1.5">
+                                        <label className="text-[10px] font-bold text-slate-500 flex items-center gap-1.5">
+                                            <Tag size={10} /> Tên đơn vị <span className="text-red-400">*</span>
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={editing.options.title}
+                                            onChange={e => setOpt("title", e.target.value)}
+                                            placeholder="VD: Công ty TNHH Phân Bón Nông Nghiệp Việt"
+                                            className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none shadow-sm text-sm"
+                                        />
+                                    </div>
+                                    <div className="space-y-1.5">
+                                        <label className="text-[10px] font-bold text-slate-500 flex items-center gap-1.5">
+                                            <MapPin size={10} /> Địa chỉ <span className="text-red-400">*</span>
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={editing.options.diachi}
+                                            onChange={e => setOpt("diachi", e.target.value)}
+                                            placeholder="VD: 123 Đường ABC, Quận 1, TP.HCM"
+                                            className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none shadow-sm text-sm"
+                                        />
+                                    </div>
+                                    <div className="space-y-1.5">
+                                        <label className="text-[10px] font-bold text-slate-500 flex items-center gap-1.5">
+                                            <Globe size={10} /> Website <span className="text-red-400">*</span>
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={editing.options.website}
+                                            onChange={e => setOpt("website", e.target.value)}
+                                            placeholder="VD: https://phanbon.com.vn"
+                                            className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none shadow-sm text-sm"
+                                        />
+                                    </div>
+                                    <div className="flex items-center justify-between mb-2 flex-shrink-0">
+                                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
+                                            <FileText size={10} /> createOrderFromAssistant <span className="text-red-400">*</span>
+                                        </label>
+                                        <button
+                                            type="button"
+                                            onClick={() => setPromptExpanded1(true)}
+                                            className="flex items-center gap-1 text-[10px] font-bold text-indigo-500 hover:text-indigo-700 hover:bg-indigo-50 px-2 py-1 rounded-lg transition-colors"
+                                        >
+                                            <Maximize2 size={11} /> Mở rộng
+                                        </button>
+                                    </div>
+                                    <textarea
+                                        rows={10}
+                                        value={editing.options.createOrderFromAssistant}
+                                        onChange={e => setOpt("createOrderFromAssistant", e.target.value)}
+                                        placeholder="Nhập nội dung createOrderFromAssistant cho AI Agent..."
+                                        className="flex-1 w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none font-mono text-xs leading-relaxed resize-none"
+                                    />
+                                    <div className="flex items-center justify-between mb-2 flex-shrink-0">
+                                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
+                                            <FileText size={10} /> fileSearch <span className="text-red-400">*</span>
+                                        </label>
+                                        <button
+                                            type="button"
+                                            onClick={() => setPromptExpanded2(true)}
+                                            className="flex items-center gap-1 text-[10px] font-bold text-indigo-500 hover:text-indigo-700 hover:bg-indigo-50 px-2 py-1 rounded-lg transition-colors"
+                                        >
+                                            <Maximize2 size={11} /> Mở rộng
+                                        </button>
+                                    </div>
+                                    <textarea
+                                        rows={10}
+                                        value={editing.options.fileSearch}
+                                        onChange={e => setOpt("fileSearch", e.target.value)}
+                                        placeholder="Nhập nội dung fileSearch cho AI Agent..."
+                                        className="flex-1 w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none font-mono text-xs leading-relaxed resize-none"
+                                    />
+                                    <div className="flex items-center justify-between mb-2 flex-shrink-0">
+                                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
+                                            <FileText size={10} /> calculateShipping <span className="text-red-400">*</span>
+                                        </label>
+                                        <button
+                                            type="button"
+                                            onClick={() => setPromptExpanded3(true)}
+                                            className="flex items-center gap-1 text-[10px] font-bold text-indigo-500 hover:text-indigo-700 hover:bg-indigo-50 px-2 py-1 rounded-lg transition-colors"
+                                        >
+                                            <Maximize2 size={11} /> Mở rộng
+                                        </button>
+                                    </div>
+                                    <textarea
+                                        rows={10}
+                                        value={editing.options.calculateShipping}
+                                        onChange={e => setOpt("calculateShipping", e.target.value)}
+                                        placeholder="Nhập nội dung calculateShipping cho AI Agent..."
+                                        className="flex-1 w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none font-mono text-xs leading-relaxed resize-none"
+                                    />
+                                    <div className="flex items-center justify-between mb-2 flex-shrink-0">
+                                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
+                                            <FileText size={10} /> findPromoEvent <span className="text-red-400">*</span>
+                                        </label>
+                                        <button
+                                            type="button"
+                                            onClick={() => setPromptExpanded4(true)}
+                                            className="flex items-center gap-1 text-[10px] font-bold text-indigo-500 hover:text-indigo-700 hover:bg-indigo-50 px-2 py-1 rounded-lg transition-colors"
+                                        >
+                                            <Maximize2 size={11} /> Mở rộng
+                                        </button>
+                                    </div>
+                                    <textarea
+                                        rows={10}
+                                        value={editing.options.findPromoEvent}
+                                        onChange={e => setOpt("findPromoEvent", e.target.value)}
+                                        placeholder="Nhập nội dung findPromoEvent cho AI Agent..."
+                                        className="flex-1 w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none font-mono text-xs leading-relaxed resize-none"
                                     />
                                 </div>
-                                <div className="space-y-1.5">
-                                    <label className="text-[10px] font-bold text-slate-500 flex items-center gap-1.5">
-                                        <MapPin size={10} /> Địa chỉ <span className="text-red-400">*</span>
-                                    </label>
-                                    <input
-                                        type="text"
-                                        value={editing.options.diachi}
-                                        onChange={e => setOpt("diachi", e.target.value)}
-                                        placeholder="VD: 123 Đường ABC, Quận 1, TP.HCM"
-                                        className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none shadow-sm text-sm"
-                                    />
-                                </div>
-                                <div className="space-y-1.5">
-                                    <label className="text-[10px] font-bold text-slate-500 flex items-center gap-1.5">
-                                        <Globe size={10} /> Website <span className="text-red-400">*</span>
-                                    </label>
-                                    <input
-                                        type="text"
-                                        value={editing.options.website}
-                                        onChange={e => setOpt("website", e.target.value)}
-                                        placeholder="VD: https://phanbon.com.vn"
-                                        className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none shadow-sm text-sm"
-                                    />
-                                </div>
-                            </div>
+                            </div>}
                         </div>}
 
                         {/* System prompt */}
@@ -231,6 +313,7 @@ export default function InstructionModal({ isOpen, onClose, onSave, editing, set
                                 </button>
                             </div>
                             <textarea
+                                rows={10}
                                 value={editing.system}
                                 onChange={e => set("system", e.target.value)}
                                 placeholder="Nhập nội dung system prompt cho AI Agent..."
@@ -259,6 +342,110 @@ export default function InstructionModal({ isOpen, onClose, onSave, editing, set
                                         value={editing.system}
                                         onChange={e => set("system", e.target.value)}
                                         placeholder="Nhập nội dung system prompt cho AI Agent..."
+                                        className="flex-1 w-full px-6 py-5 outline-none font-mono text-sm leading-relaxed resize-none"
+                                    />
+                                </div>
+                            </div>
+                        )}
+                        {/* Fullscreen prompt editor */}
+                        {promptExpanded1 && (
+                            <div className="fixed inset-0 z-[60] flex flex-col bg-slate-900/70 backdrop-blur-sm p-6">
+                                <div className="bg-white rounded-2xl flex flex-col flex-1 overflow-hidden shadow-2xl">
+                                    <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 flex-shrink-0">
+                                        <span className="text-sm font-black text-slate-700 flex items-center gap-2">
+                                            <FileText size={15} className="text-indigo-500" /> Prompt CreateOrderFromAssistant
+                                        </span>
+                                        <button
+                                            type="button"
+                                            onClick={() => setPromptExpanded1(false)}
+                                            className="flex items-center gap-1.5 text-xs font-bold text-slate-500 hover:text-slate-800 hover:bg-slate-100 px-3 py-1.5 rounded-lg transition-colors"
+                                        >
+                                            <Minimize2 size={13} /> Thu nhỏ
+                                        </button>
+                                    </div>
+                                    <textarea
+                                        autoFocus
+                                        value={editing.options.createOrderFromAssistant}
+                                        onChange={e => setOpt("createOrderFromAssistant", e.target.value)}
+                                        placeholder="Nhập nội dung createOrderFromAssistant prompt cho AI Agent..."
+                                        className="flex-1 w-full px-6 py-5 outline-none font-mono text-sm leading-relaxed resize-none"
+                                    />
+                                </div>
+                            </div>
+                        )}
+                        {/* Fullscreen prompt editor */}
+                        {promptExpanded2 && (
+                            <div className="fixed inset-0 z-[60] flex flex-col bg-slate-900/70 backdrop-blur-sm p-6">
+                                <div className="bg-white rounded-2xl flex flex-col flex-1 overflow-hidden shadow-2xl">
+                                    <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 flex-shrink-0">
+                                        <span className="text-sm font-black text-slate-700 flex items-center gap-2">
+                                            <FileText size={15} className="text-indigo-500" /> Prompt FileSearch
+                                        </span>
+                                        <button
+                                            type="button"
+                                            onClick={() => setPromptExpanded2(false)}
+                                            className="flex items-center gap-1.5 text-xs font-bold text-slate-500 hover:text-slate-800 hover:bg-slate-100 px-3 py-1.5 rounded-lg transition-colors"
+                                        >
+                                            <Minimize2 size={13} /> Thu nhỏ
+                                        </button>
+                                    </div>
+                                    <textarea
+                                        autoFocus
+                                        value={editing.options.fileSearch}
+                                        onChange={e => setOpt("fileSearch", e.target.value)}
+                                        placeholder="Nhập nội dung fileSearch prompt cho AI Agent..."
+                                        className="flex-1 w-full px-6 py-5 outline-none font-mono text-sm leading-relaxed resize-none"
+                                    />
+                                </div>
+                            </div>
+                        )}
+                        {/* Fullscreen prompt editor */}
+                        {promptExpanded3 && (
+                            <div className="fixed inset-0 z-[60] flex flex-col bg-slate-900/70 backdrop-blur-sm p-6">
+                                <div className="bg-white rounded-2xl flex flex-col flex-1 overflow-hidden shadow-2xl">
+                                    <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 flex-shrink-0">
+                                        <span className="text-sm font-black text-slate-700 flex items-center gap-2">
+                                            <FileText size={15} className="text-indigo-500" /> Prompt CalculateShipping
+                                        </span>
+                                        <button
+                                            type="button"
+                                            onClick={() => setPromptExpanded3(false)}
+                                            className="flex items-center gap-1.5 text-xs font-bold text-slate-500 hover:text-slate-800 hover:bg-slate-100 px-3 py-1.5 rounded-lg transition-colors"
+                                        >
+                                            <Minimize2 size={13} /> Thu nhỏ
+                                        </button>
+                                    </div>
+                                    <textarea
+                                        autoFocus
+                                        value={editing.options.calculateShipping}
+                                        onChange={e => setOpt("calculateShipping", e.target.value)}
+                                        placeholder="Nhập nội dung calculateShipping prompt cho AI Agent..."
+                                        className="flex-1 w-full px-6 py-5 outline-none font-mono text-sm leading-relaxed resize-none"
+                                    />
+                                </div>
+                            </div>
+                        )}
+                        {/* Fullscreen prompt editor */}
+                        {promptExpanded4 && (
+                            <div className="fixed inset-0 z-[60] flex flex-col bg-slate-900/70 backdrop-blur-sm p-6">
+                                <div className="bg-white rounded-2xl flex flex-col flex-1 overflow-hidden shadow-2xl">
+                                    <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 flex-shrink-0">
+                                        <span className="text-sm font-black text-slate-700 flex items-center gap-2">
+                                            <FileText size={15} className="text-indigo-500" /> Prompt FindPromoEvent
+                                        </span>
+                                        <button
+                                            type="button"
+                                            onClick={() => setPromptExpanded4(false)}
+                                            className="flex items-center gap-1.5 text-xs font-bold text-slate-500 hover:text-slate-800 hover:bg-slate-100 px-3 py-1.5 rounded-lg transition-colors"
+                                        >
+                                            <Minimize2 size={13} /> Thu nhỏ
+                                        </button>
+                                    </div>
+                                    <textarea
+                                        autoFocus
+                                        value={editing.options.findPromoEvent}
+                                        onChange={e => setOpt("findPromoEvent", e.target.value)}
+                                        placeholder="Nhập nội dung findPromoEvent prompt cho AI Agent..."
                                         className="flex-1 w-full px-6 py-5 outline-none font-mono text-sm leading-relaxed resize-none"
                                     />
                                 </div>

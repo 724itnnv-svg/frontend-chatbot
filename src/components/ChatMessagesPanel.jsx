@@ -131,7 +131,8 @@ export default function ChatMessagesPanel({ messages, threadId, setMessages }) {
         pending: !!m?.pending,
       });
     }
-
+    console.log(out);
+    
 
     return out;
   }, [messages]);

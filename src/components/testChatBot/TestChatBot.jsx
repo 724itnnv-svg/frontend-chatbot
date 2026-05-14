@@ -29,7 +29,7 @@ function TestChatBot() {
   useEffect(() => {
     async function loadPages() {
       try {
-        const res = await fetch("/api/test-v2/pages", {
+        const res = await fetch("/api/test-v3/pages", {
           headers: {
             Authorization: `Bearer ${token}`,
           },
@@ -119,7 +119,7 @@ function TestChatBot() {
     addLog("info", `[${eventType.toUpperCase()}] senderId=${senderId} → pageId=${selectedPageId}\n${JSON.stringify(data, null, 2)}`);
 
     try {
-      const res = await fetch("/api/test-v2/send", {
+      const res = await fetch("/api/test-v3/send", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

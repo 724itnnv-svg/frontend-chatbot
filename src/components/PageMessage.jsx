@@ -94,8 +94,8 @@ function PageMessage() {
           },
         });
         if (res.status === 401) logout();
-        let data = await res.json();
 
+        let data = await res.json();       
 
         setPages(Array.isArray(data) ? data : []);
       } catch (err) {
@@ -170,9 +170,11 @@ function PageMessage() {
         },
       });
       const allChats = await chatRes.json();
+      console.log(allChats);
+      
 
       const filteredChats = (Array.isArray(allChats) ? allChats : []).filter(
-        (c) => String(c.page) === String(page.facebookId)
+        (c) => (String(c.page) === String(page.facebookId)) && c.conversationId
       );
 
       setChats(filteredChats);
@@ -232,8 +234,7 @@ function PageMessage() {
   }, [chats, chatSearch, userInfo]);
 
   // ✅ Chọn khách → load lịch sử theo threadId
-  const handleSelectChat = async (chat) => {
-    
+  const handleSelectChat = async (chat) => {   
     if (!chat?.threadId && !chat?.conversationId) {
       alert("⚠️ Chat này chưa có threadId để xem lịch sử");
       return;
@@ -489,7 +490,8 @@ function PageMessage() {
       });
       if (!res.ok) throw new Error("Không lấy được danh sách đơn hàng");
 
-      const data = await res.json();
+      const data = await res.json();     
+      
       const orders = Array.isArray(data) ? data : (data?.orders || []);
 
       // ✅ Nếu order có field page/pageId/facebookId thì lọc theo page hiện tại (an toàn, không bắt buộc)
