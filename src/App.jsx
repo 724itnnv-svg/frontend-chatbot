@@ -1,6 +1,7 @@
 // src/App.jsx
 import { lazy, Suspense } from "react";
-import { Routes, Route, Navigate } from "react-router-dom";
+import { Capacitor } from "@capacitor/core";
+import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "./context/AuthContext";
 
 import DashboardLayout from "./components/DashboardLayout";
@@ -8,6 +9,8 @@ import DashboardLayout from "./components/DashboardLayout";
 const Login = lazy(() => import("./components/auth/Login"));
 const Register = lazy(() => import("./components/auth/Register"));
 const ForgotPassword = lazy(() => import("./components/auth/ForgotPassword"));
+const ResetPassword = lazy(() => import("./components/auth/ResetPassword"));
+const QrLogin = lazy(() => import("./components/auth/QrLogin"));
 
 const UserDashboard = lazy(() => import("./components/UserDashboard"));
 const WelcomePage = lazy(() => import("./components/home/WelcomePage"));
@@ -24,8 +27,8 @@ const DonHangWeb = lazy(() => import("./components/DonHangWeb"));
 const UsersPage = lazy(() => import("./components/UserManager"));
 const RolePage = lazy(() => import("./components/role/RoleList"));
 const UserProfile = lazy(() => import("./components/UserProfile"));
-const CommissionOnlineCalculator = lazy(() => import("./components/CommissionOnlineCalculator"));
-const CommissionABCCalculator = lazy(() => import("./components/CommissionABCCalculator"));
+const CommissionOnlineCalculator = lazy(() => import("./components/calculators/CommissionOnlineCalculator"));
+const CommissionABCCalculator = lazy(() => import("./components/calculators/CommissionABCCalculator"));
 const AdminDashboard = lazy(() => import("./components/AdminDashboard"));
 const ProductTool = lazy(() => import("./components/products/ProductsTool"));
 const PromoManager = lazy(() => import("./components/event_promo/PromoManager"));
@@ -34,7 +37,12 @@ const AgentManage = lazy(() => import("./components/agentAI/AgentManage"));
 const LogsManage = lazy(() => import("./components/logs/LogsManager"));
 const PayrollManager = lazy(() => import("./components/PayrollManager"));
 const RouteManager = lazy(() => import("./components/RouteManager"));
-const TestCaseChatBotManager = lazy(() => import("./components/testChatBot/TestChatBot"));
+const AttendancePage = lazy(() => import("./components/attendance/AttendancePage"));
+const AttendanceShiftManager = lazy(() => import("./components/attendance/AttendanceShiftManager"));
+const WorkLocationManager = lazy(() => import("./components/attendance/WorkLocationManager"));
+const AttendanceManager = lazy(() => import("./components/attendance/AttendanceManager"));
+const StandaloneAttendance = lazy(() => import("./components/attendance/StandaloneAttendance"));
+
 const ADMIN_ROUTE_BY_SCREEN = {
   pages: "/admin/pages",
   pagesmessage: "/admin/page-messages",
@@ -54,6 +62,11 @@ const ADMIN_ROUTE_BY_SCREEN = {
   admin_test_chatbot_v2: "/admin/test-chatbot-v2", // New route for TestChatBotV2
   admin_testcase: "/admin/test-chat",
   admin_logs: "/admin/logs",
+  attendance: "/admin/attendance",
+  attendance_shifts: "/admin/attendance-shifts",
+  attendance_locations: "/admin/attendance-locations",
+  attendance_self: "/admin/my-attendance",
+  payroll: "/admin/payroll",
 };
 
 const adminRoutes = [
@@ -74,8 +87,45 @@ const adminRoutes = [
   { path: "agents", screenId: "admin_agent", element: <AgentManage /> },// New route
   { path: "test-chat", screenId: "admin_testcase", element: <TestCaseChatBotManager /> },
   { path: "logs", screenId: "admin_logs", element: <LogsManage /> },
-
+  { path: "my-attendance", screenId: "attendance_self", element: <AttendancePage /> },
+  { path: "attendance", screenId: "attendance", element: <AttendanceManager /> },
+  { path: "attendance-shifts", screenId: "attendance_shifts", element: <AttendanceShiftManager /> },
+  { path: "attendance-locations", screenId: "attendance_locations", element: <WorkLocationManager /> },
+  { path: "payroll", screenId: "payroll", element: <PayrollManager /> },
 ];
+
+// Guard cho trang độc lập: chưa login → /login?redirect=<current>
+function getSafeRedirect(search) {
+  try {
+    const redirect = new URLSearchParams(search).get("redirect");
+    if (!redirect || !redirect.startsWith("/") || redirect.startsWith("//")) return null;
+    return redirect;
+  } catch {
+    return null;
+  }
+}
+
+function RequireAuth({ children }) {
+  const { isLoggedIn } = useAuth();
+  const location = useLocation();
+  if (!isLoggedIn) {
+    const currentPath = `${location.pathname}${location.search || ""}${location.hash || ""}`;
+    return <Navigate to={`/login?redirect=${encodeURIComponent(currentPath)}`} replace />;
+  }
+  return children;
+}
+
+function LoginRoute() {
+  const { isLoggedIn } = useAuth();
+  const location = useLocation();
+  const redirectTo = getSafeRedirect(location.search);
+
+  if (isLoggedIn) {
+    return <Navigate to={redirectTo || "/admin"} replace />;
+  }
+
+  return <Login />;
+}
 
 function AppLoader() {
   return (
@@ -85,16 +135,19 @@ function AppLoader() {
   );
 }
 
+function hasFullAccess(user) {
+  return Number(user?.allpage) === 1;
+}
+
 function AdminDefaultRedirect() {
   const { user } = useAuth();
-  const role = user?.role?.toLowerCase?.();
-  const isAdmin = role === "admin";
+  const fullAccess = hasFullAccess(user);
   const saved = localStorage.getItem("dashboard_active_tab");
   const preferred = saved || user?.screenDefault || "pages";
 
   if (
     ADMIN_ROUTE_BY_SCREEN[preferred] &&
-    (isAdmin || preferred === "profile" || user?.screen?.includes(preferred))
+    (fullAccess || preferred === "profile" || user?.screen?.includes(preferred))
   ) {
     return <Navigate to={ADMIN_ROUTE_BY_SCREEN[preferred]} replace />;
   }
@@ -105,13 +158,20 @@ function AdminDefaultRedirect() {
 
 function RequireScreen({ screenId, children }) {
   const { user } = useAuth();
-  const role = user?.role?.toLowerCase?.();
 
-  if (role === "admin" || screenId === "profile" || user?.screen?.includes(screenId)) {
+  if (hasFullAccess(user) || screenId === "profile" || user?.screen?.includes(screenId)) {
     return children;
   }
 
   return <Navigate to="/404" replace />;
+}
+
+function HomeRoute() {
+  if (Capacitor.isNativePlatform()) {
+    return <Navigate to="/cham-cong" replace />;
+  }
+
+  return <WelcomePage />;
 }
 
 export default function App() {
@@ -120,14 +180,16 @@ export default function App() {
   return (
     <Suspense fallback={<AppLoader />}>
       <Routes>
-        <Route path="/" element={<WelcomePage />} />
+        <Route path="/" element={<HomeRoute />} />
         <Route path="/user" element={<UserDashboard />} />
 
         <Route path="/forgot-password" element={<ForgotPassword />} />
+        <Route path="/reset-password" element={<ResetPassword />} />
+        <Route path="/qr-login" element={<QrLogin />} />
 
         <Route
           path="/login"
-          element={!isLoggedIn ? <Login /> : <Navigate to="/admin" replace />}
+          element={<LoginRoute />}
         />
         <Route
           path="/register"
@@ -151,6 +213,16 @@ export default function App() {
             />
           ))}
         </Route>
+
+        {/* Trang chấm công độc lập — không cần sidebar admin */}
+        <Route
+          path="/cham-cong"
+          element={
+            <RequireAuth>
+              <StandaloneAttendance />
+            </RequireAuth>
+          }
+        />
 
         <Route path="/policy" element={<PolicyPage />} />
         <Route path="/terms-of-service" element={<TermsOfServicePage />} />

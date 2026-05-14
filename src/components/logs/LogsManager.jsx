@@ -18,7 +18,7 @@ const LevelBadge = ({ type, value }) => {
         SUCCESS: 'bg-blue-500 text-white',
         DEBUG: 'bg-gray-500 text-white',
     };
-    const style = type === 'method' 
+    const style = type === 'method'
         ? (methodStyles[value?.toUpperCase()] || 'bg-gray-100 text-gray-800')
         : (logStyles[value?.toUpperCase()] || 'bg-gray-100 text-gray-800');
 
@@ -48,7 +48,7 @@ const AdvancedLogManager = () => {
     const [logs, setLogs] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
-    
+
     // State filters
     const [page, setPage] = useState(1);
     const [limit, setLimit] = useState(15);
@@ -96,7 +96,7 @@ const AdvancedLogManager = () => {
     // --- Hàm Xuất CSV ---
     const exportToCSV = () => {
         if (logs.length === 0) return;
-        
+
         const headers = ["Time", "User", "Method", "Level", "Status", "IP", "Message"];
         const rows = logs.map(log => [
             format(new Date(log.timestamp), 'yyyy-MM-dd HH:mm:ss'),
@@ -141,13 +141,13 @@ const AdvancedLogManager = () => {
                     <div className="flex justify-between items-center">
                         <h1 className="text-xl font-bold text-gray-800">Quản lý Logs hệ thống</h1>
                         <div className="flex gap-2">
-                            <button 
+                            <button
                                 onClick={fetchLogs}
                                 className="p-2 text-gray-600 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-all shadow-sm active:scale-95"
                             >
                                 <RefreshCw size={18} className={loading ? 'animate-spin text-blue-500' : ''} />
                             </button>
-                            <button 
+                            <button
                                 onClick={exportToCSV}
                                 className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-all shadow-md shadow-blue-200 active:scale-95"
                             >
@@ -174,7 +174,7 @@ const AdvancedLogManager = () => {
 
                         <div className="w-32 flex flex-col gap-2">
                             <label className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Method</label>
-                            <select 
+                            <select
                                 value={method}
                                 onChange={(e) => { setMethod(e.target.value); setPage(1); }}
                                 className="border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500/20 bg-white font-medium"
@@ -186,7 +186,7 @@ const AdvancedLogManager = () => {
 
                         <div className="w-32 flex flex-col gap-2">
                             <label className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Mức độ</label>
-                            <select 
+                            <select
                                 value={level}
                                 onChange={(e) => { setLevel(e.target.value); setPage(1); }}
                                 className="border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500/20 bg-white font-medium"
@@ -232,7 +232,7 @@ const AdvancedLogManager = () => {
                                                 {log.metadata?.username || 'System'}
                                             </td>
                                             <td className="p-4 text-center"><LevelBadge type="method" value={log.metadata?.method} /></td>
-                                            <td className="p-4 text-center"><LevelBadge type="log" value={log.level=='info'?'success':log.level} /></td>
+                                            <td className="p-4 text-center"><LevelBadge type="log" value={log.level == 'info' ? 'success' : log.level} /></td>
                                             <td className="p-4 text-center"><LevelStatus status={log.metadata?.status} /></td>
                                             <td className="p-4 text-gray-500 font-mono text-xs">{log.metadata?.ip || '0.0.0.0'}</td>
                                             <td className="p-4 text-gray-600 font-mono text-xs truncate" title={log.message}>{log.message}</td>
@@ -262,8 +262,8 @@ const AdvancedLogManager = () => {
                                     <span className="px-4 py-1.5 bg-blue-600 text-white rounded-lg font-bold shadow-md">
                                         {page}
                                     </span>
-                                    <button 
-                                        onClick={() => setPage(p => p + 1)} 
+                                    <button
+                                        onClick={() => setPage(p => p + 1)}
                                         disabled={loading || logs.length < limit}
                                         className="px-3 py-1.5 border border-gray-300 rounded-lg bg-white disabled:opacity-50 hover:bg-gray-50 shadow-sm font-bold"
                                     >
@@ -274,7 +274,7 @@ const AdvancedLogManager = () => {
                                 {/* Limit Selector - Dời xuống đây */}
                                 <div className="flex items-center gap-2 text-gray-500 ml-4">
                                     <span className="text-xs font-semibold uppercase tracking-tighter">Hiển thị:</span>
-                                    <select 
+                                    <select
                                         value={limit}
                                         onChange={(e) => { setLimit(Number(e.target.value)); setPage(1); }}
                                         className="border border-gray-300 rounded-md px-2 py-1 text-xs outline-none focus:ring-1 focus:ring-blue-500 bg-white font-bold text-gray-700"

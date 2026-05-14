@@ -1,9 +1,12 @@
 import axios from "axios";
+import { getApiBaseUrl } from "./baseUrl";
 
 export function createApi({ getToken, onAuthFail }) {
-    const api = axios.create({ baseURL: "/api" });
+    const api = axios.create({ baseURL: getApiBaseUrl() });
 
     api.interceptors.request.use((config) => {
+        config.headers = config.headers || {};
+        config.headers["ngrok-skip-browser-warning"] = "true";
         const token = getToken?.();
         if (token) config.headers.Authorization = `Bearer ${token}`;
         return config;

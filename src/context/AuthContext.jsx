@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { createApi } from "../api/api";
+import { scheduleAttendanceReminder } from "../utils/attendanceReminder";
 
 const AuthContext = createContext();
 
@@ -19,6 +20,7 @@ export function AuthProvider({ children }) {
   const isLoggedIn = !!token;
 
   function login(userData, tokenData) {
+    didLogoutRef.current = false;
     setUser(userData);
     setToken(tokenData);
 
@@ -57,6 +59,18 @@ export function AuthProvider({ children }) {
     didLogoutRef.current = true;
     logout(redirect);
   };
+
+  useEffect(() => {
+    if (token) didLogoutRef.current = false;
+  }, [token]);
+
+  useEffect(() => {
+    if (!token) return;
+
+    scheduleAttendanceReminder().catch((err) => {
+      console.warn("Không thể lên lịch nhắc chấm công:", err);
+    });
+  }, [token]);
 
   // ✅ Sync state với localStorage
   // - Nếu token/user bị mất => logout về login
@@ -129,7 +143,7 @@ export function AuthProvider({ children }) {
 
         if (!cancelled && data?.ok && data?.user) {
           // optional: đồng bộ user từ server cho chắc
-          setUser((prev) => (prev?._id === data.user?._id ? prev : data.user));
+          setUser(data.user);
           localStorage.setItem("authUser", JSON.stringify(data.user));
         }
       } catch (err) {

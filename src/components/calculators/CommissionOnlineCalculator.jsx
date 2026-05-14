@@ -368,9 +368,8 @@ export default function CommissionOnlineCalculator() {
   const [missingPriceModalOpen, setMissingPriceModalOpen] = useState(false);
   const [missingReturns, setMissingReturns] = useState([]);
   const [missingGifts, setMissingGifts] = useState([]);
-  const [overrideGiftPrices, setOverrideGiftPrices] = useState([
-    { itemCode: "NNV22", price: "0" },
-  ]);
+  const [excludedGiftCodes, setExcludedGiftCodes] = useState([]);
+  const [newGiftCode, setNewGiftCode] = useState("");
 
   const allFilesReady = ["cashflow", "returns", "invoice"].every((key) => files[key]);
 
@@ -577,21 +576,9 @@ export default function CommissionOnlineCalculator() {
     setMissingPriceModalOpen(false);
     setMissingReturns([]);
     setMissingGifts([]);
-    setOverrideGiftPrices([{ itemCode: "NNV22", price: "0" }]);
+    setExcludedGiftCodes(["NNV22"]);
+    setNewGiftCode("");
     setInputKey((v) => v + 1);
-  };
-
-  const buildGiftPriceMap = () => {
-    const map = {};
-    overrideGiftPrices.forEach((item) => {
-      const code = normalizeText(item.itemCode).toUpperCase();
-      if (!code) return;
-      const val = parseNumber(item.price);
-      if (Number.isFinite(val)) {
-        map[code] = val;
-      }
-    });
-    return map;
   };
 
   const runCalculation = async (options = {}) => {
@@ -604,10 +591,9 @@ export default function CommissionOnlineCalculator() {
 
     const {
       overrideReturnsPrices = {},
-      overrideGiftPrices = {},
-      forceModal = false,
     } = options;
 
+    const excludedGiftSet = new Set(excludedGiftCodes.map((c) => normalizeText(c).toUpperCase()));
     const newErrors = [];
     const newWarnings = [];
     const missingReturnsLocal = [];
@@ -715,7 +701,7 @@ export default function CommissionOnlineCalculator() {
               const note = normalizeText(getCell(row, headerMap, "Ghi chú")).toUpperCase();
               const payer = normalizeText(getCell(row, headerMap, "Người nộp/nhận")).toUpperCase();
               const isAgency =
-                empType === "admin" ? true : note.startsWith("DL") || payer.startsWith("DL");
+                empType === "admin" ? true : note ? note.startsWith("DL") : payer.startsWith("DL");
               const isCTDB = note.includes("CTDB");
               const stats = getStats(employeeMap, employee);
               const log = getLog(employee);
@@ -802,14 +788,7 @@ export default function CommissionOnlineCalculator() {
               const salePrice = parseNumber(getCell(row, headerMap, "Giá bán"));
               const qty = parseNumber(getCell(row, headerMap, "Số lượng"));
               const unit = normalizeUnit(getCell(row, headerMap, "ĐVT"));
-              const hasOverrideGift = Object.prototype.hasOwnProperty.call(
-                overrideGiftPrices,
-                itemCode
-              );
-              const overrideGift = hasOverrideGift
-                ? overrideGiftPrices[itemCode]
-                : undefined;
-              if (salePrice === 0 && unitPrice > 0) {
+              if (salePrice === 0 && unitPrice > 0 && !excludedGiftSet.has(itemCode)) {
                 const value = unitPrice * qty;
                 if (value > 0) {
                   stats[deductKey] -= value;
@@ -1127,13 +1106,6 @@ export default function CommissionOnlineCalculator() {
         return;
       }
 
-      if (forceModal && (missingReturnsLocal.length > 0 || missingGiftsLocal.length > 0)) {
-        setMissingReturns(missingReturnsLocal);
-        setMissingGifts([]);
-        setMissingPriceModalOpen(true);
-        return;
-      }
-
       const computed = Array.from(employeeMap.entries()).map(([name, stat]) => {
         const empType = getEmployeeType(name);
         const retailNormal = stat.Retail_Normal || 0;
@@ -1295,20 +1267,6 @@ export default function CommissionOnlineCalculator() {
       giftPriceMap[item.itemCode] = val;
     });
 
-    overrideGiftPrices.forEach((item) => {
-      const code = normalizeText(item.itemCode).toUpperCase();
-      if (!code || item.price == null || item.price === "") {
-        invalid = true;
-        return;
-      }
-      const val = parseNumber(item.price);
-      if (!Number.isFinite(val) || val < 0) {
-        invalid = true;
-        return;
-      }
-      giftPriceMap[code] = val;
-    });
-
     if (invalid) {
       setErrors([
         "Vui lòng nhập đầy đủ giá hợp lệ cho tất cả các dòng bắt buộc.",
@@ -1319,15 +1277,11 @@ export default function CommissionOnlineCalculator() {
     setMissingPriceModalOpen(false);
     runCalculation({
       overrideReturnsPrices: returnsPriceMap,
-      overrideGiftPrices: giftPriceMap,
     });
   };
 
   const handleCalculateClick = () => {
-    runCalculation({
-      forceModal: true,
-      overrideGiftPrices: buildGiftPriceMap(),
-    });
+    runCalculation();
   };
 
   return (
@@ -1402,6 +1356,63 @@ export default function CommissionOnlineCalculator() {
                 </span>
               </label>
             ))}
+          </div>
+
+          <div className="mt-4 rounded-2xl border border-slate-200 bg-white/60 p-4">
+            <div className="text-sm font-semibold text-slate-800">
+              Mã sản phẩm hàng tặng không trừ doanh thu
+            </div>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {excludedGiftCodes.map((code) => (
+                <span
+                  key={code}
+                  className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700"
+                >
+                  {code}
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setExcludedGiftCodes((prev) => prev.filter((c) => c !== code))
+                    }
+                    className="ml-0.5 text-slate-400 hover:text-rose-500"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </span>
+              ))}
+              {excludedGiftCodes.length === 0 && (
+                <span className="text-xs text-slate-400">Chưa có mã nào được loại trừ</span>
+              )}
+            </div>
+            <div className="mt-3 flex gap-2">
+              <input
+                className="rounded-xl border bg-white px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-emerald-300"
+                placeholder="Nhập mã hàng..."
+                value={newGiftCode}
+                onChange={(e) => setNewGiftCode(e.target.value.toUpperCase())}
+                onKeyDown={(e) => {
+                  if (e.key !== "Enter") return;
+                  const code = normalizeText(newGiftCode).toUpperCase();
+                  if (code && !excludedGiftCodes.includes(code)) {
+                    setExcludedGiftCodes((prev) => [...prev, code]);
+                    setNewGiftCode("");
+                  }
+                }}
+              />
+              <button
+                type="button"
+                className="rounded-xl border bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50 active:scale-[0.98]"
+                onClick={() => {
+                  const code = normalizeText(newGiftCode).toUpperCase();
+                  if (code && !excludedGiftCodes.includes(code)) {
+                    setExcludedGiftCodes((prev) => [...prev, code]);
+                    setNewGiftCode("");
+                  }
+                }}
+              >
+                Thêm
+              </button>
+            </div>
           </div>
         </div>
 

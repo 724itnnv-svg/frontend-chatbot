@@ -24,6 +24,12 @@ function decodeData(str) {
   }
 }
 
+function looksLikePhone(value) {
+  const raw = String(value || "").trim();
+  const digits = raw.replace(/\D/g, "");
+  return digits.length >= 8 && /^[+\d\s().-]+$/.test(raw);
+}
+
 function SnowfallLayer({ count = 34 }) {
   const flakes = useMemo(() => {
     return Array.from({ length: count }).map((_, i) => {
@@ -87,6 +93,17 @@ export default function Login() {
   const { login } = useAuth();
   const navigate = useNavigate();
 
+  // đọc ?redirect= để sau login quay lại trang đúng
+  const redirectTo = (() => {
+    try {
+      const r = new URLSearchParams(window.location.search).get("redirect");
+      // chỉ chấp nhận path nội bộ (bắt đầu bằng /) để tránh open redirect
+      return r && r.startsWith("/") && !r.startsWith("//") ? r : null;
+    } catch {
+      return null;
+    }
+  })();
+
   const [showPassword, setShowPassword] = useState(false);
 
   // ✅ Khởi tạo form từ localStorage (dạng đã mã hóa)
@@ -126,11 +143,11 @@ export default function Login() {
     setLoading(true);
 
     try {
-      let loginEmail = form.email.trim();
+      let loginIdentifier = form.email.trim();
 
-      // cho phép nhập "khanh" → tự thêm @gmail.com
-      if (!loginEmail.includes("@")) {
-        loginEmail = `${loginEmail}@gmail.com`;
+      // Cho phép nhập "khanh" -> tự thêm @gmail.com, nhưng giữ nguyên nếu là SĐT.
+      if (!loginIdentifier.includes("@") && !looksLikePhone(loginIdentifier)) {
+        loginIdentifier = `${loginIdentifier}@gmail.com`;
       }
 
       const res = await fetch("/api/auth/login", {
@@ -138,7 +155,8 @@ export default function Login() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ...form,
-          email: loginEmail,
+          email: loginIdentifier,
+          identifier: loginIdentifier,
         }),
       });
 
@@ -162,10 +180,10 @@ export default function Login() {
         localStorage.removeItem(REMEMBER_KEY);
       }
      
-      if(data && data.user && data.user.screenDefault){
-        localStorage.setItem('dashboard_active_tab', data.user.screenDefault);
-      }      
-      navigate("/admin", { replace: true });
+      if (data && data.user && data.user.screenDefault) {
+        localStorage.setItem("dashboard_active_tab", data.user.screenDefault);
+      }
+      navigate(redirectTo || "/admin", { replace: true });
     } catch (err) {
       console.error(err);
       setError("Có lỗi xảy ra, vui lòng thử lại");
@@ -211,7 +229,7 @@ export default function Login() {
                     Đăng nhập hệ thống
                   </h1>
                   <p className="mt-1 text-sm text-slate-500">
-                    Có thể nhập phần trước @ hoặc full email để đăng nhập.
+                    Có thể nhập Gmail, phần trước @gmail.com hoặc số điện thoại để đăng nhập.
                   </p>
                 </div>
               </div>
@@ -230,19 +248,19 @@ export default function Login() {
             <form className="space-y-3 px-6 pb-6" onSubmit={handleSubmit}>
               <div>
                 <label className="mb-1 block text-xs font-semibold text-slate-600">
-                  Email / Tên trước @
+                  Gmail / Số điện thoại
                 </label>
                 <input
                   type="text"
                   name="email"
-                  placeholder="VD: khanh hoặc khanh@gmail.com"
+                  placeholder="VD: khanh, khanh@gmail.com hoặc 0949015724"
                   required
                   value={form.email}
                   onChange={handleChange}
                   className="w-full rounded-2xl border border-white/70 bg-white/75 px-4 py-3 text-sm text-slate-900 shadow-sm outline-none transition focus:border-sky-200 focus:ring-4 focus:ring-sky-100"
                 />
                 <p className="mt-1 text-xs text-slate-500">
-                  Tip: nhập “khanh” là hệ thống tự thêm <b>@gmail.com</b>.
+                  Tip: nhập “khanh” hệ thống tự thêm <b>@gmail.com</b>; nhập SĐT thì giữ nguyên.
                 </p>
               </div>
 
