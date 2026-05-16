@@ -19,8 +19,10 @@ import {
   Users,
   Wallet,
   Workflow,
+  BellRing,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
+import { canAccessScreen, getAllowedScreens, hasFullAccess } from "../utils/screenAccess";
 
 const ACTIVE_TAB_KEY = "dashboard_active_tab";
 
@@ -40,6 +42,7 @@ const MENU_CONFIG = [
   { id: "admin_vectorstore_tool", path: "/admin/vector-stores", label: "Quản trị Vector DB", icon: Database },
   { id: "admin_agent", path: "/admin/agents", label: "Quản trị Agent", icon: BotMessageSquare },
   { id: "admin_logs", path: "/admin/logs", label: "Log hệ thống", icon: Database },
+  { id: "notifications", path: "/admin/notifications", label: "Thông báo thiết bị", icon: BellRing },
   { id: "attendance_self", path: "/admin/my-attendance", label: "Chấm công của tôi", icon: CalendarCheck },
   { id: "attendance", path: "/admin/attendance", label: "Quản lý chấm công", icon: UserCheck },
   { id: "attendance_shifts", path: "/admin/attendance-shifts", label: "Ca làm", icon: Workflow },
@@ -77,7 +80,7 @@ const MENU_GROUPS = [
     id: "system",
     label: "Hệ thống & AI",
     icon: ShieldCheck,
-    items: ["admin_dashboard", "admin_products_tool", "admin_vectorstore_tool", "admin_agent", "admin_logs"],
+    items: ["admin_dashboard", "admin_products_tool", "admin_vectorstore_tool", "admin_agent", "admin_logs", "notifications"],
   },
 ];
 
@@ -114,14 +117,12 @@ const Sidebar = memo(() => {
     localStorage.setItem("sidebar_collapsed", isCollapsed ? "1" : "0");
   }, [isCollapsed]);
 
-  const isAdmin = Number(user?.allpage) === 1;
-  const roleDetails = Array.isArray(user?.screen) ? user.screen : [];
+  const isAdmin = hasFullAccess(user);
+  const roleDetails = getAllowedScreens(user);
   const roleKey = roleDetails.join("|");
 
   const filteredMenus = useMemo(() => {
-    if (isAdmin) return MENU_CONFIG;
-    const roleSet = new Set(roleDetails);
-    return MENU_CONFIG.filter((item) => roleSet.has(item.id));
+    return MENU_CONFIG.filter((item) => canAccessScreen(user, item.id));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAdmin, roleKey]);
 
@@ -202,6 +203,7 @@ const Sidebar = memo(() => {
   const displayName = user?.fullName || user?.name || user?.email || "Người dùng";
   const avatarInitial = displayName?.trim()?.charAt(0)?.toUpperCase?.() || "?";
   const isProfileActive = location.pathname === "/admin/profile";
+  const canViewProfile = canAccessScreen(user, "profile");
 
   const handleLogout = () => {
     localStorage.removeItem(ACTIVE_TAB_KEY);
@@ -238,29 +240,31 @@ const Sidebar = memo(() => {
             </div>
           </div>
 
-          <NavLink
-            to="/admin/profile"
-            onClick={() => {
-              localStorage.setItem(ACTIVE_TAB_KEY, "profile");
-              setIsOpen(false);
-            }}
-            className={`flex min-w-0 cursor-pointer items-center gap-3 rounded-2xl border bg-white/90 p-2 transition shadow-[0_12px_28px_rgba(8,145,178,0.10)] hover:border-cyan-200 hover:bg-cyan-50/60 ${isProfileActive ? "border-cyan-200 ring-2 ring-cyan-100" : "border-cyan-100"
-              } ${isCollapsed ? "md:justify-center md:gap-0" : ""}`}
-          >
-            <img
-              alt="avatar"
-              src={user?.avatarUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(avatarInitial)}&background=random&size=64`}
-              className={`rounded-2xl border border-cyan-100 object-cover flex-shrink-0 aspect-square ${isCollapsed ? "h-11 w-11 min-w-[2.75rem]" : "h-10 w-10 min-w-[2.5rem]"}`}
-            />
-            <div className={`min-w-0 overflow-hidden transition-all duration-300 ${isCollapsed ? "md:w-0 md:opacity-0" : "md:w-auto md:opacity-100"}`}>
-              <div className="rainbow-text whitespace-nowrap overflow-hidden text-ellipsis text-sm font-semibold text-slate-900">{displayName}</div>
-              <div className="mt-1">
-                <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold ${isAdmin ? "border-cyan-200 bg-cyan-50 text-cyan-700" : "border-sky-200 bg-sky-50 text-sky-700"}`}>
-                  {isAdmin ? "Admin" : "User"}
-                </span>
+          {canViewProfile && (
+            <NavLink
+              to="/admin/profile"
+              onClick={() => {
+                localStorage.setItem(ACTIVE_TAB_KEY, "profile");
+                setIsOpen(false);
+              }}
+              className={`flex min-w-0 cursor-pointer items-center gap-3 rounded-2xl border bg-white/90 p-2 transition shadow-[0_12px_28px_rgba(8,145,178,0.10)] hover:border-cyan-200 hover:bg-cyan-50/60 ${isProfileActive ? "border-cyan-200 ring-2 ring-cyan-100" : "border-cyan-100"
+                } ${isCollapsed ? "md:justify-center md:gap-0" : ""}`}
+            >
+              <img
+                alt="avatar"
+                src={user?.avatarUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(avatarInitial)}&background=random&size=64`}
+                className={`rounded-2xl border border-cyan-100 object-cover flex-shrink-0 aspect-square ${isCollapsed ? "h-11 w-11 min-w-[2.75rem]" : "h-10 w-10 min-w-[2.5rem]"}`}
+              />
+              <div className={`min-w-0 overflow-hidden transition-all duration-300 ${isCollapsed ? "md:w-0 md:opacity-0" : "md:w-auto md:opacity-100"}`}>
+                <div className="rainbow-text whitespace-nowrap overflow-hidden text-ellipsis text-sm font-semibold text-slate-900">{displayName}</div>
+                <div className="mt-1">
+                  <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold ${isAdmin ? "border-cyan-200 bg-cyan-50 text-cyan-700" : "border-sky-200 bg-sky-50 text-sky-700"}`}>
+                    {isAdmin ? "Admin" : "User"}
+                  </span>
+                </div>
               </div>
-            </div>
-          </NavLink>
+            </NavLink>
+          )}
         </div>
 
         <nav ref={navRef} tabIndex={0} className="flex-1 min-h-0 overflow-y-auto px-3 pb-3 outline-none" title="Dùng phím lên/xuống để di chuyển menu">

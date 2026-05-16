@@ -1,0 +1,95 @@
+import { Capacitor } from "@capacitor/core";
+import { PushNotifications } from "@capacitor/push-notifications";
+import { getApiBaseUrl } from "../api/baseUrl.js";
+
+const PUSH_CHANNEL_ID = "server_push_high";
+let listenersReady = false;
+
+function getDeviceId() {
+  const key = "nnvDeviceId";
+  const existing = localStorage.getItem(key);
+  if (existing) return existing;
+
+  const next = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  localStorage.setItem(key, next);
+  return next;
+}
+
+function notificationRoute(notification) {
+  return notification?.data?.route || notification?.notification?.data?.route || "/cham-cong";
+}
+
+function openNotificationRoute(notification) {
+  const route = notificationRoute(notification);
+  if (route) window.location.assign(route);
+}
+
+async function createPushChannels() {
+  const channel = {
+    id: PUSH_CHANNEL_ID,
+    name: "Thong bao tu server",
+    description: "Thong bao quan trong tu he thong NNV",
+    importance: 5,
+    visibility: 1,
+    vibration: true,
+    lights: true,
+    lightColor: "#16A34A",
+  };
+
+  await PushNotifications.createChannel(channel);
+}
+
+async function sendDeviceTokenToServer(fcmToken) {
+  const authToken = localStorage.getItem("token");
+  if (!authToken || !fcmToken) return;
+
+  const res = await fetch(`${getApiBaseUrl()}/api/notifications/device-token`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${authToken}`,
+      "ngrok-skip-browser-warning": "true",
+    },
+    body: JSON.stringify({
+      token: fcmToken,
+      platform: Capacitor.getPlatform(),
+      deviceId: getDeviceId(),
+      appId: "com.nnv.chamcongvip",
+    }),
+  });
+
+  if (!res.ok) {
+    throw new Error(`Register push token failed: ${res.status}`);
+  }
+}
+
+export async function setupServerPushNotifications() {
+  if (!Capacitor.isNativePlatform()) return;
+
+  await createPushChannels();
+
+  if (!listenersReady) {
+    listenersReady = true;
+
+    PushNotifications.addListener("registration", (token) => {
+      sendDeviceTokenToServer(token.value).catch((err) => {
+        console.warn("Khong the dang ky FCM token:", err);
+      });
+    });
+
+    PushNotifications.addListener("registrationError", (err) => {
+      console.warn("Dang ky push notification loi:", err);
+    });
+
+    PushNotifications.addListener("pushNotificationActionPerformed", (event) => {
+      openNotificationRoute(event.notification);
+    });
+  }
+
+  const permission = await PushNotifications.requestPermissions();
+  if (permission.receive !== "granted") return;
+
+  await PushNotifications.register();
+}
+
+export { PUSH_CHANNEL_ID };

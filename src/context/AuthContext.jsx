@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { createApi } from "../api/api";
-import { scheduleAttendanceReminder } from "../utils/attendanceReminder";
+import { setupServerPushNotifications } from "../utils/serverPushNotifications";
 
 const AuthContext = createContext();
 
@@ -67,8 +67,8 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     if (!token) return;
 
-    scheduleAttendanceReminder().catch((err) => {
-      console.warn("Không thể lên lịch nhắc chấm công:", err);
+    setupServerPushNotifications().catch((err) => {
+      console.warn("Không thể thiết lập push notification:", err);
     });
   }, [token]);
 

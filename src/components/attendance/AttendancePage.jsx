@@ -21,6 +21,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
+import { AndroidLocationSettings } from "../../utils/androidLocationSettings";
 
 const TONE = {
   emerald: "border-emerald-200 bg-emerald-50 text-emerald-700",
@@ -101,6 +102,11 @@ function gpsErrorMessage(error) {
     return "Lấy vị trí quá thời gian chờ. Vui lòng thử lại ở nơi có tín hiệu GPS tốt hơn.";
   }
   return `Không lấy được vị trí: ${message || "Lỗi không xác định"}`;
+}
+
+function isLocationServiceError(error) {
+  const message = error?.message || "";
+  return error?.code === 2 || /location|provider|gps|disabled|unavailable/i.test(message);
 }
 
 function money(value) {
@@ -425,6 +431,7 @@ export default function AttendancePage() {
 
   const activeWindow = useMemo(() => getActiveAttendanceWindow(new Date(clockNow), assignedShifts), [assignedShifts, clockNow]);
   const adminConfirmPromptVisible = adminConfirmFailureCount >= ADMIN_CONFIRM_FAILURE_LIMIT;
+  const isNativeAndroid = Capacitor.isNativePlatform() && Capacitor.getPlatform() === "android";
   const isNonWorkDay = activeWindow.isNonWorkDay === true;
   const payrollEmployeeCode = useMemo(
     () => String(user?.code || user?.employeeCode || user?.maNhanVien || "").trim().toUpperCase(),
@@ -450,9 +457,38 @@ export default function AttendancePage() {
       setGpsError(gpsErrorMessage(err));
       return false;
     }
-  }, []);
+  }, [isNativeAndroid]);
 
-  const getGPS = useCallback(() => {
+  const openGpsSettings = useCallback(async () => {
+    if (!isNativeAndroid) return;
+
+    try {
+      await AndroidLocationSettings.openLocationSettings();
+    } catch (err) {
+      console.warn("Khong the mo cai dat GPS:", err);
+    }
+  }, [isNativeAndroid]);
+
+  const ensureNativeLocationService = useCallback(async (options = {}) => {
+    if (!isNativeAndroid) return true;
+
+    try {
+      const result = await AndroidLocationSettings.isLocationEnabled();
+      if (result?.enabled) return true;
+
+      setGps(null);
+      setGpsError("GPS trên điện thoại đang tắt. Vui lòng bật Vị trí/GPS rồi quay lại chấm công.");
+      if (options.openSettingsIfDisabled) {
+        await openGpsSettings();
+      }
+      return false;
+    } catch (err) {
+      console.warn("Khong the kiem tra trang thai GPS:", err);
+      return true;
+    }
+  }, [isNativeAndroid, openGpsSettings]);
+
+  const getGPS = useCallback((options = {}) => {
     if (gpsRequestRef.current) return gpsRequestRef.current;
     if (!Capacitor.isNativePlatform() && !navigator.geolocation) {
       setGpsError("Trình duyệt không hỗ trợ định vị GPS.");
@@ -468,6 +504,9 @@ export default function AttendancePage() {
           const permitted = await requestNativeGpsPermission();
           if (!permitted) return null;
 
+          const locationServiceEnabled = await ensureNativeLocationService(options);
+          if (!locationServiceEnabled) return null;
+
           const pos = await Geolocation.getCurrentPosition(GPS_OPTIONS);
           const nextGps = { lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy };
           setGps(nextGps);
@@ -475,6 +514,9 @@ export default function AttendancePage() {
         } catch (err) {
           setGps(null);
           setGpsError(gpsErrorMessage(err));
+          if (options.openSettingsIfDisabled && isLocationServiceError(err)) {
+            await openGpsSettings();
+          }
           return null;
         } finally {
           setGpsLoading(false);
@@ -506,7 +548,7 @@ export default function AttendancePage() {
     });
     gpsRequestRef.current = request;
     return request;
-  }, [requestNativeGpsPermission]);
+  }, [ensureNativeLocationService, openGpsSettings, requestNativeGpsPermission]);
 
   useEffect(() => {
     getGPS();
@@ -753,7 +795,7 @@ export default function AttendancePage() {
       return gps;
     }
 
-    return getGPS();
+    return getGPS({ openSettingsIfDisabled: true });
   }
 
   async function refreshAttendance() {
@@ -988,6 +1030,16 @@ export default function AttendancePage() {
                     ) : gpsError ? (
                       <div className="rounded-xl border border-rose-100 bg-rose-50 px-3 py-2">
                         <p className="min-w-0 truncate text-sm font-medium text-rose-600">{gpsError}</p>
+                        {isNativeAndroid && (
+                          <button
+                            type="button"
+                            onClick={openGpsSettings}
+                            className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-rose-200 bg-white px-2.5 py-1.5 text-xs font-bold text-rose-600 hover:bg-rose-50"
+                          >
+                            <Navigation size={13} />
+                            Mở cài đặt GPS
+                          </button>
+                        )}
                       </div>
                     ) : gps ? (
                       <div className="rounded-xl border border-emerald-100 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700">
