@@ -6,8 +6,8 @@
     "CapacitorHttp": {
       "enabled": true
     },
-    "LocalNotifications": {
-      "iconColor": "#16A34A"
+    "PushNotifications": {
+      "presentationOptions": ["badge", "sound", "alert"]
     }
   }
 }
