@@ -3,6 +3,7 @@ import { lazy, Suspense } from "react";
 import { Capacitor } from "@capacitor/core";
 import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "./context/AuthContext";
+import { canAccessScreen, getAllowedScreens } from "./utils/screenAccess";
 
 import DashboardLayout from "./components/DashboardLayout";
 
@@ -35,6 +36,7 @@ const PromoManager = lazy(() => import("./components/event_promo/PromoManager"))
 const VectorStoreManage = lazy(() => import("./components/vectorstores/VectorStore"));
 const AgentManage = lazy(() => import("./components/agentAI/AgentManage"));
 const LogsManage = lazy(() => import("./components/logs/LogsManager"));
+const NotificationManager = lazy(() => import("./components/NotificationManager"));
 const PayrollManager = lazy(() => import("./components/PayrollManager"));
 const RouteManager = lazy(() => import("./components/RouteManager"));
 const AttendancePage = lazy(() => import("./components/attendance/AttendancePage"));
@@ -63,6 +65,7 @@ const ADMIN_ROUTE_BY_SCREEN = {
   admin_test_chatbot_v2: "/admin/test-chatbot-v2", // New route for TestChatBotV2
   admin_testcase: "/admin/test-chat",
   admin_logs: "/admin/logs",
+  notifications: "/admin/notifications",
   attendance: "/admin/attendance",
   attendance_shifts: "/admin/attendance-shifts",
   attendance_locations: "/admin/attendance-locations",
@@ -88,6 +91,7 @@ const adminRoutes = [
   { path: "agents", screenId: "admin_agent", element: <AgentManage /> },// New route
   { path: "test-chat", screenId: "admin_testcase", element: <TestCaseChatBotManager /> },
   { path: "logs", screenId: "admin_logs", element: <LogsManage /> },
+  { path: "notifications", screenId: "notifications", element: <NotificationManager /> },
   { path: "my-attendance", screenId: "attendance_self", element: <AttendancePage /> },
   { path: "attendance", screenId: "attendance", element: <AttendanceManager /> },
   { path: "attendance-shifts", screenId: "attendance_shifts", element: <AttendanceShiftManager /> },
@@ -136,31 +140,26 @@ function AppLoader() {
   );
 }
 
-function hasFullAccess(user) {
-  return Number(user?.allpage) === 1;
-}
-
 function AdminDefaultRedirect() {
   const { user } = useAuth();
-  const fullAccess = hasFullAccess(user);
   const saved = localStorage.getItem("dashboard_active_tab");
   const preferred = saved || user?.screenDefault || "pages";
 
   if (
     ADMIN_ROUTE_BY_SCREEN[preferred] &&
-    (fullAccess || preferred === "profile" || user?.screen?.includes(preferred))
+    canAccessScreen(user, preferred)
   ) {
     return <Navigate to={ADMIN_ROUTE_BY_SCREEN[preferred]} replace />;
   }
 
-  const firstAllowed = user?.screen?.find((screenId) => ADMIN_ROUTE_BY_SCREEN[screenId]);
-  return <Navigate to={ADMIN_ROUTE_BY_SCREEN[firstAllowed] || "/admin/profile"} replace />;
+  const firstAllowed = getAllowedScreens(user).find((screenId) => ADMIN_ROUTE_BY_SCREEN[screenId]);
+  return <Navigate to={ADMIN_ROUTE_BY_SCREEN[firstAllowed] || "/404"} replace />;
 }
 
 function RequireScreen({ screenId, children }) {
   const { user } = useAuth();
 
-  if (hasFullAccess(user) || screenId === "profile" || user?.screen?.includes(screenId)) {
+  if (canAccessScreen(user, screenId)) {
     return children;
   }
 

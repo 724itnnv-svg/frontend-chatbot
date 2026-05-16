@@ -16,6 +16,7 @@ const APP_PERMISSIONS = {
     { id: "admin_agent", name: "Quản Trị Agent" },
     { id: "admin_testcase", name: "Quản Trị Test Case ChatBot" },
     { id: "admin_logs", name: "Log Hệ Thống" },
+    { id: "notifications", name: "Thông Báo Thiết Bị" },
     { id: "attendance_self", name: "Chấm công của tôi" },
     { id: "attendance", name: "Quản lý chấm công" },
     { id: "attendance_shifts", name: "Ca làm" },
