@@ -118,7 +118,7 @@ export default function PageList({
             node.scrollIntoView({ block: "nearest", behavior: "smooth" });
         }
     }, [selectedPageId]);
-
+    
     return (
         <div className={["h-full bg-gray-50", className].join(" ")}>
             {/* ✅ Header 2 tầng: headerTitle + (subTitle | Tổng) */}

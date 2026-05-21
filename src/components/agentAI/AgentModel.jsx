@@ -218,6 +218,18 @@ export default function InstructionModal({ isOpen, onClose, onSave, editing, set
                                             className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none shadow-sm text-sm"
                                         />
                                     </div>
+                                    <div className="space-y-1.5">
+                                        <label className="text-[10px] font-bold text-slate-500 flex items-center gap-1.5">
+                                            <Globe size={10} /> Hotline <span className="text-red-400">*</span>
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={editing.options.hotline}
+                                            onChange={e => setOpt("hotline", e.target.value)}
+                                            placeholder="VD: 19008020"
+                                            className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none shadow-sm text-sm"
+                                        />
+                                    </div>
                                     <div className="flex items-center justify-between mb-2 flex-shrink-0">
                                         <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
                                             <FileText size={10} /> createOrderFromAssistant <span className="text-red-400">*</span>

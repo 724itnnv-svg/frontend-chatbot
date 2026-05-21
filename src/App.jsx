@@ -89,7 +89,7 @@ const adminRoutes = [
   { path: "promotions", screenId: "admin_event_promo", element: <PromoManager /> },
   { path: "vector-stores", screenId: "admin_vectorstore_tool", element: <VectorStoreManage /> },
   { path: "agents", screenId: "admin_agent", element: <AgentManage /> },// New route
-  { path: "test-chat", screenId: "admin_testcase", element: <TestCaseChatBotManager /> },
+  { path: "test-cases", screenId: "admin_testcase", element: <TestCaseChatBotManager /> },
   { path: "logs", screenId: "admin_logs", element: <LogsManage /> },
   { path: "notifications", screenId: "notifications", element: <NotificationManager /> },
   { path: "my-attendance", screenId: "attendance_self", element: <AttendancePage /> },

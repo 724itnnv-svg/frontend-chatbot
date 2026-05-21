@@ -40,6 +40,7 @@ const MENU_CONFIG = [
   { id: "admin_products_tool", path: "/admin/products", label: "Quản trị sản phẩm", icon: BotMessageSquare },
   { id: "admin_event_promo", path: "/admin/promotions", label: "Chương trình khuyến mãi", icon: BotMessageSquare },
   { id: "admin_vectorstore_tool", path: "/admin/vector-stores", label: "Quản trị Vector DB", icon: Database },
+  { id: "admin_testcase", path: "/admin/test-cases", label: "Test ChatBOT", icon: Database },
   { id: "admin_agent", path: "/admin/agents", label: "Quản trị Agent", icon: BotMessageSquare },
   { id: "admin_logs", path: "/admin/logs", label: "Log hệ thống", icon: Database },
   { id: "notifications", path: "/admin/notifications", label: "Thông báo thiết bị", icon: BellRing },
@@ -80,7 +81,7 @@ const MENU_GROUPS = [
     id: "system",
     label: "Hệ thống & AI",
     icon: ShieldCheck,
-    items: ["admin_dashboard", "admin_products_tool", "admin_vectorstore_tool", "admin_agent", "admin_logs", "notifications"],
+    items: ["admin_dashboard", "admin_products_tool", "admin_vectorstore_tool", "admin_agent", "admin_logs", "notifications","admin_testcase"],
   },
 ];
 

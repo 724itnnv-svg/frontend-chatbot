@@ -88,7 +88,7 @@ function PageMessage() {
     const fetchPages = async () => {
       try {
         setLoadingPages(true);
-        const res = await fetch("/api/page", {
+        const res = await fetch("/api/page?autoReply=true", {
           headers: {
             Authorization: `Bearer ${token}`,
           },
