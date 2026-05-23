@@ -4,9 +4,53 @@ import defaultAvatar from "../assets/default-avatar.png";
 import { useAuth } from "../context/AuthContext";
 import PageList from "./PageList";
 import ChatMessagesPanel from "./ChatMessagesPanel";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, Image, Paperclip, Send, Video, X } from "lucide-react";
+import { io } from "socket.io-client";
 
 const HISTORY_ENDPOINT = "/chatweb/history"; // <- đổi nếu backend khác
+const SOCKET_URL =
+  import.meta.env.VITE_SOCKET_URL ||
+  import.meta.env.VITE_API_BASE_URL ||
+  (typeof window !== "undefined" && window.location.port === "5173" ? "http://localhost:5000" : undefined);
+
+function normalizeMessageText(message = {}) {
+  return String(message.text || message.content || "").replace(/\s+/g, " ").trim();
+}
+
+function upsertRealtimeMessage(messages, incoming) {
+  if (!incoming) return messages;
+  const incomingId = incoming.id ? String(incoming.id) : "";
+  const incomingText = normalizeMessageText(incoming);
+
+  if (incomingId && messages.some((message) => String(message.id || "") === incomingId)) {
+    return messages;
+  }
+
+  const pendingIndex = messages.findIndex((message) => {
+    if (!message.pending || message.role !== incoming.role) return false;
+    if (normalizeMessageText(message) !== incomingText) return false;
+    const oldTime = message.createdAt ? new Date(message.createdAt).getTime() : 0;
+    const newTime = incoming.createdAt ? new Date(incoming.createdAt).getTime() : Date.now();
+    return !oldTime || Math.abs(newTime - oldTime) <= 30000;
+  });
+
+  if (pendingIndex >= 0) {
+    return messages.map((message, index) =>
+      index === pendingIndex ? { ...incoming, pending: false } : message,
+    );
+  }
+
+  const last = messages[messages.length - 1];
+  if (last && last.role === incoming.role && normalizeMessageText(last) === incomingText) {
+    const lastTime = last.createdAt ? new Date(last.createdAt).getTime() : 0;
+    const incomingTime = incoming.createdAt ? new Date(incoming.createdAt).getTime() : Date.now();
+    if (!lastTime || Math.abs(incomingTime - lastTime) <= 15000) {
+      return messages;
+    }
+  }
+
+  return [...messages, incoming];
+}
 
 function PageMessage() {
   const [pages, setPages] = useState([]);
@@ -22,6 +66,13 @@ function PageMessage() {
   const [loadingPages, setLoadingPages] = useState(false);
   const [loadingChats, setLoadingChats] = useState(false);
   const [sendingBulk, setSendingBulk] = useState(false);
+  const [replyText, setReplyText] = useState("");
+  const [replyAttachmentUrl, setReplyAttachmentUrl] = useState("");
+  const [replyAttachmentType, setReplyAttachmentType] = useState("image");
+  const [replyAttachmentFile, setReplyAttachmentFile] = useState(null);
+  const [sendingReply, setSendingReply] = useState(false);
+  const [chatReplyState, setChatReplyState] = useState({ mode: "bot", loading: false });
+  const [releasingToBot, setReleasingToBot] = useState(false);
 
   // UI giống ChatwebManager
   const [selectedChat, setSelectedChat] = useState(null);
@@ -32,6 +83,10 @@ function PageMessage() {
   const [mobileTab, setMobileTab] = useState("customers"); // customers | messages
 
   const messageFetchRef = useRef(null);
+  const replyFileInputRef = useRef(null);
+  const realtimeSocketRef = useRef(null);
+  const selectedPageRef = useRef(null);
+  const selectedChatRef = useRef(null);
 
   const [orderedCustomerSet, setOrderedCustomerSet] = useState(() => new Set());
   const [loadingOrders, setLoadingOrders] = useState(false);
@@ -74,6 +129,14 @@ function PageMessage() {
   const roleLower = rawRole?.toLowerCase?.();
   const isAdmin = roleLower === "admin";
   const isUser = roleLower === "user";
+
+  useEffect(() => {
+    selectedPageRef.current = selectedPage;
+  }, [selectedPage]);
+
+  useEffect(() => {
+    selectedChatRef.current = selectedChat;
+  }, [selectedChat]);
 
   // 🔐 Mảng pageId (facebookId) của user
   const rawUserPageIds = user?.pageId || user?.pageIds || [];
@@ -158,6 +221,10 @@ function PageMessage() {
     setSelectedChat(null);
     setCurrentMessages([]);
     setActiveThreadId(null);
+    setReplyText("");
+    setReplyAttachmentUrl("");
+    setReplyAttachmentFile(null);
+    setChatReplyState({ mode: "bot", loading: false });
     setChatSearch("");
     setMobileTab("customers");
 
@@ -247,6 +314,10 @@ function PageMessage() {
       setActiveThreadId(chat.conversationId);
     }
     setCurrentMessages([]);
+    setReplyText("");
+    setReplyAttachmentUrl("");
+    setReplyAttachmentFile(null);
+    setChatReplyState({ mode: "bot", loading: true });
     setMobileTab("messages");
     if (!isDesktop) setIsPageListOpen(false);
 
@@ -278,6 +349,7 @@ function PageMessage() {
       else if (data && Array.isArray(data.messages)) msgs = data.messages;
 
       setCurrentMessages(msgs);
+      fetchChatReplyState(chat);
     } catch (err) {
       if (err.name === "AbortError") return;
       console.error("Lỗi lấy lịch sử chat:", err);
@@ -287,15 +359,88 @@ function PageMessage() {
     }
   };
 
-  const refreshThreadMessages = async (threadId, { retries = 3, delayMs = 800 } = {}) => {
-    if (!threadId) return;
+  const buildHistoryEndpoint = (chatOrId) => {
+    const conversationId =
+      typeof chatOrId === "object" ? chatOrId?.conversationId : null;
+    const threadId =
+      typeof chatOrId === "object" ? chatOrId?.threadId : chatOrId;
+
+    if (conversationId) {
+      return `${HISTORY_ENDPOINT}?conversationId=${encodeURIComponent(conversationId)}`;
+    }
+    if (threadId) {
+      return `${HISTORY_ENDPOINT}?threadId=${encodeURIComponent(threadId)}`;
+    }
+    return "";
+  };
+
+  const fetchChatReplyState = async (chat) => {
+    if (!chat?.user || !chat?.page || !token) return;
+
+    try {
+      setChatReplyState((prev) => ({ ...prev, loading: true }));
+      const params = new URLSearchParams({
+        pageId: chat.page,
+        userId: chat.user,
+      });
+      const res = await fetch(`/api/page-message/state?${params.toString()}`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data?.ok === false) {
+        throw new Error(data?.message || "Không lấy được trạng thái trả lời");
+      }
+      setChatReplyState({
+        mode: data.mode === "human" ? "human" : "bot",
+        loading: false,
+        humanPausedAt: data.humanPausedAt || null,
+      });
+    } catch (err) {
+      console.error("fetchChatReplyState error:", err);
+      setChatReplyState((prev) => ({ ...prev, loading: false }));
+    }
+  };
+
+  const handleReleaseToBot = async () => {
+    if (!selectedPage?.facebookId || !selectedChat?.user || releasingToBot) return;
+
+    try {
+      setReleasingToBot(true);
+      const res = await fetch("/api/page-message/handoff/release", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          pageId: selectedPage.facebookId,
+          userId: selectedChat.user,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data?.ok === false) {
+        throw new Error(data?.message || "Không nhường lại BOT được");
+      }
+      setChatReplyState({ mode: "bot", loading: false });
+    } catch (err) {
+      alert(err?.message || "Lỗi khi nhường lại BOT");
+    } finally {
+      setReleasingToBot(false);
+    }
+  };
+
+  const refreshThreadMessages = async (chatOrId, { retries = 3, delayMs = 800 } = {}) => {
+    const endpoint = buildHistoryEndpoint(chatOrId);
+    if (!endpoint) return;
 
     for (let attempt = 0; attempt < retries; attempt++) {
       try {
         if (attempt === 0) setLoadingMessages(true);
 
         const res = await fetch(
-          `${HISTORY_ENDPOINT}?threadId=${encodeURIComponent(threadId)}`,
+          endpoint,
           {
             headers: {
               Authorization: `Bearer ${token}`,
@@ -324,6 +469,224 @@ function PageMessage() {
     }
 
     setLoadingMessages(false);
+  };
+
+  useEffect(() => {
+    if (!token) return undefined;
+
+    const socket = io(SOCKET_URL, {
+      auth: { token },
+      transports: ["websocket", "polling"],
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 800,
+      reconnectionDelayMax: 5000,
+    });
+
+    realtimeSocketRef.current = socket;
+
+    const joinCurrentRooms = () => {
+      const page = selectedPageRef.current;
+      const chat = selectedChatRef.current;
+      if (page?.facebookId) socket.emit("page:join", page.facebookId);
+      if (page?.facebookId && chat?.user) {
+        socket.emit("thread:join", { pageId: page.facebookId, userId: chat.user });
+      }
+    };
+
+    socket.on("connect", joinCurrentRooms);
+    socket.on("chat:event", (payload = {}) => {
+      const page = selectedPageRef.current;
+      if (!page?.facebookId || String(payload.page) !== String(page.facebookId)) return;
+
+      setChats((prev) => {
+        const index = prev.findIndex(
+          (chat) => String(chat.page) === String(payload.page) && String(chat.user) === String(payload.user),
+        );
+        if (index < 0) {
+          if (!payload.chat) return prev;
+          return [
+            {
+              ...payload.chat,
+              updatedAt: payload.createdAt || payload.chat.updatedAt || new Date().toISOString(),
+              lastMessage: payload.text || payload.chat.lastMessage,
+            },
+            ...prev,
+          ];
+        }
+
+        const next = [...prev];
+        next[index] = {
+          ...next[index],
+          updatedAt: payload.createdAt || new Date().toISOString(),
+          lastMessage: payload.text || next[index].lastMessage,
+        };
+        return next;
+      });
+
+      const selected = selectedChatRef.current;
+      const isActiveThread =
+        selected &&
+        String(selected.page) === String(payload.page) &&
+        String(selected.user) === String(payload.user);
+
+      if (!isActiveThread) return;
+
+      if (payload.message) {
+        setCurrentMessages((prev) => upsertRealtimeMessage(prev, payload.message));
+      } else {
+        refreshThreadMessages(selected, { retries: 1, delayMs: 0 });
+      }
+    });
+    socket.on("chat:state", (payload = {}) => {
+      const page = selectedPageRef.current;
+      const selected = selectedChatRef.current;
+      if (!page?.facebookId || !selected?.user) return;
+      if (String(payload.page) !== String(page.facebookId)) return;
+      if (String(payload.user) !== String(selected.user)) return;
+
+      setChatReplyState({
+        mode: payload.mode === "human" || payload.humanPausedAutoReply ? "human" : "bot",
+        loading: false,
+        humanPausedAt: payload.humanPausedAt || null,
+      });
+    });
+
+    return () => {
+      socket.off("connect", joinCurrentRooms);
+      socket.off("chat:event");
+      socket.off("chat:state");
+      socket.disconnect();
+      if (realtimeSocketRef.current === socket) realtimeSocketRef.current = null;
+    };
+  }, [token]);
+
+  useEffect(() => {
+    const socket = realtimeSocketRef.current;
+    const pageId = selectedPage?.facebookId;
+    if (!socket || !pageId) return undefined;
+
+    socket.emit("page:join", pageId);
+    return () => socket.emit("page:leave", pageId);
+  }, [selectedPage?.facebookId]);
+
+  useEffect(() => {
+    const socket = realtimeSocketRef.current;
+    const pageId = selectedPage?.facebookId;
+    const userId = selectedChat?.user;
+    if (!socket || !pageId || !userId) return undefined;
+
+    socket.emit("thread:join", { pageId, userId });
+    return () => socket.emit("thread:leave", { pageId, userId });
+  }, [selectedPage?.facebookId, selectedChat?.user]);
+
+  const handleSendReply = async () => {
+    const text = replyText.trim();
+    const hasAttachment = Boolean(replyAttachmentFile);
+    let attachmentUrl = "";
+    let attachmentType = replyAttachmentType;
+    let attachmentFileName = "";
+    let attachmentMimeType = "";
+    let attachmentDisplayName = replyAttachmentFile?.name || "";
+    if (replyAttachmentFile) {
+      attachmentType = replyAttachmentFile.type?.startsWith("video/") ? "video" : "image";
+    }
+    if ((!text && !replyAttachmentFile) || sendingReply) return;
+
+    if (!selectedPage?.facebookId || !selectedChat?.user) {
+      alert("Vui lòng chọn Page và khách cần trả lời");
+      return;
+    }
+
+    const tempId = `manual_${Date.now()}`;
+    const optimisticMessage = {
+      id: tempId,
+      role: "user",
+      text: `Admin: ${[
+        text,
+        hasAttachment ? `[${replyAttachmentType === "video" ? "Video" : "Hình ảnh"}] ${attachmentDisplayName}` : "",
+      ].filter(Boolean).join("\n")}`,
+      createdAt: new Date().toISOString(),
+      pending: true,
+    };
+
+    const fileToUpload = replyAttachmentFile;
+    setCurrentMessages((prev) => [...prev, optimisticMessage]);
+    setReplyText("");
+    setReplyAttachmentUrl("");
+    setReplyAttachmentFile(null);
+    setSendingReply(true);
+
+    try {
+      if (fileToUpload) {
+        const formData = new FormData();
+        formData.append("file", fileToUpload);
+
+        const uploadRes = await fetch("/api/page-message/upload", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+          body: formData,
+        });
+
+        const uploadData = await uploadRes.json().catch(() => ({}));
+        if (!uploadRes.ok || uploadData?.ok === false) {
+          throw new Error(uploadData?.message || "Không upload được file");
+        }
+        attachmentType = uploadData.attachmentType || attachmentType;
+        attachmentFileName = uploadData.attachmentFileName || "";
+        attachmentMimeType = uploadData.attachmentMimeType || fileToUpload.type || "";
+        attachmentDisplayName = uploadData.fileName || attachmentDisplayName;
+      }
+
+      const res = await fetch("/api/page-message/reply", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          pageId: selectedPage.facebookId,
+          userId: selectedChat.user,
+          text,
+          attachmentUrl,
+          attachmentFileName,
+          attachmentDisplayName,
+          attachmentMimeType,
+          attachmentType,
+        }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data?.ok === false) {
+        throw new Error(data?.message || "Không gửi được tin nhắn");
+      }
+
+      setCurrentMessages((prev) =>
+        prev.map((message) =>
+          message.id === tempId
+            ? {
+              ...message,
+              id: data?.message?.id || message.id,
+              pending: false,
+              createdAt: data?.message?.createdAt || message.createdAt,
+            }
+            : message
+        )
+      );
+
+      setTimeout(() => refreshThreadMessages(selectedChat), 800);
+    } catch (err) {
+      setCurrentMessages((prev) =>
+        prev.map((message) =>
+          message.id === tempId ? { ...message, pending: false, error: true } : message
+        )
+      );
+      alert(err?.message || "Lỗi khi gửi tin nhắn");
+    } finally {
+      setSendingReply(false);
+    }
   };
 
 
@@ -449,8 +812,8 @@ function PageMessage() {
       setBulkMessage("");
       setImageUrl("");
 
-      if (selectedChat?.threadId) {
-        setTimeout(() => refreshThreadMessages(selectedChat.threadId), 800);
+      if (selectedChat?.threadId || selectedChat?.conversationId) {
+        setTimeout(() => refreshThreadMessages(selectedChat), 800);
       }
     } catch (err) {
       console.error("❌ Lỗi tổng khi gửi bulk:", err);
@@ -688,7 +1051,7 @@ function PageMessage() {
                 </div>
 
                 {/* List khách */}
-                <div className="flex-1 overflow-y-auto">
+                <div className="flex-1 min-h-0 overflow-y-auto">
                   {loadingOrders && (
                     <div className="text-xs text-gray-500">Đang tải đơn hàng...</div>
                   )}
@@ -701,7 +1064,7 @@ function PageMessage() {
                     filteredChats.map((chat) => {
                       const u = userInfo[chat.user];
                       const hasOrder = orderedCustomerSet.has(String(chat.user));
-                      const isActive = activeThreadId === chat.threadId;
+                      const isActive = activeThreadId === (chat.conversationId || chat.threadId);
 
                       return (
                         <div
@@ -768,6 +1131,7 @@ function PageMessage() {
                     })
                   )}
                 </div>
+
               </div>
 
               {/* CỘT TIN NHẮN */}
@@ -806,8 +1170,46 @@ function PageMessage() {
                   )}
 
                   <div className="flex items-center gap-2">
-                    {loadingMessages && (
-                      <div className="text-xs text-gray-500 whitespace-nowrap">Đang tải...</div>
+                    {selectedChat && (
+                      <div className="flex items-center gap-2">
+                        <div
+                          className={[
+                            "inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium ring-1",
+                            chatReplyState.mode === "human"
+                              ? "bg-amber-50 text-amber-700 ring-amber-200"
+                              : "bg-emerald-50 text-emerald-700 ring-emerald-200",
+                          ].join(" ")}
+                          title={chatReplyState.mode === "human" ? "Người đang trả lời" : "BOT đang trả lời"}
+                        >
+                          <span
+                            className={[
+                              "h-2 w-2 rounded-full",
+                              chatReplyState.loading
+                                ? "bg-slate-300"
+                                : chatReplyState.mode === "human"
+                                  ? "bg-amber-500"
+                                  : "bg-emerald-500",
+                            ].join(" ")}
+                          />
+                          {chatReplyState.loading
+                            ? "Đang kiểm tra"
+                            : chatReplyState.mode === "human"
+                              ? "Người đang trả lời"
+                              : "BOT đang trả lời"}
+                        </div>
+
+                        {chatReplyState.mode === "human" && (
+                          <button
+                            type="button"
+                            onClick={handleReleaseToBot}
+                            disabled={releasingToBot}
+                            className="rounded-full border border-sky-200 bg-white px-3 py-1 text-xs font-medium text-sky-700 shadow-sm hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-60"
+                            title="Nhường lại cho BOT tự động trả lời"
+                          >
+                            {releasingToBot ? "Đang nhường..." : "Nhường BOT"}
+                          </button>
+                        )}
+                      </div>
                     )}
 
                     <button
@@ -820,15 +1222,168 @@ function PageMessage() {
                   </div>
                 </div>
 
-                <div className="flex-1 overflow-y-auto">
+                <div className="flex-1 min-h-0 overflow-y-auto">
                   {selectedChat ? (
                     <ChatMessagesPanel messages={currentMessages} />
                   ) : (
                     <div className="h-full flex items-center justify-center text-gray-400">
-                      👈 Chọn khách để xem hội thoại
+                      Chọn khách để xem hội thoại
                     </div>
                   )}
                 </div>
+
+                {selectedChat && (
+                  <>
+                  <div className="hidden">
+                    <div className="rounded-3xl border border-slate-200 bg-slate-50 px-2 py-2 shadow-sm">
+                      <textarea
+                        value={replyText}
+                        onChange={(e) => setReplyText(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && !e.shiftKey) {
+                            e.preventDefault();
+                            handleSendReply();
+                          }
+                        }}
+                        rows={1}
+                        disabled={sendingReply}
+                        placeholder="Nhập tin nhắn trả lời khách..."
+                        className="max-h-28 min-h-10 w-full resize-none rounded-3xl border-0 bg-white px-4 py-2.5 text-sm leading-5 text-slate-800 outline-none ring-1 ring-slate-200 placeholder:text-slate-400 focus:ring-2 focus:ring-sky-200 disabled:bg-slate-100"
+                      />
+                      <div className="mt-2 flex items-center gap-2">
+                        <div className="hidden">
+                          <button
+                            type="button"
+                            onClick={() => setReplyAttachmentType("image")}
+                            className={[
+                              "grid h-10 w-10 place-items-center rounded-full transition",
+                              replyAttachmentType === "image" ? "bg-sky-100 text-sky-700" : "text-slate-500 hover:bg-white hover:text-sky-700",
+                            ].join(" ")}
+                            title="Đính kèm hình ảnh"
+                          >
+                            <Image size={17} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setReplyAttachmentType("video")}
+                            className={[
+                              "grid h-10 w-10 place-items-center rounded-full transition",
+                              replyAttachmentType === "video" ? "bg-sky-100 text-sky-700" : "text-slate-500 hover:bg-white hover:text-sky-700",
+                            ].join(" ")}
+                            title="Đính kèm video"
+                          >
+                            <Video size={17} />
+                          </button>
+                        </div>
+                        <input
+                          ref={replyFileInputRef}
+                          type="file"
+                          accept="image/*,video/*"
+                          className="hidden"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0] || null;
+                            setReplyAttachmentFile(file);
+                            if (file) {
+                              setReplyAttachmentType(file.type?.startsWith("video/") ? "video" : "image");
+                            }
+                          }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => replyFileInputRef.current?.click()}
+                          disabled={sendingReply}
+                          className={[
+                            "relative grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-full transition",
+                            replyAttachmentFile
+                              ? "bg-sky-100 text-sky-700 ring-2 ring-sky-200"
+                              : "text-slate-500 hover:bg-white hover:text-sky-700",
+                          ].join(" ")}
+                          aria-label="Đính kèm file"
+                          title={replyAttachmentFile?.name || "Đính kèm file"}
+                        >
+                          <Paperclip className="absolute text-current" size={19} />{replyAttachmentFile && (<span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-sky-600" />)}
+                        </button>
+                        {replyAttachmentFile && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setReplyAttachmentFile(null);
+                              if (replyFileInputRef.current) replyFileInputRef.current.value = "";
+                            }}
+                            className="hidden"
+                            title="Bỏ file"
+                          >
+                            <X size={17} />
+                          </button>
+                        )}
+                        <input
+                          type="hidden"
+                          value={replyAttachmentUrl}
+                          onChange={(e) => setReplyAttachmentUrl(e.target.value)}
+                          disabled={sendingReply}
+                          placeholder={replyAttachmentType === "video" ? "URL video .mp4/.mov..." : "URL hình ảnh .jpg/.png/.webp..."}
+                          className="h-10 min-w-0 flex-1 rounded border border-slate-300 px-3 text-sm outline-none focus:ring-2 focus:ring-sky-200 disabled:bg-slate-50"
+                        />
+                        <button
+                          type="button"
+                          onClick={handleSendReply}
+                          disabled={sendingReply || (!replyText.trim() && !replyAttachmentFile)}
+                          className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-sky-600 text-white shadow-sm transition hover:bg-sky-700 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:shadow-none"
+                          title={sendingReply ? "Đang gửi..." : "Gửi tin nhắn"}
+                        >
+                          <Send size={18} />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="border-t border-slate-200 bg-white px-3 py-2">
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => replyFileInputRef.current?.click()}
+                        disabled={sendingReply}
+                        className={[
+                          "relative grid h-9 w-9 shrink-0 place-items-center rounded-full text-sky-600 hover:bg-sky-50 disabled:opacity-50",
+                          replyAttachmentFile ? "bg-sky-50 ring-1 ring-sky-200" : "",
+                        ].join(" ")}
+                        title={replyAttachmentFile?.name || "Đính kèm file"}
+                      >
+                        <Image size={18} />
+                        {replyAttachmentFile && (
+                          <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-sky-600" />
+                        )}
+                      </button>
+
+                      <div className="flex min-w-0 flex-1 items-center rounded-full bg-slate-100 px-3 ring-1 ring-slate-200 focus-within:ring-2 focus-within:ring-sky-200">
+                        <textarea
+                          value={replyText}
+                          onChange={(e) => setReplyText(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" && !e.shiftKey) {
+                              e.preventDefault();
+                              handleSendReply();
+                            }
+                          }}
+                          rows={1}
+                          disabled={sendingReply}
+                          placeholder="Aa"
+                          className="max-h-24 min-h-9 flex-1 resize-none border-0 bg-transparent py-2 text-sm leading-5 text-slate-800 outline-none placeholder:text-slate-400 disabled:opacity-60"
+                        />
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={handleSendReply}
+                        disabled={sendingReply || (!replyText.trim() && !replyAttachmentFile)}
+                        className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-sky-600 hover:bg-sky-50 disabled:cursor-not-allowed disabled:text-slate-300"
+                        title={sendingReply ? "Đang gửi..." : "Gửi tin nhắn"}
+                      >
+                        <Send size={21} />
+                      </button>
+                    </div>
+                  </div>
+                  </>
+                )}
               </div>
             </div>
           </>
@@ -883,3 +1438,4 @@ function SpinnerOverlay({ open, text = "Đang gửi..." }) {
 
 
 export default PageMessage;
+

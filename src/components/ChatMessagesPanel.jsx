@@ -1,80 +1,28 @@
 // src/components/ChatMessagesPanel.jsx
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import { apiUrl } from "../api/baseUrl";
+import React, { useEffect, useMemo, useRef } from "react";
 import { extractCleanTextAndImage } from "../utils/chatSanitizer";
-
 
 function formatTime(ts) {
   if (!ts) return "";
   const d = new Date(ts);
   if (Number.isNaN(d.getTime())) return "";
-  return d.toLocaleString("vi-VN", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit" });
+  return d.toLocaleString("vi-VN", {
+    hour: "2-digit",
+    minute: "2-digit",
+    day: "2-digit",
+    month: "2-digit",
+  });
 }
 
 function initials(name = "") {
   const s = String(name || "").trim();
   if (!s) return "?";
   const parts = s.split(/\s+/).slice(0, 2);
-  return parts.map(p => p[0]?.toUpperCase() || "").join("") || "?";
+  return parts.map((p) => p[0]?.toUpperCase() || "").join("") || "?";
 }
 
-export default function ChatMessagesPanel({ messages, threadId, setMessages }) {
+export default function ChatMessagesPanel({ messages }) {
   const bottomRef = useRef(null);
-  const [input, setInput] = useState("");
-  function handleKeyDown(e) {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault(); // tránh xuống dòng
-      sendMessage();
-    }
-  }
-  async function sendMessage() {
-    const text = `Admin: ${input.trim()}`;    
-    if (!text) return;
-    
-    const tempId = `tmp_${Date.now()}`;
-    const newMsg = {
-      id: tempId,
-      role: "user",
-      text,
-      createdAt: new Date().toISOString(),
-      pending: true,
-    };
-
-    // ✅ Push ngay lên UI
-    setMessages((prev) => [...prev, newMsg]);
-    setInput(""); // clear input after successful send       
-    const API_BASE_URL = apiUrl("/chatwebpopup");
-    let requestBody = { threadId: threadId, text: text };
-    const response = await fetch(`${API_BASE_URL}/reply`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(requestBody)
-    });
-    const data = await response.json();
-    if (data.success) {
-        // ✅ remove pending
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === tempId ? { ...m, pending: false } : m
-          )
-        );
-
-        // ✅ push bot reply
-        if (data.reply) {
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: `bot_${Date.now()}`,
-              role: "user",
-              text: data.reply,
-              createdAt: new Date().toISOString(),
-            },
-          ]);
-        }
-    } else {
-      console.log('Send mess failed');
-    }
-  }
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -89,19 +37,15 @@ export default function ChatMessagesPanel({ messages, threadId, setMessages }) {
 
     const out = [];
 
-
     for (const m of sorted) {
       const role = m?.role;
-
       const rawText =
         (typeof m?.text === "string" ? m.text : "") ||
         m?.content?.[0]?.text?.value ||
         (typeof m?.content === "string" ? m.content : "");
 
-      // ✅ dùng sanitizer để dọn rác + bóc JSON {text, image_url}
       const { text: cleanedText, imageUrl } = extractCleanTextAndImage(rawText);
 
-      // ✅ ADMIN notice
       if (cleanedText && /^\s*admin\s*:/i.test(cleanedText)) {
         const adminText = cleanedText.replace(/^\s*admin\s*:\s*/i, "").trim();
         if (adminText) {
@@ -110,15 +54,14 @@ export default function ChatMessagesPanel({ messages, threadId, setMessages }) {
             kind: "admin",
             text: adminText,
             ts: m?.createdAt || m?.created_at,
+            pending: !!m?.pending,
+            error: !!m?.error,
           });
         }
         continue;
       }
 
-      // ✅ chỉ render user/assistant
       if (role !== "user" && role !== "assistant") continue;
-
-      // ✅ nếu không có text nhưng có ảnh vẫn hiển thị
       if (!cleanedText && !imageUrl) continue;
 
       out.push({
@@ -129,39 +72,25 @@ export default function ChatMessagesPanel({ messages, threadId, setMessages }) {
         imageUrl,
         ts: m?.createdAt || m?.created_at,
         pending: !!m?.pending,
+        error: !!m?.error,
       });
     }
-    console.log(out);
-    
 
     return out;
   }, [messages]);
 
-
   return (
-    <div className="flex-1 flex flex-col h-full min-h-10 bg-gradient-to-b from-slate-50 to-white relative ">
-      {/* subtle top bar */}
-      {/* <div className="px-4 py-2 border-b bg-white/80 backdrop-blur">
-        <div className="flex items-center justify-between">
-          <div className="text-xs font-semibold text-slate-700">Hội thoại</div>
-          <div className="text-[11px] text-slate-500">
-            {chatItems.length ? `Tin nhắn: ${chatItems.filter(i => i.kind === "chat").length}` : ""}
-          </div>
-        </div>
-      </div> */}
-
-      {/* messages */}
+    <div className="flex-1 flex flex-col h-full min-h-10 bg-gradient-to-b from-slate-50 to-white relative">
       <div className="flex-1 min-h-0 overflow-y-auto px-3 md:px-4 py-4 space-y-3">
         {chatItems.length === 0 ? (
           <div className="mx-auto mt-10 max-w-md rounded-2xl border border-slate-200 bg-white p-4 text-center shadow-sm">
             <div className="text-sm font-semibold text-slate-800">Chưa có tin nhắn</div>
             <div className="mt-1 text-xs text-slate-500">
-              Nếu đang tải lịch sử, vui lòng đợi vài giây…
+              Nếu đang tải lịch sử, vui lòng đợi vài giây...
             </div>
           </div>
         ) : (
           chatItems.map((m) => {
-            // ✅ ADMIN notice - kiểu banner chuyên nghiệp            
             if (m.kind === "admin") {
               return (
                 <div key={m.id} className="flex w-full justify-center">
@@ -179,6 +108,12 @@ export default function ChatMessagesPanel({ messages, threadId, setMessages }) {
                             <span className="text-[10px] text-amber-700/80">
                               • {formatTime(m.ts)}
                             </span>
+                          ) : null}
+                          {m.pending ? (
+                            <span className="text-[10px] text-amber-700/80">• Đang gửi</span>
+                          ) : null}
+                          {m.error ? (
+                            <span className="text-[10px] font-semibold text-red-600">• Lỗi gửi</span>
                           ) : null}
                         </div>
                         <div className="mt-0.5 text-[12px] leading-relaxed text-amber-900 whitespace-pre-wrap break-words">
@@ -201,12 +136,13 @@ export default function ChatMessagesPanel({ messages, threadId, setMessages }) {
             return (
               <div key={m.id} className={`flex w-full ${wrapPos}`}>
                 <div className={`flex max-w-[92%] md:max-w-[78%] ${isUser ? "flex-row" : "flex-row-reverse"} gap-2`}>
-                  {/* Avatar */}
                   <div className="shrink-0">
                     <div
                       className={[
                         "h-9 w-9 rounded-2xl grid place-items-center border shadow-sm",
-                        isUser ? "bg-white border-slate-200 text-slate-700" : "bg-sky-50 border-sky-200 text-sky-700",
+                        isUser
+                          ? "bg-white border-slate-200 text-slate-700"
+                          : "bg-sky-50 border-sky-200 text-sky-700",
                       ].join(" ")}
                       title={displayName}
                     >
@@ -216,9 +152,7 @@ export default function ChatMessagesPanel({ messages, threadId, setMessages }) {
                     </div>
                   </div>
 
-                  {/* Content */}
                   <div className="min-w-0">
-                    {/* meta line */}
                     <div className={`mb-1 flex items-center gap-2 ${isUser ? "" : "justify-end"}`}>
                       <span className="text-[11px] font-semibold text-slate-600">
                         {displayName}
@@ -229,13 +163,13 @@ export default function ChatMessagesPanel({ messages, threadId, setMessages }) {
                         </span>
                       ) : null}
                       {m.pending ? (
-                        <span className="text-[10px] text-slate-400">
-                          • Đang gửi…
-                        </span>
+                        <span className="text-[10px] text-slate-400">• Đang gửi</span>
+                      ) : null}
+                      {m.error ? (
+                        <span className="text-[10px] font-semibold text-red-600">• Lỗi gửi</span>
                       ) : null}
                     </div>
 
-                    {/* bubble */}
                     <div className={`px-3 py-2 shadow-sm ${bubbleCls}`}>
                       {m.text ? (
                         <div className="text-[13px] leading-relaxed whitespace-pre-wrap break-words">
@@ -253,14 +187,6 @@ export default function ChatMessagesPanel({ messages, threadId, setMessages }) {
                           >
                             Xem ảnh đính kèm
                           </a>
-                          {/* nếu muốn preview ảnh luôn, mở comment dưới:
-                          <img
-                            src={m.imageUrl}
-                            alt="attachment"
-                            className="mt-2 max-h-64 w-full rounded-xl border border-white/20 object-cover"
-                            loading="lazy"
-                          />
-                          */}
                         </div>
                       ) : null}
                     </div>
@@ -273,8 +199,6 @@ export default function ChatMessagesPanel({ messages, threadId, setMessages }) {
 
         <div ref={bottomRef} />
       </div>
-      
-
     </div>
   );
 }
