@@ -1,5 +1,5 @@
 ﻿// src/components/CommissionABCCalculator.jsx
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Calculator, RefreshCcw, X } from "lucide-react";
 import * as XLSX from "xlsx";
 import {
@@ -17,7 +17,7 @@ const FILE_DEFS_ABC = [
     key: "returns",
     label: "File Hàng trả về",
     headers: [
-      "Người nhận trả",
+      "Người bán",
       "Mã hàng",
       "Số lượng",
       "Giá bán",
@@ -28,6 +28,39 @@ const FILE_DEFS_ABC = [
   {
     key: "invoice",
     label: "File Hóa đơn",
+    headers: [
+      "Người bán",
+      "Bảng giá",
+      "Mã hóa đơn",
+      "Mã hàng",
+      "Đơn giá",
+      "Giá bán",
+      "Số lượng",
+      "Đối tác giao hàng",
+      "Tên hàng",
+      "ĐVT",
+    ],
+  },
+  {
+    key: "cashflow_border",
+    label: "File Sổ Quỹ tiểu ngạch",
+    headers: ["Nhân viên", "Giá trị", "Ghi chú"],
+  },
+  {
+    key: "returns_border",
+    label: "File Hàng trả về tiểu ngạch",
+    headers: [
+      "Người bán",
+      "Mã hàng",
+      "Số lượng",
+      "Giá bán",
+      "Giá nhập lại",
+      "Ghi chú",
+    ],
+  },
+  {
+    key: "invoice_border",
+    label: "File Hóa đơn tiểu ngạch",
     headers: [
       "Người bán",
       "Bảng giá",
@@ -129,43 +162,10 @@ const CG_SKUS = new Set([
   "NNVKB7",
 ]);
 
-const CG_NAME_KEYWORDS = [
-  "CÂY GIỐNG",
-  "CAY GIONG",
-  "HỒNG NHUNG",
-  "HONG NHUNG",
-  "CAO BỤNG",
-  "CAO BUNG",
-  "KÊ BẠC",
-  "KE BAC",
-  "DỪA SÁP TRÁI",
-  "DUA SAP TRAI",
-  "DỪA SÁP ĐÃ LẤY PHÔI",
-  "DUA SAP DA LAY PHOI",
-  "DÁNG HƯƠNG",
-  "DANG HUONG",
-  "CAO ĐUÔI CHỒN",
-  "CAO DUOI CHON",
-  "THỐT NỐT",
-  "THOT NOT",
-  "DỪA BÚP",
-  "DUA BUP",
-  "DỪA XIÊM",
-  "DUA XIEM",
-  "DỪA MÃ LAI",
-  "DUA MA LAI",
-  "DỪA DỨA",
-  "DUA DUA",
-  "DỪA SÁP TỰ NHIÊN",
-  "DUA SAP TU NHIEN",
-];
-
 const DSCP1_SKU_1200000 = "NNVDS1";
 const DSCP2_SKU_1500000 = "NNVDS2";
 
 const SPECIAL_GIFT_RULES = new Map([
-  [DSCP1_SKU_1200000, { group: "DSCP1", tier: "tier1200000" }],
-  [DSCP2_SKU_1500000, { group: "DSCP2", tier: "tier1500000" }],
   ["ABC20-DS1", { group: "DSCP1", tier: "tier1200000" }],
   ["NNV22-DS1", { group: "DSCP1", tier: "tier1200000" }],
   ["ABC20-DS2", { group: "DSCP2", tier: "tier1500000" }],
@@ -181,63 +181,12 @@ const DEFAULT_SPECIAL_GIFT_PRICES = [
 ];
 
 const VN_LOCALE = "vi-VN";
-const STORAGE_PREFIX_ABC = "commission-abc";
-const CASHFLOW_NOTE_OVERRIDES_STORAGE_KEY = `${STORAGE_PREFIX_ABC}:cashflow-note-overrides`;
-const AD_COST_OVERRIDES_STORAGE_KEY = `${STORAGE_PREFIX_ABC}:ad-cost-overrides`;
-
-const EMPLOYEE_TYPES = [
-  { value: "online", label: "Online" },
-  { value: "admin", label: "Sale Admin" },
-  { value: "mkt", label: "Marketing" },
-];
-
-const DEFAULT_AD_COST_TYPE = "PB";
-
-const AD_COST_TYPE_OPTIONS = [
-  { value: "PB", label: "Quảng cáo phân bón" },
-  { value: "CG", label: "Quảng cáo cây giống" },
-];
-
-const CASHFLOW_NOTE_CLASS_OPTIONS = [
-  { value: "PB_RETAIL_NORMAL", label: "PB Lẻ" },
-  { value: "PB_RETAIL_CTDB", label: "PB Lẻ CTDB" },
-  { value: "PB_AGENCY_NORMAL", label: "PB Đại lý" },
-  { value: "PB_AGENCY_CTDB", label: "PB Đại lý CTDB" },
-  { value: "DSCP1_1000000", label: "DSCP1 1,000,000" },
-  { value: "DSCP1_1200000", label: "DSCP1 1,200,000" },
-  { value: "DSCP2_1200000", label: "DSCP2 1,200,000" },
-  { value: "DSCP2_1500000", label: "DSCP2 1,500,000" },
-  { value: "CG_NORMAL", label: "CG" },
-  { value: "CG_CTDB", label: "CG CTDB" },
-  { value: "DG", label: "DG - Dừa giống" },
-  { value: "DST", label: "DST" },
-  { value: "UNKNOWN", label: "Chưa phân loại" },
-];
 
 const formatMoney = (n) =>
   Number(n || 0).toLocaleString(VN_LOCALE, { maximumFractionDigits: 0 });
 
 const normalizeText = (v) => String(v ?? "").trim();
 const normalizeHeader = (h) => normalizeText(h).toLowerCase();
-
-const readStoredObject = (key) => {
-  try {
-    const raw = localStorage.getItem(key);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === "object" ? parsed : {};
-  } catch {
-    return {};
-  }
-};
-
-const saveStoredObject = (key, value) => {
-  try {
-    localStorage.setItem(key, JSON.stringify(value || {}));
-  } catch { }
-};
-
-const isEmployeeDisplayName = (name) => /[a-zA-ZÀ-ỹ]/.test(normalizeText(name));
 
 const normalizeNote = (v) =>
   normalizeText(v).toUpperCase().replace(/[–—]/g, "-").replace(/\s+/g, " ");
@@ -267,77 +216,12 @@ const parseNoteValue = (note) => {
   return parseNumber(matches[matches.length - 1]);
 };
 
-const parseProgramPrice = (text) => {
-  const normalized = normalizeNote(text);
-  if (!normalized) return 0;
-  const matches = normalized.match(/(\d[\d.,]*)/g);
-  if (!matches || matches.length === 0) return 0;
-  const values = matches.map(parseNumber).filter((value) => value >= 100000);
-  return values.length ? values[values.length - 1] : 0;
-};
-
 const parseBaoValue = (name) => {
   const text = normalizeText(name);
   if (!text) return 0;
   const matches = text.match(/(\d[\d.,]*)/g);
   if (!matches || matches.length === 0) return 0;
   return parseNumber(matches[matches.length - 1]);
-};
-
-const classifyDSCP1ByPrice = (price) => {
-  const value = parseNumber(price);
-  if (value >= 1200000) {
-    return {
-      group: "DSCP1",
-      value: 1200000,
-      tier: "tier1200000",
-      label: "DSCP1 1,200,000",
-      priceKeySuffix: "dscp1_1200000",
-    };
-  }
-  if (value >= 1000000) {
-    return {
-      group: "DSCP1",
-      value: 1000000,
-      tier: "tier1000000",
-      label: "DSCP1 1,000,000",
-      priceKeySuffix: "dscp1_1000000",
-    };
-  }
-  return {
-    group: "unknown",
-    value: "unknown",
-    label: "Chưa phân loại",
-    priceKeySuffix: "unknown",
-  };
-};
-
-const classifyDSCP2ByPrice = (price) => {
-  const value = parseNumber(price);
-  if (value >= 1500000) {
-    return {
-      group: "DSCP2",
-      value: 1500000,
-      tier: "tier1500000",
-      label: "DSCP2 1,500,000",
-      priceKeySuffix: "dscp2_1500000",
-    };
-  }
-  if (value >= 1200000) {
-    return {
-      group: "DSCP2",
-      value: 1200000,
-      tier: "tier1200000",
-      label: "DSCP2 1,200,000",
-      priceKeySuffix: "dscp2_1200000",
-    };
-  }
-  return {
-    group: "unknown",
-    value: "unknown",
-    label: "Chưa phân loại",
-    priceKeySuffix: "unknown",
-  };
 };
 
 const exportResultsXLSX = (summaryRows, logRows, detailsByEmployee) => {
@@ -415,32 +299,18 @@ const exportResultsXLSX = (summaryRows, logRows, detailsByEmployee) => {
       details.shipFees || [],
     );
     pushSection(
-      "Trừ trả hàng PB",
+      "Trừ trả hàng",
       [
         "File",
         "Mã hàng",
-        "ĐVT",
         "Số lượng",
         "Giá dùng",
         "Giá bán",
         "Số tiền trừ",
         "Nhóm",
+        "Tiểu ngạch",
       ],
-      details.returnDeductPB || [],
-    );
-    pushSection(
-      "Trừ trả hàng CG",
-      [
-        "File",
-        "Mã hàng",
-        "ĐVT",
-        "Số lượng",
-        "Giá dùng",
-        "Giá bán",
-        "Số tiền trừ",
-        "Nhóm",
-      ],
-      details.returnDeductCG || [],
+      details.returnDeduct || [],
     );
     pushSection(
       "Cộng trả hàng",
@@ -452,6 +322,7 @@ const exportResultsXLSX = (summaryRows, logRows, detailsByEmployee) => {
         "Giá bán",
         "Số tiền cộng",
         "Nhóm",
+        "Tiểu ngạch",
       ],
       details.returnAdd || [],
     );
@@ -573,16 +444,28 @@ const EMPTY_STATS = () => ({
     noCommNormal: 0,
     noCommCTDB: 0,
   },
-  DG: {
-    normal: 0,
-    noCommNormal: 0,
-  },
   unknown: 0,
 });
 
 const classifyCashflowNote = (note) => {
   const text = normalizeNote(note);
   if (!text) return { group: "unknown" };
+
+  const tokenHasAmount = (token, amount) => {
+    const t = normalizeText(token);
+    if (!t) return false;
+    const compact = t.replace(/\s+/g, "");
+    if (amount === 1000000) {
+      return compact.startsWith("1,000,000") || compact.startsWith("1.000.000");
+    }
+    if (amount === 1200000) {
+      return compact.startsWith("1,200,000") || compact.startsWith("1.200.000");
+    }
+    if (amount === 1500000) {
+      return compact.startsWith("1,500,000") || compact.startsWith("1.500.000");
+    }
+    return false;
+  };
 
   if (text.startsWith("PB")) {
     const isAgency = /\bDL\b/.test(text);
@@ -595,15 +478,25 @@ const classifyCashflowNote = (note) => {
   }
 
   if (text.startsWith("DSCP1")) {
-    return { ...classifyDSCP1ByPrice(parseProgramPrice(note)), raw: note };
-  }
-
-  if (text === "DSCP" || text.startsWith("DSCP ")) {
-    return { ...classifyDSCP1ByPrice(1200000), raw: note };
+    const parts = text.split("-").map((p) => p.trim());
+    if (parts.some((p) => tokenHasAmount(p, 1000000))) {
+      return { group: "DSCP1", value: 1000000 };
+    }
+    if (parts.some((p) => tokenHasAmount(p, 1200000))) {
+      return { group: "DSCP1", value: 1200000 };
+    }
+    return { group: "DSCP1", value: "other", raw: note };
   }
 
   if (text.startsWith("DSCP2") || text.startsWith("DSCP 2")) {
-    return { ...classifyDSCP2ByPrice(parseProgramPrice(note)), raw: note };
+    const parts = text.split("-").map((p) => p.trim());
+    if (parts.some((p) => tokenHasAmount(p, 1200000))) {
+      return { group: "DSCP2", value: 1200000 };
+    }
+    if (parts.some((p) => tokenHasAmount(p, 1500000))) {
+      return { group: "DSCP2", value: 1500000 };
+    }
+    return { group: "DSCP2", value: "other", raw: note };
   }
 
   if (text.startsWith("DST")) {
@@ -615,105 +508,55 @@ const classifyCashflowNote = (note) => {
     return { group: "CG", program: isCTDB ? "CTDB" : "normal" };
   }
 
-  if (text.startsWith("DG")) {
-    return { group: "DG", program: "normal" };
-  }
-
   return { group: "unknown" };
 };
 
-const classifyCashflowNoteOverride = (value) => {
-  if (value === "PB_RETAIL_NORMAL") {
-    return { group: "PB", customer: "retail", program: "normal" };
+const classifyAdNote = (note) => {
+  const text = normalizeNote(note);
+  if (!text) return { group: "PB", customer: "retail", program: "normal" };
+  if (text.startsWith("CG")) {
+    const isCTDB = /\bCTDB\b/.test(text);
+    return { group: "CG", program: isCTDB ? "CTDB" : "normal" };
   }
-  if (value === "PB_RETAIL_CTDB") {
-    return { group: "PB", customer: "retail", program: "CTDB" };
+  if (text.startsWith("PB")) {
+    const isAgency = /\bDL\b/.test(text);
+    const isCTDB = /\bCTDB\b/.test(text);
+    return {
+      group: "PB",
+      customer: isAgency ? "agency" : "retail",
+      program: isCTDB ? "CTDB" : "normal",
+    };
   }
-  if (value === "PB_AGENCY_NORMAL") {
-    return { group: "PB", customer: "agency", program: "normal" };
+  if (text.startsWith("NNVDS1")) {
+    return { group: "DSCP1", tier: "tier1200000" };
   }
-  if (value === "PB_AGENCY_CTDB") {
-    return { group: "PB", customer: "agency", program: "CTDB" };
+  if (text.startsWith("NNVDS2")) {
+    return { group: "DSCP2", tier: "tier1500000" };
   }
-  if (value === "DSCP1_1000000") return classifyDSCP1ByPrice(1000000);
-  if (value === "DSCP1_1200000") return classifyDSCP1ByPrice(1200000);
-  if (value === "DSCP2_1200000") return classifyDSCP2ByPrice(1200000);
-  if (value === "DSCP2_1500000") return classifyDSCP2ByPrice(1500000);
-  if (value === "CG_NORMAL") return { group: "CG", program: "normal" };
-  if (value === "CG_CTDB") return { group: "CG", program: "CTDB" };
-  if (value === "DG") return { group: "DG", program: "normal" };
-  if (value === "DST") return { group: "DST" };
-  return { group: "unknown" };
-};
-
-const getCashflowNoteOptionValue = (cls) => {
-  if (cls.group === "PB") {
-    if (cls.customer === "agency") {
-      return cls.program === "CTDB" ? "PB_AGENCY_CTDB" : "PB_AGENCY_NORMAL";
-    }
-    return cls.program === "CTDB" ? "PB_RETAIL_CTDB" : "PB_RETAIL_NORMAL";
-  }
-  if (cls.group === "DSCP1") {
-    if (cls.value === 1000000) return "DSCP1_1000000";
-    if (cls.value === 1200000) return "DSCP1_1200000";
-    return "UNKNOWN";
-  }
-  if (cls.group === "DSCP2") {
-    if (cls.value === 1200000) return "DSCP2_1200000";
-    if (cls.value === 1500000) return "DSCP2_1500000";
-    return "UNKNOWN";
-  }
-  if (cls.group === "CG") {
-    return cls.program === "CTDB" ? "CG_CTDB" : "CG_NORMAL";
-  }
-  if (cls.group === "DG") return "DG";
-  if (cls.group === "DST") return "DST";
-  return "UNKNOWN";
-};
-
-const classifyAdCostType = (type) => {
-  if (type === "CG" || type === "DG") {
-    return { group: "CG", program: "normal" };
+  if (text.startsWith("DST")) {
+    return { group: "DST" };
   }
   return { group: "PB", customer: "retail", program: "normal" };
 };
 
-const classifyReturnGroup = (
-  sku,
-  customer,
-  note = "",
-  price = 0,
-  unit = "",
-) => {
-  const normalizedNote = normalizeNote(note);
-  const normalizedUnit = normalizeUnit(unit);
-  if (
-    normalizedUnit === "CÂY" ||
-    normalizedUnit === "CAY" ||
-    CG_SKUS.has(sku)
-  ) {
-    const isCTDB = /\bCTDB\b/.test(normalizedNote);
-    return {
-      group: "CG",
-      program: isCTDB ? "CTDB" : "normal",
-      label: isCTDB ? "CG CTDB" : "CG",
-      priceKey: `${sku}__${isCTDB ? "cg_ctdb" : "cg"}`,
-    };
+const classifyReturnGroup = (sku, customer) => {
+  if (CG_SKUS.has(sku)) {
+    return { group: "CG", label: "CG", priceKey: `${sku}__cg` };
   }
   if (sku === DSCP1_SKU_1200000) {
-    const tier = classifyDSCP1ByPrice(price);
     return {
-      ...tier,
-      label: getClassLabel(tier),
-      priceKey: `${sku}__${price > 0 ? tier.priceKeySuffix : "dscp1_manual"}`,
+      group: "DSCP1",
+      tier: "tier1200000",
+      label: "DSCP1 1,200,000",
+      priceKey: `${sku}__dscp1_1200000`,
     };
   }
   if (sku === DSCP2_SKU_1500000) {
-    const tier = classifyDSCP2ByPrice(price);
     return {
-      ...tier,
-      label: getClassLabel(tier),
-      priceKey: `${sku}__${price > 0 ? tier.priceKeySuffix : "dscp2_manual"}`,
+      group: "DSCP2",
+      tier: "tier1500000",
+      label: "DSCP2 1,500,000",
+      priceKey: `${sku}__dscp2_1500000`,
     };
   }
 
@@ -724,31 +567,6 @@ const classifyReturnGroup = (
     label: isAgency ? "PB Đại lý" : "PB Khách lẻ",
     priceKey: `${sku}__${isAgency ? "agency" : "retail"}`,
   };
-};
-
-const getClassLabel = (cls) => {
-  if (cls.group === "PB") {
-    if (cls.customer === "agency") {
-      return cls.program === "CTDB" ? "PB ĐL CTDB" : "PB ĐL";
-    }
-    return cls.program === "CTDB" ? "PB Lẻ CTDB" : "PB Lẻ";
-  }
-  if (cls.group === "CG") {
-    return cls.program === "CTDB" ? "CG CTDB" : "CG";
-  }
-  if (cls.group === "DG") return "DG - Dừa giống";
-  if (cls.group === "DSCP1") {
-    if (cls.tier === "tier1200000") return "DSCP1 1,200,000";
-    if (cls.tier === "tier1000000") return "DSCP1 1,000,000";
-    return "Chưa phân loại";
-  }
-  if (cls.group === "DSCP2") {
-    if (cls.tier === "tier1500000") return "DSCP2 1,500,000";
-    if (cls.tier === "tier1200000") return "DSCP2 1,200,000";
-    return "Chưa phân loại";
-  }
-  if (cls.group === "DST") return "DST";
-  return "Chưa phân loại";
 };
 
 const applyDelta = (stats, cls, delta) => {
@@ -765,7 +583,6 @@ const applyDelta = (stats, cls, delta) => {
   }
   if (cls.group === "DSCP1") {
     if (cls.tier === "tier1200000") stats.DSCP1.tier1200000 += delta;
-    else if (cls.tier === "tier1000000") stats.DSCP1.tier1000000 += delta;
     else stats.DSCP1.other += delta;
     return;
   }
@@ -782,10 +599,6 @@ const applyDelta = (stats, cls, delta) => {
   if (cls.group === "CG") {
     if (cls.program === "CTDB") stats.CG.CTDB += delta;
     else stats.CG.normal += delta;
-    return;
-  }
-  if (cls.group === "DG") {
-    stats.DG.normal += delta;
     return;
   }
   stats.unknown += delta;
@@ -823,101 +636,7 @@ const applyNoCommission = (stats, cls, value) => {
   if (cls.group === "CG") {
     if (cls.program === "CTDB") stats.CG.noCommCTDB += value;
     else stats.CG.noCommNormal += value;
-    return;
   }
-  if (cls.group === "DG") {
-    stats.DG.noCommNormal += value;
-  }
-};
-
-const calculatePBCommission = (pb = {}, employeeType = "online") => {
-  const pbRetailTotal = (pb.retailNormal || 0) + (pb.retailCTDB || 0);
-  const pbAgencyTotal = (pb.agencyNormal || 0) + (pb.agencyCTDB || 0);
-  const pbTotal = pbRetailTotal + pbAgencyTotal;
-  const pbRetailCommissionableNormal = Math.max(
-    0,
-    (pb.retailNormal || 0) - (pb.retailNoCommNormal || 0),
-  );
-  const pbRetailCommissionableCTDB = Math.max(
-    0,
-    (pb.retailCTDB || 0) - (pb.retailNoCommCTDB || 0),
-  );
-  const pbAgencyCommissionableNormal =
-    (pb.agencyNormal || 0) - (pb.agencyNoCommNormal || 0);
-  const pbAgencyCommissionableCTDB =
-    (pb.agencyCTDB || 0) - (pb.agencyNoCommCTDB || 0);
-
-  let pbRetailRate = pbRetailTotal < 100000000 ? 0.07 : 0.1;
-  let pbAgencyRate = pbAgencyTotal < 30000000 ? 0.01 : 0.03;
-  let pbRetailCommission = 0;
-  let pbAgencyCommission = 0;
-
-  if (employeeType === "admin") {
-    pbRetailRate = 0;
-    pbAgencyRate = 0.03;
-    pbAgencyCommission = pbTotal * pbAgencyRate;
-  } else {
-    if (employeeType === "mkt") {
-      pbRetailRate = 0.05;
-      pbAgencyRate = pbAgencyTotal >= 30000000 ? 0.015 : 0.005;
-    }
-    pbRetailCommission =
-      pbRetailCommissionableNormal * pbRetailRate +
-      pbRetailCommissionableCTDB * pbRetailRate * 0.5;
-    pbAgencyCommission =
-      pbAgencyCommissionableNormal * pbAgencyRate +
-      pbAgencyCommissionableCTDB * pbAgencyRate * 0.5;
-  }
-
-  return {
-    pbRetailTotal,
-    pbAgencyTotal,
-    pbRetailRate,
-    pbAgencyRate,
-    pbRetailCommission,
-    pbAgencyCommission,
-    pbTotalCommission: pbRetailCommission + pbAgencyCommission,
-  };
-};
-
-const calculateOtherCommission = (stats = {}) => {
-  const dscp1_100_comm =
-    Math.max(0, (stats.DSCP1?.tier1000000 || 0) - (stats.DSCP1?.noCommTier1000000 || 0)) *
-    0.025;
-  const dscp1_120_comm =
-    Math.max(0, (stats.DSCP1?.tier1200000 || 0) - (stats.DSCP1?.noCommTier1200000 || 0)) *
-    0.05;
-  const dscp2_120_comm =
-    Math.max(0, (stats.DSCP2?.tier1200000 || 0) - (stats.DSCP2?.noCommTier1200000 || 0)) *
-    0.025;
-  const dscp2_150_comm =
-    Math.max(0, (stats.DSCP2?.tier1500000 || 0) - (stats.DSCP2?.noCommTier1500000 || 0)) *
-    0.05;
-  const cg_comm = Math.max(0, (stats.CG?.normal || 0) - (stats.CG?.noCommNormal || 0)) * 0.05;
-  const cg_ctdb_comm = Math.max(0, (stats.CG?.CTDB || 0) - (stats.CG?.noCommCTDB || 0)) * 0.025;
-  const dg_comm = Math.max(0, (stats.DG?.normal || 0) - (stats.DG?.noCommNormal || 0)) * 0.05;
-  const dst_comm = Math.max(0, (stats.DST || 0) - (stats.DSTNoComm || 0)) * 0.05;
-  const dscp1_comm = dscp1_100_comm + dscp1_120_comm;
-  const dscp2_comm = dscp2_120_comm + dscp2_150_comm;
-  const dscp_comm = dscp1_comm + dscp2_comm;
-  const cg_total_comm = cg_comm + cg_ctdb_comm;
-  const seedling_comm = dscp_comm + cg_total_comm + dg_comm + dst_comm;
-
-  return {
-    dscp1_100_comm,
-    dscp1_120_comm,
-    dscp1_comm,
-    dscp2_120_comm,
-    dscp2_150_comm,
-    dscp2_comm,
-    dscp_comm,
-    cg_comm,
-    cg_ctdb_comm,
-    cg_total_comm,
-    dg_comm,
-    dst_comm,
-    seedling_comm,
-  };
 };
 
 function Modal({ open, title, subtitle, children, onClose, showClose = true }) {
@@ -967,38 +686,19 @@ export default function CommissionABCCalculator() {
   const [inputKey, setInputKey] = useState(0);
   const [results, setResults] = useState([]);
   const [missingPriceModalOpen, setMissingPriceModalOpen] = useState(false);
-  const [missingPriceModalMode, setMissingPriceModalMode] =
-    useState("calculation");
   const [missingReturns, setMissingReturns] = useState([]);
   const [missingGifts, setMissingGifts] = useState([]);
-  const [invoiceGiftRows, setInvoiceGiftRows] = useState([]);
-  const [cashflowNoteModalOpen, setCashflowNoteModalOpen] = useState(false);
-  const [pendingCashflowNotes, setPendingCashflowNotes] = useState([]);
-  const [cashflowNoteOverrides, setCashflowNoteOverrides] = useState({});
-  const [adCostModalOpen, setAdCostModalOpen] = useState(false);
-  const [pendingAdCosts, setPendingAdCosts] = useState([]);
-  const [adCostOverrides, setAdCostOverrides] = useState({});
   const [detailsByEmployee, setDetailsByEmployee] = useState({});
   const [logRows, setLogRows] = useState([]);
   const [cashflowEmployees, setCashflowEmployees] = useState([]);
   const [selectedEmployees, setSelectedEmployees] = useState([]);
-  const [employeeTypes, setEmployeeTypes] = useState({});
   const [groupSelected, setGroupSelected] = useState([]);
   const [groupApplied, setGroupApplied] = useState(false);
   const [overrideGiftPrices, setOverrideGiftPrices] = useState(
     DEFAULT_SPECIAL_GIFT_PRICES,
   );
 
-  useEffect(() => {
-    setCashflowNoteOverrides(
-      readStoredObject(CASHFLOW_NOTE_OVERRIDES_STORAGE_KEY),
-    );
-    setAdCostOverrides(readStoredObject(AD_COST_OVERRIDES_STORAGE_KEY));
-  }, []);
-
-  const allFilesReady = ["cashflow", "returns", "invoice"].every(
-    (key) => files[key],
-  );
+  const allFilesReady = FILE_DEFS_ABC.every((def) => files[def.key]);
 
   const totals = useMemo(() => {
     return results.reduce(
@@ -1008,39 +708,73 @@ export default function CommissionABCCalculator() {
           row.PB.retailCTDB +
           row.PB.agencyNormal +
           row.PB.agencyCTDB;
-        acc.dscp1 += row.DSCP1.tier1000000 + row.DSCP1.tier1200000;
-        acc.dscp2 += row.DSCP2.tier1200000 + row.DSCP2.tier1500000;
+        acc.dscp1 +=
+          row.DSCP1.tier1000000 + row.DSCP1.tier1200000 + row.DSCP1.other;
+        acc.dscp2 +=
+          row.DSCP2.tier1200000 + row.DSCP2.tier1500000 + row.DSCP2.other;
         acc.dst += row.DST;
         acc.cg += row.CG.normal + row.CG.CTDB;
-        acc.dg += row.DG?.normal || 0;
         acc.unknown += row.unknown;
         return acc;
       },
-      { pb: 0, dscp1: 0, dscp2: 0, dst: 0, cg: 0, dg: 0, unknown: 0 },
+      { pb: 0, dscp1: 0, dscp2: 0, dst: 0, cg: 0, unknown: 0 },
     );
   }, [results]);
 
   const commissionRows = useMemo(() => {
     return results.map((r) => {
-      const {
-        pbRetailTotal,
-        pbAgencyTotal,
-        pbRetailRate,
-        pbAgencyRate,
-        pbRetailCommission,
-        pbAgencyCommission,
-      } = calculatePBCommission(r.PB, r.employeeType || "online");
+      const pbRetailTotal = r.PB.retailNormal + r.PB.retailCTDB;
+      const pbAgencyTotal = r.PB.agencyNormal + r.PB.agencyCTDB;
+      const pbRetailCommissionableNormal = Math.max(
+        0,
+        r.PB.retailNormal - (r.PB.retailNoCommNormal || 0),
+      );
+      const pbRetailCommissionableCTDB = Math.max(
+        0,
+        r.PB.retailCTDB - (r.PB.retailNoCommCTDB || 0),
+      );
+      const pbAgencyCommissionableNormal = Math.max(
+        0,
+        r.PB.agencyNormal - (r.PB.agencyNoCommNormal || 0),
+      );
+      const pbAgencyCommissionableCTDB = Math.max(
+        0,
+        r.PB.agencyCTDB - (r.PB.agencyNoCommCTDB || 0),
+      );
+      const pbRetailRate = pbRetailTotal < 100000000 ? 0.07 : 0.1;
+      const pbAgencyRate = pbAgencyTotal < 30000000 ? 0.01 : 0.03;
+      const pbRetailCommission =
+        pbRetailCommissionableNormal * pbRetailRate +
+        pbRetailCommissionableCTDB * pbRetailRate * 0.5;
+      const pbAgencyCommission =
+        pbAgencyCommissionableNormal * pbAgencyRate +
+        pbAgencyCommissionableCTDB * pbAgencyRate * 0.5;
 
-      const {
-        dscp1_100_comm,
-        dscp1_120_comm,
-        dscp2_120_comm,
-        dscp2_150_comm,
-        cg_comm,
-        cg_ctdb_comm,
-        dg_comm,
-        dst_comm,
-      } = calculateOtherCommission(r);
+      const dscp1_100_rate = 0.025;
+      const dscp1_120_rate = 0.05;
+      const dscp2_120_rate = 0.025;
+      const dscp2_150_rate = 0.05;
+      const cg_rate = 0.05;
+      const cg_ctdb_rate = 0.025;
+      const dst_rate = 0.05;
+
+      const dscp1_100_comm =
+        Math.max(0, r.DSCP1.tier1000000 - (r.DSCP1.noCommTier1000000 || 0)) *
+        dscp1_100_rate;
+      const dscp1_120_comm =
+        Math.max(0, r.DSCP1.tier1200000 - (r.DSCP1.noCommTier1200000 || 0)) *
+        dscp1_120_rate;
+      const dscp2_120_comm =
+        Math.max(0, r.DSCP2.tier1200000 - (r.DSCP2.noCommTier1200000 || 0)) *
+        dscp2_120_rate;
+      const dscp2_150_comm =
+        Math.max(0, r.DSCP2.tier1500000 - (r.DSCP2.noCommTier1500000 || 0)) *
+        dscp2_150_rate;
+      const cg_comm =
+        Math.max(0, r.CG.normal - (r.CG.noCommNormal || 0)) * cg_rate;
+      const cg_ctdb_comm =
+        Math.max(0, r.CG.CTDB - (r.CG.noCommCTDB || 0)) * cg_ctdb_rate;
+      const dst_comm = Math.max(0, r.DST - (r.DSTNoComm || 0)) * dst_rate;
 
       const totalCommission =
         pbRetailCommission +
@@ -1051,12 +785,10 @@ export default function CommissionABCCalculator() {
         dscp2_150_comm +
         cg_comm +
         cg_ctdb_comm +
-        dg_comm +
         dst_comm;
 
       return {
         name: r.name,
-        employeeType: r.employeeType || "online",
         pbRetailTotal,
         pbAgencyTotal,
         pbRetailRate,
@@ -1069,7 +801,6 @@ export default function CommissionABCCalculator() {
         dscp2_150_comm,
         cg_comm,
         cg_ctdb_comm,
-        dg_comm,
         dst_comm,
         totalCommission,
       };
@@ -1091,9 +822,6 @@ export default function CommissionABCCalculator() {
     if (groupSelected.length < 2 || groupSelected.length > 3) return null;
     const rows = results.filter((r) => groupSelected.includes(r.name));
     if (rows.length !== groupSelected.length) return null;
-    const allMkt = rows.every((r) => (r.employeeType || "online") === "mkt");
-    const allAdmin = rows.every((r) => (r.employeeType || "online") === "admin");
-    const groupEmployeeType = allAdmin ? "admin" : allMkt ? "mkt" : "online";
     const pbRetailNormal = rows.reduce((s, r) => s + r.PB.retailNormal, 0);
     const pbRetailCTDB = rows.reduce((s, r) => s + r.PB.retailCTDB, 0);
     const pbAgencyNormal = rows.reduce((s, r) => s + r.PB.agencyNormal, 0);
@@ -1114,33 +842,38 @@ export default function CommissionABCCalculator() {
       (s, r) => s + (r.PB.agencyNoCommCTDB || 0),
       0,
     );
-    const {
-      pbRetailTotal,
-      pbAgencyTotal,
-      pbRetailRate,
-      pbAgencyRate,
-      pbRetailCommission,
-      pbAgencyCommission,
-    } = calculatePBCommission(
-      {
-        retailNormal: pbRetailNormal,
-        retailCTDB: pbRetailCTDB,
-        agencyNormal: pbAgencyNormal,
-        agencyCTDB: pbAgencyCTDB,
-        retailNoCommNormal: pbRetailNoCommNormal,
-        retailNoCommCTDB: pbRetailNoCommCTDB,
-        agencyNoCommNormal: pbAgencyNoCommNormal,
-        agencyNoCommCTDB: pbAgencyNoCommCTDB,
-      },
-      groupEmployeeType,
+    const pbRetailTotal = pbRetailNormal + pbRetailCTDB;
+    const pbAgencyTotal = pbAgencyNormal + pbAgencyCTDB;
+    const pbRetailRate = pbRetailTotal < 100000000 ? 0.07 : 0.1;
+    const pbAgencyRate = pbAgencyTotal < 30000000 ? 0.01 : 0.03;
+    const pbRetailCommissionableNormal = Math.max(
+      0,
+      pbRetailNormal - pbRetailNoCommNormal,
     );
+    const pbRetailCommissionableCTDB = Math.max(
+      0,
+      pbRetailCTDB - pbRetailNoCommCTDB,
+    );
+    const pbAgencyCommissionableNormal = Math.max(
+      0,
+      pbAgencyNormal - pbAgencyNoCommNormal,
+    );
+    const pbAgencyCommissionableCTDB = Math.max(
+      0,
+      pbAgencyCTDB - pbAgencyNoCommCTDB,
+    );
+    const pbRetailCommission =
+      pbRetailCommissionableNormal * pbRetailRate +
+      pbRetailCommissionableCTDB * pbRetailRate * 0.5;
+    const pbAgencyCommission =
+      pbAgencyCommissionableNormal * pbAgencyRate +
+      pbAgencyCommissionableCTDB * pbAgencyRate * 0.5;
     const dscp1_100_total = rows.reduce((s, r) => s + r.DSCP1.tier1000000, 0);
     const dscp1_120_total = rows.reduce((s, r) => s + r.DSCP1.tier1200000, 0);
     const dscp2_120_total = rows.reduce((s, r) => s + r.DSCP2.tier1200000, 0);
     const dscp2_150_total = rows.reduce((s, r) => s + r.DSCP2.tier1500000, 0);
     const cg_total = rows.reduce((s, r) => s + r.CG.normal, 0);
     const cg_ctdb_total = rows.reduce((s, r) => s + r.CG.CTDB, 0);
-    const dg_total = rows.reduce((s, r) => s + (r.DG?.normal || 0), 0);
     const dst_total = rows.reduce((s, r) => s + r.DST, 0);
     const dscp1_no_comm_100 = rows.reduce(
       (s, r) => s + (r.DSCP1.noCommTier1000000 || 0),
@@ -1166,7 +899,6 @@ export default function CommissionABCCalculator() {
       (s, r) => s + (r.CG.noCommCTDB || 0),
       0,
     );
-    const dg_no_comm = rows.reduce((s, r) => s + (r.DG?.noCommNormal || 0), 0);
     const dst_no_comm = rows.reduce((s, r) => s + (r.DSTNoComm || 0), 0);
     const dscp1_100_comm = Math.max(0, dscp1_100_total - dscp1_no_comm_100) * 0.025;
     const dscp1_120_comm = Math.max(0, dscp1_120_total - dscp1_no_comm_120) * 0.05;
@@ -1174,7 +906,6 @@ export default function CommissionABCCalculator() {
     const dscp2_150_comm = Math.max(0, dscp2_150_total - dscp2_no_comm_150) * 0.05;
     const cg_comm = Math.max(0, cg_total - cg_no_comm_normal) * 0.05;
     const cg_ctdb_comm = Math.max(0, cg_ctdb_total - cg_no_comm_ctdb) * 0.025;
-    const dg_comm = Math.max(0, dg_total - dg_no_comm) * 0.05;
     const dst_comm = Math.max(0, dst_total - dst_no_comm) * 0.05;
     const totalCommission =
       pbRetailCommission +
@@ -1185,12 +916,10 @@ export default function CommissionABCCalculator() {
       dscp2_150_comm +
       cg_comm +
       cg_ctdb_comm +
-      dg_comm +
       dst_comm;
     return {
       pbRetailRate,
       pbAgencyRate,
-      employeeType: groupEmployeeType,
       pbRetailTotal,
       pbAgencyTotal,
       pbRetailNormal,
@@ -1203,7 +932,6 @@ export default function CommissionABCCalculator() {
       dscp2_150_total,
       cg_total,
       cg_ctdb_total,
-      dg_total,
       dst_total,
       pbRetailCommission,
       pbAgencyCommission,
@@ -1213,7 +941,6 @@ export default function CommissionABCCalculator() {
       dscp2_150_comm,
       cg_comm,
       cg_ctdb_comm,
-      dg_comm,
       dst_comm,
       totalCommission,
     };
@@ -1224,32 +951,24 @@ export default function CommissionABCCalculator() {
     return results
       .filter((r) => groupSelected.includes(r.name))
       .map((r) => {
-        let pbRetailCommission = 0;
-        let pbAgencyCommission = 0;
-        if (groupSummary.employeeType === "admin") {
-          pbAgencyCommission =
-            (r.PB.retailNormal +
-              r.PB.retailCTDB +
-              r.PB.agencyNormal +
-              r.PB.agencyCTDB) *
-            groupSummary.pbAgencyRate;
-        } else {
-          pbRetailCommission =
-            Math.max(
-              0,
-              r.PB.retailNormal - (r.PB.retailNoCommNormal || 0),
-            ) *
-            groupSummary.pbRetailRate +
-            Math.max(0, r.PB.retailCTDB - (r.PB.retailNoCommCTDB || 0)) *
-            groupSummary.pbRetailRate *
-            0.5;
-          pbAgencyCommission =
-            (r.PB.agencyNormal - (r.PB.agencyNoCommNormal || 0)) *
-            groupSummary.pbAgencyRate +
-            (r.PB.agencyCTDB - (r.PB.agencyNoCommCTDB || 0)) *
-            groupSummary.pbAgencyRate *
-            0.5;
-        }
+        const pbRetailCommission =
+          Math.max(
+            0,
+            r.PB.retailNormal - (r.PB.retailNoCommNormal || 0),
+          ) *
+          groupSummary.pbRetailRate +
+          Math.max(0, r.PB.retailCTDB - (r.PB.retailNoCommCTDB || 0)) *
+          groupSummary.pbRetailRate *
+          0.5;
+        const pbAgencyCommission =
+          Math.max(
+            0,
+            r.PB.agencyNormal - (r.PB.agencyNoCommNormal || 0),
+          ) *
+          groupSummary.pbAgencyRate +
+          Math.max(0, r.PB.agencyCTDB - (r.PB.agencyNoCommCTDB || 0)) *
+          groupSummary.pbAgencyRate *
+          0.5;
         const dscp1_100_comm =
           Math.max(0, r.DSCP1.tier1000000 - (r.DSCP1.noCommTier1000000 || 0)) *
           0.025;
@@ -1264,7 +983,6 @@ export default function CommissionABCCalculator() {
           0.05;
         const cg_comm = Math.max(0, r.CG.normal - (r.CG.noCommNormal || 0)) * 0.05;
         const cg_ctdb_comm = Math.max(0, r.CG.CTDB - (r.CG.noCommCTDB || 0)) * 0.025;
-        const dg_comm = Math.max(0, (r.DG?.normal || 0) - (r.DG?.noCommNormal || 0)) * 0.05;
         const dst_comm = Math.max(0, r.DST - (r.DSTNoComm || 0)) * 0.05;
         const totalCommission =
           pbRetailCommission +
@@ -1275,7 +993,6 @@ export default function CommissionABCCalculator() {
           dscp2_150_comm +
           cg_comm +
           cg_ctdb_comm +
-          dg_comm +
           dst_comm;
         return {
           name: r.name,
@@ -1291,7 +1008,6 @@ export default function CommissionABCCalculator() {
           dscp2_150_comm,
           cg_comm,
           cg_ctdb_comm,
-          dg_comm,
           dst_comm,
           totalCommission,
         };
@@ -1304,9 +1020,6 @@ export default function CommissionABCCalculator() {
       const c = commissionMap.get(r.name);
       return {
         "Nhân viên": r.name,
-        "Loại nhân viên":
-          EMPLOYEE_TYPES.find((t) => t.value === (r.employeeType || "online"))
-            ?.label || r.employeeType || "Online",
         "PB Lẻ": r.PB.retailNormal,
         "PB Lẻ CTDB": r.PB.retailCTDB,
         "PB Đại lý": r.PB.agencyNormal,
@@ -1318,21 +1031,16 @@ export default function CommissionABCCalculator() {
         DST: r.DST,
         CG: r.CG.normal,
         "CG CTDB": r.CG.CTDB,
-        DG: r.DG?.normal || 0,
         "PB Lẻ Rate": c ? (c.pbRetailRate * 100).toFixed(0) + "%" : "",
         "PB Đại lý Rate": c ? (c.pbAgencyRate * 100).toFixed(0) + "%" : "",
         "HH PB Lẻ": c ? c.pbRetailCommission : 0,
         "HH PB Đại lý": c ? c.pbAgencyCommission : 0,
-        "Tổng HH PB-DL": c
-          ? c.pbRetailCommission + c.pbAgencyCommission
-          : 0,
         "HH DSCP1 1,000,000": c ? c.dscp1_100_comm : 0,
         "HH DSCP1 1,200,000": c ? c.dscp1_120_comm : 0,
         "HH DSCP2 1,200,000": c ? c.dscp2_120_comm : 0,
         "HH DSCP2 1,500,000": c ? c.dscp2_150_comm : 0,
         "HH CG": c ? c.cg_comm : 0,
         "HH CG CTDB": c ? c.cg_ctdb_comm : 0,
-        "HH DG": c ? c.dg_comm : 0,
         "HH DST": c ? c.dst_comm : 0,
         "Tổng HH": c ? c.totalCommission : 0,
       };
@@ -1343,10 +1051,6 @@ export default function CommissionABCCalculator() {
     if (!groupSummary || groupAdjustedRows.length === 0) return summaryRows;
     const groupRows = groupAdjustedRows.map((r) => ({
       "Nhân viên": `${r.name} (Nhóm)`,
-      "Loại nhân viên":
-        EMPLOYEE_TYPES.find(
-          (t) => t.value === (groupSummary.employeeType || "online"),
-        )?.label || "Online",
       "PB Lẻ": r.pbRetailTotal,
       "PB Lẻ CTDB": "",
       "PB Đại lý": r.pbAgencyTotal,
@@ -1358,28 +1062,21 @@ export default function CommissionABCCalculator() {
       DST: "",
       CG: "",
       "CG CTDB": "",
-      DG: "",
       "PB Lẻ Rate": (r.pbRetailRate * 100).toFixed(0) + "%",
       "PB Đại lý Rate": (r.pbAgencyRate * 100).toFixed(0) + "%",
       "HH PB Lẻ": r.pbRetailCommission,
       "HH PB Đại lý": r.pbAgencyCommission,
-      "Tổng HH PB-DL": r.pbRetailCommission + r.pbAgencyCommission,
       "HH DSCP1 1,000,000": r.dscp1_100_comm,
       "HH DSCP1 1,200,000": r.dscp1_120_comm,
       "HH DSCP2 1,200,000": r.dscp2_120_comm,
       "HH DSCP2 1,500,000": r.dscp2_150_comm,
       "HH CG": r.cg_comm,
       "HH CG CTDB": r.cg_ctdb_comm,
-      "HH DG": r.dg_comm,
       "HH DST": r.dst_comm,
       "Tổng HH": r.totalCommission,
     }));
     const groupTotalRow = {
       "Nhân viên": "Tổng nhóm",
-      "Loại nhân viên":
-        EMPLOYEE_TYPES.find(
-          (t) => t.value === (groupSummary.employeeType || "online"),
-        )?.label || "Online",
       "PB Lẻ": groupSummary.pbRetailNormal,
       "PB Lẻ CTDB": groupSummary.pbRetailCTDB,
       "PB Đại lý": groupSummary.pbAgencyNormal,
@@ -1391,20 +1088,16 @@ export default function CommissionABCCalculator() {
       DST: groupSummary.dst_total,
       CG: groupSummary.cg_total,
       "CG CTDB": groupSummary.cg_ctdb_total,
-      DG: groupSummary.dg_total,
       "PB Lẻ Rate": (groupSummary.pbRetailRate * 100).toFixed(0) + "%",
       "PB Đại lý Rate": (groupSummary.pbAgencyRate * 100).toFixed(0) + "%",
       "HH PB Lẻ": groupSummary.pbRetailCommission,
       "HH PB Đại lý": groupSummary.pbAgencyCommission,
-      "Tổng HH PB-DL":
-        groupSummary.pbRetailCommission + groupSummary.pbAgencyCommission,
       "HH DSCP1 1,000,000": groupSummary.dscp1_100_comm,
       "HH DSCP1 1,200,000": groupSummary.dscp1_120_comm,
       "HH DSCP2 1,200,000": groupSummary.dscp2_120_comm,
       "HH DSCP2 1,500,000": groupSummary.dscp2_150_comm,
       "HH CG": groupSummary.cg_comm,
       "HH CG CTDB": groupSummary.cg_ctdb_comm,
-      "HH DG": groupSummary.dg_comm,
       "HH DST": groupSummary.dst_comm,
       "Tổng HH": groupSummary.totalCommission,
     };
@@ -1414,24 +1107,11 @@ export default function CommissionABCCalculator() {
   const handleFileChange = (key, file) => {
     setFiles((prev) => ({ ...prev, [key]: file || null }));
     if (key === "cashflow") {
-      setCashflowNoteOverrides(
-        readStoredObject(CASHFLOW_NOTE_OVERRIDES_STORAGE_KEY),
-      );
-      setPendingCashflowNotes([]);
-      setCashflowNoteModalOpen(false);
       loadCashflowEmployees(file);
-    }
-    if (key === "adcost") {
-      setAdCostOverrides(readStoredObject(AD_COST_OVERRIDES_STORAGE_KEY));
-      setPendingAdCosts([]);
-      setAdCostModalOpen(false);
-    }
-    if (key === "invoice") {
-      loadInvoiceGiftPrices(file);
     }
   };
 
-  const buildOverrideGiftPriceMap = () => {
+  const buildGiftPriceMap = () => {
     const map = {};
     overrideGiftPrices.forEach((item) => {
       const code = normalizeText(item.itemCode).toUpperCase();
@@ -1441,117 +1121,13 @@ export default function CommissionABCCalculator() {
         map[code] = val;
       }
     });
-    invoiceGiftRows.forEach((item) => {
-      const code = normalizeText(item.itemCode).toUpperCase();
-      if (!code) return;
-      const manualVal = parseNumber(item.manualPrice);
-      if (item.manualPrice !== "" && Number.isFinite(manualVal) && manualVal >= 0) {
-        map[code] = manualVal;
-        return;
-      }
-      const unitVal = parseNumber(item.unitPrice);
-      if (Number.isFinite(unitVal) && unitVal > 0) {
-        map[code] = unitVal;
-      }
-    });
     return map;
-  };
-
-  const loadInvoiceGiftPrices = async (file) => {
-    setInvoiceGiftRows([]);
-    if (!file) return;
-
-    try {
-      const wb = await readWorkbook(file);
-      const { rows, headers, sheetMissing } = readSheetRows(wb);
-      if (sheetMissing) return;
-
-      const { headerMap, missing } = ensureHeaders(headers, [
-        "Mã hàng",
-        "Đơn giá",
-        "Giá bán",
-        "Số lượng",
-      ]);
-      if (missing.length) return;
-
-      const storedPrices = await getStoredManualPrices("abc");
-      const giftMap = new Map();
-      rows.forEach((row) => {
-        const itemCode = normalizeText(
-          getCell(row, headerMap, "Mã hàng"),
-        ).toUpperCase();
-        if (!itemCode) return;
-
-        const salePrice = parseNumber(getCell(row, headerMap, "Giá bán"));
-        if (salePrice !== 0) return;
-
-        const note = normalizeText(
-          getCellAlt(row, headerMap, "Ghi chú", "Ghi chú hàng hóa"),
-        );
-        if (normalizeNote(note).startsWith("KTP")) return;
-
-        const itemName = normalizeText(getCell(row, headerMap, "Tên hàng"));
-        const unit = normalizeUnit(getCell(row, headerMap, "ĐVT"));
-        const unitPrice = parseNumber(getCell(row, headerMap, "Đơn giá"));
-        const qty = parseNumber(getCell(row, headerMap, "Số lượng"));
-        const invoiceId = normalizeText(getCell(row, headerMap, "Mã hóa đơn"));
-        const prev = giftMap.get(itemCode);
-
-        if (prev) {
-          prev.qty += qty || 0;
-          if (invoiceId && !prev.invoiceIds.includes(invoiceId)) {
-            prev.invoiceIds.push(invoiceId);
-          }
-          if (itemName && !prev.itemNames.includes(itemName)) {
-            prev.itemNames.push(itemName);
-          }
-          if (unit && !prev.units.includes(unit)) {
-            prev.units.push(unit);
-          }
-          if (!(prev.unitPrice > 0) && unitPrice > 0) {
-            prev.unitPrice = unitPrice;
-          }
-          return;
-        }
-
-        giftMap.set(itemCode, {
-          itemCode,
-          itemName,
-          unit,
-          unitPrice,
-          itemNames: itemName ? [itemName] : [],
-          units: unit ? [unit] : [],
-          qty: qty || 0,
-          invoiceIds: invoiceId ? [invoiceId] : [],
-        });
-      });
-
-      const giftList = Array.from(giftMap.values()).map((item) => {
-        const storedPrice = storedPrices[item.itemCode];
-        return {
-          ...item,
-          manualPrice:
-            storedPrice != null
-              ? storedPrice
-              : item.unitPrice > 0
-                ? item.unitPrice
-                : "",
-        };
-      });
-
-      if (giftList.length > 0) {
-        setInvoiceGiftRows(giftList);
-      }
-    } catch (err) {
-      console.error("Lỗi đọc danh sách hàng tặng:", err);
-    }
   };
 
   const loadCashflowEmployees = async (file) => {
     if (!file) {
       setCashflowEmployees([]);
       setSelectedEmployees([]);
-      setEmployeeTypes({});
       return;
     }
     try {
@@ -1560,34 +1136,26 @@ export default function CommissionABCCalculator() {
       if (sheetMissing) {
         setCashflowEmployees([]);
         setSelectedEmployees([]);
-        setEmployeeTypes({});
         return;
       }
       const { headerMap, missing } = ensureHeaders(headers, ["Nhân viên"]);
       if (missing.length) {
         setCashflowEmployees([]);
         setSelectedEmployees([]);
-        setEmployeeTypes({});
         return;
       }
       const set = new Set();
       rows.forEach((row) => {
         const name = normalizeText(getCell(row, headerMap, "Nhân viên"));
-        if (name && isEmployeeDisplayName(name)) set.add(name);
+        if (name) set.add(name);
       });
       const list = Array.from(set).sort((a, b) => a.localeCompare(b));
       setCashflowEmployees(list);
       setSelectedEmployees(list);
-      const types = {};
-      list.forEach((name) => {
-        types[name] = "online";
-      });
-      setEmployeeTypes(types);
     } catch (err) {
       console.error("Lỗi đọc danh sách nhân viên:", err);
       setCashflowEmployees([]);
       setSelectedEmployees([]);
-      setEmployeeTypes({});
     }
   };
 
@@ -1604,21 +1172,10 @@ export default function CommissionABCCalculator() {
     setMissingReturns([]);
     setMissingGifts([]);
     setMissingPriceModalOpen(false);
-    setMissingPriceModalMode("calculation");
-    setCashflowNoteModalOpen(false);
-    setPendingCashflowNotes([]);
-    setCashflowNoteOverrides(
-      readStoredObject(CASHFLOW_NOTE_OVERRIDES_STORAGE_KEY),
-    );
-    setAdCostModalOpen(false);
-    setPendingAdCosts([]);
-    setAdCostOverrides(readStoredObject(AD_COST_OVERRIDES_STORAGE_KEY));
     setCashflowEmployees([]);
     setSelectedEmployees([]);
-    setEmployeeTypes({});
     setGroupSelected([]);
     setGroupApplied(false);
-    setInvoiceGiftRows([]);
     setOverrideGiftPrices(DEFAULT_SPECIAL_GIFT_PRICES);
     setLogRows([]);
     setInputKey((v) => v + 1);
@@ -1631,17 +1188,10 @@ export default function CommissionABCCalculator() {
     setResults([]);
     setMissingReturns([]);
     setMissingGifts([]);
-    setPendingCashflowNotes([]);
-    setCashflowNoteModalOpen(false);
-    setPendingAdCosts([]);
-    setAdCostModalOpen(false);
 
     const {
       overrideReturnsPrices = {},
       overrideGiftPrices = {},
-      overrideCashflowNotes = cashflowNoteOverrides,
-      overrideAdCosts = adCostOverrides,
-      reviewCashflowNotes = false,
       forceModal = false,
     } = options;
 
@@ -1652,13 +1202,10 @@ export default function CommissionABCCalculator() {
     const missingReturnsLocal = [];
     const missingGiftsLocal = [];
     const unknownCashflowRows = [];
-    const pendingCashflowNoteMap = new Map();
-    const pendingAdCostMap = new Map();
 
     const selectedSet = new Set(selectedEmployees);
     const shouldProcess = (name) =>
       selectedSet.size === 0 || selectedSet.has(name);
-    const getEmployeeType = (name) => employeeTypes[name] || "online";
 
     if (cashflowEmployees.length > 0 && selectedEmployees.length === 0) {
       setErrors(["Vui lòng chọn ít nhất một nhân viên để tính toán."]);
@@ -1667,7 +1214,9 @@ export default function CommissionABCCalculator() {
     }
 
     try {
-      const cashflowFiles = [FILE_DEFS_ABC[0]];
+      const cashflowDef = FILE_DEFS_ABC[0];
+      const cashflowBorderDef = FILE_DEFS_ABC[3];
+      const cashflowFiles = [cashflowDef, cashflowBorderDef];
 
       const employeeMap = new Map();
       const getStats = (name) => {
@@ -1683,8 +1232,6 @@ export default function CommissionABCCalculator() {
             giftDSCP2: [],
             shipFees: [],
             returnDeduct: [],
-            returnDeductPB: [],
-            returnDeductCG: [],
             returnAdd: [],
             adCosts: [],
           });
@@ -1707,7 +1254,6 @@ export default function CommissionABCCalculator() {
               dst: 0,
               cg: 0,
               cgCTDB: 0,
-              dg: 0,
             },
             deduct: {
               giftPB: 0,
@@ -1715,12 +1261,8 @@ export default function CommissionABCCalculator() {
               giftDSCP2: 0,
               shipFee: 0,
               returnDeduct: 0,
-              returnDeductPB: 0,
-              returnDeductCG: 0,
               returnAdd: 0,
               adCost: 0,
-              adCostPB: 0,
-              adCostCG: 0,
             },
           });
         }
@@ -1749,47 +1291,9 @@ export default function CommissionABCCalculator() {
           const value = parseNumber(getCell(row, headerMap, "Giá trị"));
           if (!value) return;
           const note = getCell(row, headerMap, "Ghi chú");
-          const empType = getEmployeeType(employee);
           const stats = getStats(employee);
           const summary = getSummary(employee);
-          const noteText = normalizeText(note);
-          const noteKey = `${employee}||${def.label}||${noteText}`;
-          const overrideClass = overrideCashflowNotes[noteKey];
-          const cls = overrideClass
-            ? classifyCashflowNoteOverride(overrideClass)
-            : classifyCashflowNote(note);
-          const shouldReviewCashflowNote = reviewCashflowNotes || !overrideClass;
-          if (shouldReviewCashflowNote) {
-            const prev = pendingCashflowNoteMap.get(noteKey);
-            const defaultCls = { ...cls };
-            if (!overrideClass && defaultCls.group === "PB" && empType === "admin") {
-              defaultCls.customer = "agency";
-            }
-            const selectedFromClass = getCashflowNoteOptionValue(defaultCls);
-            const selected =
-              overrideClass &&
-                CASHFLOW_NOTE_CLASS_OPTIONS.some((option) => option.value === overrideClass)
-                ? overrideClass
-                : selectedFromClass;
-            if (prev) {
-              prev.value += value;
-              prev.count += 1;
-            } else {
-              pendingCashflowNoteMap.set(noteKey, {
-                key: noteKey,
-                employee,
-                source: def.label,
-                note: noteText,
-                value,
-                count: 1,
-                selected,
-              });
-            }
-            return;
-          }
-          if (!overrideClass && cls.group === "PB" && empType === "admin") {
-            cls.customer = "agency";
-          }
+          const cls = classifyCashflowNote(note);
 
           if (cls.group === "PB") {
             if (cls.customer === "agency") {
@@ -1854,12 +1358,6 @@ export default function CommissionABCCalculator() {
             return;
           }
 
-          if (cls.group === "DG") {
-            stats.DG.normal += value;
-            summary.cashflow.dg += value;
-            return;
-          }
-
           stats.unknown += value;
           unknownCashflowRows.push({
             employee,
@@ -1870,18 +1368,7 @@ export default function CommissionABCCalculator() {
         });
       }
 
-      if (pendingCashflowNoteMap.size > 0) {
-        setPendingCashflowNotes(
-          Array.from(pendingCashflowNoteMap.values()).sort(
-            (a, b) => b.value - a.value,
-          ),
-        );
-        setCashflowNoteModalOpen(true);
-        setWarnings(newWarnings);
-        return;
-      }
-
-      const invoiceFiles = [FILE_DEFS_ABC[2]];
+      const invoiceFiles = [FILE_DEFS_ABC[2], FILE_DEFS_ABC[5]];
       const giftLog = new Map();
       const getGiftLog = (name) => {
         if (!giftLog.has(name)) {
@@ -1950,7 +1437,6 @@ export default function CommissionABCCalculator() {
           const isCG = CG_SKUS.has(itemCode);
           const normalizedPriceList = priceList.replace(/\s+/g, " ").trim();
           const isAgency =
-            getEmployeeType(employee) === "admin" ||
             normalizedPriceList === "BẢNG GIÁ CHUNG" ||
             normalizedPriceList.startsWith("BẢNG GIÁ CHUNG") ||
             normalizedPriceList === "BANG GIA CHUNG" ||
@@ -1962,31 +1448,13 @@ export default function CommissionABCCalculator() {
           const qty = parseNumber(getCell(row, headerMap, "Số lượng"));
           const unit = normalizeUnit(getCell(row, headerMap, "ĐVT"));
 
-          if (salePrice === 0 && SPECIAL_GIFT_RULES.has(itemCode)) {
-            const baseRule = SPECIAL_GIFT_RULES.get(itemCode);
+          if (SPECIAL_GIFT_RULES.has(itemCode)) {
+            const rule = SPECIAL_GIFT_RULES.get(itemCode);
             const overridePrice =
-              overrideGiftPrices[itemCode] ?? storedPrices[itemCode] ?? unitPrice;
-            if (!Number.isFinite(overridePrice) || overridePrice <= 0) {
-              missingGiftsLocal.push({
-                employee,
-                itemCode,
-                itemName,
-                unit,
-                unitPrice,
-                qty,
-                invoiceId,
-                customerCode,
-                customerName,
-                note,
-              });
+              overrideGiftPrices[itemCode] ?? storedPrices[itemCode];
+            if (!Number.isFinite(overridePrice)) {
               return;
             }
-            const rule =
-              itemCode === DSCP1_SKU_1200000
-                ? classifyDSCP1ByPrice(overridePrice)
-                : itemCode === DSCP2_SKU_1500000
-                  ? classifyDSCP2ByPrice(overridePrice)
-                  : baseRule;
             const giftValue = overridePrice * qty;
             if (giftValue > 0) {
               applyDelta(stats, rule, -giftValue);
@@ -2014,84 +1482,84 @@ export default function CommissionABCCalculator() {
             overrideGiftPrices,
             itemCode,
           );
-          const hasStoredGift = storedPrices[itemCode] != null;
-          const hasGiftPrice = hasOverrideGift || hasStoredGift;
+          const overrideGift = hasOverrideGift || storedPrices[itemCode] != null
+            ? overrideGiftPrices[itemCode]
+            : undefined;
 
           if (salePrice === 0) {
             if (noteNormalized.startsWith("KTP")) {
               return;
             }
-
-            const needsManualPrice =
-              unitPrice <= 0 &&
-              unit !== "BAO" &&
-              unit !== "CUỐN" &&
-              unit !== "CUON" &&
-              unit !== "CÁI" &&
-              unit !== "CAI";
-            if (needsManualPrice && !hasGiftPrice) {
-              missingGiftsLocal.push({
-                employee,
-                itemCode,
-                itemName,
-                unit,
-                unitPrice,
-                qty,
-                invoiceId,
-                customerCode,
-                customerName,
-                note,
-              });
-              return;
-            }
-
-            const effectiveUnitPrice = hasGiftPrice
-              ? (overrideGiftPrices[itemCode] ?? storedPrices[itemCode])
-              : unitPrice;
-            const giftValue =
-              unit === "BAO"
-                ? parseBaoValue(itemName) * (qty || 1)
-                : effectiveUnitPrice * qty;
-            if (giftValue) {
-              if (isCG) {
-                if (isCTDB) stats.CG.CTDB -= giftValue;
-                else stats.CG.normal -= giftValue;
-              } else if (normalKey === "agency") {
-                if (isCTDB) stats.PB.agencyCTDB -= giftValue;
-                else stats.PB.agencyNormal -= giftValue;
-              } else if (isCTDB) {
-                stats.PB.retailCTDB -= giftValue;
-              } else {
-                stats.PB.retailNormal -= giftValue;
+            if (itemCode !== "NNV22") {
+              const needsManualPrice =
+                unitPrice <= 0 &&
+                unit !== "BAO" &&
+                unit !== "CUỐN" &&
+                unit !== "CUON" &&
+                unit !== "CÁI" &&
+                unit !== "CAI";
+              if (needsManualPrice && !hasOverrideGift) {
+                missingGiftsLocal.push({
+                  employee,
+                  itemCode,
+                  itemName,
+                  unit,
+                  qty,
+                  invoiceId,
+                  customerCode,
+                  customerName,
+                  note,
+                });
+                return;
               }
-              const log = getGiftLog(employee);
-              if (isCG) {
-                if (isCTDB) log.cgCTDB += giftValue;
-                else log.cgNormal += giftValue;
-              } else if (normalKey === "agency") {
-                if (isCTDB) log.pbAgencyCTDB += giftValue;
-                else log.pbAgency += giftValue;
-              } else if (isCTDB) {
-                log.pbRetailCTDB += giftValue;
-              } else {
-                log.pbRetail += giftValue;
-              }
-              details.giftPB.push([
-                invoiceId,
-                itemCode,
-                itemName,
-                unit,
-                qty,
-                unitPrice,
-                salePrice,
-                giftValue,
-                normalKey === "agency" ? "Đại lý" : "Khách lẻ",
-                note,
-              ]);
-              const summary = getSummary(employee);
-              summary.deduct.giftPB += giftValue;
-            }
 
+              const effectiveUnitPrice = hasOverrideGift
+                ? (overrideGift ?? storedPrices[itemCode])
+                : unitPrice;
+              const giftValue =
+                unit === "BAO"
+                  ? parseBaoValue(itemName) * (qty || 1)
+                  : effectiveUnitPrice * qty;
+              if (giftValue) {
+                if (isCG) {
+                  if (isCTDB) stats.CG.CTDB -= giftValue;
+                  else stats.CG.normal -= giftValue;
+                } else if (normalKey === "agency") {
+                  if (isCTDB) stats.PB.agencyCTDB -= giftValue;
+                  else stats.PB.agencyNormal -= giftValue;
+                } else if (isCTDB) {
+                  stats.PB.retailCTDB -= giftValue;
+                } else {
+                  stats.PB.retailNormal -= giftValue;
+                }
+                const log = getGiftLog(employee);
+                if (isCG) {
+                  if (isCTDB) log.cgCTDB += giftValue;
+                  else log.cgNormal += giftValue;
+                } else if (normalKey === "agency") {
+                  if (isCTDB) log.pbAgencyCTDB += giftValue;
+                  else log.pbAgency += giftValue;
+                } else if (isCTDB) {
+                  log.pbRetailCTDB += giftValue;
+                } else {
+                  log.pbRetail += giftValue;
+                }
+                details.giftPB.push([
+                  invoiceId,
+                  itemCode,
+                  itemName,
+                  unit,
+                  qty,
+                  unitPrice,
+                  salePrice,
+                  giftValue,
+                  normalKey === "agency" ? "Đại lý" : "Khách lẻ",
+                  note,
+                ]);
+                const summary = getSummary(employee);
+                summary.deduct.giftPB += giftValue;
+              }
+            }
           }
 
           const partnerRaw = normalizeText(
@@ -2155,14 +1623,19 @@ export default function CommissionABCCalculator() {
         if (!returnLog.has(name)) {
           returnLog.set(name, {
             normalDeduct: 0,
+            borderDeduct: 0,
             normalAdd: 0,
+            borderAdd: 0,
           });
         }
         return returnLog.get(name);
       };
 
-      const returnsFiles = [FILE_DEFS_ABC[1]];
-      for (const def of returnsFiles) {
+      const returnsFiles = [
+        { def: FILE_DEFS_ABC[1], isBorder: false },
+        { def: FILE_DEFS_ABC[4], isBorder: true },
+      ];
+      for (const { def, isBorder } of returnsFiles) {
         const file = files[def.key];
         if (!file) continue;
         const wb = await readWorkbook(file);
@@ -2183,9 +1656,7 @@ export default function CommissionABCCalculator() {
         }
 
         rows.forEach((row) => {
-          const employee = normalizeText(
-            getCell(row, headerMap, "Người nhận trả"),
-          );
+          const employee = normalizeText(getCell(row, headerMap, "Người bán"));
           if (!employee) return;
           if (!shouldProcess(employee)) return;
           const stats = getStats(employee);
@@ -2209,7 +1680,6 @@ export default function CommissionABCCalculator() {
           const reprice = parseNumber(
             getCellAlt(row, headerMap, "Giá nhập lại", "Giá nhập"),
           );
-          const basePrice = reprice > 0 ? reprice : salePrice;
 
           if (
             salePrice === 0 &&
@@ -2222,82 +1692,59 @@ export default function CommissionABCCalculator() {
             return;
           }
 
-          const cls = classifyReturnGroup(sku, customer, note, basePrice, unit);
-          if (getEmployeeType(employee) === "admin" && cls.group === "PB") {
-            cls.customer = "agency";
-            cls.label = "PB Đại lý";
-            cls.priceKey = `${sku}__agency`;
-          }
+          const cls = classifyReturnGroup(sku, customer);
+          const basePrice = reprice > 0 ? reprice : salePrice;
 
           if (basePrice > 0) {
-            const lineValue = qty * basePrice * 1.05;
+            const lineValue = qty * basePrice * (isBorder ? 1 : 1.05);
             const deduction = lineValue * 0.1;
             applyDelta(stats, cls, -deduction);
             const log = getReturnLog(employee);
-            log.normalDeduct += deduction;
-            const returnDeductRow = [
+            if (isBorder) {
+              log.borderDeduct += deduction;
+            } else {
+              log.normalDeduct += deduction;
+            }
+            details.returnDeduct.push([
               def.label,
               sku,
-              unit,
               qty,
               basePrice,
               salePrice,
               deduction,
               cls.label,
-            ];
-            details.returnDeduct.push(returnDeductRow);
-            if (cls.group === "CG") {
-              details.returnDeductCG.push(returnDeductRow);
-            } else {
-              details.returnDeductPB.push(returnDeductRow);
-            }
+              isBorder ? "Có" : "Không",
+            ]);
             const summary = getSummary(employee);
             summary.deduct.returnDeduct += deduction;
-            if (cls.group === "CG") {
-              summary.deduct.returnDeductCG += deduction;
-            } else {
-              summary.deduct.returnDeductPB += deduction;
-            }
             return;
           }
 
-          const overrideKey = `${cls.priceKey}__normal`;
+          const overrideKey = `${cls.priceKey}__${isBorder ? "border" : "normal"}`;
           const priceValue =
             overrideReturnsPrices[overrideKey] ?? storedPrices[overrideKey];
           if (!(priceValue > 0)) {
             missingReturnsLocal.push({
               employee,
               sku,
-              groupLabel:
-                sku === DSCP1_SKU_1200000
-                  ? "DSCP1 (nhập giá để xác định mốc)"
-                  : sku === DSCP2_SKU_1500000
-                    ? "DSCP2 (nhập giá để xác định mốc)"
-                    : cls.label,
+              groupLabel: cls.label,
               qty,
               salePrice,
               priceKey: overrideKey,
               sourceLabel: def.label,
+              isBorder,
             });
             return;
           }
 
-          const pricedCls = classifyReturnGroup(
-            sku,
-            customer,
-            note,
-            priceValue,
-            unit,
-          );
-          if (getEmployeeType(employee) === "admin" && pricedCls.group === "PB") {
-            pricedCls.customer = "agency";
-            pricedCls.label = "PB Đại lý";
-            pricedCls.priceKey = `${sku}__agency`;
-          }
           const addValue = qty * priceValue;
-          applyDelta(stats, pricedCls, addValue);
+          applyDelta(stats, cls, addValue);
           const log = getReturnLog(employee);
-          log.normalAdd += addValue;
+          if (isBorder) {
+            log.borderAdd += addValue;
+          } else {
+            log.normalAdd += addValue;
+          }
           details.returnAdd.push([
             def.label,
             sku,
@@ -2305,7 +1752,8 @@ export default function CommissionABCCalculator() {
             priceValue,
             salePrice,
             addValue,
-            pricedCls.label,
+            cls.label,
+            isBorder ? "Có" : "Không",
           ]);
           const summary = getSummary(employee);
           summary.deduct.returnAdd += addValue;
@@ -2313,7 +1761,7 @@ export default function CommissionABCCalculator() {
       }
 
       {
-        const def = FILE_DEFS_ABC[3];
+        const def = FILE_DEFS_ABC[6];
         const file = files[def.key];
         if (file) {
           const wb = await readWorkbook(file);
@@ -2335,6 +1783,13 @@ export default function CommissionABCCalculator() {
                 if (!shouldProcess(employee)) return;
                 const stats = getStats(employee);
                 const details = getDetails(employee);
+                const note = getCellAlt(
+                  row,
+                  headerMap,
+                  "Ghi chú",
+                  "Ghi chú chiến dịch",
+                );
+                const cls = classifyAdNote(note);
                 const cost = parseNumber(
                   getCell(row, headerMap, "TỔNG CHI"),
                 );
@@ -2345,44 +1800,22 @@ export default function CommissionABCCalculator() {
                 const campaignName = normalizeText(
                   getCell(row, headerMap, "Sản phẩm chạy quảng cáo"),
                 );
-                const adKey = `${employee}||${campaignName || "(trống)"}`;
-                const selectedAdType = overrideAdCosts[adKey];
-                if (!selectedAdType) {
-                  const prev = pendingAdCostMap.get(adKey);
-                  if (prev) {
-                    prev.cost += cost;
-                    prev.revenue += revenue;
-                    prev.count += 1;
-                  } else {
-                    pendingAdCostMap.set(adKey, {
-                      key: adKey,
-                      employee,
-                      campaignName,
-                      cost,
-                      revenue,
-                      count: 1,
-                      selected: DEFAULT_AD_COST_TYPE,
-                    });
-                  }
-                  return;
-                }
-                const cls = classifyAdCostType(selectedAdType);
                 let deductValue = 0;
                 let status = "ROAS >= 8: Trừ chi phí quảng cáo";
 
                 if (!Number.isFinite(roas) || roas < 0 || roas >= 8) {
                   deductValue = cost;
                   if (deductValue) applyDelta(stats, cls, -deductValue);
-                } else if (roas > 2) {
+                } else if (roas >= 2) {
                   const nonCommissionValue = Math.max(0, revenue);
                   if (nonCommissionValue > 0) {
                     applyNoCommission(stats, cls, nonCommissionValue);
                   }
-                  status = "2 < ROAS < 8: Ghi nhận doanh thu không hưởng hoa hồng";
+                  status = "2 <= ROAS < 8: Ghi nhận doanh thu không hưởng hoa hồng";
                 } else {
                   deductValue = Math.abs(revenue - cost);
                   if (deductValue) applyDelta(stats, cls, -deductValue);
-                  status = "ROAS <= 2: Trừ phần chênh lệch |Doanh thu - Chi phí|";
+                  status = "ROAS < 2: Trừ phần chênh lệch |Doanh thu - Chi phí|";
                 }
                 details.adCosts.push([
                   campaignName,
@@ -2390,33 +1823,33 @@ export default function CommissionABCCalculator() {
                   cost,
                   revenue,
                   deductValue,
-                  getClassLabel(cls),
+                  cls.group === "PB"
+                    ? cls.customer === "agency"
+                      ? cls.program === "CTDB"
+                        ? "PB ĐL CTDB"
+                        : "PB ĐL"
+                      : cls.program === "CTDB"
+                        ? "PB Lẻ CTDB"
+                        : "PB Lẻ"
+                    : cls.group === "CG"
+                      ? cls.program === "CTDB"
+                        ? "CG CTDB"
+                        : "CG"
+                      : cls.group === "DSCP1"
+                        ? "DSCP1 1,200,000"
+                        : cls.group === "DSCP2"
+                          ? "DSCP2 1,500,000"
+                          : "DST",
                   status,
                 ]);
                 if (deductValue) {
                   const summary = getSummary(employee);
                   summary.deduct.adCost += deductValue;
-                  if (cls.group === "PB") {
-                    summary.deduct.adCostPB += deductValue;
-                  } else {
-                    summary.deduct.adCostCG += deductValue;
-                  }
                 }
               });
             }
           }
         }
-      }
-
-      if (pendingAdCostMap.size > 0) {
-        setPendingAdCosts(
-          Array.from(pendingAdCostMap.values()).sort(
-            (a, b) => b.cost - a.cost,
-          ),
-        );
-        setAdCostModalOpen(true);
-        setWarnings(newWarnings);
-        return;
       }
 
       if (newErrors.length) {
@@ -2437,28 +1870,16 @@ export default function CommissionABCCalculator() {
         if (missingGiftsLocal.length > 0) {
           const giftMap = new Map();
           missingGiftsLocal.forEach((item) => {
-            const key = item.itemCode;
+            const key = `${item.itemCode}||${item.unit}||${item.itemName}`;
             const prev = giftMap.get(key);
             if (prev) {
               prev.qty += item.qty || 0;
               if (item.invoiceId) prev.invoiceIds.push(item.invoiceId);
-              if (item.itemName && !prev.itemNames.includes(item.itemName)) {
-                prev.itemNames.push(item.itemName);
-              }
-              if (item.unit && !prev.units.includes(item.unit)) {
-                prev.units.push(item.unit);
-              }
-              if (!(prev.unitPrice > 0) && item.unitPrice > 0) {
-                prev.unitPrice = item.unitPrice;
-              }
             } else {
               giftMap.set(key, {
                 itemCode: item.itemCode,
                 itemName: item.itemName,
                 unit: item.unit,
-                unitPrice: item.unitPrice,
-                itemNames: item.itemName ? [item.itemName] : [],
-                units: item.unit ? [item.unit] : [],
                 qty: item.qty || 0,
                 invoiceIds: item.invoiceId ? [item.invoiceId] : [],
               });
@@ -2469,8 +1890,6 @@ export default function CommissionABCCalculator() {
             const storedPrice = storedPrices[item.itemCode];
             if (storedPrice != null) {
               item.manualPrice = storedPrice;
-            } else if (item.unitPrice > 0) {
-              item.manualPrice = item.unitPrice;
             }
           });
 
@@ -2479,7 +1898,6 @@ export default function CommissionABCCalculator() {
           setMissingGifts([]);
         }
         setMissingPriceModalOpen(true);
-        setMissingPriceModalMode("calculation");
         setWarnings(newWarnings);
         return;
       }
@@ -2487,7 +1905,6 @@ export default function CommissionABCCalculator() {
       if (forceModal) {
         setMissingReturns([]);
         setMissingGifts([]);
-        setMissingPriceModalMode("calculation");
         setMissingPriceModalOpen(true);
         setWarnings(newWarnings);
         return;
@@ -2527,22 +1944,22 @@ export default function CommissionABCCalculator() {
             const log = getReturnLog(name);
             return {
               "Nhân viên": name,
-              "Trừ trả hàng": log.normalDeduct,
-              "Cộng trả hàng": log.normalAdd,
+              "Trừ trả hàng (chính ngạch)": log.normalDeduct,
+              "Trừ trả hàng (tiểu ngạch)": log.borderDeduct,
+              "Cộng trả hàng (chính ngạch)": log.normalAdd,
+              "Cộng trả hàng (tiểu ngạch)": log.borderAdd,
             };
           })
           .sort((a, b) => a["Nhân viên"].localeCompare(b["Nhân viên"]));
-        console.groupCollapsed("LOG | Trả hàng theo nhân viên");
+        console.groupCollapsed(
+          "LOG | Trả hàng theo nhân viên (đủ cả chính/ngạch)",
+        );
         console.table(rows);
         console.groupEnd();
       }
 
       const rows = Array.from(employeeMap.entries())
-        .map(([name, stats]) => ({
-          name,
-          employeeType: getEmployeeType(name),
-          ...stats,
-        }))
+        .map(([name, stats]) => ({ name, ...stats }))
         .sort((a, b) => a.name.localeCompare(b.name));
       setResults(rows);
       if (unknownCashflowRows.length > 0) {
@@ -2575,15 +1992,8 @@ export default function CommissionABCCalculator() {
         .map((name) => {
           const summary = getSummary(name);
           const stat = getStats(name);
-          const pbCommission = calculatePBCommission(stat.PB, getEmployeeType(name));
-          const otherCommission = calculateOtherCommission(stat);
-          const totalCommission =
-            pbCommission.pbTotalCommission + otherCommission.seedling_comm;
           return {
             "Nhân viên": name,
-            "Loại nhân viên":
-              EMPLOYEE_TYPES.find((t) => t.value === getEmployeeType(name))
-                ?.label || getEmployeeType(name),
             "Sổ quỹ PB Lẻ": summary.cashflow.pbRetail,
             "Sổ quỹ PB Lẻ CTDB": summary.cashflow.pbRetailCTDB,
             "Sổ quỹ PB ĐL": summary.cashflow.pbAgency,
@@ -2595,46 +2005,13 @@ export default function CommissionABCCalculator() {
             "Sổ quỹ DST": summary.cashflow.dst,
             "Sổ quỹ CG": summary.cashflow.cg,
             "Sổ quỹ CG CTDB": summary.cashflow.cgCTDB,
-            "Sổ quỹ DG": summary.cashflow.dg,
             "Trừ hàng tặng PB": summary.deduct.giftPB,
             "Trừ hàng tặng DSCP1 1,200,000": summary.deduct.giftDSCP1,
             "Trừ hàng tặng DSCP2 1,500,000": summary.deduct.giftDSCP2,
             "Trừ phí xe công ty": summary.deduct.shipFee,
-            "Trừ trả hàng PB": summary.deduct.returnDeductPB,
-            "Trừ trả hàng CG": summary.deduct.returnDeductCG,
+            "Trừ trả hàng": summary.deduct.returnDeduct,
             "Cộng trả hàng": summary.deduct.returnAdd,
-            "Quảng cáo PB": summary.deduct.adCostPB,
-            "Quảng cáo CG": summary.deduct.adCostCG,
-            "DS sau xử lý PB Lẻ": stat.PB.retailNormal,
-            "DS sau xử lý PB Lẻ CTDB": stat.PB.retailCTDB,
-            "DS sau xử lý PB ĐL": stat.PB.agencyNormal,
-            "DS sau xử lý PB ĐL CTDB": stat.PB.agencyCTDB,
-            "DS sau xử lý DSCP1 1,000,000": stat.DSCP1.tier1000000,
-            "DS sau xử lý DSCP1 1,200,000": stat.DSCP1.tier1200000,
-            "DS sau xử lý DSCP2 1,200,000": stat.DSCP2.tier1200000,
-            "DS sau xử lý DSCP2 1,500,000": stat.DSCP2.tier1500000,
-            "DS sau xử lý CG": stat.CG.normal,
-            "DS sau xử lý CG CTDB": stat.CG.CTDB,
-            "DS sau xử lý DG": stat.DG?.normal || 0,
-            "DS sau xử lý DST": stat.DST,
-            "HH PB Lẻ": pbCommission.pbRetailCommission,
-            "HH PB Đại lý": pbCommission.pbAgencyCommission,
-            "Tổng HH PB-DL": pbCommission.pbTotalCommission,
-            "Tổng HH PB": pbCommission.pbTotalCommission,
-            "HH DSCP1 1,000,000": otherCommission.dscp1_100_comm,
-            "HH DSCP1 1,200,000": otherCommission.dscp1_120_comm,
-            "Tổng HH DSCP1": otherCommission.dscp1_comm,
-            "HH DSCP2 1,200,000": otherCommission.dscp2_120_comm,
-            "HH DSCP2 1,500,000": otherCommission.dscp2_150_comm,
-            "Tổng HH DSCP2": otherCommission.dscp2_comm,
-            "Tổng HH Dừa sáp": otherCommission.dscp_comm,
-            "HH CG": otherCommission.cg_comm,
-            "HH CG CTDB": otherCommission.cg_ctdb_comm,
-            "Tổng HH cây giống khác": otherCommission.cg_total_comm,
-            "HH DG": otherCommission.dg_comm,
-            "HH DST": otherCommission.dst_comm,
-            "Tổng HH cây giống": otherCommission.seedling_comm,
-            "Tổng HH tất cả": totalCommission,
+            "Trừ chi phí quảng cáo": summary.deduct.adCost,
             "Chưa phân loại": stat.unknown || 0,
           };
         })
@@ -2650,77 +2027,10 @@ export default function CommissionABCCalculator() {
   };
 
   const handleCalculateClick = () => {
-    const storedCashflowNoteOverrides = readStoredObject(
-      CASHFLOW_NOTE_OVERRIDES_STORAGE_KEY,
-    );
-    const storedAdCostOverrides = readStoredObject(AD_COST_OVERRIDES_STORAGE_KEY);
-    setCashflowNoteOverrides(storedCashflowNoteOverrides);
-    setAdCostOverrides(storedAdCostOverrides);
     runClassification({
-      overrideGiftPrices: buildOverrideGiftPriceMap(),
-      overrideCashflowNotes: storedCashflowNoteOverrides,
-      overrideAdCosts: storedAdCostOverrides,
-      reviewCashflowNotes: true,
+      forceModal: true,
+      overrideGiftPrices: buildGiftPriceMap(),
     });
-  };
-
-  const handleConfirmCashflowNotes = () => {
-    const nextOverrides = { ...cashflowNoteOverrides };
-    pendingCashflowNotes.forEach((item) => {
-      nextOverrides[item.key] = item.selected || "UNKNOWN";
-    });
-    saveStoredObject(CASHFLOW_NOTE_OVERRIDES_STORAGE_KEY, nextOverrides);
-    setCashflowNoteOverrides(nextOverrides);
-    setCashflowNoteModalOpen(false);
-    runClassification({
-      overrideGiftPrices: buildOverrideGiftPriceMap(),
-      overrideCashflowNotes: nextOverrides,
-      overrideAdCosts: adCostOverrides,
-    });
-  };
-
-  const handleConfirmAdCosts = () => {
-    const nextOverrides = { ...adCostOverrides };
-    pendingAdCosts.forEach((item) => {
-      nextOverrides[item.key] = item.selected || DEFAULT_AD_COST_TYPE;
-    });
-    saveStoredObject(AD_COST_OVERRIDES_STORAGE_KEY, nextOverrides);
-    setAdCostOverrides(nextOverrides);
-    setAdCostModalOpen(false);
-    runClassification({
-      overrideGiftPrices: buildOverrideGiftPriceMap(),
-      overrideCashflowNotes: cashflowNoteOverrides,
-      overrideAdCosts: nextOverrides,
-    });
-  };
-
-  const handleSaveInvoiceGiftPrices = async () => {
-    const giftPriceMap = {};
-    let invalid = false;
-
-    invoiceGiftRows.forEach((item) => {
-      const code = normalizeText(item.itemCode).toUpperCase();
-      if (!code) return;
-      if (item.manualPrice == null || item.manualPrice === "") {
-        invalid = true;
-        return;
-      }
-      const val = parseNumber(item.manualPrice);
-      if (!Number.isFinite(val) || val < 0) {
-        invalid = true;
-        return;
-      }
-      giftPriceMap[code] = val;
-    });
-
-    if (invalid) {
-      setErrors(["Vui lòng nhập giá hợp lệ cho tất cả hàng tặng."]);
-      return;
-    }
-
-    const existing = await getStoredManualPrices("abc");
-    await saveAllManualPrices("abc", { ...existing, ...giftPriceMap });
-    setErrors([]);
   };
 
   const handleConfirmMissingPrices = async () => {
@@ -2767,18 +2077,9 @@ export default function CommissionABCCalculator() {
     await saveAllManualPrices("abc", { ...existing, ...returnsPriceMap, ...giftPriceMap });
 
     setMissingPriceModalOpen(false);
-    if (missingPriceModalMode === "invoice") {
-      setErrors([]);
-      setMissingGifts([]);
-      setMissingPriceModalMode("calculation");
-      return;
-    }
-
     runClassification({
       overrideReturnsPrices: returnsPriceMap,
       overrideGiftPrices: giftPriceMap,
-      overrideCashflowNotes: cashflowNoteOverrides,
-      overrideAdCosts: adCostOverrides,
     });
   };
 
@@ -2824,11 +2125,11 @@ export default function CommissionABCCalculator() {
 
         <div className="rounded-3xl border border-white/50 bg-white/70 p-4 shadow-[0_10px_30px_-18px_rgba(15,23,42,0.25)] backdrop-blur-xl">
           <div className="mb-3 text-sm font-semibold text-slate-800">
-            Tải lên 4 file
+            Tải lên 7 file
           </div>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             {FILE_DEFS_ABC.map((def) => (
-              <div
+              <label
                 key={def.key}
                 className="flex flex-col gap-2 rounded-2xl border border-dashed border-slate-200 bg-white/70 p-4 text-sm shadow-sm"
               >
@@ -2853,82 +2154,16 @@ export default function CommissionABCCalculator() {
                 <span className="text-xs text-slate-500">
                   {files[def.key]?.name || "Chưa chọn file"}
                 </span>
-              </div>
+              </label>
             ))}
           </div>
         </div>
-
-        {invoiceGiftRows.length > 0 && (
-          <div className="rounded-3xl border border-white/50 bg-white/70 p-4 shadow-sm backdrop-blur-xl">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <div className="text-sm font-semibold text-slate-800">
-                  Chỉnh giá hàng tặng từ file hóa đơn
-                </div>
-                <div className="mt-0.5 text-xs text-slate-400">
-                  Giá sẽ được dùng khi tính hoa hồng và có thể lưu để lần sau tự điền.
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={handleSaveInvoiceGiftPrices}
-                className="rounded-full bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-slate-700"
-              >
-                Lưu giá
-              </button>
-            </div>
-            <div className="mt-3 overflow-auto rounded-2xl border bg-white/80">
-              <table className="w-full min-w-[720px] text-xs">
-                <thead className="bg-slate-50 text-slate-600">
-                  <tr>
-                    <th className="px-3 py-2 text-left">Mã hàng</th>
-                    <th className="px-3 py-2 text-left">Tên hàng</th>
-                    <th className="px-3 py-2 text-left">ĐVT</th>
-                    <th className="px-3 py-2 text-right">Số lượng</th>
-
-                    <th className="px-3 py-2 text-right">Giá nhập</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {invoiceGiftRows.map((item, idx) => (
-                    <tr key={`${item.itemCode}-${idx}`} className="border-t">
-                      <td className="px-3 py-2 font-medium text-slate-800">
-                        {item.itemCode}
-                      </td>
-                      <td className="px-3 py-2">{item.itemName}</td>
-                      <td className="px-3 py-2">{item.unit}</td>
-                      <td className="px-3 py-2 text-right">{item.qty}</td>
-
-                      <td className="px-3 py-2 text-right">
-                        <input
-                          className="w-28 rounded border px-2 py-1 text-right"
-                          value={item.manualPrice || ""}
-                          onChange={(e) => {
-                            const value = e.target.value;
-                            setInvoiceGiftRows((prev) => {
-                              const next = [...prev];
-                              next[idx] = {
-                                ...next[idx],
-                                manualPrice: value,
-                              };
-                              return next;
-                            });
-                          }}
-                        />
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
 
         {cashflowEmployees.length > 0 && (
           <div className="rounded-3xl border border-white/50 bg-white/70 p-4 shadow-sm backdrop-blur-xl">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="text-sm font-semibold text-slate-800">
-                Chọn nhân viên cần tính (từ file Sổ quỹ)
+                Chọn nhân viên cần tính (từ file Sổ quỹ chính ngạch)
               </div>
               <div className="flex gap-2">
                 <button
@@ -2951,7 +2186,6 @@ export default function CommissionABCCalculator() {
               <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                 {cashflowEmployees.map((name) => {
                   const checked = selectedEmployees.includes(name);
-                  const typeValue = employeeTypes[name] || "online";
                   return (
                     <div key={name} className="flex items-center gap-2 text-sm">
                       <input
@@ -2966,23 +2200,6 @@ export default function CommissionABCCalculator() {
                         }}
                       />
                       <span className="flex-1 truncate">{name}</span>
-                      <select
-                        value={typeValue}
-                        onChange={(e) => {
-                          const value = e.target.value;
-                          setEmployeeTypes((prev) => ({
-                            ...prev,
-                            [name]: value,
-                          }));
-                        }}
-                        className="rounded-full border bg-white px-2 py-1 text-xs"
-                      >
-                        {EMPLOYEE_TYPES.map((type) => (
-                          <option key={type.value} value={type.value}>
-                            {type.label}
-                          </option>
-                        ))}
-                      </select>
                     </div>
                   );
                 })}
@@ -3016,7 +2233,7 @@ export default function CommissionABCCalculator() {
                   PB: {formatMoney(totals.pb)} · DSCP1:{" "}
                   {formatMoney(totals.dscp1)} · DSCP2:{" "}
                   {formatMoney(totals.dscp2)} · DST: {formatMoney(totals.dst)} ·
-                  CG: {formatMoney(totals.cg)} · DG: {formatMoney(totals.dg)}
+                  CG: {formatMoney(totals.cg)}
                 </div>
               </div>
               <div className="flex items-center gap-3">
@@ -3050,7 +2267,6 @@ export default function CommissionABCCalculator() {
                 <thead className="text-[11px] uppercase text-slate-500">
                   <tr className="border-b border-slate-100">
                     <th className="px-3 py-2 text-left">Nhân viên</th>
-                    <th className="px-3 py-2 text-left">Loại</th>
                     <th className="px-3 py-2 text-right">PB Lẻ DS</th>
                     <th className="px-3 py-2 text-right">PB Lẻ Rate</th>
                     <th className="px-3 py-2 text-right">HH PB Lẻ</th>
@@ -3063,7 +2279,6 @@ export default function CommissionABCCalculator() {
                     <th className="px-3 py-2 text-right">HH DSCP2 1,500,000</th>
                     <th className="px-3 py-2 text-right">HH CG</th>
                     <th className="px-3 py-2 text-right">HH CG CTDB</th>
-                    <th className="px-3 py-2 text-right">HH DG</th>
                     <th className="px-3 py-2 text-right">HH DST</th>
                     <th className="px-3 py-2 text-right">Tổng HH</th>
                   </tr>
@@ -3076,11 +2291,6 @@ export default function CommissionABCCalculator() {
                     >
                       <td className="px-3 py-2 font-semibold text-slate-800">
                         {r.name}
-                      </td>
-                      <td className="px-3 py-2">
-                        {EMPLOYEE_TYPES.find(
-                          (type) => type.value === (r.employeeType || "online"),
-                        )?.label || r.employeeType || "Online"}
                       </td>
                       <td className="px-3 py-2 text-right">
                         {formatMoney(r.pbRetailTotal)}
@@ -3117,9 +2327,6 @@ export default function CommissionABCCalculator() {
                       </td>
                       <td className="px-3 py-2 text-right">
                         {formatMoney(r.cg_ctdb_comm)}
-                      </td>
-                      <td className="px-3 py-2 text-right">
-                        {formatMoney(r.dg_comm)}
                       </td>
                       <td className="px-3 py-2 text-right">
                         {formatMoney(r.dst_comm)}
@@ -3215,7 +2422,6 @@ export default function CommissionABCCalculator() {
                       </th>
                       <th className="px-3 py-2 text-right">HH CG</th>
                       <th className="px-3 py-2 text-right">HH CG CTDB</th>
-                      <th className="px-3 py-2 text-right">HH DG</th>
                       <th className="px-3 py-2 text-right">HH DST</th>
                       <th className="px-3 py-2 text-right">Tổng HH</th>
                     </tr>
@@ -3260,9 +2466,6 @@ export default function CommissionABCCalculator() {
                           {formatMoney(r.cg_ctdb_comm)}
                         </td>
                         <td className="px-3 py-2 text-right">
-                          {formatMoney(r.dg_comm)}
-                        </td>
-                        <td className="px-3 py-2 text-right">
                           {formatMoney(r.dst_comm)}
                         </td>
                         <td className="px-3 py-2 text-right font-semibold text-emerald-700">
@@ -3279,188 +2482,17 @@ export default function CommissionABCCalculator() {
       </div>
 
       <Modal
-        open={cashflowNoteModalOpen}
-        onClose={() => setCashflowNoteModalOpen(false)}
-        title="Xác nhận ghi chú sổ quỹ"
-        subtitle="Kiểm tra và chọn nhóm doanh số cho tất cả ghi chú trước khi tính."
-        showClose={false}
-      >
-        <div className="space-y-4">
-          <div className="overflow-auto rounded-2xl border bg-white/80">
-            <table className="w-full min-w-[760px] text-xs">
-              <thead className="bg-slate-50 text-slate-600">
-                <tr>
-                  <th className="px-3 py-2 text-left">Nhân viên</th>
-                  <th className="px-3 py-2 text-left">Nguồn</th>
-                  <th className="px-3 py-2 text-left">Ghi chú</th>
-                  <th className="px-3 py-2 text-right">Giá trị</th>
-                  <th className="px-3 py-2 text-right">Số dòng</th>
-                  <th className="px-3 py-2 text-left">Đánh dấu là</th>
-                </tr>
-              </thead>
-              <tbody>
-                {pendingCashflowNotes.map((item, idx) => (
-                  <tr key={item.key} className="border-t">
-                    <td className="px-3 py-2">{item.employee}</td>
-                    <td className="px-3 py-2">{item.source}</td>
-                    <td className="px-3 py-2 font-medium text-slate-800">
-                      {item.note || "—"}
-                    </td>
-                    <td className="px-3 py-2 text-right">
-                      {formatMoney(item.value)}
-                    </td>
-                    <td className="px-3 py-2 text-right">{item.count}</td>
-                    <td className="px-3 py-2">
-                      <select
-                        className="w-full rounded border bg-white px-2 py-1 text-sm"
-                        value={item.selected}
-                        onChange={(e) => {
-                          const value = e.target.value;
-                          setPendingCashflowNotes((prev) => {
-                            const next = [...prev];
-                            next[idx] = { ...next[idx], selected: value };
-                            return next;
-                          });
-                        }}
-                      >
-                        {CASHFLOW_NOTE_CLASS_OPTIONS.map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">
-            <button
-              type="button"
-              onClick={() => setCashflowNoteModalOpen(false)}
-              className="inline-flex items-center justify-center rounded-2xl border bg-white/70 px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-white active:scale-[0.98]"
-            >
-              Hủy
-            </button>
-            <button
-              type="button"
-              onClick={handleConfirmCashflowNotes}
-              className="inline-flex items-center justify-center gap-2 rounded-2xl bg-amber-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-amber-700 active:scale-[0.98]"
-            >
-              Tiếp tục tính
-            </button>
-          </div>
-        </div>
-      </Modal>
-
-      <Modal
-        open={adCostModalOpen}
-        onClose={() => setAdCostModalOpen(false)}
-        title="Xác nhận loại quảng cáo"
-        subtitle="Kiểm tra và chọn loại quảng cáo cho từng chiến dịch trước khi tính."
-        showClose={false}
-      >
-        <div className="space-y-4">
-          <div className="overflow-auto rounded-2xl border bg-white/80">
-            <table className="w-full min-w-[760px] text-xs">
-              <thead className="bg-slate-50 text-slate-600">
-                <tr>
-                  <th className="px-3 py-2 text-left">Nhân viên</th>
-                  <th className="px-3 py-2 text-left">
-                    Sản phẩm chạy quảng cáo
-                  </th>
-                  <th className="px-3 py-2 text-right">Tổng chi</th>
-                  <th className="px-3 py-2 text-right">Doanh thu</th>
-                  <th className="px-3 py-2 text-right">Số dòng</th>
-                  <th className="px-3 py-2 text-left">Đánh dấu là</th>
-                </tr>
-              </thead>
-              <tbody>
-                {pendingAdCosts.map((item, idx) => (
-                  <tr key={item.key} className="border-t">
-                    <td className="px-3 py-2">{item.employee}</td>
-                    <td className="px-3 py-2 font-medium text-slate-800">
-                      {item.campaignName || "—"}
-                    </td>
-                    <td className="px-3 py-2 text-right">
-                      {formatMoney(item.cost)}
-                    </td>
-                    <td className="px-3 py-2 text-right">
-                      {formatMoney(item.revenue)}
-                    </td>
-                    <td className="px-3 py-2 text-right">{item.count}</td>
-                    <td className="px-3 py-2">
-                      <select
-                        className="w-full rounded border bg-white px-2 py-1 text-sm"
-                        value={item.selected}
-                        onChange={(e) => {
-                          const value = e.target.value;
-                          setPendingAdCosts((prev) => {
-                            const next = [...prev];
-                            next[idx] = { ...next[idx], selected: value };
-                            return next;
-                          });
-                        }}
-                      >
-                        {AD_COST_TYPE_OPTIONS.map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">
-            <button
-              type="button"
-              onClick={() => setAdCostModalOpen(false)}
-              className="inline-flex items-center justify-center rounded-2xl border bg-white/70 px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-white active:scale-[0.98]"
-            >
-              Hủy
-            </button>
-            <button
-              type="button"
-              onClick={handleConfirmAdCosts}
-              className="inline-flex items-center justify-center gap-2 rounded-2xl bg-amber-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-amber-700 active:scale-[0.98]"
-            >
-              Tiếp tục tính
-            </button>
-          </div>
-        </div>
-      </Modal>
-
-      <Modal
         open={missingPriceModalOpen}
-        onClose={() => {
-          setMissingPriceModalOpen(false);
-          setMissingPriceModalMode("calculation");
-        }}
-        title={
-          missingPriceModalMode === "invoice"
-            ? "Cập nhật giá hàng tặng"
-            : "Bổ sung giá còn thiếu"
-        }
-        subtitle={
-          missingPriceModalMode === "invoice"
-            ? "Kiểm tra giá các sản phẩm hàng tặng trong file hóa đơn. Giá sẽ được lưu để lần sau tự dùng lại."
-            : ""
-        }
+        onClose={() => setMissingPriceModalOpen(false)}
+        title="Bổ sung giá còn thiếu"
+        subtitle=""
         showClose={false}
       >
         <div className="space-y-4">
           {missingGifts.length > 0 && (
             <div>
               <div className="text-sm font-semibold text-slate-800">
-                {missingPriceModalMode === "invoice"
-                  ? "Danh sách hàng tặng (nhập giá không gồm VAT)"
-                  : "Hàng tặng thiếu giá (nhập giá không gồm VAT)"}
+                Hàng tặng thiếu giá (nhập giá không gồm VAT)
               </div>
               <div className="mt-3 overflow-auto rounded-2xl border bg-white/80">
                 <table className="w-full text-xs">
@@ -3629,10 +2661,7 @@ export default function CommissionABCCalculator() {
           <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">
             <button
               type="button"
-              onClick={() => {
-                setMissingPriceModalOpen(false);
-                setMissingPriceModalMode("calculation");
-              }}
+              onClick={() => setMissingPriceModalOpen(false)}
               className="inline-flex items-center justify-center rounded-2xl border bg-white/70 px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-white active:scale-[0.98]"
             >
               Hủy
@@ -3642,7 +2671,7 @@ export default function CommissionABCCalculator() {
               onClick={handleConfirmMissingPrices}
               className="inline-flex items-center justify-center gap-2 rounded-2xl bg-amber-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-amber-700 active:scale-[0.98]"
             >
-              {missingPriceModalMode === "invoice" ? "Lưu giá" : "Tiếp tục tính"}
+              Tiếp tục tính
             </button>
           </div>
         </div>

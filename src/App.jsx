@@ -1,9 +1,10 @@
 // src/App.jsx
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import { Capacitor } from "@capacitor/core";
 import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "./context/AuthContext";
 import { canAccessScreen, getAllowedScreens } from "./utils/screenAccess";
+import { requestStartupNativePermissions } from "./utils/nativeAppPermissions";
 
 import DashboardLayout from "./components/DashboardLayout";
 
@@ -45,6 +46,9 @@ const WorkLocationManager = lazy(() => import("./components/attendance/WorkLocat
 const AttendanceManager = lazy(() => import("./components/attendance/AttendanceManager"));
 const StandaloneAttendance = lazy(() => import("./components/attendance/StandaloneAttendance"));
 const TestCaseChatBotManager = lazy(() => import("./components/testChatBot/TestChatBot"));
+const DuaSapPublicPage = lazy(() => import("./components/duasap/DuaSapPublicPage"));
+const DuaSapDetailPage = lazy(() => import("./components/duasap/DuaSapDetailPage"));
+const DuaSapManager = lazy(() => import("./components/duasap/DuaSapManager"));
 
 const ADMIN_ROUTE_BY_SCREEN = {
   pages: "/admin/pages",
@@ -71,6 +75,7 @@ const ADMIN_ROUTE_BY_SCREEN = {
   attendance_locations: "/admin/attendance-locations",
   attendance_self: "/admin/my-attendance",
   payroll: "/admin/payroll",
+  dua_sap: "/admin/dua-sap",
 };
 
 const adminRoutes = [
@@ -97,6 +102,7 @@ const adminRoutes = [
   { path: "attendance-shifts", screenId: "attendance_shifts", element: <AttendanceShiftManager /> },
   { path: "attendance-locations", screenId: "attendance_locations", element: <WorkLocationManager /> },
   { path: "payroll", screenId: "payroll", element: <PayrollManager /> },
+  { path: "dua-sap", screenId: "dua_sap", element: <DuaSapManager /> },
 ];
 
 // Guard cho trang độc lập: chưa login → /login?redirect=<current>
@@ -177,6 +183,10 @@ function HomeRoute() {
 export default function App() {
   const { isLoggedIn } = useAuth();
 
+  useEffect(() => {
+    requestStartupNativePermissions();
+  }, []);
+
   return (
     <Suspense fallback={<AppLoader />}>
       <Routes>
@@ -223,6 +233,10 @@ export default function App() {
             </RequireAuth>
           }
         />
+
+        {/* Trang công khai cây dừa sáp — không cần đăng nhập */}
+        <Route path="/dua-sap" element={<DuaSapPublicPage />} />
+        <Route path="/dua-sap/:maCay" element={<DuaSapDetailPage />} />
 
         <Route path="/policy" element={<PolicyPage />} />
         <Route path="/terms-of-service" element={<TermsOfServicePage />} />

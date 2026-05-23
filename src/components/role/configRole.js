@@ -22,6 +22,7 @@ const APP_PERMISSIONS = {
     { id: "attendance_shifts", name: "Ca làm" },
     { id: "attendance_locations", name: "Vị trí chấm công" },
     { id: "payroll", name: "Chấm công tính lương" },
+    { id: "dua_sap", name: "Quản Lý Dừa Sáp" },
   ],
   actions: [
     { id: "view", name: "Xem", color: "blue" },

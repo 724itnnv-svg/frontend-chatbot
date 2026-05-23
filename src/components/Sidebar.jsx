@@ -20,6 +20,7 @@ import {
   Wallet,
   Workflow,
   BellRing,
+  TreePine,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { canAccessScreen, getAllowedScreens, hasFullAccess } from "../utils/screenAccess";
@@ -50,6 +51,7 @@ const MENU_CONFIG = [
 ];
 
 MENU_CONFIG.push({ id: "payroll", path: "/admin/payroll", label: "Chấm công tính lương", icon: Wallet });
+MENU_CONFIG.push({ id: "dua_sap", path: "/admin/dua-sap", label: "Quản lý Dừa Sáp", icon: TreePine });
 
 const MENU_GROUPS = [
   {
@@ -81,6 +83,12 @@ const MENU_GROUPS = [
     label: "Hệ thống & AI",
     icon: ShieldCheck,
     items: ["admin_dashboard", "admin_products_tool", "admin_vectorstore_tool", "admin_agent", "admin_logs", "notifications"],
+  },
+  {
+    id: "agriculture",
+    label: "Nông nghiệp",
+    icon: TreePine,
+    items: ["dua_sap"],
   },
 ];
 

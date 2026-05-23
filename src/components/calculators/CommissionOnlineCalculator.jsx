@@ -7,6 +7,7 @@ import {
   RefreshCcw,
   X,
 } from "lucide-react";
+import { useRef } from "react";
 import * as XLSX from "xlsx";
 
 const UNIT_CONVERSION = {
@@ -87,6 +88,30 @@ const EMPLOYEE_TYPES = [
 ];
 
 const VN_LOCALE = "vi-VN";
+
+const STORAGE_KEY_RETURN_PRICES = "commission_return_prices_v1";
+const STORAGE_KEY_AMBIGUOUS = "commission_ambiguous_v1";
+
+const loadStoredReturnPrices = () => {
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY_RETURN_PRICES) || "{}"); }
+  catch { return {}; }
+};
+const saveStoredReturnPrices = (prices) => {
+  try {
+    const merged = { ...loadStoredReturnPrices(), ...prices };
+    localStorage.setItem(STORAGE_KEY_RETURN_PRICES, JSON.stringify(merged));
+  } catch { /* ignore */ }
+};
+const loadStoredAmbiguous = () => {
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY_AMBIGUOUS) || "{}"); }
+  catch { return {}; }
+};
+const saveStoredAmbiguous = (choices) => {
+  try {
+    const merged = { ...loadStoredAmbiguous(), ...choices };
+    localStorage.setItem(STORAGE_KEY_AMBIGUOUS, JSON.stringify(merged));
+  } catch { /* ignore */ }
+};
 
 const formatMoney = (n) =>
   Number(n || 0).toLocaleString(VN_LOCALE, { maximumFractionDigits: 0 });
@@ -347,6 +372,7 @@ function Modal({ open, title, subtitle, children, onClose, showClose = true }) {
 }
 
 export default function CommissionOnlineCalculator() {
+  const fileDataCacheRef = useRef({});
   const [files, setFiles] = useState({
     cashflow: null,
     returns: null,
@@ -370,6 +396,55 @@ export default function CommissionOnlineCalculator() {
   const [missingGifts, setMissingGifts] = useState([]);
   const [excludedGiftCodes, setExcludedGiftCodes] = useState([]);
   const [newGiftCode, setNewGiftCode] = useState("");
+  const [excludedReturnCodes, setExcludedReturnCodes] = useState([]);
+  const [newReturnCode, setNewReturnCode] = useState("");
+  const [ambiguousCashflowModalOpen, setAmbiguousCashflowModalOpen] =
+    useState(false);
+  const [ambiguousCashflowRows, setAmbiguousCashflowRows] = useState([]);
+  const [ambiguousChoices, setAmbiguousChoices] = useState({});
+  const [invoiceGiftItems, setInvoiceGiftItems] = useState([]);
+  const [giftPriceOverrides, setGiftPriceOverrides] = useState({});
+  const [employeeMerges, setEmployeeMerges] = useState([]);
+  const [newMergeLabel, setNewMergeLabel] = useState("");
+  const [newMergeMembers, setNewMergeMembers] = useState([]);
+
+  const getCachedWorkbook = async (key, file) => {
+    const cached = fileDataCacheRef.current[key];
+    if (cached?.file === file) {
+      if (cached.workbook) return cached.workbook;
+      if (cached.workbookPromise) return cached.workbookPromise;
+    }
+
+    const entry = {
+      file,
+      workbook: null,
+      workbookPromise: null,
+      sheets: new Map(),
+    };
+    entry.workbookPromise = readWorkbook(file)
+      .then((workbook) => {
+        entry.workbook = workbook;
+        return workbook;
+      })
+      .catch((err) => {
+        if (fileDataCacheRef.current[key] === entry) {
+          delete fileDataCacheRef.current[key];
+        }
+        throw err;
+      });
+    fileDataCacheRef.current[key] = entry;
+    return entry.workbookPromise;
+  };
+
+  const getCachedSheetRows = async (key, file, sheetName) => {
+    const workbook = await getCachedWorkbook(key, file);
+    const entry = fileDataCacheRef.current[key];
+    const sheetKey = sheetName || "__default__";
+    if (!entry.sheets.has(sheetKey)) {
+      entry.sheets.set(sheetKey, readSheetRows(workbook, sheetName));
+    }
+    return entry.sheets.get(sheetKey);
+  };
 
   const allFilesReady = ["cashflow", "returns", "invoice"].every((key) => files[key]);
 
@@ -387,12 +462,9 @@ export default function CommissionOnlineCalculator() {
 
   const groupSummary = useMemo(() => {
     if (groupSelected.length < 2 || groupSelected.length > 3) return null;
-    const rows = results.filter(
-      (r) =>
-        groupSelected.includes(r.name) &&
-        (r.employeeType || "online") === "online"
-    );
+    const rows = results.filter((r) => groupSelected.includes(r.name));
     if (rows.length !== groupSelected.length) return null;
+    const allMkt = rows.every((r) => r.employeeType === "mkt");
     const retailNormal = rows.reduce((s, r) => s + r.retailNormal, 0);
     const retailCTDB = rows.reduce((s, r) => s + r.retailCTDB, 0);
     const agencyNormal = rows.reduce((s, r) => s + r.agencyNormal, 0);
@@ -403,8 +475,14 @@ export default function CommissionOnlineCalculator() {
     );
     const totalRetail = retailNormal + retailCTDB;
     const totalAgency = agencyNormal + agencyCTDB;
-    const retailRate = totalRetail < 100000000 ? 0.07 : 0.1;
-    const agencyRate = totalAgency < 30000000 ? 0.01 : 0.03;
+    let retailRate, agencyRate;
+    if (allMkt) {
+      retailRate = 0.05;
+      agencyRate = totalAgency >= 30000000 ? 0.015 : 0.005;
+    } else {
+      retailRate = totalRetail < 100000000 ? 0.07 : 0.1;
+      agencyRate = totalAgency < 30000000 ? 0.01 : 0.03;
+    }
     const retailCommissionable = Math.max(0, retailNormal - retailNoCommission);
     const retailCommission =
       retailCommissionable * retailRate + retailCTDB * retailRate * 0.5;
@@ -412,8 +490,8 @@ export default function CommissionOnlineCalculator() {
       agencyNormal * agencyRate + agencyCTDB * agencyRate * 0.5;
     const totalCommission = retailCommission + agencyCommission;
     return {
-      name: "Tổng 3 nhân viên",
-      employeeType: "online",
+      name: `Tổng ${groupSelected.length} nhân viên`,
+      employeeType: allMkt ? "mkt" : "online",
       retailNormal,
       retailCTDB,
       retailNoCommission,
@@ -434,11 +512,7 @@ export default function CommissionOnlineCalculator() {
     const groupRetailRate = groupSummary.retailRate;
     const groupAgencyRate = groupSummary.agencyRate;
     return results
-      .filter(
-        (r) =>
-          groupSelected.includes(r.name) &&
-          (r.employeeType || "online") === "online"
-      )
+      .filter((r) => groupSelected.includes(r.name))
       .map((r) => {
         const retailCommissionable = Math.max(
           0,
@@ -453,7 +527,7 @@ export default function CommissionOnlineCalculator() {
         const totalCommission = retailCommission + agencyCommission;
         return {
           name: r.name,
-          employeeType: "online",
+          employeeType: r.employeeType,
           retailNormal: r.retailNormal,
           retailCTDB: r.retailCTDB,
           retailNoCommission: r.retailNoCommission || 0,
@@ -476,8 +550,8 @@ export default function CommissionOnlineCalculator() {
     return [
       ...summaryRows,
       ...groupAdjustedMembers.map((r) => ({
-        "Nhân viên": `${r.name} (Nhóm 3)`,
-        "Loại nhân viên": "Online",
+        "Nhân viên": `${r.name} (Nhóm ${groupSelected.length})`,
+        "Loại nhân viên": EMPLOYEE_TYPES.find((t) => t.value === r.employeeType)?.label || r.employeeType,
         "Lẻ thường": r.retailNormal,
         "Lẻ không tính HH (Adcost)": r.retailNoCommission || 0,
         "Lẻ CTDB": r.retailCTDB,
@@ -485,15 +559,15 @@ export default function CommissionOnlineCalculator() {
         "Đại lý CTDB": r.agencyCTDB,
         "Tổng lẻ": r.totalRetail,
         "Tổng đại lý": r.totalAgency,
-        "Rate lẻ": (r.retailRate * 100).toFixed(0) + "%",
-        "Rate đại lý": (r.agencyRate * 100).toFixed(0) + "%",
+        "Rate lẻ": parseFloat((r.retailRate * 100).toFixed(2)) + "%",
+        "Rate đại lý": parseFloat((r.agencyRate * 100).toFixed(2)) + "%",
         "Hoa hồng lẻ": r.retailCommission,
         "Hoa hồng đại lý": r.agencyCommission,
         "Tổng nhận": r.totalCommission,
       })),
       {
-        "Nhân viên": "Tổng 3 nhân viên",
-        "Loại nhân viên": "Online",
+        "Nhân viên": groupSummary.name,
+        "Loại nhân viên": EMPLOYEE_TYPES.find((t) => t.value === groupSummary.employeeType)?.label || groupSummary.employeeType,
         "Lẻ thường": groupSummary.retailNormal,
         "Lẻ không tính HH (Adcost)": groupSummary.retailNoCommission || 0,
         "Lẻ CTDB": groupSummary.retailCTDB,
@@ -501,14 +575,38 @@ export default function CommissionOnlineCalculator() {
         "Đại lý CTDB": groupSummary.agencyCTDB,
         "Tổng lẻ": groupSummary.totalRetail,
         "Tổng đại lý": groupSummary.totalAgency,
-        "Rate lẻ": (groupSummary.retailRate * 100).toFixed(0) + "%",
-        "Rate đại lý": (groupSummary.agencyRate * 100).toFixed(0) + "%",
+        "Rate lẻ": parseFloat((groupSummary.retailRate * 100).toFixed(2)) + "%",
+        "Rate đại lý": parseFloat((groupSummary.agencyRate * 100).toFixed(2)) + "%",
         "Hoa hồng lẻ": groupSummary.retailCommission,
         "Hoa hồng đại lý": groupSummary.agencyCommission,
         "Tổng nhận": groupSummary.totalCommission,
       },
     ];
   }, [groupAdjustedMembers, groupSummary, summaryRows]);
+
+  const groupedMissingReturns = useMemo(() => {
+    const grouped = new Map();
+    missingReturns.forEach((item) => {
+      const current = grouped.get(item.priceKey);
+      if (current) {
+        current.totalQty += item.qty || 0;
+        if (item.employee) current.employees.add(item.employee);
+        if (item.manualPrice != null && item.manualPrice !== "") {
+          current.manualPrice = item.manualPrice;
+        }
+        return;
+      }
+      grouped.set(item.priceKey, {
+        ...item,
+        totalQty: item.qty || 0,
+        employees: new Set(item.employee ? [item.employee] : []),
+      });
+    });
+    return Array.from(grouped.values()).map((item) => ({
+      ...item,
+      employees: Array.from(item.employees).join(", "),
+    }));
+  }, [missingReturns]);
 
   const loadCashflowEmployees = async (file) => {
     if (!file) {
@@ -518,8 +616,10 @@ export default function CommissionOnlineCalculator() {
       return;
     }
     try {
-      const wb = await readWorkbook(file);
-      const { rows, headers, sheetMissing } = readSheetRows(wb);
+      const { rows, headers, sheetMissing } = await getCachedSheetRows(
+        "cashflow",
+        file
+      );
       if (sheetMissing) {
         setCashflowEmployees([]);
         setSelectedEmployees([]);
@@ -554,14 +654,68 @@ export default function CommissionOnlineCalculator() {
     }
   };
 
+  const loadInvoiceGiftItems = async (file) => {
+    if (!file) {
+      setInvoiceGiftItems([]);
+      setGiftPriceOverrides({});
+      return;
+    }
+    try {
+      const { rows, headers, sheetMissing } = await getCachedSheetRows(
+        "invoice",
+        file
+      );
+      if (sheetMissing) { setInvoiceGiftItems([]); return; }
+      const { headerMap, missing } = ensureHeaders(headers, ["Mã hàng", "Đơn giá", "Giá bán", "Số lượng"]);
+      if (missing.length) { setInvoiceGiftItems([]); return; }
+      const giftMap = new Map();
+      rows.forEach((row) => {
+        const sku = normalizeText(getCell(row, headerMap, "Mã hàng")).toUpperCase();
+        if (!sku) return;
+        const salePrice = parseNumber(getCell(row, headerMap, "Giá bán"));
+        const unitPrice = parseNumber(getCell(row, headerMap, "Đơn giá"));
+        if (!(salePrice === 0 && unitPrice > 0)) return;
+        const invoiceId = normalizeText(getCell(row, headerMap, "Mã hóa đơn"));
+        const itemName = normalizeText(getCell(row, headerMap, "Tên hàng"));
+        const seller = normalizeText(getCell(row, headerMap, "Người bán"));
+        const qty = parseNumber(getCell(row, headerMap, "Số lượng"));
+        if (giftMap.has(sku)) {
+          const ex = giftMap.get(sku);
+          ex.qty += qty;
+          if (invoiceId && !ex.invoiceIds.includes(invoiceId)) ex.invoiceIds.push(invoiceId);
+          if (seller && !ex.sellers.includes(seller)) ex.sellers.push(seller);
+        } else {
+          giftMap.set(sku, {
+            itemCode: sku,
+            itemName,
+            invoiceIds: invoiceId ? [invoiceId] : [],
+            sellers: seller ? [seller] : [],
+            qty,
+            unitPrice,
+          });
+        }
+      });
+      setInvoiceGiftItems(Array.from(giftMap.values()));
+    } catch {
+      setInvoiceGiftItems([]);
+    }
+  };
+
   const handleFileChange = (key, file) => {
+    if (fileDataCacheRef.current[key]?.file !== file) {
+      delete fileDataCacheRef.current[key];
+    }
     setFiles((prev) => ({ ...prev, [key]: file || null }));
     if (key === "cashflow") {
       loadCashflowEmployees(file);
     }
+    if (key === "invoice") {
+      loadInvoiceGiftItems(file);
+    }
   };
 
   const resetAll = () => {
+    fileDataCacheRef.current = {};
     setFiles({ cashflow: null, returns: null, invoice: null, adcost: null });
     setResults([]);
     setErrors([]);
@@ -576,8 +730,15 @@ export default function CommissionOnlineCalculator() {
     setMissingPriceModalOpen(false);
     setMissingReturns([]);
     setMissingGifts([]);
-    setExcludedGiftCodes(["NNV22"]);
+    setExcludedGiftCodes([]);
     setNewGiftCode("");
+    setExcludedReturnCodes([]);
+    setNewReturnCode("");
+    setInvoiceGiftItems([]);
+    setGiftPriceOverrides({});
+    setEmployeeMerges([]);
+    setNewMergeLabel("");
+    setNewMergeMembers([]);
     setInputKey((v) => v + 1);
   };
 
@@ -588,15 +749,20 @@ export default function CommissionOnlineCalculator() {
     setResults([]);
     setMissingReturns([]);
     setMissingGifts([]);
+    setAmbiguousCashflowRows([]);
 
     const {
       overrideReturnsPrices = {},
     } = options;
 
+    const storedReturnPrices = loadStoredReturnPrices();
+
     const excludedGiftSet = new Set(excludedGiftCodes.map((c) => normalizeText(c).toUpperCase()));
+    const excludedReturnSet = new Set(excludedReturnCodes.map((c) => normalizeText(c).toUpperCase()));
     const newErrors = [];
     const newWarnings = [];
     const missingReturnsLocal = [];
+    const ambiguousCashflowLocal = [];
     const missingGiftsLocal = [];
     if (cashflowEmployees.length > 0 && selectedEmployees.length === 0) {
       setErrors(["Vui lòng chọn ít nhất một nhân viên để tính toán."]);
@@ -607,6 +773,12 @@ export default function CommissionOnlineCalculator() {
     const shouldProcess = (name) =>
       selectedSet.size === 0 || selectedSet.has(name);
     const getEmployeeType = (name) => employeeTypes[name] || "online";
+    const mergeMap = {};
+    const mergeTypeMap = {};
+    employeeMerges.forEach((mg) => {
+      mg.members.forEach((m) => { mergeMap[m] = mg.label; });
+      mergeTypeMap[mg.label] = employeeTypes[mg.members[0]] || "online";
+    });
     const employeeMap = new Map();
     const pipelineTotals = {
       cashflowSales: 0,
@@ -641,6 +813,7 @@ export default function CommissionOnlineCalculator() {
           shipDeductionAgency: 0,
           shipDeductionRetailCTDB: 0,
           shipDeductionAgencyCTDB: 0,
+          adCostDeduction: 0,
         });
       }
       return perEmployeeLogs.get(name);
@@ -661,7 +834,6 @@ export default function CommissionOnlineCalculator() {
     };
 
     try {
-      const workbooks = {};
       for (const def of FILE_DEFS) {
         const file = files[def.key];
         if (!file) {
@@ -670,7 +842,7 @@ export default function CommissionOnlineCalculator() {
           }
           continue;
         }
-        workbooks[def.key] = await readWorkbook(file);
+        await getCachedWorkbook(def.key, file);
       }
 
       if (newErrors.length) {
@@ -681,8 +853,9 @@ export default function CommissionOnlineCalculator() {
       // Step 1: Cashflow
       {
         const def = FILE_DEFS[0];
-        const { rows, headers, sheetMissing } = readSheetRows(
-          workbooks[def.key]
+        const { rows, headers, sheetMissing } = await getCachedSheetRows(
+          def.key,
+          files[def.key]
         );
         if (sheetMissing) {
           newErrors.push(`${def.label}: Không tìm thấy sheet mặc định.`);
@@ -691,20 +864,39 @@ export default function CommissionOnlineCalculator() {
           if (missing.length) {
             newErrors.push(`${def.label}: Thiếu cột ${missing.join(", ")}.`);
           } else {
-            rows.forEach((row) => {
+            for (const row of rows) {
               const employee = normalizeText(getCell(row, headerMap, "Nhân viên"));
-              if (!employee) return;
-              if (!shouldProcess(employee)) return;
+              if (!employee) continue;
+              if (!shouldProcess(employee)) continue;
               const empType = getEmployeeType(employee);
-              sourceEmployees.cashflow.add(employee);
+              const effectiveName = mergeMap[employee] || employee;
+              sourceEmployees.cashflow.add(effectiveName);
               const value = parseNumber(getCell(row, headerMap, "Giá trị"));
               const note = normalizeText(getCell(row, headerMap, "Ghi chú")).toUpperCase();
               const payer = normalizeText(getCell(row, headerMap, "Người nộp/nhận")).toUpperCase();
-              const isAgency =
-                empType === "admin" ? true : note ? note.startsWith("DL") : payer.startsWith("DL");
+              const voucherId = normalizeText(getCell(row, headerMap, "Mã phiếu"));
+
+              let isAgency;
+              if (empType === "admin") {
+                isAgency = true;
+              } else if (note && note.startsWith("DL")) {
+                isAgency = true;
+              } else if (payer && payer.startsWith("DL")) {
+                const choiceKey = `${employee}-${note}-${payer}-${value}`;
+                if (options.ambiguousChoices?.[choiceKey] !== undefined) {
+                  // auto-apply only when coming back from modal confirm
+                  isAgency = !!options.ambiguousChoices[choiceKey];
+                } else {
+                  ambiguousCashflowLocal.push({ row, employee, value, note, payer, voucherId, choiceKey });
+                  continue;
+                }
+              } else {
+                isAgency = false;
+              }
+
               const isCTDB = note.includes("CTDB");
-              const stats = getStats(employeeMap, employee);
-              const log = getLog(employee);
+              const stats = getStats(employeeMap, effectiveName);
+              const log = getLog(effectiveName);
               if (isAgency) {
                 const key = isCTDB ? "Agency_CTDB" : "Agency_Normal";
                 stats[key] += value;
@@ -723,7 +915,7 @@ export default function CommissionOnlineCalculator() {
                 }
               }
               pipelineTotals.cashflowSales += value;
-            });
+            }
           }
         }
       }
@@ -731,8 +923,9 @@ export default function CommissionOnlineCalculator() {
       // Step 2: Invoice Details
       {
         const def = FILE_DEFS[2];
-        const { rows, headers, sheetMissing } = readSheetRows(
-          workbooks[def.key]
+        const { rows, headers, sheetMissing } = await getCachedSheetRows(
+          def.key,
+          files[def.key]
         );
         if (sheetMissing) {
           newErrors.push(`${def.label}: Không tìm thấy sheet mặc định.`);
@@ -745,8 +938,9 @@ export default function CommissionOnlineCalculator() {
               const employee = normalizeText(getCell(row, headerMap, "Người bán"));
               if (!employee) return;
               if (!shouldProcess(employee)) return;
-              sourceEmployees.invoice.add(employee);
               const empType = getEmployeeType(employee);
+              const effectiveName = mergeMap[employee] || employee;
+              sourceEmployees.invoice.add(effectiveName);
               const priceListRaw = normalizeText(
                 getCell(row, headerMap, "Bảng giá")
               );
@@ -775,9 +969,9 @@ export default function CommissionOnlineCalculator() {
                   normalizedPriceList.startsWith("BẢNG GIÁ CHUNG") ||
                   normalizedPriceList === "BANG GIA CHUNG" ||
                   normalizedPriceList.startsWith("BANG GIA CHUNG");
-              const stats = getStats(employeeMap, employee);
-              const log = getLog(employee);
-              const details = getDetails(employee);
+              const stats = getStats(employeeMap, effectiveName);
+              const log = getLog(effectiveName);
+              const details = getDetails(effectiveName);
               const noteUpper = note.toUpperCase();
               const isCTDB = noteUpper.includes("CTDB");
               const normalKey = isAgency ? "Agency_Normal" : "Retail_Normal";
@@ -789,7 +983,11 @@ export default function CommissionOnlineCalculator() {
               const qty = parseNumber(getCell(row, headerMap, "Số lượng"));
               const unit = normalizeUnit(getCell(row, headerMap, "ĐVT"));
               if (salePrice === 0 && unitPrice > 0 && !excludedGiftSet.has(itemCode)) {
-                const value = unitPrice * qty;
+                const overrideRaw = giftPriceOverrides[itemCode];
+                const effectivePrice = overrideRaw && parseNumber(overrideRaw) > 0
+                  ? parseNumber(overrideRaw)
+                  : unitPrice;
+                const value = effectivePrice * qty;
                 if (value > 0) {
                   stats[deductKey] -= value;
                   if (isAgency) {
@@ -813,7 +1011,7 @@ export default function CommissionOnlineCalculator() {
                     itemName,
                     unit,
                     qty,
-                    unitPrice,
+                    effectivePrice,
                     salePrice,
                     value,
                   ];
@@ -831,7 +1029,7 @@ export default function CommissionOnlineCalculator() {
               );
               const partner = partnerRaw.toUpperCase();
               if (
-                empType === "online" &&
+                (empType === "online" || empType === "mkt") &&
                 (partner.includes("XE CÔNG TY") || partner.includes("XE CONG TY"))
               ) {
                 const ratio = UNIT_CONVERSION[unit];
@@ -881,8 +1079,9 @@ export default function CommissionOnlineCalculator() {
       // Step 3: Returns
       {
         const def = FILE_DEFS[1];
-        const { rows, headers, sheetMissing } = readSheetRows(
-          workbooks[def.key]
+        const { rows, headers, sheetMissing } = await getCachedSheetRows(
+          def.key,
+          files[def.key]
         );
         if (sheetMissing) {
           newErrors.push(`${def.label}: Không tìm thấy sheet mặc định.`);
@@ -900,8 +1099,9 @@ export default function CommissionOnlineCalculator() {
               const employee = normalizeText(getCell(row, headerMap, "Người nhận trả"));
               if (!employee) return;
               if (!shouldProcess(employee)) return;
-              sourceEmployees.returns.add(employee);
               const empType = getEmployeeType(employee);
+              const effectiveName = mergeMap[employee] || employee;
+              sourceEmployees.returns.add(effectiveName);
               const customer = normalizeText(
                 getCellAlt(row, headerMap, "Khách hàng", "Tên khách hàng")
               ).toUpperCase();
@@ -932,9 +1132,13 @@ export default function CommissionOnlineCalculator() {
               if (note.startsWith("KTP")) {
                 return;
               }
-              const stats = getStats(employeeMap, employee);
-              const log = getLog(employee);
-              const details = getDetails(employee);
+              const returnCode = normalizeText(getCell(row, headerMap, "Mã trả hàng"));
+              if (returnCode && excludedReturnSet.has(returnCode.toUpperCase())) {
+                return;
+              }
+              const stats = getStats(employeeMap, effectiveName);
+              const log = getLog(effectiveName);
+              const details = getDetails(effectiveName);
               const isAgencyReturn =
                 empType === "admin" ? true : customer.startsWith("DL");
               const customerTypeLabel = isAgencyReturn ? "Đại lý" : "Khách lẻ";
@@ -973,8 +1177,10 @@ export default function CommissionOnlineCalculator() {
                   return;
                 }
                 const returnPriceKey = `${sku}__${isAgencyReturn ? "agency" : "retail"}`;
-                const priceValue = overrideReturnsPrices[returnPriceKey];
-                if (!(priceValue > 0)) {
+                const confirmedPrice = overrideReturnsPrices[returnPriceKey];
+                if (!(confirmedPrice > 0)) {
+                  // Not yet confirmed → show in modal, pre-fill from localStorage
+                  const storedPrice = storedReturnPrices[returnPriceKey];
                   missingReturnsLocal.push({
                     employee,
                     sku,
@@ -982,15 +1188,19 @@ export default function CommissionOnlineCalculator() {
                     qty,
                     salePrice,
                     priceKey: returnPriceKey,
+                    manualPrice: storedPrice > 0 ? String(storedPrice) : undefined,
                   });
                   return;
                 }
-                const valueAdded = qty * priceValue;
+                const valueAdded = qty * confirmedPrice;
+                const isReturnCTDB = note.includes("CTDB");
                 if (isAgencyReturn) {
-                  stats.Agency_Normal += valueAdded;
+                  const addKey = isReturnCTDB ? "Agency_CTDB" : "Agency_Normal";
+                  stats[addKey] += valueAdded;
                   log.returnAdditionAgency += valueAdded;
                 } else {
-                  stats.Retail_Normal += valueAdded;
+                  const addKey = isReturnCTDB ? "Retail_CTDB" : "Retail_Normal";
+                  stats[addKey] += valueAdded;
                   log.returnAdditionRetail += valueAdded;
                 }
                 details.returnAdd.push([
@@ -1000,7 +1210,7 @@ export default function CommissionOnlineCalculator() {
                   sku,
                   itemName,
                   qty,
-                  priceValue,
+                  confirmedPrice,
                   salePrice,
                   valueAdded,
                   customerTypeLabel,
@@ -1013,10 +1223,11 @@ export default function CommissionOnlineCalculator() {
       }
 
       // Step 4: Ad Cost (optional — skip if file not uploaded)
-      if (workbooks.adcost) {
+      if (files.adcost) {
         const def = FILE_DEFS[3];
-        const { rows, headers, sheetMissing, sheetName } = readSheetRows(
-          workbooks[def.key]
+        const { rows, headers, sheetMissing, sheetName } = await getCachedSheetRows(
+          def.key,
+          files[def.key]
         );
         if (sheetMissing) {
           newErrors.push(`${def.label}: Không tìm thấy sheet "${sheetName}".`);
@@ -1030,10 +1241,12 @@ export default function CommissionOnlineCalculator() {
               if (!employee) return;
               if (!shouldProcess(employee)) return;
               const empType = getEmployeeType(employee);
-              if (empType !== "online") return;
-              sourceEmployees.adcost.add(employee);
-              const stats = getStats(employeeMap, employee);
-              const details = getDetails(employee);
+              if (empType !== "online" && empType !== "mkt") return;
+              const effectiveName = mergeMap[employee] || employee;
+              sourceEmployees.adcost.add(effectiveName);
+              const stats = getStats(employeeMap, effectiveName);
+              const log = getLog(effectiveName);
+              const details = getDetails(effectiveName);
               const campaignName = normalizeText(
                 getCell(row, headerMap, "Sản phẩm chạy quảng cáo")
               );
@@ -1048,16 +1261,17 @@ export default function CommissionOnlineCalculator() {
               if (!Number.isFinite(roas) || roas < 0 || roas >= 8) {
                 deductValue = cost;
                 stats.Retail_Normal -= deductValue;
-              } else if (roas >= 2) {
-                const nonCommissionValue = Math.max(0, revenue);
-                if (nonCommissionValue > 0) {
-                  stats.Retail_NoCommission += nonCommissionValue;
-                }
-                status = "2 <= ROAS < 8: Ghi nhận doanh thu không hưởng hoa hồng";
+                log.adCostDeduction += deductValue;
+              } else if (roas > 2) {
+                deductValue = Math.max(0, revenue);
+                stats.Retail_Normal -= deductValue;
+                log.adCostDeduction += deductValue;
+                status = "2 < ROAS < 8: Trừ doanh thu quảng cáo";
               } else {
                 deductValue = Math.abs(revenue - cost);
                 stats.Retail_Normal -= deductValue;
-                status = "ROAS < 2: Trừ phần chênh lệch |Doanh thu - Chi phí|";
+                log.adCostDeduction += deductValue;
+                status = "ROAS <= 2: Trừ phần chênh lệch |Doanh thu - Chi phí|";
               }
 
               details.adCosts.push([
@@ -1075,6 +1289,22 @@ export default function CommissionOnlineCalculator() {
 
       if (newErrors.length) {
         setErrors(newErrors);
+        return;
+      }
+
+      if (ambiguousCashflowLocal.length > 0) {
+        setAmbiguousCashflowRows(ambiguousCashflowLocal);
+        // Pre-fill choices from localStorage so user sees previous selections
+        const stored = loadStoredAmbiguous();
+        const prefilled = {};
+        ambiguousCashflowLocal.forEach((item) => {
+          if (stored[item.choiceKey] !== undefined) {
+            prefilled[item.choiceKey] = stored[item.choiceKey];
+          }
+        });
+        setAmbiguousChoices(prefilled);
+        setAmbiguousCashflowModalOpen(true);
+        setProcessing(false);
         return;
       }
 
@@ -1107,7 +1337,7 @@ export default function CommissionOnlineCalculator() {
       }
 
       const computed = Array.from(employeeMap.entries()).map(([name, stat]) => {
-        const empType = getEmployeeType(name);
+        const empType = mergeTypeMap[name] || getEmployeeType(name);
         const retailNormal = stat.Retail_Normal || 0;
         const retailNoCommission = stat.Retail_NoCommission || 0;
         const retailCTDB = stat.Retail_CTDB || 0;
@@ -1131,8 +1361,10 @@ export default function CommissionOnlineCalculator() {
         else if (empType === "mkt") {
           retailRate = 0.05;
           agencyRate = totalAgency >= 30000000 ? 0.015 : 0.005;
-          retailCommission = combinedTotal * retailRate;
-          totalCommission = retailCommission;
+          const retailCommissionable = Math.max(0, retailNormal - retailNoCommission);
+          retailCommission = retailCommissionable * retailRate + retailCTDB * retailRate * 0.5;
+          agencyCommission = agencyNormal * agencyRate + agencyCTDB * agencyRate * 0.5;
+          totalCommission = retailCommission + agencyCommission;
         }
         else {
           retailRate = totalRetail < 100000000 ? 0.07 : 0.1;
@@ -1184,8 +1416,8 @@ export default function CommissionOnlineCalculator() {
         "Đại lý CTDB": r.agencyCTDB,
         "Tổng lẻ": r.totalRetail,
         "Tổng đại lý": r.totalAgency,
-        "Rate lẻ": (r.retailRate * 100).toFixed(0) + "%",
-        "Rate đại lý": (r.agencyRate * 100).toFixed(0) + "%",
+        "Rate lẻ": parseFloat((r.retailRate * 100).toFixed(2)) + "%",
+        "Rate đại lý": parseFloat((r.agencyRate * 100).toFixed(2)) + "%",
         "Hoa hồng lẻ": r.retailCommission,
         "Hoa hồng đại lý": r.agencyCommission,
         "Tổng nhận": r.totalCommission,
@@ -1210,7 +1442,8 @@ export default function CommissionOnlineCalculator() {
         ([name, log]) => ({
           "Nhân viên": name,
           "Loại nhân viên":
-            EMPLOYEE_TYPES.find((t) => t.value === employeeTypes[name])?.label ||
+            EMPLOYEE_TYPES.find((t) => t.value === (mergeTypeMap[name] || employeeTypes[name]))?.label ||
+            mergeTypeMap[name] ||
             employeeTypes[name] ||
             "online",
           "Sổ quỹ Lẻ thường": log.cashflowRetailNormal,
@@ -1229,6 +1462,7 @@ export default function CommissionOnlineCalculator() {
           "Phí xe công ty Lẻ CTDB": log.shipDeductionRetailCTDB,
           "Phí xe công ty Đại lý": log.shipDeductionAgency,
           "Phí xe công ty Đại lý CTDB": log.shipDeductionAgencyCTDB,
+          "Trừ chi phí quảng cáo": log.adCostDeduction,
         })
       );
       const detailsObject = {};
@@ -1274,9 +1508,25 @@ export default function CommissionOnlineCalculator() {
       return;
     }
 
+    saveStoredReturnPrices(returnsPriceMap);
     setMissingPriceModalOpen(false);
     runCalculation({
       overrideReturnsPrices: returnsPriceMap,
+      ambiguousChoices: ambiguousChoices,
+    });
+  };
+
+  const handleConfirmAmbiguousCashflow = () => {
+    // Explicitly set unchecked rows to false (retail) so they're remembered and not asked again
+    const fullChoices = {};
+    ambiguousCashflowRows.forEach((item) => {
+      fullChoices[item.choiceKey] = !!ambiguousChoices[item.choiceKey];
+    });
+    saveStoredAmbiguous(fullChoices);
+    setAmbiguousCashflowModalOpen(false);
+    runCalculation({
+      overrideReturnsPrices: {},
+      ambiguousChoices: fullChoices,
     });
   };
 
@@ -1316,6 +1566,17 @@ export default function CommissionOnlineCalculator() {
               >
                 <RefreshCcw className="h-4 w-4" />
                 Làm mới
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  localStorage.removeItem(STORAGE_KEY_RETURN_PRICES);
+                  localStorage.removeItem(STORAGE_KEY_AMBIGUOUS);
+                }}
+                className="inline-flex items-center gap-2 rounded-2xl border border-rose-200/70 bg-white/75 px-4 py-2.5 text-sm font-semibold text-rose-600 shadow-sm transition hover:bg-rose-50 active:scale-[0.98]"
+                title="Xóa toàn bộ giá và lựa chọn đã lưu trong trình duyệt"
+              >
+                Xóa giá đã lưu
               </button>
               <button
                 onClick={handleCalculateClick}
@@ -1414,6 +1675,119 @@ export default function CommissionOnlineCalculator() {
               </button>
             </div>
           </div>
+
+          {files.invoice && invoiceGiftItems.length > 0 && (
+            <div className="mt-4 rounded-2xl border border-slate-200 bg-white/60 p-4">
+              <div className="text-sm font-semibold text-slate-800">
+                Sửa giá hàng tặng
+              </div>
+              <p className="mt-0.5 text-xs text-slate-400">
+                Để trống hoặc nhập 0 để dùng giá từ file. Giá sửa sẽ áp dụng cho toàn bộ dòng có cùng mã hàng.
+              </p>
+              <div className="mt-3 overflow-x-auto">
+                <table className="w-full min-w-[560px] table-auto text-xs">
+                  <thead className="text-xs uppercase text-slate-500">
+                    <tr className="border-b border-slate-100">
+                      <th className="px-2 py-1.5 text-left">Mã hàng</th>
+                      <th className="px-2 py-1.5 text-left">Tên hàng</th>
+                      {/* <th className="px-2 py-1.5 text-left">Người bán</th> */}
+                      {/* <th className="px-2 py-1.5 text-left">Mã hóa đơn</th> */}
+                      <th className="px-2 py-1.5 text-right">Số lượng</th>
+                      <th className="px-2 py-1.5 text-right">Đơn giá (file)</th>
+                      <th className="px-2 py-1.5 text-right">Đơn giá sửa</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {invoiceGiftItems.map((item) => (
+                      <tr key={item.itemCode} className="border-b border-slate-100">
+                        <td className="px-2 py-1.5 font-medium text-slate-800">{item.itemCode}</td>
+                        <td className="px-2 py-1.5 text-slate-600">{item.itemName || "—"}</td>
+                        {/* <td className="px-2 py-1.5 text-slate-600">{item.sellers.join(", ") || "—"}</td> */}
+                        {/* <td className="px-2 py-1.5 text-slate-500">{item.invoiceIds.join(", ") || "—"}</td> */}
+                        <td className="px-2 py-1.5 text-right">{item.qty}</td>
+                        <td className="px-2 py-1.5 text-right text-slate-500">{formatMoney(item.unitPrice)}</td>
+                        <td className="px-2 py-1.5 text-right">
+                          <input
+                            type="number"
+                            min="0"
+                            placeholder={String(item.unitPrice)}
+                            value={giftPriceOverrides[item.itemCode] ?? ""}
+                            onChange={(e) =>
+                              setGiftPriceOverrides((prev) => ({
+                                ...prev,
+                                [item.itemCode]: e.target.value,
+                              }))
+                            }
+                            className="w-28 rounded-lg border bg-white px-2 py-1 text-right text-xs outline-none focus:ring-2 focus:ring-emerald-300"
+                          />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          <div className="mt-4 rounded-2xl border border-slate-200 bg-white/60 p-4">
+            <div className="text-sm font-semibold text-slate-800">
+              Mã trả hàng không trừ doanh thu
+            </div>
+            <p className="mt-0.5 text-xs text-slate-400">
+              Nhập mã từ cột "Mã trả hàng" trong file Trả Hàng — các dòng có mã này sẽ bị bỏ qua khi tính hoa hồng, hoặc có ghi chú "KTP" thì sẽ không trừ doanh thu.
+            </p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {excludedReturnCodes.map((code) => (
+                <span
+                  key={code}
+                  className="inline-flex items-center gap-1 rounded-full bg-orange-100 px-3 py-1 text-xs font-medium text-orange-700"
+                >
+                  {code}
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setExcludedReturnCodes((prev) => prev.filter((c) => c !== code))
+                    }
+                    className="ml-0.5 text-orange-400 hover:text-rose-500"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </span>
+              ))}
+              {excludedReturnCodes.length === 0 && (
+                <span className="text-xs text-slate-400">Chưa có mã nào được loại trừ</span>
+              )}
+            </div>
+            <div className="mt-3 flex gap-2">
+              <input
+                className="rounded-xl border bg-white px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-orange-300"
+                placeholder="Nhập mã trả hàng..."
+                value={newReturnCode}
+                onChange={(e) => setNewReturnCode(e.target.value.toUpperCase())}
+                onKeyDown={(e) => {
+                  if (e.key !== "Enter") return;
+                  const code = normalizeText(newReturnCode).toUpperCase();
+                  if (code && !excludedReturnCodes.includes(code)) {
+                    setExcludedReturnCodes((prev) => [...prev, code]);
+                    setNewReturnCode("");
+                  }
+                }}
+              />
+              <button
+                type="button"
+                className="rounded-xl border bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50 active:scale-[0.98]"
+                onClick={() => {
+                  const code = normalizeText(newReturnCode).toUpperCase();
+                  if (code && !excludedReturnCodes.includes(code)) {
+                    setExcludedReturnCodes((prev) => [...prev, code]);
+                    setNewReturnCode("");
+                  }
+                }}
+              >
+                Thêm
+              </button>
+            </div>
+          </div>
         </div>
 
         {cashflowEmployees.length > 0 && (
@@ -1476,6 +1850,73 @@ export default function CommissionOnlineCalculator() {
                   );
                 })}
               </div>
+            </div>
+          </div>
+        )}
+
+        {cashflowEmployees.length > 0 && (
+          <div className="rounded-3xl border border-white/50 bg-white/70 p-4 shadow-sm backdrop-blur-xl">
+            <div className="mb-3 text-sm font-semibold text-slate-800">Gộp nhân viên</div>
+            {employeeMerges.length > 0 && (
+              <div className="mb-3 space-y-2">
+                {employeeMerges.map((mg) => (
+                  <div key={mg.id} className="flex items-center gap-2 rounded-xl border bg-white/80 px-3 py-2 text-sm">
+                    <span className="font-semibold text-slate-800">{mg.label}</span>
+                    <span className="text-slate-400">←</span>
+                    <span className="flex-1 text-slate-600 text-xs">{mg.members.join(", ")}</span>
+                    <button
+                      type="button"
+                      onClick={() => setEmployeeMerges((prev) => prev.filter((m) => m.id !== mg.id))}
+                      className="text-xs text-rose-500 hover:text-rose-700"
+                    >
+                      Xóa
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="space-y-2">
+              <input
+                type="text"
+                placeholder="Tên nhóm gộp (ví dụ: MKT Nhóm 1)"
+                value={newMergeLabel}
+                onChange={(e) => setNewMergeLabel(e.target.value)}
+                className="w-full rounded-xl border bg-white px-3 py-1.5 text-sm"
+              />
+              <div className="max-h-40 overflow-auto rounded-xl border bg-white/80 p-2">
+                <div className="grid gap-1 sm:grid-cols-2 lg:grid-cols-3">
+                  {cashflowEmployees.map((name) => (
+                    <label key={name} className="flex cursor-pointer items-center gap-2 text-xs">
+                      <input
+                        type="checkbox"
+                        checked={newMergeMembers.includes(name)}
+                        onChange={() => {
+                          setNewMergeMembers((prev) =>
+                            prev.includes(name) ? prev.filter((n) => n !== name) : [...prev, name]
+                          );
+                        }}
+                      />
+                      <span className="truncate">{name}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <button
+                type="button"
+                disabled={!newMergeLabel.trim() || newMergeMembers.length < 2}
+                onClick={() => {
+                  if (!newMergeLabel.trim() || newMergeMembers.length < 2) return;
+                  setEmployeeMerges((prev) => [
+                    ...prev,
+                    { id: Date.now(), label: newMergeLabel.trim(), members: [...newMergeMembers] },
+                  ]);
+                  setNewMergeLabel("");
+                  setNewMergeMembers([]);
+                }}
+                className="rounded-xl border bg-white px-4 py-1.5 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-40"
+              >
+                Thêm nhóm gộp
+              </button>
             </div>
           </div>
         )}
@@ -1592,10 +2033,10 @@ export default function CommissionOnlineCalculator() {
                   {groupSummary && (
                     <tr className="border-b border-slate-100 bg-emerald-50/50">
                       <td className="px-3 py-2 font-semibold text-slate-900">
-                        Tổng 3 nhân viên
+                        {groupSummary.name}
                       </td>
                       <td className="px-3 py-2 font-semibold text-slate-700">
-                        Online
+                        {EMPLOYEE_TYPES.find((t) => t.value === groupSummary.employeeType)?.label || groupSummary.employeeType}
                       </td>
                       <td className="px-3 py-2 text-right">
                         {formatMoney(groupSummary.retailNormal)}
@@ -1610,10 +2051,10 @@ export default function CommissionOnlineCalculator() {
                         {formatMoney(groupSummary.agencyCTDB)}
                       </td>
                       <td className="px-3 py-2 text-right">
-                        {(groupSummary.retailRate * 100).toFixed(0)}%
+                        {parseFloat((groupSummary.retailRate * 100).toFixed(2))}%
                       </td>
                       <td className="px-3 py-2 text-right">
-                        {(groupSummary.agencyRate * 100).toFixed(0)}%
+                        {parseFloat((groupSummary.agencyRate * 100).toFixed(2))}%
                       </td>
                       <td className="px-3 py-2 text-right">
                         {formatMoney(groupSummary.retailCommission)}
@@ -1636,7 +2077,7 @@ export default function CommissionOnlineCalculator() {
               </div>
               <div className="mt-2 flex flex-wrap gap-2">
                 {results
-                  .filter((r) => (r.employeeType || "online") === "online")
+                  .filter((r) => ["online", "mkt", "admin"].includes(r.employeeType || "online"))
                   .map((r) => {
                     const checked = groupSelected.includes(r.name);
                     return (
@@ -1704,10 +2145,10 @@ export default function CommissionOnlineCalculator() {
                           {formatMoney(r.agencyCTDB)}
                         </td>
                         <td className="px-3 py-2 text-right">
-                          {(r.retailRate * 100).toFixed(0)}%
+                          {parseFloat((r.retailRate * 100).toFixed(2))}%
                         </td>
                         <td className="px-3 py-2 text-right">
-                          {(r.agencyRate * 100).toFixed(0)}%
+                          {parseFloat((r.agencyRate * 100).toFixed(2))}%
                         </td>
                         <td className="px-3 py-2 text-right">
                           {formatMoney(r.retailCommission)}
@@ -1732,7 +2173,7 @@ export default function CommissionOnlineCalculator() {
         open={missingPriceModalOpen}
         onClose={() => setMissingPriceModalOpen(false)}
         title="Bổ sung giá còn thiếu"
-        subtitle="Nhập giá để tiếp tục tính hoa hồng. Giá nhập sẽ được dùng trực tiếp, không quy đổi VAT."
+        subtitle="Nhập giá để tiếp tục tính hoa hồng. Giá nhập sẽ được dùng trực tiếp, không quy đổi VAT, nhập giá trước VAT"
         showClose={false}
       >
         <div className="space-y-6">
@@ -1754,54 +2195,33 @@ export default function CommissionOnlineCalculator() {
                     </tr>
                   </thead>
                   <tbody>
-                    {(() => {
-                      const seen = new Set();
-                      return missingReturns
-                        .filter((item) => {
-                          if (seen.has(item.priceKey)) return false;
-                          seen.add(item.priceKey);
-                          return true;
-                        })
-                        .map((item) => {
-                          const group = missingReturns.filter(
-                            (r) => r.priceKey === item.priceKey
-                          );
-                          const employees = [
-                            ...new Set(group.map((r) => r.employee)),
-                          ].join(", ");
-                          const totalQty = group.reduce(
-                            (sum, r) => sum + (r.qty || 0),
-                            0
-                          );
-                          return (
-                            <tr key={item.priceKey} className="border-t">
-                              <td className="px-3 py-2">{employees}</td>
-                              <td className="px-3 py-2">{item.sku}</td>
-                              <td className="px-3 py-2">
-                                {item.group === "agency" ? "Đại lý" : "Khách lẻ"}
-                              </td>
-                              <td className="px-3 py-2 text-right">{totalQty}</td>
-                              <td className="px-3 py-2 text-right">{item.salePrice}</td>
-                              <td className="px-3 py-2 text-right">
-                                <input
-                                  className="w-24 rounded border px-2 py-1 text-right"
-                                  value={item.manualPrice || ""}
-                                  onChange={(e) => {
-                                    const value = e.target.value;
-                                    setMissingReturns((prev) =>
-                                      prev.map((r) =>
-                                        r.priceKey === item.priceKey
-                                          ? { ...r, manualPrice: value }
-                                          : r
-                                      )
-                                    );
-                                  }}
-                                />
-                              </td>
-                            </tr>
-                          );
-                        });
-                    })()}
+                    {groupedMissingReturns.map((item) => (
+                      <tr key={item.priceKey} className="border-t">
+                        <td className="px-3 py-2">{item.employees}</td>
+                        <td className="px-3 py-2">{item.sku}</td>
+                        <td className="px-3 py-2">
+                          {item.group === "agency" ? "Đại lý" : "Khách lẻ"}
+                        </td>
+                        <td className="px-3 py-2 text-right">{item.totalQty}</td>
+                        <td className="px-3 py-2 text-right">{item.salePrice}</td>
+                        <td className="px-3 py-2 text-right">
+                          <input
+                            className="w-24 rounded border px-2 py-1 text-right"
+                            value={item.manualPrice || ""}
+                            onChange={(e) => {
+                              const value = e.target.value;
+                              setMissingReturns((prev) =>
+                                prev.map((r) =>
+                                  r.priceKey === item.priceKey
+                                    ? { ...r, manualPrice: value }
+                                    : r
+                                )
+                              );
+                            }}
+                          />
+                        </td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>
@@ -1934,6 +2354,73 @@ export default function CommissionOnlineCalculator() {
               className="inline-flex items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.98]"
             >
               Tiếp tục tính
+            </button>
+          </div>
+        </div>
+      </Modal>
+      <Modal
+        open={ambiguousCashflowModalOpen}
+        onClose={() => setAmbiguousCashflowModalOpen(false)}
+        title="Xác nhận doanh số Đại lý"
+        subtitle="Các dòng sau có 'Người nộp/nhận' là Đại lý nhưng 'Ghi chú' không có 'DL'. Vui lòng xác nhận."
+        showClose={false}
+      >
+        <div className="space-y-6">
+          <div>
+            <div className="mt-3 max-h-96 overflow-auto rounded-2xl border bg-white/80">
+              <table className="w-full text-xs">
+                <thead className="bg-slate-50 text-slate-600">
+                  <tr>
+                    <th className="px-3 py-2 text-left">Nhân viên</th>
+                    <th className="px-3 py-2 text-left">Ghi chú</th>
+                    <th className="px-3 py-2 text-left">Người nộp/nhận</th>
+                    <th className="px-3 py-2 text-left">Mã phiếu</th>
+                    <th className="px-3 py-2 text-right">Giá trị</th>
+                    <th className="px-3 py-2 text-center">Tính là ĐL?</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {ambiguousCashflowRows.map((item) => (
+                    <tr key={item.choiceKey} className="border-t">
+                      <td className="px-3 py-2">{item.employee}</td>
+                      <td className="px-3 py-2">{item.note}</td>
+                      <td className="px-3 py-2">{item.payer}</td>
+                      <td className="px-3 py-2">{item.voucherId}</td>
+                      <td className="px-3 py-2 text-right">{formatMoney(item.value)}</td>
+                      <td className="px-3 py-2 text-center">
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4"
+                          checked={!!ambiguousChoices[item.choiceKey]}
+                          onChange={(e) => {
+                            const isChecked = e.target.checked;
+                            setAmbiguousChoices((prev) => ({
+                              ...prev,
+                              [item.choiceKey]: isChecked,
+                            }));
+                          }}
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">
+            <button
+              type="button"
+              onClick={() => setAmbiguousCashflowModalOpen(false)}
+              className="inline-flex items-center justify-center rounded-2xl border bg-white/70 px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-white active:scale-[0.98]"
+            >
+              Hủy
+            </button>
+            <button
+              type="button"
+              onClick={handleConfirmAmbiguousCashflow}
+              className="inline-flex items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.98]"
+            >
+              Xác nhận và Tiếp tục tính
             </button>
           </div>
         </div>

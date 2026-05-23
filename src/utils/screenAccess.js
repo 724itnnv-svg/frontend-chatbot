@@ -9,5 +9,6 @@ export function getAllowedScreens(user) {
 export function canAccessScreen(user, screenId) {
   if (!screenId) return false;
   if (screenId === "profile") return Boolean(user);
+  if (hasFullAccess(user)) return true;
   return getAllowedScreens(user).includes(screenId);
 }

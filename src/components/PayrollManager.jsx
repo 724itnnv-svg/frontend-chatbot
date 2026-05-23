@@ -46,7 +46,6 @@ const COMPUTED_PAYROLL_KEYS = new Set([
   "thuNhapTheoNgayCong.luongPhepNam",
   "thuNhapTheoNgayCong.luongTangCaThuong",
   "thuNhapTheoNgayCong.luongTangCaChuNhat",
-  "thuNhapTheoNgayCong.comTangCa",
   "thuNhapTheoNgayCong.luongTangCaLeTet",
   "thuNhapTheoNgayCong.thuongKPI",
   "thuNhapTheoNgayCong.tongThuNhap",
@@ -314,6 +313,12 @@ const DEFAULT_PAYROLL_FORMULA_SETTINGS = {
       enabled: true,
       expression: "khauTru.bhxh + khauTru.congDoan + khauTru.giamLuong + khauTru.tamUng + khauTru.phiDienThoai + khauTru.truKhac",
       note: "Tong khau tru",
+    },
+    {
+      target: "tinhThueTNCN.tongThuNhapChiuThue",
+      enabled: true,
+      expression: "thuNhapTheoNgayCong.tongThuNhap - khauTru.tongKhauTru",
+      note: "TN chiu thue = Tong thu nhap - Tong khau tru",
     },
     {
       target: "tinhThueTNCN.thuNhapTinhThue",
