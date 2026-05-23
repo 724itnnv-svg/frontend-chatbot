@@ -6,12 +6,14 @@ import PageList from "./PageList";
 import ChatMessagesPanel from "./ChatMessagesPanel";
 import { ChevronLeft, ChevronRight, Image, Paperclip, Send, Video, X } from "lucide-react";
 import { io } from "socket.io-client";
+import { getApiOrigin } from "../api/baseUrl";
 
 const HISTORY_ENDPOINT = "/chatweb/history"; // <- đổi nếu backend khác
+const isViteDevServer =
+  typeof window !== "undefined" && window.location.port === "5173";
 const SOCKET_URL =
   import.meta.env.VITE_SOCKET_URL ||
-  import.meta.env.VITE_API_BASE_URL ||
-  (typeof window !== "undefined" && window.location.port === "5173" ? "http://localhost:5000" : undefined);
+  (isViteDevServer ? "http://localhost:5000" : getApiOrigin() || undefined);
 
 function normalizeMessageText(message = {}) {
   return String(message.text || message.content || "").replace(/\s+/g, " ").trim();
@@ -73,6 +75,7 @@ function PageMessage() {
   const [sendingReply, setSendingReply] = useState(false);
   const [chatReplyState, setChatReplyState] = useState({ mode: "bot", loading: false });
   const [releasingToBot, setReleasingToBot] = useState(false);
+  const [, setRealtimeConnected] = useState(false);
 
   // UI giống ChatwebManager
   const [selectedChat, setSelectedChat] = useState(null);
@@ -206,6 +209,34 @@ function PageMessage() {
   };
 
   // ✅ Chọn Page → load chats local + load userInfo từ FB
+  const refreshChatsForPage = async (page, { updateUserNames = false } = {}) => {
+    if (!page?.facebookId || !token) return [];
+
+    const chatRes = await fetch("/api/chat/recent", {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    const allChats = await chatRes.json();
+    const filteredChats = (Array.isArray(allChats) ? allChats : []).filter(
+      (c) => String(c.page) === String(page.facebookId) && c.conversationId,
+    );
+
+    setChats(filteredChats);
+
+    if (updateUserNames) {
+      const localUserIds = [...new Set(filteredChats.map((chat) => chat.user))];
+      const tempUserInfo = {};
+      localUserIds.forEach((id) => {
+        tempUserInfo[id] = { name: id, picture: defaultAvatar };
+      });
+      setUserInfo(tempUserInfo);
+      fetchUserInfo(page, localUserIds, tempUserInfo);
+    }
+
+    return filteredChats;
+  };
+
   const handleSelectPage = async (page) => {
     if (isUser && !userPageIds.includes(page.facebookId)) {
       alert("⚠️ Bạn không có quyền truy cập Page này");
@@ -231,32 +262,10 @@ function PageMessage() {
     try {
       setLoadingChats(true);
 
-      const chatRes = await fetch("/api/chat/recent", {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
-      const allChats = await chatRes.json();
-      console.log(allChats);
+      const filteredChats = await refreshChatsForPage(page, { updateUserNames: true });
       
 
-      const filteredChats = (Array.isArray(allChats) ? allChats : []).filter(
-        (c) => (String(c.page) === String(page.facebookId)) && c.conversationId
-      );
-
-      setChats(filteredChats);
-
-      const localUserIds = [...new Set(filteredChats.map((chat) => chat.user))];
-
-      const tempUserInfo = {};
-      localUserIds.forEach((id) => {
-        tempUserInfo[id] = { name: id, picture: defaultAvatar };
-      });
-      setUserInfo(tempUserInfo);
-
       // fetch tên/avatar thật từ Facebook
-      fetchUserInfo(page, localUserIds, tempUserInfo);
-
       // auto chọn khách đầu tiên
       setTimeout(() => {
         if (filteredChats.length > 0) {
@@ -431,13 +440,13 @@ function PageMessage() {
     }
   };
 
-  const refreshThreadMessages = async (chatOrId, { retries = 3, delayMs = 800 } = {}) => {
+  const refreshThreadMessages = async (chatOrId, { retries = 3, delayMs = 800, silent = false } = {}) => {
     const endpoint = buildHistoryEndpoint(chatOrId);
     if (!endpoint) return;
 
     for (let attempt = 0; attempt < retries; attempt++) {
       try {
-        if (attempt === 0) setLoadingMessages(true);
+        if (!silent && attempt === 0) setLoadingMessages(true);
 
         const res = await fetch(
           endpoint,
@@ -468,7 +477,68 @@ function PageMessage() {
       await new Promise((r) => setTimeout(r, delayMs));
     }
 
-    setLoadingMessages(false);
+    if (!silent) setLoadingMessages(false);
+  };
+
+  const handleRealtimeChatEvent = (payload = {}) => {
+    const page = selectedPageRef.current;
+    const payloadPage = String(payload.page || "");
+    const payloadUser = String(payload.user || "");
+    if (!page?.facebookId || !payloadPage || !payloadUser) return;
+    if (String(payloadPage) !== String(page.facebookId)) return;
+
+    setChats((prev) => {
+      const index = prev.findIndex(
+        (chat) => String(chat.page) === payloadPage && String(chat.user) === payloadUser,
+      );
+      if (index < 0) {
+        if (!payload.chat) return prev;
+        return [
+          {
+            ...payload.chat,
+            updatedAt: payload.createdAt || payload.chat.updatedAt || new Date().toISOString(),
+            lastMessage: payload.text || payload.chat.lastMessage,
+          },
+          ...prev,
+        ];
+      }
+
+      const next = [...prev];
+      next[index] = {
+        ...next[index],
+        updatedAt: payload.createdAt || new Date().toISOString(),
+        lastMessage: payload.text || next[index].lastMessage,
+      };
+      return next;
+    });
+
+    const selected = selectedChatRef.current;
+    const isActiveThread =
+      selected &&
+      String(selected.page) === payloadPage &&
+      String(selected.user) === payloadUser;
+
+    if (!isActiveThread) return;
+
+    const nextSelected = payload.chat
+      ? {
+        ...selected,
+        ...payload.chat,
+        threadId: payload.chat.conversationId || payload.chat.threadId || selected.threadId,
+        conversationId: payload.chat.conversationId || selected.conversationId,
+      }
+      : selected;
+
+    selectedChatRef.current = nextSelected;
+    setSelectedChat(nextSelected);
+
+    if (payload.message) {
+      setCurrentMessages((prev) => upsertRealtimeMessage(prev, payload.message));
+    }
+
+    window.setTimeout(() => {
+      refreshThreadMessages(nextSelected, { retries: 2, delayMs: 300, silent: true });
+    }, 150);
   };
 
   useEffect(() => {
@@ -476,11 +546,12 @@ function PageMessage() {
 
     const socket = io(SOCKET_URL, {
       auth: { token },
-      transports: ["websocket", "polling"],
+      transports: ["polling", "websocket"],
       reconnection: true,
       reconnectionAttempts: Infinity,
       reconnectionDelay: 800,
       reconnectionDelayMax: 5000,
+      timeout: 20000,
     });
 
     realtimeSocketRef.current = socket;
@@ -494,50 +565,16 @@ function PageMessage() {
       }
     };
 
-    socket.on("connect", joinCurrentRooms);
-    socket.on("chat:event", (payload = {}) => {
-      const page = selectedPageRef.current;
-      if (!page?.facebookId || String(payload.page) !== String(page.facebookId)) return;
-
-      setChats((prev) => {
-        const index = prev.findIndex(
-          (chat) => String(chat.page) === String(payload.page) && String(chat.user) === String(payload.user),
-        );
-        if (index < 0) {
-          if (!payload.chat) return prev;
-          return [
-            {
-              ...payload.chat,
-              updatedAt: payload.createdAt || payload.chat.updatedAt || new Date().toISOString(),
-              lastMessage: payload.text || payload.chat.lastMessage,
-            },
-            ...prev,
-          ];
-        }
-
-        const next = [...prev];
-        next[index] = {
-          ...next[index],
-          updatedAt: payload.createdAt || new Date().toISOString(),
-          lastMessage: payload.text || next[index].lastMessage,
-        };
-        return next;
-      });
-
-      const selected = selectedChatRef.current;
-      const isActiveThread =
-        selected &&
-        String(selected.page) === String(payload.page) &&
-        String(selected.user) === String(payload.user);
-
-      if (!isActiveThread) return;
-
-      if (payload.message) {
-        setCurrentMessages((prev) => upsertRealtimeMessage(prev, payload.message));
-      } else {
-        refreshThreadMessages(selected, { retries: 1, delayMs: 0 });
-      }
+    socket.on("connect", () => {
+      setRealtimeConnected(true);
+      joinCurrentRooms();
     });
+    socket.on("disconnect", () => setRealtimeConnected(false));
+    socket.on("connect_error", (error) => {
+      setRealtimeConnected(false);
+      console.warn("Socket realtime connect error:", error?.message || error);
+    });
+    socket.on("chat:event", handleRealtimeChatEvent);
     socket.on("chat:state", (payload = {}) => {
       const page = selectedPageRef.current;
       const selected = selectedChatRef.current;
@@ -553,10 +590,13 @@ function PageMessage() {
     });
 
     return () => {
-      socket.off("connect", joinCurrentRooms);
+      socket.off("connect");
+      socket.off("disconnect");
+      socket.off("connect_error");
       socket.off("chat:event");
       socket.off("chat:state");
       socket.disconnect();
+      setRealtimeConnected(false);
       if (realtimeSocketRef.current === socket) realtimeSocketRef.current = null;
     };
   }, [token]);
@@ -579,6 +619,61 @@ function PageMessage() {
     socket.emit("thread:join", { pageId, userId });
     return () => socket.emit("thread:leave", { pageId, userId });
   }, [selectedPage?.facebookId, selectedChat?.user]);
+
+  useEffect(() => {
+    if (!token) return undefined;
+
+    const controller = new AbortController();
+    let cancelled = false;
+
+    const connectEventStream = async () => {
+      try {
+        const res = await fetch("/api/realtime/events", {
+          signal: controller.signal,
+          headers: {
+            Authorization: `Bearer ${token}`,
+            Accept: "text/event-stream",
+          },
+        });
+        if (!res.ok || !res.body) return;
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        while (!cancelled) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+
+          const chunks = buffer.split("\n\n");
+          buffer = chunks.pop() || "";
+
+          chunks.forEach((chunk) => {
+            const eventLine = chunk.split("\n").find((line) => line.startsWith("event:"));
+            const dataLine = chunk.split("\n").find((line) => line.startsWith("data:"));
+            const eventName = eventLine ? eventLine.slice(6).trim() : "message";
+            if (eventName !== "chat:event" || !dataLine) return;
+
+            try {
+              handleRealtimeChatEvent(JSON.parse(dataLine.slice(5).trim()));
+            } catch (err) {
+              console.warn("Realtime stream parse error:", err);
+            }
+          });
+        }
+      } catch (err) {
+        if (!cancelled) console.warn("Realtime stream error:", err);
+      }
+    };
+
+    connectEventStream();
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [token]);
 
   const handleSendReply = async () => {
     const text = replyText.trim();

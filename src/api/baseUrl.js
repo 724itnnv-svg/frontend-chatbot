@@ -14,6 +14,9 @@ export function getApiOrigin() {
 }
 
 export function getConfiguredApiOrigin() {
+  if (import.meta.env.PROD) {
+    return "https://chatbot-zhpy.onrender.com";
+  }
   return trimTrailingSlash(import.meta.env.VITE_API_URL);
 }
 
