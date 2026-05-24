@@ -5,7 +5,10 @@ const APP_PERMISSIONS = {
     { id: "chatweb", name: "Chatbot Web" },
     { id: "donhang", name: "Đơn Hàng" },
     { id: "donhangWeb", name: "Đơn Hàng Web" },
+<<<<<<< HEAD
     { id: "business_stats", name: "Thống kê kinh doanh" },
+=======
+>>>>>>> a1b65c68dae88feb288ad521deafe9384bb618b5
     { id: "users", name: "Người Dùng" },
     { id: "roles", name: "Phân quyền" },
     { id: "commission_online", name: "Tính Hoa Hồng Online" },
@@ -15,7 +18,10 @@ const APP_PERMISSIONS = {
     { id: "admin_event_promo", name: "Chương Trình Khuyến Mãi Chung" },
     { id: "admin_vectorstore_tool", name: "Quản Trị Vector DB" },
     { id: "admin_agent", name: "Quản Trị Agent" },
+<<<<<<< HEAD
     { id: "admin_faq", name: "FAQ Theo Page" },
+=======
+>>>>>>> a1b65c68dae88feb288ad521deafe9384bb618b5
     { id: "admin_testcase", name: "Quản Trị Test Case ChatBot" },
     { id: "admin_logs", name: "Log Hệ Thống" },
     { id: "notifications", name: "Thông Báo Thiết Bị" },
