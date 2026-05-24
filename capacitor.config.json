@@ -1,0 +1,13 @@
+{
+  "appId": "com.nnv.chamcongvip",
+  "appName": "NNV - Cham Cong",
+  "webDir": "dist",
+  "plugins": {
+    "CapacitorHttp": {
+      "enabled": true
+    },
+    "PushNotifications": {
+      "presentationOptions": ["badge", "sound", "alert"]
+    }
+  }
+}

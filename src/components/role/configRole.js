@@ -1,0 +1,37 @@
+const APP_PERMISSIONS = {
+  screens: [
+    { id: "pages", name: "Quản Lý Page" },
+    { id: "pagesmessage", name: "Tin Nhắn Page" },
+    { id: "chatweb", name: "Chatbot Web" },
+    { id: "donhang", name: "Đơn Hàng" },
+    { id: "donhangWeb", name: "Đơn Hàng Web" },
+    { id: "business_stats", name: "Thống kê kinh doanh" },
+    { id: "users", name: "Người Dùng" },
+    { id: "roles", name: "Phân quyền" },
+    { id: "commission_online", name: "Tính Hoa Hồng Online" },
+    { id: "commission_abc", name: "Tính Hoa Hồng ABC" },
+    { id: "admin_dashboard", name: "Quản Trị Hệ Thống" },
+    { id: "admin_products_tool", name: "Quản Trị Sản Phẩm" },
+    { id: "admin_event_promo", name: "Chương Trình Khuyến Mãi Chung" },
+    { id: "admin_vectorstore_tool", name: "Quản Trị Vector DB" },
+    { id: "admin_agent", name: "Quản Trị Agent" },
+    { id: "admin_faq", name: "FAQ Theo Page" },
+    { id: "admin_testcase", name: "Quản Trị Test Case ChatBot" },
+    { id: "admin_logs", name: "Log Hệ Thống" },
+    { id: "notifications", name: "Thông Báo Thiết Bị" },
+    { id: "attendance_self", name: "Chấm công của tôi" },
+    { id: "attendance", name: "Quản lý chấm công" },
+    { id: "attendance_shifts", name: "Ca làm" },
+    { id: "attendance_locations", name: "Vị trí chấm công" },
+    { id: "payroll", name: "Chấm công tính lương" },
+  ],
+  actions: [
+    { id: "view", name: "Xem", color: "blue" },
+    { id: "create", name: "Thêm mới", color: "emerald" },
+    { id: "edit", name: "Chỉnh sửa", color: "amber" },
+    { id: "delete", name: "Xóa", color: "red" },
+    { id: "export", name: "Xuất file", color: "slate" },
+  ],
+};
+
+export default APP_PERMISSIONS;

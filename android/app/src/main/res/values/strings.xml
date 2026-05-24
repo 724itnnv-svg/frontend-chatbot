@@ -1,0 +1,9 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">NNV - Chấm Công</string>
+    <string name="title_activity_main">NNV - Chấm Công</string>
+    <string name="package_name">com.nnv.chamcongvip</string>
+    <string name="custom_url_scheme">com.nnv.chamcongvip</string>
+    <string name="server_push_channel_name">Thong bao quan trong</string>
+    <string name="server_push_channel_description">Thong bao tu Firebase va he thong NNV</string>
+</resources>
