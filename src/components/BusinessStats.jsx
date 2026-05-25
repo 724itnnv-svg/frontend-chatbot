@@ -14,6 +14,7 @@ import {
   RefreshCw,
   ShoppingCart,
   TrendingUp,
+  X,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 
@@ -608,55 +609,74 @@ function makeBlob(content, format) {
   });
 }
 
-function StatCard({ title, value, subtitle, icon: Icon, tone = "sky" }) {
+function StatCard({ title, value, subtitle, icon: Icon, tone = "sky", onClick }) {
   const tones = {
     sky: {
-      border: "border-sky-100",
+      border: "border-sky-200/70",
       bg: "bg-sky-50",
       text: "text-sky-700",
       ring: "ring-sky-100",
+      accent: "bg-sky-500",
     },
     rose: {
-      border: "border-rose-100",
+      border: "border-rose-200/70",
       bg: "bg-rose-50",
       text: "text-rose-700",
       ring: "ring-rose-100",
+      accent: "bg-rose-500",
     },
     orange: {
-      border: "border-orange-100",
+      border: "border-orange-200/70",
       bg: "bg-orange-50",
       text: "text-orange-700",
       ring: "ring-orange-100",
+      accent: "bg-orange-500",
     },
     emerald: {
-      border: "border-emerald-100",
+      border: "border-emerald-200/70",
       bg: "bg-emerald-50",
       text: "text-emerald-700",
       ring: "ring-emerald-100",
+      accent: "bg-emerald-500",
     },
     violet: {
-      border: "border-violet-100",
+      border: "border-violet-200/70",
       bg: "bg-violet-50",
       text: "text-violet-700",
       ring: "ring-violet-100",
+      accent: "bg-violet-500",
     },
     amber: {
-      border: "border-amber-100",
+      border: "border-amber-200/70",
       bg: "bg-amber-50",
       text: "text-amber-700",
       ring: "ring-amber-100",
+      accent: "bg-amber-500",
     },
   };
   const current = tones[tone] || tones.sky;
 
   return (
-    <div className={`min-w-0 rounded-lg border ${current.border} bg-white p-4 shadow-sm`}>
-      <div className="flex min-h-[118px] flex-col justify-between gap-4">
+    <div
+      role={onClick ? "button" : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onClick={onClick}
+      onKeyDown={(event) => {
+        if (!onClick) return;
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onClick();
+        }
+      }}
+      className={`group relative min-w-0 overflow-hidden rounded-xl border ${current.border} bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${onClick ? "cursor-pointer focus:outline-none focus:ring-2 focus:ring-emerald-200" : ""}`}
+    >
+      <div className={`absolute inset-x-0 top-0 h-1 ${current.accent}`} />
+      <div className="flex min-h-[126px] flex-col justify-between gap-4">
         <div className="flex items-start justify-between gap-3">
-          <p className={`min-w-0 text-xs font-bold uppercase leading-5 tracking-wide ${current.text}`}>
+          <p className="min-w-0 text-[11px] font-bold uppercase leading-5 tracking-wide text-slate-500">
             {title}
           </p>
-          <div className={`shrink-0 rounded-lg ${current.bg} p-2.5 ${current.text} ring-1 ${current.ring}`}>
+          <div className={`shrink-0 rounded-xl ${current.bg} p-2.5 ${current.text} ring-1 ${current.ring}`}>
             <Icon size={22} strokeWidth={2.1} />
           </div>
         </div>
@@ -694,6 +714,18 @@ export default function BusinessStats() {
   });
   const [isExporting, setIsExporting] = useState(false);
   const [exportError, setExportError] = useState("");
+  const [convertedOrdersModal, setConvertedOrdersModal] = useState({
+    isOpen: false,
+    isLoading: false,
+    error: "",
+    orders: [],
+  });
+  const [unconvertedConversationsModal, setUnconvertedConversationsModal] = useState({
+    isOpen: false,
+    isLoading: false,
+    error: "",
+    conversations: [],
+  });
 
   const buildStatsQuery = () => {
     const timezoneOffset = -new Date().getTimezoneOffset();
@@ -754,6 +786,96 @@ export default function BusinessStats() {
     const data = await res.json();
     if (!res.ok) throw new Error(data.message || "Khong the xuat du lieu");
     return data;
+  };
+
+  const openConvertedOrdersModal = async () => {
+    if (!token) return;
+    if (statsMode === "day" && !statsDate) return;
+    if (statsMode === "range" && (!statsRange.from || !statsRange.to)) return;
+
+    setConvertedOrdersModal({
+      isOpen: true,
+      isLoading: true,
+      error: "",
+      orders: [],
+    });
+
+    try {
+      const queryParams = buildStatsQuery();
+      queryParams.set("type", "orders");
+      queryParams.set("convertedOnly", "1");
+
+      const res = await fetch(`/api/chat/stats/export?${queryParams.toString()}`, {
+        method: "GET",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Khong the tai danh sach don hang");
+
+      setConvertedOrdersModal({
+        isOpen: true,
+        isLoading: false,
+        error: "",
+        orders: Array.isArray(data.orders) ? data.orders : [],
+      });
+    } catch (err) {
+      console.error(err);
+      setConvertedOrdersModal({
+        isOpen: true,
+        isLoading: false,
+        error: err.message || "Khong the tai danh sach don hang",
+        orders: [],
+      });
+    }
+  };
+
+  const closeConvertedOrdersModal = () => {
+    setConvertedOrdersModal((current) => ({ ...current, isOpen: false }));
+  };
+
+  const openUnconvertedConversationsModal = async () => {
+    if (!token) return;
+    if (statsMode === "day" && !statsDate) return;
+    if (statsMode === "range" && (!statsRange.from || !statsRange.to)) return;
+
+    setUnconvertedConversationsModal({
+      isOpen: true,
+      isLoading: true,
+      error: "",
+      conversations: [],
+    });
+
+    try {
+      const queryParams = buildStatsQuery();
+      queryParams.set("type", "conversations");
+      queryParams.set("unconvertedOnly", "1");
+
+      const res = await fetch(`/api/chat/stats/export?${queryParams.toString()}`, {
+        method: "GET",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Khong the tai danh sach hoi thoai");
+
+      setUnconvertedConversationsModal({
+        isOpen: true,
+        isLoading: false,
+        error: "",
+        conversations: Array.isArray(data.conversations) ? data.conversations : [],
+      });
+    } catch (err) {
+      console.error(err);
+      setUnconvertedConversationsModal({
+        isOpen: true,
+        isLoading: false,
+        error: err.message || "Khong the tai danh sach hoi thoai",
+        conversations: [],
+      });
+    }
+  };
+
+  const closeUnconvertedConversationsModal = () => {
+    setUnconvertedConversationsModal((current) => ({ ...current, isOpen: false }));
   };
 
   const buildExportPayload = (data) => {
@@ -871,37 +993,65 @@ export default function BusinessStats() {
   const productStats = Array.isArray(dailyStats?.productStats) ? dailyStats.productStats : [];
   const topProducts = productStats.slice(0, 10);
   const maxProductQuantity = Math.max(...topProducts.map((product) => Number(product.quantity) || 0), 0);
+  const conversationCount = Number(dailyStats?.conversationCount || 0);
+  const totalOrderAmount = Number(dailyStats?.totalOrderAmount || 0);
+  const orderCount = Number(dailyStats?.orderCount || 0);
+  const cancelledOrderCount = Number(dailyStats?.cancelledOrderCount || 0);
+  const silentConversationCount = Number(dailyStats?.silentConversationCount || 0);
+  const interactedUnconvertedCount = Number(dailyStats?.interactedUnconvertedCount || 0);
+  const conversionRate = Number(dailyStats?.conversionRate || 0);
+  const silentThresholdMinutes = Number(dailyStats?.silentThresholdMinutes || 30);
+  const careFunnelItems = [
+    ["Hội thoại mới", conversationCount, "Tạo trong mốc đang chọn", "border-sky-100 bg-sky-50 text-sky-700"],
+    ["Đã chốt", orderCount, "Đơn hàng active/confirmed/completed", "border-emerald-100 bg-emerald-50 text-emerald-700"],
+    ["Chưa chốt", interactedUnconvertedCount, "Có trao đổi nhưng chưa có đơn", "border-orange-100 bg-orange-50 text-orange-700"],
+    ["Cần chăm sóc lại", silentConversationCount, `Quá ${formatNumber(silentThresholdMinutes)} phút chưa phản hồi`, "border-rose-100 bg-rose-50 text-rose-700"],
+  ];
+  const quickRanges = [
+    ["today", "Hôm nay"],
+    ["yesterday", "Hôm qua"],
+    ["last_week", "Tuần trước"],
+    ["last_month", "Tháng trước"],
+    ["this_month", "Tháng này"],
+  ];
 
   return (
-    <div className="min-h-screen bg-slate-50 px-4 py-6 text-slate-800 md:px-6">
-      <div className="mx-auto max-w-7xl space-y-6">
-        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight text-slate-900">Thống kê kinh doanh</h1>
-            <p className="mt-1 text-sm text-slate-500">
-              Theo dõi hội thoại, đơn hàng và tỉ lệ chốt trong ngày.
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="inline-flex rounded-xl border border-slate-200 bg-white p-1">
+    <div className="min-h-screen bg-slate-100 px-4 py-6 text-slate-800 md:px-6">
+      <div className="mx-auto max-w-[96rem] space-y-6">
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(360px,520px)] xl:items-start">
+              <div className="min-w-0 self-center py-1">
+                <div className="inline-flex items-center gap-2 rounded-full bg-cyan-50 px-3 py-1 text-xs font-bold uppercase tracking-wide text-cyan-700 ring-1 ring-cyan-100">
+                  <TrendingUp size={14} />
+                  Báo cáo vận hành
+                </div>
+                <h1 className="mt-3 text-2xl font-bold tracking-tight text-slate-950 md:text-3xl">Thống kê kinh doanh</h1>
+                <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-500">
+                  Tổng hợp doanh thu, đơn chốt và các hội thoại cần chăm sóc lại theo mốc thời gian.
+                </p>
+              </div>
+
+              <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-slate-50/80 p-3 shadow-inner">
+              <div className="inline-flex w-full rounded-xl border border-slate-200 bg-white p-1 sm:w-fit sm:self-end">
               <button
                 type="button"
                 onClick={() => setStatsMode("day")}
-                className={`rounded-lg px-3 py-1.5 text-sm font-semibold transition ${statsMode === "day" ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-100"}`}
+                className={`flex-1 whitespace-nowrap rounded-lg px-3 py-1.5 text-sm font-semibold transition sm:flex-none ${statsMode === "day" ? "bg-slate-900 text-white shadow-sm" : "text-slate-600 hover:bg-slate-50"}`}
               >
                 1 ngày
               </button>
               <button
                 type="button"
                 onClick={() => setStatsMode("range")}
-                className={`rounded-lg px-3 py-1.5 text-sm font-semibold transition ${statsMode === "range" ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-100"}`}
+                className={`flex-1 whitespace-nowrap rounded-lg px-3 py-1.5 text-sm font-semibold transition sm:flex-none ${statsMode === "range" ? "bg-slate-900 text-white shadow-sm" : "text-slate-600 hover:bg-slate-50"}`}
               >
                 Khoảng thời gian
               </button>
             </div>
 
-            {statsMode === "day" ? (
-              <label className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700">
+              <div className="flex flex-wrap items-center justify-end gap-2">
+              {statsMode === "day" ? (
+              <label className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm">
                 <Calendar size={16} className="text-slate-400" />
                 <input
                   type="date"
@@ -915,7 +1065,7 @@ export default function BusinessStats() {
               </label>
             ) : (
               <>
-                <label className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700">
+                <label className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm">
                   <span className="text-xs font-bold uppercase text-slate-400">Từ</span>
                   <input
                     type="date"
@@ -924,7 +1074,7 @@ export default function BusinessStats() {
                     onChange={(e) => setStatsRange((current) => ({ ...current, from: e.target.value }))}
                   />
                 </label>
-                <label className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700">
+                <label className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm">
                   <span className="text-xs font-bold uppercase text-slate-400">Đến</span>
                   <input
                     type="date"
@@ -939,32 +1089,36 @@ export default function BusinessStats() {
               type="button"
               onClick={fetchDailyStats}
               disabled={isLoadingStats}
-              className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 disabled:opacity-60"
+              className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:opacity-60"
             >
               <RefreshCw size={16} className={isLoadingStats ? "animate-spin" : ""} />
               Làm mới
             </button>
-          </div>
-        </div>
+              </div>
 
-        <div className="flex flex-wrap gap-2">
-          {[
-            ["today", "Hôm nay"],
-            ["yesterday", "Hôm qua"],
-            ["last_week", "Tuần trước"],
-            ["last_month", "Tháng trước"],
-            ["this_month", "Tháng này"],
-          ].map(([key, label]) => (
-            <button
-              key={key}
-              type="button"
-              onClick={() => applyQuickRange(key)}
-              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-600 transition hover:border-sky-200 hover:bg-sky-50 hover:text-sky-700"
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+            </div>
+          </div>
+
+          <div className="mt-5 flex flex-col gap-3 rounded-2xl border border-slate-200 bg-slate-50/70 p-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
+              {quickRanges.map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => applyQuickRange(key)}
+                  className="whitespace-nowrap rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 shadow-sm transition hover:border-cyan-200 hover:bg-cyan-50 hover:text-cyan-700 sm:text-sm"
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600 shadow-sm sm:w-auto">
+              <Calendar size={16} className="text-slate-400" />
+              <span>Mốc thống kê:</span>
+              <span className="font-bold text-slate-900">{statsLabel}</span>
+            </div>
+          </div>
+        </section>
 
         {statsError && (
           <div className="flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
@@ -973,12 +1127,8 @@ export default function BusinessStats() {
           </div>
         )}
 
-        <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600 shadow-sm">
-          Mốc thống kê: <span className="font-semibold text-slate-900">{statsLabel}</span>
-        </div>
-
-        <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="flex flex-col gap-5">
             <div>
               <h2 className="text-base font-bold text-slate-900">Xuất dữ liệu</h2>
               <p className="mt-1 text-sm text-slate-500">
@@ -986,7 +1136,7 @@ export default function BusinessStats() {
               </p>
             </div>
 
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-[1.1fr_0.75fr_1fr_1.05fr_auto] lg:items-end">
               <label className="space-y-1">
                 <span className="text-xs font-bold uppercase text-slate-500">Dữ liệu</span>
                 <select
@@ -1029,7 +1179,7 @@ export default function BusinessStats() {
                 </select>
               </label>
 
-              <label className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700">
+              <label className="flex min-h-[42px] items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700">
                 <input
                   type="checkbox"
                   checked={exportOptions.includeHistory || (exportOptions.format === "pdf" && exportOptions.type !== "orders")}
@@ -1046,7 +1196,7 @@ export default function BusinessStats() {
                 type="button"
                 onClick={handleExportData}
                 disabled={isExporting}
-                className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-60"
+                className="inline-flex min-h-[42px] items-center justify-center gap-2 rounded-xl bg-slate-900 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 disabled:opacity-60"
               >
                 {exportOptions.packageMode === "zip" ? <FileArchive size={17} /> : exportOptions.format === "json" ? <FileJson size={17} /> : <FileText size={17} />}
                 {isExporting ? "Đang xuất..." : "Xuất dữ liệu"}
@@ -1063,155 +1213,91 @@ export default function BusinessStats() {
           )}
         </section>
 
-        <div className="grid grid-cols-[repeat(auto-fit,minmax(230px,1fr))] gap-4">
-          <StatCard
-            title="Hội thoại"
-            value={isLoadingStats ? "..." : formatNumber(dailyStats?.conversationCount)}
-            subtitle="Tổng đoạn hội thoại"
-            icon={MessageSquare}
-            tone="sky"
-          />
-          <StatCard
-            title="Hỏi rồi im lặng"
-            value={isLoadingStats ? "..." : formatNumber(dailyStats?.silentConversationCount)}
-            subtitle={`Quá ${formatNumber(dailyStats?.silentThresholdMinutes || 30)} phút chưa phản hồi`}
-            icon={Clock}
-            tone="rose"
-          />
-          <StatCard
-            title="Tương tác chưa chốt"
-            value={isLoadingStats ? "..." : formatNumber(dailyStats?.interactedUnconvertedCount)}
-            subtitle="Có trao đổi, chưa có đơn"
-            icon={AlertTriangle}
-            tone="orange"
-          />
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(280px,1fr))] gap-4">
           <StatCard
             title="Đơn hàng"
-            value={isLoadingStats ? "..." : formatNumber(dailyStats?.orderCount)}
-            subtitle={Number(dailyStats?.cancelledOrderCount || 0) > 0 ? `Hủy: ${formatNumber(dailyStats.cancelledOrderCount)}` : "Đơn đã chốt"}
+            value={isLoadingStats ? "..." : formatNumber(orderCount)}
+            subtitle="Tổng đơn đã ghi nhận"
             icon={ShoppingCart}
             tone="emerald"
           />
           <StatCard
-            title="Tổng tiền đơn"
-            value={isLoadingStats ? "..." : formatCurrency(dailyStats?.totalOrderAmount)}
-            subtitle="Doanh thu đơn active"
+            title="Doanh thu"
+            value={isLoadingStats ? "..." : formatCurrency(totalOrderAmount)}
+            subtitle="Tổng tiền đơn active"
             icon={CircleDollarSign}
             tone="violet"
           />
           <StatCard
             title="Tỉ lệ chốt"
-            value={isLoadingStats ? "..." : `${Number(dailyStats?.conversionRate || 0).toFixed(2)}%`}
-            subtitle="Đơn hàng / hội thoại"
+            value={isLoadingStats ? "..." : `${conversionRate.toFixed(2)}%`}
+            subtitle="Khách chốt / khách tương tác"
             icon={TrendingUp}
             tone="amber"
           />
+          <StatCard
+            title="Đơn bị lỗi"
+            value={isLoadingStats ? "..." : formatNumber(cancelledOrderCount)}
+            subtitle="Đơn hủy hoặc không hợp lệ"
+            icon={AlertTriangle}
+            tone="rose"
+          />
         </div>
 
-        <div className="hidden">
-          <div className="min-w-0 rounded-xl border border-sky-100 bg-white p-4 shadow-sm">
-            <div className="flex items-start justify-between gap-4">
-              <div className="min-w-0">
-                <p className="text-xs font-bold uppercase tracking-wide text-sky-600">Hội thoại</p>
-                <p className="mt-3 break-words text-3xl font-bold text-slate-950">
-                  {isLoadingStats ? "..." : formatNumber(dailyStats?.conversationCount)}
-                </p>
-              </div>
-              <div className="shrink-0 rounded-xl bg-sky-50 p-3 text-sky-600">
-                <MessageSquare size={24} />
-              </div>
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+            <div>
+              <h2 className="text-base font-bold text-slate-900">Phễu chăm sóc khách hàng</h2>
+              <p className="mt-1 text-sm text-slate-500">Theo dõi tiến độ từ hội thoại mới đến đơn đã chốt.</p>
+            </div>
+            <div className="inline-flex w-fit items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-sm font-semibold text-slate-600">
+              <MessageSquare size={15} />
+              {isLoadingStats ? "..." : formatNumber(conversationCount)} hội thoại
             </div>
           </div>
 
-          <div className="min-w-0 rounded-xl border border-rose-100 bg-white p-4 shadow-sm">
-            <div className="flex items-start justify-between gap-4">
-              <div className="min-w-0">
-                <p className="text-xs font-bold uppercase tracking-wide text-rose-600">Hỏi rồi im lặng</p>
-                <p className="mt-3 break-words text-3xl font-bold text-slate-950">
-                  {isLoadingStats ? "..." : formatNumber(dailyStats?.silentConversationCount)}
-                </p>
-                <p className="mt-2 text-sm text-slate-500">
-                  Quá {formatNumber(dailyStats?.silentThresholdMinutes || 30)} phút
-                </p>
+          <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            {careFunnelItems.map(([label, value, note, tone], index) => {
+              const isConvertedCard = index === 1;
+              const isUnconvertedCard = index === 2;
+              const onCardOpen = isConvertedCard
+                ? openConvertedOrdersModal
+                : isUnconvertedCard
+                  ? openUnconvertedConversationsModal
+                  : undefined;
+              return (
+              <div
+                key={label}
+                role={onCardOpen ? "button" : undefined}
+                tabIndex={onCardOpen ? 0 : undefined}
+                onClick={onCardOpen}
+                onKeyDown={(event) => {
+                  if (!onCardOpen) return;
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    onCardOpen();
+                  }
+                }}
+                className={`rounded-xl border p-4 ${tone} ${onCardOpen ? "cursor-pointer transition hover:-translate-y-0.5 hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-emerald-200" : ""}`}
+              >
+                <div className="text-xs font-bold uppercase">{label}</div>
+                <div className="mt-2 text-3xl font-bold text-slate-950">
+                  {isLoadingStats ? "..." : formatNumber(value)}
+                </div>
+                <div className="mt-1 text-sm text-slate-500">{note}</div>
               </div>
-              <div className="shrink-0 rounded-xl bg-rose-50 p-3 text-rose-600">
-                <Clock size={24} />
-              </div>
-            </div>
+              );
+            })}
           </div>
+        </section>
 
-          <div className="min-w-0 rounded-xl border border-orange-100 bg-white p-4 shadow-sm">
-            <div className="flex items-start justify-between gap-4">
-              <div className="min-w-0">
-                <p className="text-xs font-bold uppercase tracking-wide text-orange-600">TÆ°Æ¡ng tÃ¡c chÆ°a chá»‘t</p>
-                <p className="mt-3 break-words text-3xl font-bold text-slate-950">
-                  {isLoadingStats ? "..." : formatNumber(dailyStats?.interactedUnconvertedCount)}
-                </p>
-                <p className="mt-2 text-sm text-slate-500">
-                  CÃ³ trao Ä‘á»•i, chÆ°a cÃ³ Ä‘Æ¡n
-                </p>
-              </div>
-              <div className="shrink-0 rounded-xl bg-orange-50 p-3 text-orange-600">
-                <AlertTriangle size={24} />
-              </div>
-            </div>
-          </div>
-
-          <div className="min-w-0 rounded-xl border border-emerald-100 bg-white p-4 shadow-sm">
-            <div className="flex items-start justify-between gap-4">
-              <div className="min-w-0">
-                <p className="text-xs font-bold uppercase tracking-wide text-emerald-600">Đơn hàng</p>
-                <p className="mt-3 break-words text-3xl font-bold text-slate-950">
-                  {isLoadingStats ? "..." : formatNumber(dailyStats?.orderCount)}
-                </p>
-                {Number(dailyStats?.cancelledOrderCount || 0) > 0 && (
-                  <p className="mt-2 text-sm text-slate-500">
-                    Hủy: {formatNumber(dailyStats.cancelledOrderCount)}
-                  </p>
-                )}
-              </div>
-              <div className="shrink-0 rounded-xl bg-emerald-50 p-3 text-emerald-600">
-                <ShoppingCart size={24} />
-              </div>
-            </div>
-          </div>
-
-          <div className="min-w-0 rounded-xl border border-violet-100 bg-white p-4 shadow-sm">
-            <div className="flex items-start justify-between gap-4">
-              <div className="min-w-0">
-                <p className="text-xs font-bold uppercase tracking-wide text-violet-600">Tổng tiền đơn</p>
-                <p className="mt-3 break-words text-2xl font-bold text-slate-950">
-                  {isLoadingStats ? "..." : formatCurrency(dailyStats?.totalOrderAmount)}
-                </p>
-              </div>
-              <div className="shrink-0 rounded-xl bg-violet-50 p-3 text-violet-600">
-                <CircleDollarSign size={24} />
-              </div>
-            </div>
-          </div>
-
-          <div className="min-w-0 rounded-xl border border-amber-100 bg-white p-4 shadow-sm">
-            <div className="flex items-start justify-between gap-4">
-              <div className="min-w-0">
-                <p className="text-xs font-bold uppercase tracking-wide text-amber-600">Tỉ lệ chốt</p>
-                <p className="mt-3 break-words text-3xl font-bold text-slate-950">
-                  {isLoadingStats ? "..." : `${Number(dailyStats?.conversionRate || 0).toFixed(2)}%`}
-                </p>
-              </div>
-              <div className="shrink-0 rounded-xl bg-amber-50 p-3 text-amber-600">
-                <TrendingUp size={24} />
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="flex flex-col gap-1 md:flex-row md:items-end md:justify-between">
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
             <div>
               <h2 className="text-base font-bold text-slate-900">Sản phẩm được chốt</h2>
               <p className="text-sm text-slate-500">Top sản phẩm theo tổng số lượng trong mốc thống kê.</p>
             </div>
-            <div className="text-sm font-semibold text-slate-500">
+            <div className="inline-flex w-fit items-center rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-sm font-semibold text-slate-600">
               {formatNumber(productStats.length)} sản phẩm
             </div>
           </div>
@@ -1230,7 +1316,7 @@ export default function BusinessStats() {
                 const quantity = Number(product.quantity) || 0;
                 const percent = maxProductQuantity > 0 ? Math.max(4, (quantity / maxProductQuantity) * 100) : 0;
                 return (
-                  <div key={`${product.sku || product.productName}-${index}`} className="grid gap-2 md:grid-cols-[minmax(180px,300px)_1fr_auto] md:items-center">
+                  <div key={`${product.sku || product.productName}-${index}`} className="grid gap-3 rounded-2xl border border-slate-100 bg-slate-50/80 p-3 transition hover:border-sky-100 hover:bg-white hover:shadow-sm md:grid-cols-[minmax(220px,320px)_1fr_auto] md:items-center">
                     <div className="min-w-0">
                       <div className="truncate text-sm font-semibold text-slate-800" title={product.productName}>
                         {index + 1}. {product.productName || "Không tên"}
@@ -1239,15 +1325,15 @@ export default function BusinessStats() {
                         SKU: {product.sku || "N/A"} | {formatNumber(product.orderCount)} đơn
                       </div>
                     </div>
-                    <div className="h-9 rounded-xl bg-slate-100 p-1">
+                    <div className="h-10 rounded-xl bg-white p-1 shadow-inner">
                       <div
-                        className="flex h-full items-center justify-end rounded-lg bg-gradient-to-r from-emerald-500 to-sky-500 px-2 text-xs font-bold text-white transition-all"
+                        className="flex h-full items-center justify-end rounded-lg bg-gradient-to-r from-emerald-500 to-sky-500 px-3 text-xs font-bold text-white transition-all"
                         style={{ width: `${percent}%` }}
                       >
                         {formatNumber(quantity)}
                       </div>
                     </div>
-                    <div className="text-right text-sm font-semibold text-slate-700">
+                    <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-right text-sm font-bold text-slate-800">
                       {formatCurrency(product.revenue)}
                     </div>
                   </div>
@@ -1256,6 +1342,169 @@ export default function BusinessStats() {
             </div>
           )}
         </section>
+
+        {convertedOrdersModal.isOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm">
+            <div className="flex max-h-[88vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
+              <div className="flex flex-col gap-3 border-b border-slate-100 px-5 py-4 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <h3 className="text-lg font-bold text-slate-950">Đơn hàng đã chốt</h3>
+                  <p className="mt-1 text-sm text-slate-500">
+                    {statsLabel} • {convertedOrdersModal.isLoading ? "Đang tải..." : `${formatNumber(convertedOrdersModal.orders.length)} đơn hàng`}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={closeConvertedOrdersModal}
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition hover:bg-slate-50 hover:text-slate-900"
+                  aria-label="Đóng"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="min-h-0 flex-1 overflow-auto p-5">
+                {convertedOrdersModal.isLoading ? (
+                  <div className="rounded-xl border border-slate-100 bg-slate-50 p-8 text-center text-sm text-slate-500">
+                    Đang tải danh sách đơn hàng...
+                  </div>
+                ) : convertedOrdersModal.error ? (
+                  <div className="flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                    <AlertTriangle size={16} />
+                    {convertedOrdersModal.error}
+                  </div>
+                ) : convertedOrdersModal.orders.length === 0 ? (
+                  <div className="rounded-xl border border-slate-100 bg-slate-50 p-8 text-center text-sm text-slate-500">
+                    Chưa có đơn hàng đã chốt trong mốc này.
+                  </div>
+                ) : (
+                  <div className="overflow-hidden rounded-xl border border-slate-200">
+                    <table className="w-full min-w-[900px] border-collapse text-left text-sm">
+                      <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+                        <tr>
+                          <th className="border-b border-slate-200 px-4 py-3">Khách hàng</th>
+                          <th className="border-b border-slate-200 px-4 py-3">Điện thoại</th>
+                          <th className="border-b border-slate-200 px-4 py-3">Sản phẩm</th>
+                          <th className="border-b border-slate-200 px-4 py-3">Tổng tiền</th>
+                          <th className="border-b border-slate-200 px-4 py-3">Trạng thái</th>
+                          <th className="border-b border-slate-200 px-4 py-3">Thời gian</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {convertedOrdersModal.orders.map((order) => {
+                          const items = Array.isArray(order.items) ? order.items : [];
+                          const itemSummary = items.length
+                            ? items.map((item) => `${item.productName || item.sku || "Sản phẩm"} x${formatNumber(item.quantity || 0)}`).join(", ")
+                            : "Không có sản phẩm";
+                          return (
+                            <tr key={order._id || `${order.customerId}-${order.createdAt}`} className="hover:bg-slate-50/80">
+                              <td className="px-4 py-3">
+                                <div className="font-semibold text-slate-900">{order.customerName || order.customerId || "Không tên"}</div>
+                                <div className="mt-0.5 text-xs text-slate-400">{order.pageName || order.pageId || ""}</div>
+                              </td>
+                              <td className="px-4 py-3 text-slate-700">{order.phoneNumber || "N/A"}</td>
+                              <td className="max-w-[360px] px-4 py-3 text-slate-600">
+                                <div className="line-clamp-2" title={itemSummary}>{itemSummary}</div>
+                              </td>
+                              <td className="px-4 py-3 font-bold text-slate-900">{formatCurrency(order.total)}</td>
+                              <td className="px-4 py-3">
+                                <span className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-bold text-emerald-700">
+                                  {order.status || "active"}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3 text-slate-500">{formatDateTime(order.createdAt)}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {unconvertedConversationsModal.isOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm">
+            <div className="flex max-h-[88vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
+              <div className="flex flex-col gap-3 border-b border-slate-100 px-5 py-4 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <h3 className="text-lg font-bold text-slate-950">Hội thoại chưa chốt</h3>
+                  <p className="mt-1 text-sm text-slate-500">
+                    {statsLabel} • {unconvertedConversationsModal.isLoading ? "Đang tải..." : `${formatNumber(unconvertedConversationsModal.conversations.length)} hội thoại`}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={closeUnconvertedConversationsModal}
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition hover:bg-slate-50 hover:text-slate-900"
+                  aria-label="Đóng"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="min-h-0 flex-1 overflow-auto p-5">
+                {unconvertedConversationsModal.isLoading ? (
+                  <div className="rounded-xl border border-slate-100 bg-slate-50 p-8 text-center text-sm text-slate-500">
+                    Đang tải danh sách hội thoại...
+                  </div>
+                ) : unconvertedConversationsModal.error ? (
+                  <div className="flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                    <AlertTriangle size={16} />
+                    {unconvertedConversationsModal.error}
+                  </div>
+                ) : unconvertedConversationsModal.conversations.length === 0 ? (
+                  <div className="rounded-xl border border-slate-100 bg-slate-50 p-8 text-center text-sm text-slate-500">
+                    Chưa có hội thoại chưa chốt trong mốc này.
+                  </div>
+                ) : (
+                  <div className="overflow-hidden rounded-xl border border-slate-200">
+                    <table className="w-full min-w-[860px] border-collapse text-left text-sm">
+                      <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+                        <tr>
+                          <th className="border-b border-slate-200 px-4 py-3">Khách hàng</th>
+                          <th className="border-b border-slate-200 px-4 py-3">Page</th>
+                          <th className="border-b border-slate-200 px-4 py-3">Tương tác</th>
+                          <th className="border-b border-slate-200 px-4 py-3">Cập nhật</th>
+                          <th className="border-b border-slate-200 px-4 py-3">Ghi chú</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {unconvertedConversationsModal.conversations.map((conversation) => {
+                          const customerName = getConversationCustomerName(conversation);
+                          const customerCount = Number(conversation.customerMessageCount || 0);
+                          const responseCount = Number(conversation.responseMessageCount || 0);
+                          const note = conversation.summary || conversation.conversationSummary || conversation.lastMessage || "";
+                          return (
+                            <tr key={conversation._id || `${conversation.page}-${conversation.user}`} className="hover:bg-slate-50/80">
+                              <td className="px-4 py-3">
+                                <div className="font-semibold text-slate-900">{customerName || conversation.user || "Không tên"}</div>
+                                <div className="mt-0.5 text-xs text-slate-400">{conversation.user || ""}</div>
+                              </td>
+                              <td className="px-4 py-3 text-slate-700">{conversation.pageName || conversation.page || "N/A"}</td>
+                              <td className="px-4 py-3 text-slate-600">
+                                <div className="font-semibold text-slate-900">{formatNumber(customerCount + responseCount)} tin</div>
+                                <div className="mt-0.5 text-xs text-slate-400">
+                                  Khách {formatNumber(customerCount)} • Phản hồi {formatNumber(responseCount)}
+                                </div>
+                              </td>
+                              <td className="px-4 py-3 text-slate-500">{formatDateTime(conversation.lastInteractionAt || conversation.updatedAt)}</td>
+                              <td className="max-w-[360px] px-4 py-3 text-slate-600">
+                                <div className="line-clamp-2" title={note}>{note || "Có trao đổi nhưng chưa phát sinh đơn chốt"}</div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

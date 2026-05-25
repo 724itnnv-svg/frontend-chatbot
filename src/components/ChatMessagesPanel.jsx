@@ -21,7 +21,60 @@ function initials(name = "") {
   return parts.map((p) => p[0]?.toUpperCase() || "").join("") || "?";
 }
 
-export default function ChatMessagesPanel({ messages }) {
+function MessageAvatar({ isUser, label, src }) {
+  if (src) {
+    return (
+      <img
+        src={src}
+        alt={label}
+        className="h-8 w-8 shrink-0 rounded-full border border-white bg-white object-cover shadow-sm ring-1 ring-slate-200"
+        onError={(event) => {
+          event.currentTarget.style.display = "none";
+        }}
+      />
+    );
+  }
+
+  return (
+    <div
+      className={[
+        "grid h-8 w-8 shrink-0 place-items-center rounded-full text-[11px] font-bold shadow-sm ring-1",
+        isUser
+          ? "bg-white text-slate-700 ring-slate-200"
+          : "bg-gradient-to-br from-sky-500 to-blue-600 text-white ring-sky-200",
+      ].join(" ")}
+      title={label}
+    >
+      {isUser ? initials("KH") : initials("PG")}
+    </div>
+  );
+}
+
+function ImageAttachment({ imageUrl, isUser }) {
+  if (!imageUrl) return null;
+
+  return (
+    <a
+      href={imageUrl}
+      target="_blank"
+      rel="noreferrer"
+      className={[
+        "mt-2 block overflow-hidden rounded-2xl border transition hover:opacity-95",
+        isUser ? "border-slate-200 bg-slate-50" : "border-white/20 bg-white/10",
+      ].join(" ")}
+      title="Mở ảnh đính kèm"
+    >
+      <img
+        src={imageUrl}
+        alt="Ảnh đính kèm"
+        className="max-h-80 w-full object-cover"
+        loading="lazy"
+      />
+    </a>
+  );
+}
+
+export default function ChatMessagesPanel({ messages, customerAvatarUrl = "" }) {
   const bottomRef = useRef(null);
 
   useEffect(() => {
@@ -80,13 +133,13 @@ export default function ChatMessagesPanel({ messages }) {
   }, [messages]);
 
   return (
-    <div className="flex-1 flex flex-col h-full min-h-10 bg-gradient-to-b from-slate-50 to-white relative">
-      <div className="flex-1 min-h-0 overflow-y-auto px-3 md:px-4 py-4 space-y-3">
+    <div className="flex h-full min-h-10 flex-1 flex-col bg-[radial-gradient(circle_at_top_left,rgba(14,165,233,0.08),transparent_34%),linear-gradient(180deg,#f8fafc_0%,#eef2f7_100%)]">
+      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-3 py-5 md:px-6">
         {chatItems.length === 0 ? (
-          <div className="mx-auto mt-10 max-w-md rounded-2xl border border-slate-200 bg-white p-4 text-center shadow-sm">
+          <div className="mx-auto mt-10 max-w-sm rounded-2xl border border-dashed border-slate-300 bg-white px-5 py-4 text-center shadow-sm">
             <div className="text-sm font-semibold text-slate-800">Chưa có tin nhắn</div>
-            <div className="mt-1 text-xs text-slate-500">
-              Nếu đang tải lịch sử, vui lòng đợi vài giây...
+            <div className="mt-1 text-xs leading-5 text-slate-500">
+              Nếu đang tải lịch sử, vui lòng đợi vài giây.
             </div>
           </div>
         ) : (
@@ -94,29 +147,19 @@ export default function ChatMessagesPanel({ messages }) {
             if (m.kind === "admin") {
               return (
                 <div key={m.id} className="flex w-full justify-center">
-                  <div className="max-w-[92%] md:max-w-xl rounded-2xl border border-amber-200 bg-amber-50 px-4 py-2 shadow-sm">
+                  <div className="max-w-[92%] rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 shadow-sm md:max-w-xl">
                     <div className="flex items-start gap-2">
-                      <div className="mt-[2px] inline-flex h-7 w-7 items-center justify-center rounded-xl bg-amber-100 text-amber-800 text-xs font-extrabold">
+                      <div className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-amber-100 text-xs font-black text-amber-800">
                         !
                       </div>
                       <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className="text-[11px] font-bold tracking-wide text-amber-800">
-                            ADMIN
-                          </span>
-                          {m.ts ? (
-                            <span className="text-[10px] text-amber-700/80">
-                              • {formatTime(m.ts)}
-                            </span>
-                          ) : null}
-                          {m.pending ? (
-                            <span className="text-[10px] text-amber-700/80">• Đang gửi</span>
-                          ) : null}
-                          {m.error ? (
-                            <span className="text-[10px] font-semibold text-red-600">• Lỗi gửi</span>
-                          ) : null}
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="text-[11px] font-bold text-amber-800">Nhân viên</span>
+                          {m.ts ? <span className="text-[10px] text-amber-700/80">• {formatTime(m.ts)}</span> : null}
+                          {m.pending ? <span className="text-[10px] text-amber-700/80">• Đang gửi</span> : null}
+                          {m.error ? <span className="text-[10px] font-semibold text-red-600">• Lỗi gửi</span> : null}
                         </div>
-                        <div className="mt-0.5 text-[12px] leading-relaxed text-amber-900 whitespace-pre-wrap break-words">
+                        <div className="mt-1 whitespace-pre-wrap break-words text-[12.5px] leading-relaxed text-amber-950">
                           {m.text}
                         </div>
                       </div>
@@ -129,66 +172,33 @@ export default function ChatMessagesPanel({ messages }) {
             const isUser = m.role === "user";
             const displayName = isUser ? "Khách hàng" : "Page";
             const bubbleCls = isUser
-              ? "bg-white border border-slate-200 text-slate-800 rounded-2xl rounded-bl-md"
-              : "bg-sky-600 text-white rounded-2xl rounded-br-md";
-            const wrapPos = isUser ? "justify-start" : "justify-end";
+              ? "rounded-2xl rounded-bl-md border border-slate-200 bg-white text-slate-800 shadow-sm"
+              : "rounded-2xl rounded-br-md bg-gradient-to-br from-sky-500 to-blue-600 text-white shadow-md shadow-sky-900/15";
 
             return (
-              <div key={m.id} className={`flex w-full ${wrapPos}`}>
-                <div className={`flex max-w-[92%] md:max-w-[78%] ${isUser ? "flex-row" : "flex-row-reverse"} gap-2`}>
-                  <div className="shrink-0">
-                    <div
-                      className={[
-                        "h-9 w-9 rounded-2xl grid place-items-center border shadow-sm",
-                        isUser
-                          ? "bg-white border-slate-200 text-slate-700"
-                          : "bg-sky-50 border-sky-200 text-sky-700",
-                      ].join(" ")}
-                      title={displayName}
-                    >
-                      <span className="text-xs font-extrabold">
-                        {isUser ? initials("KH") : initials("PG")}
-                      </span>
-                    </div>
-                  </div>
+              <div key={m.id} className={`flex w-full ${isUser ? "justify-start" : "justify-end"}`}>
+                <div className={`flex max-w-[94%] gap-2 md:max-w-[78%] ${isUser ? "flex-row" : "flex-row-reverse"}`}>
+                  <MessageAvatar
+                    isUser={isUser}
+                    label={displayName}
+                    src={isUser ? customerAvatarUrl : ""}
+                  />
 
-                  <div className="min-w-0">
-                    <div className={`mb-1 flex items-center gap-2 ${isUser ? "" : "justify-end"}`}>
-                      <span className="text-[11px] font-semibold text-slate-600">
-                        {displayName}
-                      </span>
-                      {m.ts ? (
-                        <span className="text-[10px] text-slate-400">
-                          • {formatTime(m.ts)}
-                        </span>
-                      ) : null}
-                      {m.pending ? (
-                        <span className="text-[10px] text-slate-400">• Đang gửi</span>
-                      ) : null}
-                      {m.error ? (
-                        <span className="text-[10px] font-semibold text-red-600">• Lỗi gửi</span>
-                      ) : null}
+                  <div className={`min-w-0 ${isUser ? "items-start" : "items-end"} flex flex-col`}>
+                    <div className={`mb-1 flex flex-wrap items-center gap-1.5 px-1 ${isUser ? "" : "justify-end"}`}>
+                      <span className="text-[11px] font-semibold text-slate-600">{displayName}</span>
+                      {m.ts ? <span className="text-[10px] text-slate-400">• {formatTime(m.ts)}</span> : null}
+                      {m.pending ? <span className="text-[10px] text-slate-400">• Đang gửi</span> : null}
+                      {m.error ? <span className="text-[10px] font-semibold text-red-600">• Lỗi gửi</span> : null}
                     </div>
 
-                    <div className={`px-3 py-2 shadow-sm ${bubbleCls}`}>
+                    <div className={`px-3.5 py-2.5 ${bubbleCls}`}>
                       {m.text ? (
-                        <div className="text-[13px] leading-relaxed whitespace-pre-wrap break-words">
+                        <div className="whitespace-pre-wrap break-words text-[13.5px] leading-relaxed">
                           {m.text}
                         </div>
                       ) : null}
-
-                      {m.imageUrl ? (
-                        <div className={m.text ? "mt-2" : ""}>
-                          <a
-                            href={m.imageUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                            className={isUser ? "text-sky-700 underline text-xs" : "text-white/90 underline text-xs"}
-                          >
-                            Xem ảnh đính kèm
-                          </a>
-                        </div>
-                      ) : null}
+                      <ImageAttachment imageUrl={m.imageUrl} isUser={isUser} />
                     </div>
                   </div>
                 </div>
