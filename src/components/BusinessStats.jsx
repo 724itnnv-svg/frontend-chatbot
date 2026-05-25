@@ -1081,11 +1081,41 @@ export default function BusinessStats() {
   const interactedUnconvertedCount = Number(dailyStats?.interactedUnconvertedCount || 0);
   const conversionRate = Number(dailyStats?.conversionRate || 0);
   const careFunnelItems = [
-    ["Khách tương tác", interactedCustomerCount, "Có tin nhắn của khách trong mốc", "border-sky-100 bg-sky-50 text-sky-700"],
+    ["Tổng hội thoại khách tương tác", interactedCustomerCount, "Có tin nhắn của khách trong mốc", "border-sky-100 bg-sky-50 text-sky-700"],
     ["Khách đã chốt", convertedCustomerCount, "Có phát sinh đơn chốt", "border-emerald-100 bg-emerald-50 text-emerald-700"],
     ["Đã phản hồi chưa chốt", interactedUnconvertedCount, "Có phản hồi nhưng chưa có đơn", "border-orange-100 bg-orange-50 text-orange-700"],
     ["Chưa phản hồi", silentConversationCount, "Khách đã nhắn nhưng chưa có phản hồi", "border-rose-100 bg-rose-50 text-rose-700"],
   ];
+  const convertedCustomerRows = Array.from(
+    (convertedOrdersModal.orders || []).reduce((map, order) => {
+      const key = `${order.pageId || ""}::${order.customerId || order.phoneNumber || order._id || ""}`;
+      const current = map.get(key) || {
+        key,
+        customerId: order.customerId,
+        customerName: order.customerName,
+        phoneNumber: order.phoneNumber,
+        pageName: order.pageName,
+        pageId: order.pageId,
+        orderCount: 0,
+        total: 0,
+        lastOrderAt: order.createdAt,
+        items: [],
+        statuses: new Set(),
+      };
+      current.orderCount += 1;
+      current.total += Number(order.total) || 0;
+      if (order.status) current.statuses.add(order.status);
+      if (order.createdAt && (!current.lastOrderAt || new Date(order.createdAt) > new Date(current.lastOrderAt))) {
+        current.lastOrderAt = order.createdAt;
+      }
+      if (Array.isArray(order.items)) current.items.push(...order.items);
+      map.set(key, current);
+      return map;
+    }, new Map()).values(),
+  ).map((customer) => ({
+    ...customer,
+    statuses: Array.from(customer.statuses),
+  }));
   const quickRanges = [
     ["today", "Hôm nay"],
     ["yesterday", "Hôm qua"],
@@ -1310,7 +1340,7 @@ export default function BusinessStats() {
           <StatCard
             title="Tỉ lệ chốt"
             value={isLoadingStats ? "..." : `${conversionRate.toFixed(2)}%`}
-            subtitle="Khách chốt / khách tương tác"
+            subtitle="Khách chốt / tổng hội thoại"
             icon={TrendingUp}
             tone="amber"
           />
@@ -1327,11 +1357,11 @@ export default function BusinessStats() {
           <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
             <div>
               <h2 className="text-base font-bold text-slate-900">Phễu chăm sóc khách hàng</h2>
-              <p className="mt-1 text-sm text-slate-500">Theo dõi tiến độ từ hội thoại mới đến đơn đã chốt.</p>
+              <p className="mt-1 text-sm text-slate-500">Theo dõi tiến độ từ hội thoại có khách tương tác đến đơn đã chốt.</p>
             </div>
             <div className="inline-flex w-fit items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-sm font-semibold text-slate-600">
               <MessageSquare size={15} />
-              {isLoadingStats ? "..." : formatNumber(conversationCount)} hội thoại
+              {isLoadingStats ? "..." : formatNumber(interactedCustomerCount)} hội thoại tương tác
             </div>
           </div>
 
@@ -1528,9 +1558,9 @@ export default function BusinessStats() {
             <div className="flex max-h-[88vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
               <div className="flex flex-col gap-3 border-b border-slate-100 px-5 py-4 sm:flex-row sm:items-start sm:justify-between">
                 <div>
-                  <h3 className="text-lg font-bold text-slate-950">Đơn hàng đã chốt</h3>
+                  <h3 className="text-lg font-bold text-slate-950">Khách đã chốt</h3>
                   <p className="mt-1 text-sm text-slate-500">
-                    {statsLabel} • {convertedOrdersModal.isLoading ? "Đang tải..." : `${formatNumber(convertedOrdersModal.orders.length)} đơn hàng`}
+                    {statsLabel} • {convertedOrdersModal.isLoading ? "Đang tải..." : `${formatNumber(convertedCustomerRows.length)} khách`} • {formatNumber(convertedOrdersModal.orders.length)} đơn hàng
                   </p>
                 </div>
                 <button
@@ -1553,9 +1583,9 @@ export default function BusinessStats() {
                     <AlertTriangle size={16} />
                     {convertedOrdersModal.error}
                   </div>
-                ) : convertedOrdersModal.orders.length === 0 ? (
+                ) : convertedCustomerRows.length === 0 ? (
                   <div className="rounded-xl border border-slate-100 bg-slate-50 p-8 text-center text-sm text-slate-500">
-                    Chưa có đơn hàng đã chốt trong mốc này.
+                    Chưa có khách đã chốt trong mốc này.
                   </div>
                 ) : (
                   <div className="overflow-hidden rounded-xl border border-slate-200">
@@ -1566,33 +1596,33 @@ export default function BusinessStats() {
                           <th className="border-b border-slate-200 px-4 py-3">Điện thoại</th>
                           <th className="border-b border-slate-200 px-4 py-3">Sản phẩm</th>
                           <th className="border-b border-slate-200 px-4 py-3">Tổng tiền</th>
-                          <th className="border-b border-slate-200 px-4 py-3">Trạng thái</th>
-                          <th className="border-b border-slate-200 px-4 py-3">Thời gian</th>
+                          <th className="border-b border-slate-200 px-4 py-3">Số đơn</th>
+                          <th className="border-b border-slate-200 px-4 py-3">Đơn gần nhất</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
-                        {convertedOrdersModal.orders.map((order) => {
-                          const items = Array.isArray(order.items) ? order.items : [];
+                        {convertedCustomerRows.map((customer) => {
+                          const items = Array.isArray(customer.items) ? customer.items : [];
                           const itemSummary = items.length
                             ? items.map((item) => `${item.productName || item.sku || "Sản phẩm"} x${formatNumber(item.quantity || 0)}`).join(", ")
                             : "Không có sản phẩm";
                           return (
-                            <tr key={order._id || `${order.customerId}-${order.createdAt}`} className="hover:bg-slate-50/80">
+                            <tr key={customer.key} className="hover:bg-slate-50/80">
                               <td className="px-4 py-3">
-                                <div className="font-semibold text-slate-900">{order.customerName || order.customerId || "Không tên"}</div>
-                                <div className="mt-0.5 text-xs text-slate-400">{order.pageName || order.pageId || ""}</div>
+                                <div className="font-semibold text-slate-900">{customer.customerName || customer.customerId || "Không tên"}</div>
+                                <div className="mt-0.5 text-xs text-slate-400">{customer.pageName || customer.pageId || ""}</div>
                               </td>
-                              <td className="px-4 py-3 text-slate-700">{order.phoneNumber || "N/A"}</td>
+                              <td className="px-4 py-3 text-slate-700">{customer.phoneNumber || "N/A"}</td>
                               <td className="max-w-[360px] px-4 py-3 text-slate-600">
                                 <div className="line-clamp-2" title={itemSummary}>{itemSummary}</div>
                               </td>
-                              <td className="px-4 py-3 font-bold text-slate-900">{formatCurrency(order.total)}</td>
+                              <td className="px-4 py-3 font-bold text-slate-900">{formatCurrency(customer.total)}</td>
                               <td className="px-4 py-3">
                                 <span className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-bold text-emerald-700">
-                                  {order.status || "active"}
+                                  {formatNumber(customer.orderCount)} đơn
                                 </span>
                               </td>
-                              <td className="px-4 py-3 text-slate-500">{formatDateTime(order.createdAt)}</td>
+                              <td className="px-4 py-3 text-slate-500">{formatDateTime(customer.lastOrderAt)}</td>
                             </tr>
                           );
                         })}
