@@ -10,6 +10,7 @@ import {
   FileArchive,
   FileJson,
   FileText,
+  MapPin,
   MessageSquare,
   RefreshCw,
   ShoppingCart,
@@ -84,6 +85,26 @@ function formatDateTime(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return String(value);
   return date.toLocaleString("vi-VN");
+}
+
+function formatWaitingTime(value) {
+  if (!value) return "N/A";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "N/A";
+  const minutes = Math.max(0, Math.floor((Date.now() - date.getTime()) / 60000));
+  if (minutes < 60) return `${formatNumber(minutes)} phút`;
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  if (hours < 24) {
+    return remainingMinutes > 0
+      ? `${formatNumber(hours)} giờ ${formatNumber(remainingMinutes)} phút`
+      : `${formatNumber(hours)} giờ`;
+  }
+  const days = Math.floor(hours / 24);
+  const remainingHours = hours % 24;
+  return remainingHours > 0
+    ? `${formatNumber(days)} ngày ${formatNumber(remainingHours)} giờ`
+    : `${formatNumber(days)} ngày`;
 }
 
 function sanitizeFilePart(value, fallback = "khong-ten") {
@@ -726,6 +747,12 @@ export default function BusinessStats() {
     error: "",
     conversations: [],
   });
+  const [silentConversationsModal, setSilentConversationsModal] = useState({
+    isOpen: false,
+    isLoading: false,
+    error: "",
+    conversations: [],
+  });
 
   const buildStatsQuery = () => {
     const timezoneOffset = -new Date().getTimezoneOffset();
@@ -878,6 +905,51 @@ export default function BusinessStats() {
     setUnconvertedConversationsModal((current) => ({ ...current, isOpen: false }));
   };
 
+  const openSilentConversationsModal = async () => {
+    if (!token) return;
+    if (statsMode === "day" && !statsDate) return;
+    if (statsMode === "range" && (!statsRange.from || !statsRange.to)) return;
+
+    setSilentConversationsModal({
+      isOpen: true,
+      isLoading: true,
+      error: "",
+      conversations: [],
+    });
+
+    try {
+      const queryParams = buildStatsQuery();
+      queryParams.set("type", "conversations");
+      queryParams.set("silentOnly", "1");
+
+      const res = await fetch(`/api/chat/stats/export?${queryParams.toString()}`, {
+        method: "GET",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Khong the tai danh sach hoi thoai can cham soc");
+
+      setSilentConversationsModal({
+        isOpen: true,
+        isLoading: false,
+        error: "",
+        conversations: Array.isArray(data.conversations) ? data.conversations : [],
+      });
+    } catch (err) {
+      console.error(err);
+      setSilentConversationsModal({
+        isOpen: true,
+        isLoading: false,
+        error: err.message || "Khong the tai danh sach hoi thoai can cham soc",
+        conversations: [],
+      });
+    }
+  };
+
+  const closeSilentConversationsModal = () => {
+    setSilentConversationsModal((current) => ({ ...current, isOpen: false }));
+  };
+
   const buildExportPayload = (data) => {
     const payload = { meta: data.meta };
     if (exportOptions.type === "all" || exportOptions.type === "orders") payload.orders = data.orders || [];
@@ -993,19 +1065,26 @@ export default function BusinessStats() {
   const productStats = Array.isArray(dailyStats?.productStats) ? dailyStats.productStats : [];
   const topProducts = productStats.slice(0, 10);
   const maxProductQuantity = Math.max(...topProducts.map((product) => Number(product.quantity) || 0), 0);
+  const productProvinceStats = dailyStats?.productProvinceStats || {};
+  const demandProducts = Array.isArray(productProvinceStats.products) ? productProvinceStats.products : [];
+  const demandProvinces = Array.isArray(productProvinceStats.provinces) ? productProvinceStats.provinces : [];
+  const demandCells = Array.isArray(productProvinceStats.cells) ? productProvinceStats.cells : [];
+  const maxDemandQuantity = Number(productProvinceStats.maxQuantity || 0);
+  const demandCellMap = new Map(demandCells.map((cell) => [`${cell.productKey}::${cell.province}`, cell]));
   const conversationCount = Number(dailyStats?.conversationCount || 0);
   const totalOrderAmount = Number(dailyStats?.totalOrderAmount || 0);
   const orderCount = Number(dailyStats?.orderCount || 0);
   const cancelledOrderCount = Number(dailyStats?.cancelledOrderCount || 0);
   const silentConversationCount = Number(dailyStats?.silentConversationCount || 0);
+  const interactedCustomerCount = Number(dailyStats?.interactedCustomerCount || 0);
+  const convertedCustomerCount = Number(dailyStats?.convertedCustomerCount || 0);
   const interactedUnconvertedCount = Number(dailyStats?.interactedUnconvertedCount || 0);
   const conversionRate = Number(dailyStats?.conversionRate || 0);
-  const silentThresholdMinutes = Number(dailyStats?.silentThresholdMinutes || 30);
   const careFunnelItems = [
-    ["Hội thoại mới", conversationCount, "Tạo trong mốc đang chọn", "border-sky-100 bg-sky-50 text-sky-700"],
-    ["Đã chốt", orderCount, "Đơn hàng active/confirmed/completed", "border-emerald-100 bg-emerald-50 text-emerald-700"],
-    ["Chưa chốt", interactedUnconvertedCount, "Có trao đổi nhưng chưa có đơn", "border-orange-100 bg-orange-50 text-orange-700"],
-    ["Cần chăm sóc lại", silentConversationCount, `Quá ${formatNumber(silentThresholdMinutes)} phút chưa phản hồi`, "border-rose-100 bg-rose-50 text-rose-700"],
+    ["Khách tương tác", interactedCustomerCount, "Có tin nhắn của khách trong mốc", "border-sky-100 bg-sky-50 text-sky-700"],
+    ["Khách đã chốt", convertedCustomerCount, "Có phát sinh đơn chốt", "border-emerald-100 bg-emerald-50 text-emerald-700"],
+    ["Đã phản hồi chưa chốt", interactedUnconvertedCount, "Có phản hồi nhưng chưa có đơn", "border-orange-100 bg-orange-50 text-orange-700"],
+    ["Chưa phản hồi", silentConversationCount, "Khách đã nhắn nhưng chưa có phản hồi", "border-rose-100 bg-rose-50 text-rose-700"],
   ];
   const quickRanges = [
     ["today", "Hôm nay"],
@@ -1027,7 +1106,7 @@ export default function BusinessStats() {
                 </div>
                 <h1 className="mt-3 text-2xl font-bold tracking-tight text-slate-950 md:text-3xl">Thống kê kinh doanh</h1>
                 <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-500">
-                  Tổng hợp doanh thu, đơn chốt và các hội thoại cần chăm sóc lại theo mốc thời gian.
+                  Tổng hợp doanh thu, đơn chốt và các hội thoại cần chăm sóc lại theo mốc thời gian. Chỉ thống kê page đang bật AutoReply.
                 </p>
               </div>
 
@@ -1260,11 +1339,14 @@ export default function BusinessStats() {
             {careFunnelItems.map(([label, value, note, tone], index) => {
               const isConvertedCard = index === 1;
               const isUnconvertedCard = index === 2;
+              const isSilentCard = index === 3;
               const onCardOpen = isConvertedCard
                 ? openConvertedOrdersModal
                 : isUnconvertedCard
                   ? openUnconvertedConversationsModal
-                  : undefined;
+                  : isSilentCard
+                    ? openSilentConversationsModal
+                    : undefined;
               return (
               <div
                 key={label}
@@ -1339,6 +1421,104 @@ export default function BusinessStats() {
                   </div>
                 );
               })}
+            </div>
+          )}
+        </section>
+
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+            <div>
+              <h2 className="text-base font-bold text-slate-900">Phân bố nhu cầu theo tỉnh</h2>
+              <p className="text-sm text-slate-500">Số lượng sản phẩm đã chốt theo tỉnh/thành lấy từ địa chỉ đơn hàng.</p>
+            </div>
+            <div className="inline-flex w-fit items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-sm font-semibold text-slate-600">
+              <MapPin size={15} />
+              {formatNumber(demandProvinces.length)} tỉnh/thành
+            </div>
+          </div>
+
+          {isLoadingStats ? (
+            <div className="mt-5 rounded-xl border border-slate-100 bg-slate-50 p-6 text-center text-sm text-slate-500">
+              Đang tải biểu đồ nhu cầu...
+            </div>
+          ) : demandProducts.length === 0 || demandProvinces.length === 0 ? (
+            <div className="mt-5 rounded-xl border border-slate-100 bg-slate-50 p-6 text-center text-sm text-slate-500">
+              Chưa đủ dữ liệu địa chỉ để thống kê nhu cầu theo tỉnh.
+            </div>
+          ) : (
+            <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
+              <div className="overflow-x-auto rounded-xl border border-slate-200">
+                <div className="min-w-[920px]">
+                  <div
+                    className="grid border-b border-slate-200 bg-slate-50 text-xs font-bold uppercase text-slate-500"
+                    style={{ gridTemplateColumns: `minmax(220px,1.35fr) repeat(${demandProvinces.length}, minmax(92px,1fr))` }}
+                  >
+                    <div className="px-3 py-3">Sản phẩm</div>
+                    {demandProvinces.map((province) => (
+                      <div key={province.province} className="px-2 py-3 text-center" title={`${province.province}: ${formatNumber(province.quantity)} sản phẩm`}>
+                        <div className="truncate">{province.province}</div>
+                        <div className="mt-0.5 text-[11px] font-semibold normal-case text-slate-400">{formatNumber(province.quantity)}</div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {demandProducts.map((product) => (
+                    <div
+                      key={product.productKey}
+                      className="grid border-b border-slate-100 last:border-b-0"
+                      style={{ gridTemplateColumns: `minmax(220px,1.35fr) repeat(${demandProvinces.length}, minmax(92px,1fr))` }}
+                    >
+                      <div className="min-w-0 px-3 py-3">
+                        <div className="truncate text-sm font-semibold text-slate-800" title={product.productName}>
+                          {product.productName || "Không tên"}
+                        </div>
+                        <div className="mt-0.5 text-xs text-slate-400">
+                          {formatNumber(product.quantity)} sản phẩm
+                        </div>
+                      </div>
+                      {demandProvinces.map((province) => {
+                        const cell = demandCellMap.get(`${product.productKey}::${province.province}`);
+                        const quantity = Number(cell?.quantity || 0);
+                        const opacity = maxDemandQuantity > 0 ? 0.12 + (quantity / maxDemandQuantity) * 0.78 : 0.12;
+                        return (
+                          <div key={`${product.productKey}-${province.province}`} className="flex items-center justify-center border-l border-slate-100 px-2 py-3">
+                            <div
+                              className="flex h-10 w-full items-center justify-center rounded-lg text-sm font-bold text-slate-900 ring-1 ring-sky-100"
+                              style={{
+                                backgroundColor: quantity > 0 ? `rgba(14, 165, 233, ${opacity})` : "rgba(248, 250, 252, 1)",
+                              }}
+                              title={`${product.productName} tại ${province.province}: ${formatNumber(quantity)}`}
+                            >
+                              {quantity > 0 ? formatNumber(quantity) : "-"}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4">
+                <div className="text-sm font-bold text-slate-900">Tỉnh/thành mua nhiều</div>
+                <div className="mt-4 space-y-3">
+                  {demandProvinces.map((province, index) => {
+                    const maxProvinceQuantity = Math.max(...demandProvinces.map((item) => Number(item.quantity) || 0), 0);
+                    const percent = maxProvinceQuantity > 0 ? Math.max(6, (province.quantity / maxProvinceQuantity) * 100) : 0;
+                    return (
+                      <div key={province.province}>
+                        <div className="flex items-center justify-between gap-3 text-xs">
+                          <span className="truncate font-semibold text-slate-700">{index + 1}. {province.province}</span>
+                          <span className="shrink-0 font-bold text-slate-900">{formatNumber(province.quantity)}</span>
+                        </div>
+                        <div className="mt-1 h-2 rounded-full bg-white shadow-inner">
+                          <div className="h-full rounded-full bg-sky-500" style={{ width: `${percent}%` }} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
           )}
         </section>
@@ -1493,6 +1673,95 @@ export default function BusinessStats() {
                               <td className="px-4 py-3 text-slate-500">{formatDateTime(conversation.lastInteractionAt || conversation.updatedAt)}</td>
                               <td className="max-w-[360px] px-4 py-3 text-slate-600">
                                 <div className="line-clamp-2" title={note}>{note || "Có trao đổi nhưng chưa phát sinh đơn chốt"}</div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {silentConversationsModal.isOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm">
+            <div className="flex max-h-[88vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
+              <div className="flex flex-col gap-3 border-b border-slate-100 px-5 py-4 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <h3 className="text-lg font-bold text-slate-950">Cần chăm sóc lại</h3>
+                  <p className="mt-1 text-sm text-slate-500">
+                    {statsLabel} • {silentConversationsModal.isLoading ? "Đang tải..." : `${formatNumber(silentConversationsModal.conversations.length)} hội thoại`} • Chưa có phản hồi BOT hoặc người
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={closeSilentConversationsModal}
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition hover:bg-slate-50 hover:text-slate-900"
+                  aria-label="Đóng"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="min-h-0 flex-1 overflow-auto p-5">
+                {silentConversationsModal.isLoading ? (
+                  <div className="rounded-xl border border-slate-100 bg-slate-50 p-8 text-center text-sm text-slate-500">
+                    Đang tải danh sách hội thoại cần chăm sóc...
+                  </div>
+                ) : silentConversationsModal.error ? (
+                  <div className="flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                    <AlertTriangle size={16} />
+                    {silentConversationsModal.error}
+                  </div>
+                ) : silentConversationsModal.conversations.length === 0 ? (
+                  <div className="rounded-xl border border-slate-100 bg-slate-50 p-8 text-center text-sm text-slate-500">
+                    Chưa có hội thoại cần chăm sóc lại trong mốc này.
+                  </div>
+                ) : (
+                  <div className="overflow-hidden rounded-xl border border-slate-200">
+                    <table className="w-full min-w-[960px] border-collapse text-left text-sm">
+                      <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+                        <tr>
+                          <th className="border-b border-slate-200 px-4 py-3">Khách hàng</th>
+                          <th className="border-b border-slate-200 px-4 py-3">Page</th>
+                          <th className="border-b border-slate-200 px-4 py-3">Chưa phản hồi</th>
+                          <th className="border-b border-slate-200 px-4 py-3">Tương tác</th>
+                          <th className="border-b border-slate-200 px-4 py-3">Tin cuối của khách</th>
+                          <th className="border-b border-slate-200 px-4 py-3">Ghi chú</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {silentConversationsModal.conversations.map((conversation) => {
+                          const customerName = getConversationCustomerName(conversation);
+                          const customerCount = Number(conversation.customerMessageCount || 0);
+                          const responseCount = Number(conversation.responseMessageCount || 0);
+                          const lastCustomerText = conversation.lastCustomerText || "";
+                          const note = conversation.conversationSummary || conversation.adName || "";
+                          return (
+                            <tr key={conversation._id || `${conversation.page}-${conversation.user}`} className="hover:bg-slate-50/80">
+                              <td className="px-4 py-3">
+                                <div className="font-semibold text-slate-900">{customerName || conversation.user || "Không tên"}</div>
+                                <div className="mt-0.5 text-xs text-slate-400">{conversation.user || ""}</div>
+                              </td>
+                              <td className="px-4 py-3 text-slate-700">{conversation.pageName || conversation.page || "N/A"}</td>
+                              <td className="px-4 py-3">
+                                <div className="font-bold text-rose-700">{formatWaitingTime(conversation.lastCustomerAt)}</div>
+                                <div className="mt-0.5 text-xs text-slate-400">{formatDateTime(conversation.lastCustomerAt)}</div>
+                              </td>
+                              <td className="px-4 py-3 text-slate-600">
+                                <div className="font-semibold text-slate-900">{formatNumber(customerCount + responseCount)} tin</div>
+                                <div className="mt-0.5 text-xs text-slate-400">
+                                  Khách {formatNumber(customerCount)} • Phản hồi {formatNumber(responseCount)}
+                                </div>
+                              </td>
+                              <td className="max-w-[300px] px-4 py-3 text-slate-600">
+                                <div className="line-clamp-2" title={lastCustomerText}>{lastCustomerText || "Khách đã nhắn"}</div>
+                              </td>
+                              <td className="max-w-[300px] px-4 py-3 text-slate-600">
+                                <div className="line-clamp-2" title={note}>{note || "Chưa có phản hồi BOT hoặc người"}</div>
                               </td>
                             </tr>
                           );
