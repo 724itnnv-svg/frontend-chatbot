@@ -61,7 +61,7 @@ const MENU_GROUPS = [
     id: "business",
     label: "Kinh doanh",
     icon: MessageCircle,
-    items: ["pages", "pagesmessage", "chatweb", "donhang", "donhangWeb", "business_stats", "admin_event_promo"],
+    items: ["business_stats", "pages", "pagesmessage", "chatweb", "donhang", "donhangWeb", "admin_event_promo"],
   },
   {
     id: "attendance",

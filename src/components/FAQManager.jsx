@@ -35,6 +35,8 @@ export default function FAQManager() {
   const [selectedPageId, setSelectedPageId] = useState("");
   const [search, setSearch] = useState("");
   const [form, setForm] = useState(EMPTY_FORM);
+  const [bulkCreateMode, setBulkCreateMode] = useState(false);
+  const [bulkPageIds, setBulkPageIds] = useState([]);
   const [editingId, setEditingId] = useState(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -67,6 +69,7 @@ export default function FAQManager() {
     const list = Array.isArray(data.pages) ? data.pages : [];
     setPages(list);
     setSelectedPageId((current) => current || list[0]?.facebookId || "");
+    setBulkPageIds((current) => current.length ? current : (list[0]?.facebookId ? [list[0].facebookId] : []));
   };
 
   const loadFaqs = async (pageId = selectedPageId) => {
@@ -111,6 +114,7 @@ export default function FAQManager() {
 
   const startEdit = (faq) => {
     setEditingId(faq._id);
+    setBulkCreateMode(false);
     setForm({
       pageId: faq.pageId || selectedPageId,
       question: faq.question || "",
@@ -122,29 +126,53 @@ export default function FAQManager() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
+  const toggleBulkPage = (pageId) => {
+    const normalizedPageId = String(pageId || "");
+    if (!normalizedPageId) return;
+    setBulkPageIds((current) =>
+      current.includes(normalizedPageId)
+        ? current.filter((id) => id !== normalizedPageId)
+        : [...current, normalizedPageId],
+    );
+  };
+
+  const selectAllBulkPages = () => {
+    setBulkPageIds(pages.map((page) => String(page.facebookId)).filter(Boolean));
+  };
+
+  const clearBulkPages = () => {
+    setBulkPageIds([]);
+  };
+
   const handleSubmit = async (event) => {
     event.preventDefault();
-    if (!form.pageId || !form.question.trim() || !form.answer.trim()) {
+    const isBulkCreate = bulkCreateMode && !editingId;
+    if ((!isBulkCreate && !form.pageId) || !form.question.trim() || !form.answer.trim()) {
       setError("Vui lòng chọn page, nhập câu hỏi và câu trả lời.");
+      return;
+    }
+    if (isBulkCreate && bulkPageIds.length === 0) {
+      setError("Vui lòng chọn ít nhất một page để tạo FAQ hàng loạt.");
       return;
     }
 
     setSaving(true);
     setError("");
     try {
-      const url = editingId ? `/api/faqs/${editingId}` : "/api/faqs";
+      const url = editingId ? `/api/faqs/${editingId}` : (isBulkCreate ? "/api/faqs/bulk" : "/api/faqs");
       const res = await fetch(url, {
         method: editingId ? "PUT" : "POST",
         headers: authHeaders(),
         body: JSON.stringify({
           ...form,
+          pageIds: isBulkCreate ? bulkPageIds : undefined,
           priority: Number(form.priority) || 0,
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || "Không thể lưu FAQ");
       resetForm();
-      await loadFaqs(form.pageId);
+      await loadFaqs(selectedPageId || form.pageId);
     } catch (err) {
       console.error(err);
       setError(err.message || "Không thể lưu FAQ");
@@ -172,8 +200,8 @@ export default function FAQManager() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 px-4 py-6 text-slate-800 md:px-6">
-      <div className="mx-auto max-w-7xl space-y-5">
+    <div className="flex h-screen min-h-0 flex-col overflow-hidden bg-slate-50 text-slate-800">
+      <div className="shrink-0 border-b border-slate-200 bg-white px-4 py-4 shadow-sm md:px-6">
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div>
             <div className="flex items-center gap-2">
@@ -197,19 +225,23 @@ export default function FAQManager() {
           </button>
         </div>
 
+      </div>
+
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-4 py-4 md:px-6">
         {error && (
-          <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+          <div className="mb-4 shrink-0 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
             {error}
           </div>
         )}
 
-        <div className="grid gap-5 xl:grid-cols-[420px_1fr]">
-          <form onSubmit={handleSubmit} className="space-y-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-            <div className="flex items-center gap-2 border-b border-slate-100 pb-3">
+        <div className="grid min-h-0 flex-1 gap-4 xl:grid-cols-[440px_minmax(0,1fr)]">
+          <form onSubmit={handleSubmit} className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+            <div className="flex shrink-0 items-center gap-2 border-b border-slate-100 px-5 py-4">
               {editingId ? <Edit3 size={18} className="text-amber-600" /> : <Plus size={18} className="text-cyan-600" />}
               <h2 className="font-bold text-slate-900">{editingId ? "Chỉnh sửa FAQ" : "Thêm FAQ"}</h2>
             </div>
 
+            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4">
             <label className="block space-y-1">
               <span className="text-xs font-bold uppercase text-slate-500">Page</span>
               <select
@@ -227,6 +259,79 @@ export default function FAQManager() {
                 ))}
               </select>
             </label>
+
+            {!editingId && (
+              <div className="rounded-xl border border-cyan-100 bg-cyan-50/60 p-3">
+                <label className="flex items-start gap-2 text-sm font-semibold text-slate-800">
+                  <input
+                    type="checkbox"
+                    checked={bulkCreateMode}
+                    onChange={(e) => {
+                      setBulkCreateMode(e.target.checked);
+                      if (e.target.checked && bulkPageIds.length === 0 && form.pageId) {
+                        setBulkPageIds([form.pageId]);
+                      }
+                    }}
+                    className="mt-0.5 h-4 w-4 accent-cyan-600"
+                  />
+                  <span>
+                    Tạo đồng loạt cho nhiều Page
+                    <span className="mt-0.5 block text-xs font-normal leading-5 text-slate-500">
+                      FAQ sẽ được tạo thành từng bản riêng cho các Page đã chọn.
+                    </span>
+                  </span>
+                </label>
+
+                {bulkCreateMode && (
+                  <div className="mt-3 rounded-xl border border-cyan-100 bg-white p-3">
+                    <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                      <div className="text-xs font-bold uppercase text-slate-500">
+                        Đã chọn {bulkPageIds.length}/{pages.length} Page
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={selectAllBulkPages}
+                          className="rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                        >
+                          Chọn tất cả
+                        </button>
+                        <button
+                          type="button"
+                          onClick={clearBulkPages}
+                          className="rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                        >
+                          Bỏ chọn
+                        </button>
+                      </div>
+                    </div>
+                    <div className="max-h-56 space-y-1 overflow-y-auto pr-1">
+                      {pages.map((page) => {
+                        const pageId = String(page.facebookId || "");
+                        const checked = bulkPageIds.includes(pageId);
+                        return (
+                          <label
+                            key={pageId}
+                            className={`flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-sm transition ${checked ? "bg-cyan-50 text-cyan-900" : "hover:bg-slate-50"}`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => toggleBulkPage(pageId)}
+                              className="h-4 w-4 accent-cyan-600"
+                            />
+                            <span className="min-w-0 flex-1 truncate font-medium">{page.name || pageId}</span>
+                            {page.autoReply ? (
+                              <span className="shrink-0 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-bold text-emerald-700">AutoReply</span>
+                            ) : null}
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             <label className="block space-y-1">
               <span className="text-xs font-bold uppercase text-slate-500">Câu hỏi</span>
@@ -281,14 +386,16 @@ export default function FAQManager() {
               </label>
             </div>
 
-            <div className="flex gap-2">
+            </div>
+
+            <div className="flex shrink-0 gap-2 border-t border-slate-100 bg-white px-5 py-4">
               <button
                 type="submit"
                 disabled={saving}
                 className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl bg-cyan-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-cyan-700 disabled:opacity-60"
               >
                 {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
-                {editingId ? "Lưu thay đổi" : "Thêm FAQ"}
+                {editingId ? "Lưu thay đổi" : bulkCreateMode ? `Tạo cho ${bulkPageIds.length} Page` : "Thêm FAQ"}
               </button>
               {editingId && (
                 <button
@@ -302,8 +409,8 @@ export default function FAQManager() {
             </div>
           </form>
 
-          <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
-            <div className="flex flex-col gap-3 border-b border-slate-100 p-4 md:flex-row md:items-center md:justify-between">
+          <div className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+            <div className="flex shrink-0 flex-col gap-3 border-b border-slate-100 p-4 md:flex-row md:items-center md:justify-between">
               <div className="min-w-0">
                 <div className="flex items-center gap-2 font-bold text-slate-900">
                   <BotMessageSquare size={18} className="text-cyan-600" />
@@ -322,7 +429,7 @@ export default function FAQManager() {
               </label>
             </div>
 
-            <div className="divide-y divide-slate-100">
+            <div className="min-h-0 flex-1 divide-y divide-slate-100 overflow-y-auto">
               {loading ? (
                 <div className="grid min-h-[220px] place-items-center text-sm text-slate-500">
                   <Loader2 size={24} className="mb-2 animate-spin text-cyan-600" />

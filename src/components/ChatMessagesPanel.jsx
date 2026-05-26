@@ -74,7 +74,13 @@ function ImageAttachment({ imageUrl, isUser }) {
   );
 }
 
-export default function ChatMessagesPanel({ messages, customerAvatarUrl = "" }) {
+export default function ChatMessagesPanel({
+  messages,
+  customerAvatarUrl = "",
+  reportMode = false,
+  selectedReportIds = new Set(),
+  onToggleReportMessage,
+}) {
   const bottomRef = useRef(null);
 
   useEffect(() => {
@@ -144,10 +150,26 @@ export default function ChatMessagesPanel({ messages, customerAvatarUrl = "" }) 
           </div>
         ) : (
           chatItems.map((m) => {
+            const isSelected = selectedReportIds?.has?.(String(m.id));
+            const selectableCls = reportMode
+              ? "cursor-pointer ring-2 ring-transparent hover:ring-rose-200"
+              : "";
+            const selectedCls = isSelected ? "ring-2 ring-rose-400" : "";
+
             if (m.kind === "admin") {
               return (
                 <div key={m.id} className="flex w-full justify-center">
-                  <div className="max-w-[92%] rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 shadow-sm md:max-w-xl">
+                  <button
+                    type="button"
+                    onClick={() => reportMode && onToggleReportMessage?.(m)}
+                    className={`relative max-w-[92%] rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-left shadow-sm md:max-w-xl ${selectableCls} ${selectedCls}`}
+                    title={reportMode ? "Chọn đoạn tin nhắn này để báo lỗi" : ""}
+                  >
+                    {isSelected && (
+                      <span className="absolute -right-2 -top-2 grid h-6 w-6 place-items-center rounded-full bg-rose-600 text-xs font-black text-white shadow-md ring-2 ring-white">
+                        ✓
+                      </span>
+                    )}
                     <div className="flex items-start gap-2">
                       <div className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-amber-100 text-xs font-black text-amber-800">
                         !
@@ -164,7 +186,7 @@ export default function ChatMessagesPanel({ messages, customerAvatarUrl = "" }) 
                         </div>
                       </div>
                     </div>
-                  </div>
+                  </button>
                 </div>
               );
             }
@@ -192,7 +214,25 @@ export default function ChatMessagesPanel({ messages, customerAvatarUrl = "" }) 
                       {m.error ? <span className="text-[10px] font-semibold text-red-600">• Lỗi gửi</span> : null}
                     </div>
 
-                    <div className={`px-3.5 py-2.5 ${bubbleCls}`}>
+                    <div
+                      role={reportMode ? "button" : undefined}
+                      tabIndex={reportMode ? 0 : undefined}
+                      onClick={() => reportMode && onToggleReportMessage?.(m)}
+                      onKeyDown={(event) => {
+                        if (!reportMode) return;
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          onToggleReportMessage?.(m);
+                        }
+                      }}
+                      className={`relative px-3.5 py-2.5 text-left ${bubbleCls} ${selectableCls} ${selectedCls}`}
+                      title={reportMode ? "Chọn đoạn tin nhắn này để báo lỗi" : ""}
+                    >
+                      {isSelected && (
+                        <span className="absolute -right-2 -top-2 grid h-6 w-6 place-items-center rounded-full bg-rose-600 text-xs font-black text-white shadow-md ring-2 ring-white">
+                          ✓
+                        </span>
+                      )}
                       {m.text ? (
                         <div className="whitespace-pre-wrap break-words text-[13.5px] leading-relaxed">
                           {m.text}

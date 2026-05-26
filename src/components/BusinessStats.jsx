@@ -12,6 +12,7 @@ import {
   FileText,
   MapPin,
   MessageSquare,
+  Phone,
   RefreshCw,
   ShoppingCart,
   TrendingUp,
@@ -105,6 +106,12 @@ function formatWaitingTime(value) {
   return remainingHours > 0
     ? `${formatNumber(days)} ngày ${formatNumber(remainingHours)} giờ`
     : `${formatNumber(days)} ngày`;
+}
+
+function formatHourRange(hour) {
+  const startHour = Number(hour) || 0;
+  const endHour = (startHour + 1) % 24;
+  return `${String(startHour).padStart(2, "0")}:00 - ${String(endHour).padStart(2, "0")}:00`;
 }
 
 function sanitizeFilePart(value, fallback = "khong-ten") {
@@ -753,6 +760,14 @@ export default function BusinessStats() {
     error: "",
     conversations: [],
   });
+  const [messageReportsModal, setMessageReportsModal] = useState({
+    isOpen: false,
+    isLoading: false,
+    error: "",
+    reports: [],
+    summary: null,
+  });
+  const [hoveredOrderHour, setHoveredOrderHour] = useState(null);
 
   const buildStatsQuery = () => {
     const timezoneOffset = -new Date().getTimezoneOffset();
@@ -950,6 +965,51 @@ export default function BusinessStats() {
     setSilentConversationsModal((current) => ({ ...current, isOpen: false }));
   };
 
+  const openMessageReportsModal = async () => {
+    if (!token) return;
+    if (statsMode === "day" && !statsDate) return;
+    if (statsMode === "range" && (!statsRange.from || !statsRange.to)) return;
+
+    setMessageReportsModal({
+      isOpen: true,
+      isLoading: true,
+      error: "",
+      reports: [],
+      summary: null,
+    });
+
+    try {
+      const queryParams = buildStatsQuery();
+      const res = await fetch(`/api/chat/stats/message-reports?${queryParams.toString()}`, {
+        method: "GET",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Khong the tai danh sach hoi thoai loi");
+
+      setMessageReportsModal({
+        isOpen: true,
+        isLoading: false,
+        error: "",
+        reports: Array.isArray(data.reports) ? data.reports : [],
+        summary: data.summary || null,
+      });
+    } catch (err) {
+      console.error(err);
+      setMessageReportsModal({
+        isOpen: true,
+        isLoading: false,
+        error: err.message || "Khong the tai danh sach hoi thoai loi",
+        reports: [],
+        summary: null,
+      });
+    }
+  };
+
+  const closeMessageReportsModal = () => {
+    setMessageReportsModal((current) => ({ ...current, isOpen: false }));
+  };
+
   const buildExportPayload = (data) => {
     const payload = { meta: data.meta };
     if (exportOptions.type === "all" || exportOptions.type === "orders") payload.orders = data.orders || [];
@@ -1070,13 +1130,29 @@ export default function BusinessStats() {
   const demandProvinces = Array.isArray(productProvinceStats.provinces) ? productProvinceStats.provinces : [];
   const demandCells = Array.isArray(productProvinceStats.cells) ? productProvinceStats.cells : [];
   const maxDemandQuantity = Number(productProvinceStats.maxQuantity || 0);
+  const frequentQuestions = Array.isArray(dailyStats?.frequentQuestions) ? dailyStats.frequentQuestions : [];
+  const orderHourlyStats = dailyStats?.orderHourlyStats || {};
+  const hourlyOrderRows = Array.isArray(orderHourlyStats.hours) ? orderHourlyStats.hours : [];
+  const peakOrderHour = orderHourlyStats.peak || null;
+  const maxHourlyOrderCount = Number(orderHourlyStats.maxOrderCount || 0);
+  const previewOrderHour = hoveredOrderHour || peakOrderHour;
+  const isPreviewingHoveredHour = Boolean(hoveredOrderHour);
   const demandCellMap = new Map(demandCells.map((cell) => [`${cell.productKey}::${cell.province}`, cell]));
   const conversationCount = Number(dailyStats?.conversationCount || 0);
   const totalOrderAmount = Number(dailyStats?.totalOrderAmount || 0);
   const orderCount = Number(dailyStats?.orderCount || 0);
-  const cancelledOrderCount = Number(dailyStats?.cancelledOrderCount || 0);
+  const messageReportConversationCount = Number(dailyStats?.messageReportConversationCount || 0);
+  const messageReportCount = Number(dailyStats?.messageReportCount || 0);
+  const messageReportCategoryRows = Array.isArray(
+    messageReportsModal.summary?.categories,
+  )
+    ? messageReportsModal.summary.categories
+    : Array.isArray(dailyStats?.messageReportCategoryStats)
+      ? dailyStats.messageReportCategoryStats
+      : [];
   const silentConversationCount = Number(dailyStats?.silentConversationCount || 0);
   const interactedCustomerCount = Number(dailyStats?.interactedCustomerCount || 0);
+  const phoneCapturedConversationCount = Number(dailyStats?.phoneCapturedConversationCount || 0);
   const convertedCustomerCount = Number(dailyStats?.convertedCustomerCount || 0);
   const interactedUnconvertedCount = Number(dailyStats?.interactedUnconvertedCount || 0);
   const conversionRate = Number(dailyStats?.conversionRate || 0);
@@ -1345,13 +1421,140 @@ export default function BusinessStats() {
             tone="amber"
           />
           <StatCard
-            title="Đơn bị lỗi"
-            value={isLoadingStats ? "..." : formatNumber(cancelledOrderCount)}
-            subtitle="Đơn hủy hoặc không hợp lệ"
+            title="Đã xin SĐT"
+            value={isLoadingStats ? "..." : formatNumber(phoneCapturedConversationCount)}
+            subtitle="Hội thoại/đơn chốt đã ghi nhận số điện thoại"
+            icon={Phone}
+            tone="sky"
+          />
+          <StatCard
+            title="Hội thoại lỗi"
+            value={isLoadingStats ? "..." : formatNumber(messageReportConversationCount)}
+            subtitle={`${formatNumber(messageReportCount)} lượt báo lỗi từ màn tin nhắn`}
             icon={AlertTriangle}
             tone="rose"
+            onClick={openMessageReportsModal}
           />
         </div>
+
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+            <div>
+              <h2 className="text-base font-bold text-slate-900">Khung giờ chốt đơn nhiều nhất</h2>
+              <p className="text-sm text-slate-500">Thống kê theo giờ tạo đơn hàng đã chốt trong mốc đang chọn.</p>
+            </div>
+            <div className="inline-flex w-fit items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-sm font-semibold text-slate-600">
+              <Clock size={15} />
+              {isLoadingStats
+                ? "..."
+                : maxHourlyOrderCount > 0
+                  ? `${peakOrderHour?.label || "--:--"} • ${formatNumber(peakOrderHour?.orderCount)} đơn`
+                  : "Chưa có đơn"}
+            </div>
+          </div>
+
+          {isLoadingStats ? (
+            <div className="mt-5 rounded-xl border border-slate-100 bg-slate-50 p-6 text-center text-sm text-slate-500">
+              Đang tải biểu đồ khung giờ...
+            </div>
+          ) : hourlyOrderRows.length === 0 || maxHourlyOrderCount === 0 ? (
+            <div className="mt-5 rounded-xl border border-slate-100 bg-slate-50 p-6 text-center text-sm text-slate-500">
+              Chưa có đơn hàng đã chốt trong mốc này để thống kê khung giờ.
+            </div>
+          ) : (
+            <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1fr)_300px]">
+              <div
+                className="relative overflow-x-auto rounded-xl border border-slate-200 bg-slate-50 p-4"
+                onMouseLeave={() => setHoveredOrderHour(null)}
+              >
+                {previewOrderHour && (isPreviewingHoveredHour || Number(previewOrderHour.orderCount || 0) > 0) && (
+                  <div className="pointer-events-none absolute right-4 top-4 z-20 w-64 rounded-xl border border-slate-200 bg-white/95 p-3 text-left shadow-xl shadow-slate-900/10 ring-1 ring-slate-900/5 backdrop-blur">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="text-[11px] font-bold uppercase tracking-wide text-slate-400">
+                          {isPreviewingHoveredHour ? "Khung giờ đang xem" : "Khung giờ cao điểm"}
+                        </div>
+                        <div className="mt-1 text-base font-black text-slate-950">
+                          {formatHourRange(previewOrderHour.hour)}
+                        </div>
+                      </div>
+                      <span className={[
+                        "rounded-full px-2.5 py-1 text-xs font-bold",
+                        isPreviewingHoveredHour ? "bg-sky-50 text-sky-700" : "bg-emerald-50 text-emerald-700",
+                      ].join(" ")}>
+                        {formatNumber(previewOrderHour.orderCount)} đơn
+                      </span>
+                    </div>
+                    <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+                      <div className="rounded-lg bg-slate-50 px-2.5 py-2">
+                        <div className="text-slate-400">Khách chốt</div>
+                        <div className="mt-0.5 font-bold text-slate-900">{formatNumber(previewOrderHour.customerCount)}</div>
+                      </div>
+                      <div className="rounded-lg bg-slate-50 px-2.5 py-2">
+                        <div className="text-slate-400">Doanh thu</div>
+                        <div className="mt-0.5 font-bold text-slate-900">{formatCurrency(previewOrderHour.revenue)}</div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                <div className="flex min-w-[820px] items-end gap-2 pt-24">
+                  {hourlyOrderRows.map((item) => {
+                    const orderValue = Number(item.orderCount) || 0;
+                    const height = maxHourlyOrderCount > 0 ? Math.max(10, (orderValue / maxHourlyOrderCount) * 170) : 10;
+                    const isPeak = Number(item.hour) === Number(peakOrderHour?.hour) && orderValue > 0;
+                    const isHovered = Number(item.hour) === Number(hoveredOrderHour?.hour);
+                    return (
+                      <div
+                        key={item.hour}
+                        tabIndex={0}
+                        className="group flex min-w-7 flex-1 flex-col items-center gap-2"
+                        onMouseEnter={() => setHoveredOrderHour(item)}
+                        onFocus={() => setHoveredOrderHour(item)}
+                      >
+                        <div className="flex h-44 w-full items-end rounded-lg bg-white px-1.5 pb-1.5 shadow-inner">
+                          <div
+                            className={[
+                              "w-full rounded-md transition-all duration-200 group-hover:-translate-y-1 group-hover:shadow-lg",
+                              isHovered
+                                ? "bg-gradient-to-t from-sky-700 to-cyan-300 shadow-sky-200"
+                                : isPeak
+                                  ? "bg-gradient-to-t from-emerald-600 to-sky-400"
+                                  : "bg-sky-300 group-hover:bg-sky-400",
+                            ].join(" ")}
+                            style={{ height: `${height}px` }}
+                            aria-label={`${item.label}: ${formatNumber(item.orderCount)} don, ${formatCurrency(item.revenue)}`}
+                          />
+                        </div>
+                        <div className={["text-[11px] font-semibold", isPeak ? "text-emerald-700" : "text-slate-500"].join(" ")}>
+                          {String(item.hour).padStart(2, "0")}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-emerald-100 bg-emerald-50/70 p-4">
+                <div className="text-xs font-bold uppercase text-emerald-700">Cao điểm chốt đơn</div>
+                <div className="mt-2 text-3xl font-black text-slate-950">{peakOrderHour?.label || "--:--"}</div>
+                <div className="mt-3 grid gap-2 text-sm text-slate-700">
+                  <div className="flex justify-between gap-3 rounded-lg bg-white/80 px-3 py-2">
+                    <span>Đơn hàng</span>
+                    <span className="font-bold text-slate-950">{formatNumber(peakOrderHour?.orderCount)}</span>
+                  </div>
+                  <div className="flex justify-between gap-3 rounded-lg bg-white/80 px-3 py-2">
+                    <span>Khách chốt</span>
+                    <span className="font-bold text-slate-950">{formatNumber(peakOrderHour?.customerCount)}</span>
+                  </div>
+                  <div className="flex justify-between gap-3 rounded-lg bg-white/80 px-3 py-2">
+                    <span>Doanh thu</span>
+                    <span className="font-bold text-slate-950">{formatCurrency(peakOrderHour?.revenue)}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </section>
 
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
@@ -1403,49 +1606,61 @@ export default function BusinessStats() {
           </div>
         </section>
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
             <div>
               <h2 className="text-base font-bold text-slate-900">Sản phẩm được chốt</h2>
-              <p className="text-sm text-slate-500">Top sản phẩm theo tổng số lượng trong mốc thống kê.</p>
+              <p className="text-xs text-slate-500">Top sản phẩm theo số lượng trong mốc thống kê.</p>
             </div>
-            <div className="inline-flex w-fit items-center rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-sm font-semibold text-slate-600">
+            <div className="inline-flex w-fit items-center rounded-full border border-emerald-100 bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700">
               {formatNumber(productStats.length)} sản phẩm
             </div>
           </div>
 
           {isLoadingStats ? (
-            <div className="mt-5 rounded-xl border border-slate-100 bg-slate-50 p-6 text-center text-sm text-slate-500">
+            <div className="mt-4 rounded-xl border border-slate-100 bg-slate-50 p-5 text-center text-sm text-slate-500">
               Đang tải biểu đồ...
             </div>
           ) : topProducts.length === 0 ? (
-            <div className="mt-5 rounded-xl border border-slate-100 bg-slate-50 p-6 text-center text-sm text-slate-500">
+            <div className="mt-4 rounded-xl border border-slate-100 bg-slate-50 p-5 text-center text-sm text-slate-500">
               Chưa có sản phẩm được chốt trong mốc này.
             </div>
           ) : (
-            <div className="mt-5 space-y-3">
+            <div className="mt-4 overflow-hidden rounded-xl border border-slate-200">
+              <div className="grid grid-cols-[42px_minmax(0,1fr)_92px_120px] items-center border-b border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold uppercase text-slate-500">
+                <div>#</div>
+                <div>Sản phẩm</div>
+                <div className="text-center">SL</div>
+                <div className="text-right">Doanh thu</div>
+              </div>
               {topProducts.map((product, index) => {
                 const quantity = Number(product.quantity) || 0;
                 const percent = maxProductQuantity > 0 ? Math.max(4, (quantity / maxProductQuantity) * 100) : 0;
                 return (
-                  <div key={`${product.sku || product.productName}-${index}`} className="grid gap-3 rounded-2xl border border-slate-100 bg-slate-50/80 p-3 transition hover:border-sky-100 hover:bg-white hover:shadow-sm md:grid-cols-[minmax(220px,320px)_1fr_auto] md:items-center">
-                    <div className="min-w-0">
-                      <div className="truncate text-sm font-semibold text-slate-800" title={product.productName}>
-                        {index + 1}. {product.productName || "Không tên"}
+                  <div key={`${product.sku || product.productName}-${index}`} className="grid grid-cols-[42px_minmax(0,1fr)_92px_120px] items-center gap-2 border-b border-slate-100 px-3 py-2.5 last:border-b-0 transition hover:bg-sky-50/50">
+                    <div className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-100 text-xs font-bold text-slate-600">
+                      {index + 1}
+                    </div>
+                    <div className="min-w-0 pr-1">
+                      <div className="truncate text-sm font-semibold text-slate-800" title={product.productName || "Không tên"}>
+                        {product.productName || "Không tên"}
                       </div>
-                      <div className="mt-0.5 truncate text-xs text-slate-400">
-                        SKU: {product.sku || "N/A"} | {formatNumber(product.orderCount)} đơn
+                      <div className="mt-1 flex items-center gap-2 text-xs text-slate-400">
+                        <span className="truncate">SKU: {product.sku || "N/A"}</span>
+                        <span className="h-1 w-1 shrink-0 rounded-full bg-slate-300" />
+                        <span className="shrink-0">{formatNumber(product.orderCount)} đơn</span>
+                      </div>
+                      <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-slate-100">
+                        <div
+                          className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-sky-500"
+                          style={{ width: `${percent}%` }}
+                        />
                       </div>
                     </div>
-                    <div className="h-10 rounded-xl bg-white p-1 shadow-inner">
-                      <div
-                        className="flex h-full items-center justify-end rounded-lg bg-gradient-to-r from-emerald-500 to-sky-500 px-3 text-xs font-bold text-white transition-all"
-                        style={{ width: `${percent}%` }}
-                      >
-                        {formatNumber(quantity)}
-                      </div>
+                    <div className="justify-self-center rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-bold text-emerald-700">
+                      {formatNumber(quantity)}
                     </div>
-                    <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-right text-sm font-bold text-slate-800">
+                    <div className="truncate text-right text-sm font-bold text-slate-800" title={formatCurrency(product.revenue)}>
                       {formatCurrency(product.revenue)}
                     </div>
                   </div>
@@ -1551,7 +1766,175 @@ export default function BusinessStats() {
               </div>
             </div>
           )}
+
+          <div className="mt-6 rounded-xl border border-slate-200 bg-slate-50/80 p-4">
+            <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">Câu hỏi khách hàng thường hỏi nhất</h3>
+                <p className="mt-1 text-sm text-slate-500">Tổng hợp từ tin nhắn của khách trong mốc thống kê đang chọn.</p>
+              </div>
+              <div className="inline-flex w-fit items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-sm font-semibold text-slate-600">
+                <MessageSquare size={15} />
+                {isLoadingStats ? "..." : formatNumber(frequentQuestions.length)} nhóm câu hỏi
+              </div>
+            </div>
+
+            {isLoadingStats ? (
+              <div className="mt-4 rounded-xl border border-slate-100 bg-white p-6 text-center text-sm text-slate-500">
+                Đang tải danh sách câu hỏi...
+              </div>
+            ) : frequentQuestions.length === 0 ? (
+              <div className="mt-4 rounded-xl border border-dashed border-slate-300 bg-white p-6 text-center text-sm text-slate-500">
+                Chưa có đủ dữ liệu câu hỏi của khách trong mốc này.
+              </div>
+            ) : (
+              <div className="mt-4 overflow-x-auto rounded-xl border border-slate-200 bg-white">
+                <div className="min-w-[760px]">
+                  <div className="grid grid-cols-[52px_minmax(220px,1fr)_110px_120px_150px] border-b border-slate-200 bg-slate-100 px-4 py-3 text-xs font-bold uppercase text-slate-500">
+                    <div>#</div>
+                    <div>Câu hỏi</div>
+                    <div className="text-right">Số lần</div>
+                    <div className="text-right">Khách</div>
+                    <div className="text-right">Gần nhất</div>
+                  </div>
+                  {frequentQuestions.slice(0, 12).map((item, index) => (
+                    <div
+                      key={`${item.question}-${index}`}
+                      className="grid grid-cols-[52px_minmax(220px,1fr)_110px_120px_150px] items-start gap-0 border-b border-slate-100 px-4 py-3 text-sm last:border-b-0 hover:bg-sky-50/40"
+                    >
+                      <div className="font-bold text-slate-400">{index + 1}</div>
+                      <div className="min-w-0">
+                        <div className="break-words font-semibold text-slate-800">{item.question || "Không rõ nội dung"}</div>
+                        {Array.isArray(item.examples) && item.examples.length > 1 && (
+                          <div className="mt-1 truncate text-xs text-slate-400" title={item.examples.join(" | ")}>
+                            Ví dụ khác: {item.examples.slice(1, 3).join(" | ")}
+                          </div>
+                        )}
+                      </div>
+                      <div className="text-right font-bold text-slate-900">{formatNumber(item.count)}</div>
+                      <div className="text-right text-slate-600">{formatNumber(item.customerCount)}</div>
+                      <div className="text-right text-xs text-slate-500">{formatDateTime(item.latestAt) || "N/A"}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
         </section>
+
+        {messageReportsModal.isOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm">
+            <div className="flex max-h-[88vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
+              <div className="flex flex-col gap-3 border-b border-slate-100 px-5 py-4 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <h3 className="text-lg font-bold text-slate-950">Hội thoại lỗi</h3>
+                  <p className="mt-1 text-sm text-slate-500">
+                    {statsLabel} • {messageReportsModal.isLoading ? "Đang tải..." : `${formatNumber(messageReportsModal.reports.length)} lượt báo lỗi`}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={closeMessageReportsModal}
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition hover:bg-slate-50 hover:text-slate-900"
+                  aria-label="Đóng"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="min-h-0 flex-1 overflow-auto p-5">
+                {messageReportsModal.isLoading ? (
+                  <div className="rounded-xl border border-slate-100 bg-slate-50 p-8 text-center text-sm text-slate-500">
+                    Đang tải danh sách hội thoại lỗi...
+                  </div>
+                ) : messageReportsModal.error ? (
+                  <div className="flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                    <AlertTriangle size={16} />
+                    {messageReportsModal.error}
+                  </div>
+                ) : messageReportsModal.reports.length === 0 ? (
+                  <div className="rounded-xl border border-slate-100 bg-slate-50 p-8 text-center text-sm text-slate-500">
+                    Chưa có hội thoại lỗi trong mốc này.
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {messageReportCategoryRows.length > 0 && (
+                      <div className="flex flex-wrap gap-2">
+                        {messageReportCategoryRows.map((row, index) => {
+                          const label = row.category === "Khác" && row.customCategory
+                            ? `Khác: ${row.customCategory}`
+                            : row.category || "Chưa phân loại";
+                          return (
+                            <span
+                              key={`${label}_${index}`}
+                              className="inline-flex items-center gap-2 rounded-full border border-rose-100 bg-rose-50 px-3 py-1 text-xs font-bold text-rose-700"
+                            >
+                              {label}
+                              <span className="rounded-full bg-white px-1.5 py-0.5 text-rose-600">
+                                {formatNumber(row.conversationCount || row.reportCount || 0)}
+                              </span>
+                            </span>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    <div className="overflow-hidden rounded-xl border border-slate-200">
+                      <table className="w-full min-w-[980px] border-collapse text-left text-sm">
+                        <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+                          <tr>
+                            <th className="border-b border-slate-200 px-4 py-3">Thời gian</th>
+                            <th className="border-b border-slate-200 px-4 py-3">Nhóm lỗi</th>
+                            <th className="border-b border-slate-200 px-4 py-3">Khách hàng</th>
+                            <th className="border-b border-slate-200 px-4 py-3">Page</th>
+                            <th className="border-b border-slate-200 px-4 py-3">Đoạn báo lỗi</th>
+                            <th className="border-b border-slate-200 px-4 py-3">Ghi chú</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {messageReportsModal.reports.map((report) => {
+                            const category = report.category === "Khác" && report.customCategory
+                              ? `Khác: ${report.customCategory}`
+                              : report.category || "Chưa phân loại";
+                            const messages = Array.isArray(report.messages) ? report.messages : [];
+                            const messagePreview = messages
+                              .map((message) => message.text || message.imageUrl || "")
+                              .filter(Boolean)
+                              .slice(0, 2)
+                              .join(" | ");
+                            return (
+                              <tr key={report._id} className="hover:bg-slate-50/80">
+                                <td className="px-4 py-3 text-slate-500">{formatDateTime(report.createdAt)}</td>
+                                <td className="px-4 py-3">
+                                  <span className="inline-flex rounded-full border border-rose-100 bg-rose-50 px-2.5 py-1 text-xs font-bold text-rose-700">
+                                    {category}
+                                  </span>
+                                </td>
+                                <td className="px-4 py-3">
+                                  <div className="font-semibold text-slate-900">{report.customerName || report.userId || "Không tên"}</div>
+                                  <div className="mt-0.5 text-xs text-slate-400">{report.userId || ""}</div>
+                                </td>
+                                <td className="px-4 py-3 text-slate-700">{report.pageName || report.pageId || "N/A"}</td>
+                                <td className="max-w-[360px] px-4 py-3 text-slate-600">
+                                  <div className="line-clamp-3" title={messagePreview}>
+                                    {messagePreview || `${formatNumber(messages.length)} đoạn tin nhắn`}
+                                  </div>
+                                </td>
+                                <td className="max-w-[260px] px-4 py-3 text-slate-600">
+                                  <div className="line-clamp-2" title={report.note || ""}>{report.note || "Không có"}</div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
 
         {convertedOrdersModal.isOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm">
