@@ -16,12 +16,14 @@ import {
   MessageCircle,
   HelpCircle,
   ShieldCheck,
+  Settings2,
   TrendingUp,
   UserCheck,
   Users,
   Wallet,
   Workflow,
   BellRing,
+  Code2,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { canAccessScreen, getAllowedScreens, hasFullAccess } from "../utils/screenAccess";
@@ -44,7 +46,11 @@ const MENU_CONFIG = [
   { id: "admin_event_promo", path: "/admin/promotions", label: "Chương trình khuyến mãi", icon: BotMessageSquare },
   { id: "admin_vectorstore_tool", path: "/admin/vector-stores", label: "Quản trị Vector DB", icon: Database },
   { id: "admin_testcase", path: "/admin/test-cases", label: "Test ChatBOT", icon: Database },
+  { id: "admin_chat_v4_rules", path: "/admin/chat-v4-rules", label: "Quy tắc Chat V4", icon: Settings2 },
+  { id: "admin_chat_v4_function_calls", path: "/admin/chat-v4-function-calls", label: "Function Call V4", icon: Code2 },
   { id: "admin_agent", path: "/admin/agents", label: "Quản trị Agent", icon: BotMessageSquare },
+  { id: "admin_agent_promo", path: "/admin/agent-promotions", label: "Quản lý khuyến mãi", icon: BotMessageSquare },
+  { id: "admin_chatbot_config", path: "/admin/chatbot-config", label: "Cấu hình ChatBot", icon: Settings2 },
   { id: "admin_faq", path: "/admin/faqs", label: "FAQ theo Page", icon: HelpCircle },
   { id: "admin_logs", path: "/admin/logs", label: "Log hệ thống", icon: Database },
   { id: "notifications", path: "/admin/notifications", label: "Thông báo thiết bị", icon: BellRing },
@@ -85,7 +91,13 @@ const MENU_GROUPS = [
     id: "system",
     label: "Hệ thống & AI",
     icon: ShieldCheck,
-    items: ["admin_dashboard", "admin_products_tool", "admin_vectorstore_tool", "admin_agent", "admin_faq", "admin_logs", "notifications","admin_testcase"],
+    items: ["admin_dashboard", "admin_products_tool", "admin_vectorstore_tool", "admin_agent", "admin_agent_promo", "admin_chatbot_config", "admin_faq", "admin_logs", "notifications"],
+  },
+  {
+    id: "experimental",
+    label: "Phiên bản thử nghiệm",
+    icon: BotMessageSquare,
+    items: ["admin_chat_v4_rules", "admin_chat_v4_function_calls", "admin_testcase"],
   },
 ];
 

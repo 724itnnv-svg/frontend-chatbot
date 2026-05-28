@@ -44,6 +44,11 @@ export default function ProductManager() {
   const [filterCompany, setFilterCompany] = useState("");
   const [showEditModal, setShowEditModal] = useState(false);
   const [showSyncDataModal, setShowSyncDataModal] = useState(false);
+  const [showNameCheckModal, setShowNameCheckModal] = useState(false);
+  const [productCodeText, setProductCodeText] = useState("");
+  const [productNameCheckResults, setProductNameCheckResults] = useState([]);
+  const [productNameResultFormat, setProductNameResultFormat] = useState("card");
+  const [checkingProductNames, setCheckingProductNames] = useState(false);
   const [editingProduct, setEditingProduct] = useState(null);
   const [saving, setSaving] = useState(false);
   const [sortField, setSortField] = useState("");
@@ -321,6 +326,84 @@ export default function ProductManager() {
     setShowSyncDataModal((prev) => !prev);
   };
 
+  const parseProductCodes = (text = "") => {
+    const seen = new Set();
+    return text
+      .split(/[\n,;\t ]+/)
+      .map((code) => code.trim())
+      .filter(Boolean)
+      .filter((code) => {
+        const key = code.toUpperCase();
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+  };
+
+  const handleCheckProductNames = async () => {
+    const codes = parseProductCodes(productCodeText);
+
+    if (codes.length === 0) {
+      setProductNameCheckResults([]);
+      alert("Vui lòng nhập ít nhất một mã sản phẩm.");
+      return;
+    }
+
+    setCheckingProductNames(true);
+    setProductNameCheckResults([]);
+
+    try {
+      const results = await Promise.all(
+        codes.map(async (code) => {
+          try {
+            const res = await fetch(
+              `/api/products?q=${encodeURIComponent(code)}&page=1&limit=20&companyId=${encodeURIComponent(filterCompany)}&sortField=&sortOrder=asc`,
+              {
+                headers: { Authorization: `Bearer ${token}` },
+              }
+            );
+
+            if (!res.ok) throw new Error("Không thể kiểm tra");
+
+            const data = await res.json();
+            const list = Array.isArray(data?.data)
+              ? data.data
+              : Array.isArray(data)
+                ? data
+                : [];
+            const matched =
+              list.find((product) => String(product.PRODUCT_CODE || "").trim().toUpperCase() === code.toUpperCase()) ||
+              list[0];
+
+            return {
+              code,
+              found: Boolean(matched),
+              name: matched?.PRODUCT_NAME || "",
+              productCode: matched?.PRODUCT_CODE || "",
+              companyId: matched?.companyId || matched?.COMPANY_ID || "",
+            };
+          } catch (error) {
+            return {
+              code,
+              found: false,
+              name: "",
+              error: error.message || "Không thể kiểm tra",
+            };
+          }
+        })
+      );
+
+      setProductNameCheckResults(results);
+    } finally {
+      setCheckingProductNames(false);
+    }
+  };
+
+  const productNameResultText = productNameCheckResults
+    .filter((item) => item.found)
+    .map((item) => `${String(item.name || "").toUpperCase()} (${item.productCode || item.code})`)
+    .join(",\n");
+
   const filteredProducts = useMemo(() => {
     const keyword = search.trim().toLowerCase();
     if (!keyword) return products;
@@ -500,6 +583,13 @@ export default function ProductManager() {
 
           <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 w-full md:w-auto">
             <button
+              onClick={() => setShowNameCheckModal(true)}
+              className="w-full sm:w-auto flex justify-center items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-white shadow-md bg-gradient-to-r from-violet-500 to-violet-400 hover:from-violet-400 hover:to-violet-300"
+            >
+              <CheckCircle size={16} /> Check tên SP
+            </button>
+
+            <button
               onClick={handleSyncData}
               className="w-full sm:w-auto flex justify-center items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-white shadow-md bg-gradient-to-r from-blue-500 to-blue-400 hover:from-blue-400 hover:to-blue-300"
             >
@@ -647,6 +737,124 @@ export default function ProductManager() {
           open={showSyncDataModal}
           onClose={() => setShowSyncDataModal(false)}
         />
+
+        {showNameCheckModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+            <div className="relative w-full max-w-4xl rounded-3xl bg-white p-6 shadow-xl">
+              <div className="mb-5 flex items-center justify-between border-b pb-3">
+                <div>
+                  <h2 className="text-lg font-bold text-slate-900">Check tên sản phẩm theo mã</h2>
+                  <p className="text-xs text-slate-500">
+                    Nhập nhiều mã, cách nhau bằng xuống dòng, dấu phẩy hoặc khoảng trắng.
+                  </p>
+                </div>
+                <button
+                  onClick={() => setShowNameCheckModal(false)}
+                  className="rounded-full p-2 transition hover:bg-gray-100"
+                >
+                  <X className="text-gray-600" />
+                </button>
+              </div>
+
+              <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(320px,420px)]">
+                <div className="space-y-3">
+                  <textarea
+                    value={productCodeText}
+                    onChange={(event) => setProductCodeText(event.target.value)}
+                    placeholder={"VD:\nVNB1\nVNB5\nABC001"}
+                    className="min-h-[260px] w-full resize-none rounded-2xl border border-slate-200 px-4 py-3 font-mono text-sm outline-none focus:ring-2 focus:ring-violet-300"
+                  />
+                  <div className="flex flex-wrap items-center gap-3">
+                    <button
+                      onClick={handleCheckProductNames}
+                      disabled={checkingProductNames}
+                      className="flex items-center gap-2 rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-bold text-white shadow-md transition hover:bg-violet-700 disabled:opacity-60"
+                    >
+                      {checkingProductNames ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle size={16} />}
+                      Kiểm tra
+                    </button>
+                    <button
+                      onClick={() => {
+                        setProductCodeText("");
+                        setProductNameCheckResults([]);
+                      }}
+                      className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-500 transition hover:bg-slate-50"
+                    >
+                      Xóa danh sách
+                    </button>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="mb-3 flex items-center justify-between">
+                    <h3 className="text-sm font-bold text-slate-800">Kết quả</h3>
+                    <div className="flex items-center gap-2">
+                      <div className="rounded-full bg-white p-1">
+                        {[
+                          { value: "card", label: "Hiện tại" },
+                          { value: "text", label: "Text" },
+                        ].map((option) => (
+                          <button
+                            key={option.value}
+                            type="button"
+                            onClick={() => setProductNameResultFormat(option.value)}
+                            className={`rounded-full px-2.5 py-1 text-[11px] font-bold transition ${
+                              productNameResultFormat === option.value
+                                ? "bg-violet-600 text-white"
+                                : "text-slate-500 hover:bg-slate-100"
+                            }`}
+                          >
+                            {option.label}
+                          </button>
+                        ))}
+                      </div>
+                      <span className="rounded-full bg-white px-2.5 py-1 text-xs font-bold text-slate-500">
+                        {productNameCheckResults.length} mã
+                      </span>
+                    </div>
+                  </div>
+
+                  {productNameCheckResults.length === 0 ? (
+                    <div className="flex h-[250px] items-center justify-center rounded-xl border border-dashed border-slate-200 bg-white text-sm text-slate-400">
+                      Chưa có kết quả kiểm tra
+                    </div>
+                  ) : productNameResultFormat === "text" ? (
+                    <textarea
+                      readOnly
+                      value={productNameResultText}
+                      className="h-[360px] w-full resize-none rounded-xl border border-slate-200 bg-white px-3 py-3 font-mono text-sm leading-relaxed text-slate-800 outline-none"
+                    />
+                  ) : (
+                    <div className="max-h-[360px] space-y-2 overflow-y-auto pr-1">
+                      {productNameCheckResults.map((item) => (
+                        <div
+                          key={item.code}
+                          className={`rounded-xl border bg-white px-3 py-2 ${
+                            item.found ? "border-emerald-100" : "border-red-100"
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-3">
+                            <span className="font-mono text-xs font-bold text-blue-600">
+                              #{item.productCode || item.code}
+                            </span>
+                            <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                              item.found ? "bg-emerald-50 text-emerald-600" : "bg-red-50 text-red-600"
+                            }`}>
+                              {item.found ? "Có" : "Không thấy"}
+                            </span>
+                          </div>
+                          <div className="mt-1 text-sm font-semibold text-slate-800">
+                            {item.found ? item.name : item.error || "Không tìm thấy sản phẩm"}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         <ProductForm
           open={showEditModal}
