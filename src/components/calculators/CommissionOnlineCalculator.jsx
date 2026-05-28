@@ -1126,9 +1126,7 @@ export default function CommissionOnlineCalculator() {
               const returnPrice = parseNumber(
                 getCell(row, headerMap, "Giá nhập lại")
               );
-              const note = normalizeText(getCell(row, headerMap, "Ghi chú"))
-                .toUpperCase()
-                .trim();
+              const note = normalizeText(getCell(row, headerMap, "Ghi chú hàng hóa")).toUpperCase().trim();
               if (note.startsWith("KTP")) {
                 return;
               }

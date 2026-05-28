@@ -4,8 +4,6 @@ import { Geolocation } from "@capacitor/geolocation";
 import { useSearchParams } from "react-router-dom";
 import {
   AlertCircle,
-  BadgeCheck,
-  BriefcaseBusiness,
   CalendarDays,
   CheckCircle2,
   ChevronLeft,
@@ -65,7 +63,7 @@ const incomeRows = [
   ["Lương tăng ca chủ nhật", "thuNhapTheoNgayCong.luongTangCaChuNhat"],
   ["Lương tăng ca lễ tết", "thuNhapTheoNgayCong.luongTangCaLeTet"],
   ["Cơm tăng ca", "thuNhapTheoNgayCong.comTangCa"],
-  ["Trả giảm lương", "thuNhapTheoNgayCong.traGiamLuong"],
+  ["Trả giam lương", "thuNhapTheoNgayCong.traGiamLuong"],
   ["Thưởng KPI", "thuNhapTheoNgayCong.thuongKPI"],
   ["Hoa hồng", "thuNhapTheoNgayCong.hoaHong"],
   ["Cộng khác", "thuNhapTheoNgayCong.congKhac"],
@@ -74,7 +72,7 @@ const incomeRows = [
 const deductionRows = [
   ["BHXH", "khauTru.bhxh"],
   ["Công đoàn", "khauTru.congDoan"],
-  ["Giảm lương", "khauTru.giamLuong"],
+  ["Giam lương", "khauTru.giamLuong"],
   ["Tạm ứng", "khauTru.tamUng"],
   ["Phí điện thoại", "khauTru.phiDienThoai"],
   ["Trừ khác", "khauTru.truKhac"],
@@ -339,35 +337,27 @@ function Badge({ tone = "slate", children }) {
   );
 }
 
-function PayrollStatCard({ label, value, icon, highlight = false }) {
-  return (
-    <div className={`rounded-2xl border p-4 shadow-sm ${highlight ? "border-transparent bg-gradient-to-br from-emerald-600 to-emerald-800 text-white" : "border-slate-200 bg-white text-slate-800"}`}>
-      <div className={`mb-3 inline-flex h-10 w-10 items-center justify-center rounded-xl ${highlight ? "bg-white/20 text-white" : "bg-emerald-50 text-emerald-600"}`}>
-        {React.createElement(icon, { size: 20 })}
-      </div>
-      <div className={`text-xs font-semibold uppercase ${highlight ? "text-white/80" : "text-slate-500"}`}>{label}</div>
-      <div className="mt-1 text-xl font-bold tracking-tight">{value}</div>
-    </div>
-  );
-}
 
 function PayrollDetailList({ title, rows, payroll, totalLabel, totalValue, tone = "emerald", icon }) {
   const isDeduction = tone === "rose";
-  const accentClass = isDeduction ? "bg-rose-50 text-rose-600" : "bg-emerald-50 text-emerald-600";
-  const totalClass = isDeduction ? "text-rose-600" : "text-emerald-700";
+  const headerBg = isDeduction
+    ? "bg-gradient-to-r from-rose-600 to-rose-500"
+    : "bg-gradient-to-r from-emerald-600 to-emerald-500";
+  const barColor = isDeduction ? "bg-rose-400" : "bg-emerald-400";
+  const totalNum = toNumber(totalValue);
 
   return (
-    <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
-      <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-4 py-3">
-        <div className="flex items-center gap-2">
-          <span className={`inline-flex h-9 w-9 items-center justify-center rounded-xl ${accentClass}`}>
-            {React.createElement(icon, { size: 18 })}
+    <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <div className={`flex items-center justify-between px-4 py-3.5 ${headerBg}`}>
+        <div className="flex items-center gap-2 text-white">
+          <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-white/20">
+            {React.createElement(icon, { size: 17 })}
           </span>
-          <h2 className="text-sm font-bold text-slate-800">{title}</h2>
+          <h2 className="text-sm font-bold">{title}</h2>
         </div>
         <div className="text-right">
-          <div className="text-xs text-slate-500">{totalLabel}</div>
-          <div className={`font-bold ${totalClass}`}>{money(totalValue)}</div>
+          <div className="text-[11px] font-medium text-white/70">{totalLabel}</div>
+          <div className="text-sm font-black tabular-nums text-white">{money(totalValue)}</div>
         </div>
       </div>
       <div className="divide-y divide-slate-100">
@@ -377,10 +367,16 @@ function PayrollDetailList({ title, rows, payroll, totalLabel, totalValue, tone 
             : toNumber(valueAt(payroll, path));
           if (!value) return null;
           const rowKey = Array.isArray(path) ? path.join("|") : path;
+          const pct = totalNum > 0 ? Math.round((value / totalNum) * 100) : 0;
           return (
-            <div key={rowKey} className="flex items-center justify-between gap-4 px-4 py-3 text-sm">
-              <span className="text-slate-600">{label}</span>
-              <span className="font-semibold tabular-nums text-slate-800">{money(value)}</span>
+            <div key={rowKey} className="px-4 py-3">
+              <div className="mb-1.5 flex items-center justify-between gap-4 text-sm">
+                <span className="text-slate-600">{label}</span>
+                <span className="shrink-0 font-semibold tabular-nums text-slate-800">{money(value)}</span>
+              </div>
+              <div className="h-1 overflow-hidden rounded-full bg-slate-100">
+                <div className={`h-full rounded-full ${barColor}`} style={{ width: `${Math.max(pct, 2)}%` }} />
+              </div>
             </div>
           );
         })}
@@ -1145,27 +1141,35 @@ export default function AttendancePage() {
                             <Badge tone={sl.tone}>{sl.text}</Badge>
                           </div>
                         </div>
-                        <div className="grid grid-cols-2 gap-2 text-xs">
-                          <div className={`rounded-lg border p-2 ${shift.checkIn?.time ? TONE.sky : "border-slate-200 bg-white text-slate-400"}`}>
-                            <div className="font-semibold">Giờ vào</div>
-                            <div className="mt-0.5 text-sm font-bold">{fmtTime(shift.checkIn?.time)}</div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div className={`rounded-xl border p-3 ${shift.checkIn?.time ? TONE.sky : "border-slate-200 bg-white text-slate-400"}`}>
+                            <div className="flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wide">
+                              <LogIn size={11} />
+                              Giờ vào
+                            </div>
+                            <div className="mt-1 text-xl font-black tabular-nums">{fmtTime(shift.checkIn?.time)}</div>
                             {shift.checkIn?.time && (
-                              <div className="mt-0.5 truncate font-semibold text-slate-500">Vào {punchLocationName(shift.checkIn, todayRecord?.locationName)}</div>
+                              <div className="mt-0.5 truncate text-[11px] font-medium text-slate-500">
+                                {punchLocationName(shift.checkIn, todayRecord?.locationName)}
+                              </div>
                             )}
-
                             {shift.checkIn?.reviewStatus === "pending" && (
-                              <div className="mt-0.5 font-semibold text-rose-600">Chờ admin xác nhận</div>
+                              <div className="mt-1 text-[11px] font-semibold text-rose-600">Chờ admin xác nhận</div>
                             )}
                           </div>
-                          <div className={`rounded-lg border p-2 ${shift.checkOut?.time ? TONE.emerald : "border-slate-200 bg-white text-slate-400"}`}>
-                            <div className="font-semibold">Giờ ra</div>
-                            <div className="mt-0.5 text-sm font-bold">{fmtTime(shift.checkOut?.time)}</div>
+                          <div className={`rounded-xl border p-3 ${shift.checkOut?.time ? TONE.emerald : "border-slate-200 bg-white text-slate-400"}`}>
+                            <div className="flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wide">
+                              <LogOut size={11} />
+                              Giờ ra
+                            </div>
+                            <div className="mt-1 text-xl font-black tabular-nums">{fmtTime(shift.checkOut?.time)}</div>
                             {shift.checkOut?.time && (
-                              <div className="mt-0.5 truncate font-semibold text-slate-500">Ra {punchLocationName(shift.checkOut, todayRecord?.locationName)}</div>
+                              <div className="mt-0.5 truncate text-[11px] font-medium text-slate-500">
+                                {punchLocationName(shift.checkOut, todayRecord?.locationName)}
+                              </div>
                             )}
-
                             {shift.checkOut?.reviewStatus === "pending" && (
-                              <div className="mt-0.5 font-semibold text-rose-600">Chờ admin xác nhận</div>
+                              <div className="mt-1 text-[11px] font-semibold text-rose-600">Chờ admin xác nhận</div>
                             )}
                           </div>
                         </div>
@@ -1266,33 +1270,54 @@ export default function AttendancePage() {
                   {history.map((record) => {
                     const sl = statusLabel(record.status);
                     const shifts = getRecordShifts(record);
+                    const dateParts = fmtShortDate(record.date).split("/");
                     return (
-                      <div key={record._id} className="flex items-start gap-3 px-5 py-3">
-                        <div className="flex w-14 flex-col items-center pt-0.5">
-                          <span className="text-xs font-bold text-slate-700">{fmtShortDate(record.date)}</span>
-                          <span className="text-[10px] text-slate-400">{weekdayVN(record.date)}</span>
+                      <div key={record._id} className="flex items-start gap-3 px-4 py-3 sm:px-5">
+                        {/* Thẻ ngày */}
+                        <div className="flex w-14 shrink-0 flex-col items-center rounded-xl border border-slate-200 bg-slate-50 py-1.5">
+                          <span className="text-[10px] font-medium text-slate-400">{weekdayVN(record.date)}</span>
+                          <span className="text-lg font-black leading-tight text-slate-800">{dateParts[0]}</span>
+                          <span className="text-[10px] text-slate-400">/{dateParts[1]}/{dateParts[2]}</span>
                         </div>
+
                         <div className="min-w-0 flex-1">
-                          <p className="truncate text-sm font-medium text-slate-800">{record.locationName || "-"}</p>
-                          <div className="mt-1 space-y-0.5 text-xs text-slate-500">
+                          <div className="flex items-start justify-between gap-2">
+                            <p className="truncate text-sm font-semibold text-slate-800">{record.locationName || "—"}</p>
+                            <Badge tone={sl.tone}>{sl.text}</Badge>
+                          </div>
+
+                          <div className="mt-2 space-y-1.5">
                             {shifts.map((shift) => (
-                              <p key={shift.shiftNo || shift.name}>
-                                <span className="font-semibold text-slate-600">{shift.name || `Ca ${shift.shiftNo}`}:</span>{" "}
-                                {fmtTime(shift.checkIn?.time)} → {fmtTime(shift.checkOut?.time)}
-                                <span className="ml-1 font-semibold text-slate-600">Vào {punchLocationName(shift.checkIn, record.locationName)} / Ra {punchLocationName(shift.checkOut, record.locationName)}</span>
-                                {shift.workHours != null && <span className="ml-1 font-semibold text-emerald-600">{shift.workHours}h</span>}
-                                {Number(shift.overtimeMinutes || 0) > 0 && <span className="ml-1 font-semibold text-violet-600">TC {shift.overtimeMinutes}p</span>}
-                              </p>
+                              <div key={shift.shiftNo || shift.name} className="flex flex-wrap items-center gap-1.5 text-xs">
+                                <span className="rounded bg-slate-100 px-1.5 py-0.5 font-semibold text-slate-600">
+                                  {shift.name || `Ca ${shift.shiftNo}`}
+                                </span>
+                                <span className="font-bold text-sky-700">{fmtTime(shift.checkIn?.time)}</span>
+                                <span className="text-slate-300">→</span>
+                                <span className="font-bold text-emerald-700">{fmtTime(shift.checkOut?.time)}</span>
+                                {shift.workHours != null && (
+                                  <span className="rounded-full border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 font-semibold text-emerald-700">
+                                    {shift.workHours}h
+                                  </span>
+                                )}
+                                {Number(shift.overtimeMinutes || 0) > 0 && (
+                                  <span className="rounded-full border border-violet-200 bg-violet-50 px-1.5 py-0.5 font-semibold text-violet-700">
+                                    TC {shift.overtimeMinutes}p
+                                  </span>
+                                )}
+                              </div>
                             ))}
                           </div>
+
                           {record.workHours != null && (
-                            <p className="mt-1 text-xs font-semibold text-emerald-700">
-                              Tổng công: {record.workHours}h
-                              {Number(record.overtimeMinutes || 0) > 0 && <span className="ml-2 text-violet-700">Tăng ca: {record.overtimeMinutes} phút</span>}
-                            </p>
+                            <div className="mt-2 flex items-center gap-2">
+                              <span className="text-xs font-semibold text-emerald-700">Tổng: {record.workHours}h</span>
+                              {Number(record.overtimeMinutes || 0) > 0 && (
+                                <span className="text-xs font-semibold text-violet-700">Tăng ca: {record.overtimeMinutes}p</span>
+                              )}
+                            </div>
                           )}
                         </div>
-                        <Badge tone={sl.tone}>{sl.text}</Badge>
                       </div>
                     );
                   })}
@@ -1375,66 +1400,190 @@ export default function AttendancePage() {
                   <Loader2 size={24} className="animate-spin text-emerald-600" />
                 </div>
               ) : payroll ? (
-                <>
-                  <div className="overflow-hidden rounded-2xl border border-emerald-100 bg-white shadow-sm">
-                    <div className="bg-gradient-to-br from-emerald-600 to-emerald-800 p-5 text-white">
-                      <div className="flex flex-wrap items-start justify-between gap-4">
-                        <div>
-                          <div className="flex flex-wrap items-center gap-2">
-                            <h2 className="text-2xl font-black tracking-tight">{payroll.tenNhanVien || payroll.employeeName || user?.fullName || "-"}</h2>
-                            <span className={`rounded-full border px-2.5 py-1 text-xs font-bold ${payrollMeta.className}`}>{payrollMeta.label}</span>
-                          </div>
-                          <div className="mt-3 flex flex-wrap gap-2 text-sm text-emerald-50">
-                            <span className="rounded-lg bg-white/15 px-3 py-1.5 font-mono font-semibold">{payroll.maNhanVien || payrollEmployeeCode}</span>
-                            <span className="rounded-lg bg-white/15 px-3 py-1.5">{payroll.chucVu || "Nhân viên"}</span>
-                            <span className="rounded-lg bg-white/15 px-3 py-1.5">{payroll.khoiPhongBan || user?.teamId || "-"}</span>
+                (() => {
+                  const thuongKPI = toNumber(payroll.thuNhapTheoNgayCong?.thuongKPI);
+                  const hoaHong = toNumber(payroll.thuNhapTheoNgayCong?.hoaHong);
+                  const tongThucLinh = toNumber(payroll.luongThucLinh);
+                  const luongDot2 = thuongKPI + hoaHong;
+                  const luongDot1 = Math.max(0, tongThucLinh - luongDot2);
+                  const hasBonus = luongDot2 > 0;
+                  const tongThuNhap = toNumber(payroll.thuNhapTheoNgayCong?.tongThuNhap);
+                  const tongKhauTruTotal = toNumber(payroll.khauTru?.tongKhauTru) + toNumber(payroll.tinhThueTNCN?.thueTNCNTamTinh);
+                  const netPct = tongThuNhap > 0 ? Math.round(Math.max(0, Math.min(100, (tongThucLinh / tongThuNhap) * 100))) : 0;
+                  const dedPct = tongThuNhap > 0 ? Math.round(Math.max(0, Math.min(100 - netPct, (tongKhauTruTotal / tongThuNhap) * 100))) : 0;
+                  const luongTangCaTong =
+                    toNumber(payroll.thuNhapTheoNgayCong?.luongTangCaThuong) +
+                    toNumber(payroll.thuNhapTheoNgayCong?.luongTangCaChuNhat) +
+                    toNumber(payroll.thuNhapTheoNgayCong?.luongTangCaLeTet);
+                  return (
+                    <>
+                      {/* Hero card */}
+                      <div className="overflow-hidden rounded-2xl bg-white shadow-sm">
+                        {/* Gradient header với net pay nổi bật */}
+                        <div className="bg-gradient-to-br from-emerald-700 via-emerald-600 to-teal-600 px-5 py-5 text-white">
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div className="min-w-0 flex-1">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <h2 className="text-xl font-black tracking-tight">
+                                  {payroll.tenNhanVien || payroll.employeeName || user?.fullName || "—"}
+                                </h2>
+                                <span className={`rounded-full border px-2.5 py-0.5 text-xs font-bold ${payrollMeta.className}`}>
+                                  {payrollMeta.label}
+                                </span>
+                              </div>
+                              <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-emerald-100/80">
+                                <span className="font-mono">{payroll.maNhanVien || payrollEmployeeCode}</span>
+                                {payroll.chucVu && <><span className="opacity-50">·</span><span>{payroll.chucVu}</span></>}
+                                {(payroll.khoiPhongBan || user?.teamId) && (
+                                  <><span className="opacity-50">·</span><span>{payroll.khoiPhongBan || user?.teamId}</span></>
+                                )}
+                                <span className="opacity-50">·</span>
+                                <span>{formatPeriod(payroll.period)}</span>
+                              </div>
+                            </div>
+                            <div className="shrink-0 text-right">
+                              <div className="text-[11px] font-semibold uppercase tracking-wider text-emerald-200">Thực lĩnh</div>
+                              <div className="text-2xl font-black tabular-nums">{money(tongThucLinh)}</div>
+                            </div>
                           </div>
                         </div>
-                        <div className="min-w-[210px] rounded-2xl bg-white/15 px-5 py-4 text-right shadow-inner">
-                          <div className="text-xs font-bold uppercase text-emerald-50">Thực nhận chuyển khoản</div>
-                          <div className="mt-1 text-3xl font-black">{money(payroll.luongThucLinh)}</div>
-                          <div className="mt-2 text-xs font-semibold text-emerald-50">{formatPeriod(payroll.period)}</div>
+
+                        {/* Work stats 3 cột */}
+                        <div className="grid grid-cols-3 divide-x divide-slate-100 border-b border-slate-100">
+                          <div className="p-3 text-center sm:p-4">
+                            <div className="text-2xl font-black tabular-nums text-slate-800">
+                              {toNumber(payroll.thuNhapTheoNgayCong?.ngayCong)}
+                            </div>
+                            <div className="mt-0.5 text-[11px] text-slate-400">Ngày công</div>
+                          </div>
+                          <div className="p-3 text-center sm:p-4">
+                            <div className="text-sm font-black tabular-nums text-emerald-700 sm:text-base">
+                              {money(tongThuNhap)}
+                            </div>
+                            <div className="mt-0.5 text-[11px] text-slate-400">Tổng thu nhập</div>
+                          </div>
+                          <div className="p-3 text-center sm:p-4">
+                            <div className="text-sm font-black tabular-nums text-rose-600 sm:text-base">
+                              {money(tongKhauTruTotal)}
+                            </div>
+                            <div className="mt-0.5 text-[11px] text-slate-400">Tổng khấu trừ</div>
+                          </div>
+                        </div>
+
+                        {/* Công thức + progress bar */}
+                        <div className="border-b border-slate-100 bg-slate-50 px-4 py-3">
+                          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+                            <span className="font-semibold text-emerald-600">{money(tongThuNhap)}</span>
+                            <span className="font-bold text-slate-300">−</span>
+                            <span className="font-semibold text-rose-500">{money(tongKhauTruTotal)}</span>
+                            <span className="font-bold text-slate-300">=</span>
+                            <span className="font-black text-slate-900">{money(tongThucLinh)}</span>
+                          </div>
+                          <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-200">
+                            <div className="flex h-full">
+                              <div className="h-full bg-emerald-500 transition-all" style={{ width: `${netPct}%` }} />
+                              <div className="h-full bg-rose-400 transition-all" style={{ width: `${dedPct}%` }} />
+                            </div>
+                          </div>
+                          <div className="mt-1.5 flex items-center gap-3 text-[10px] text-slate-400">
+                            <span className="flex items-center gap-1">
+                              <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                              Thực lĩnh ({netPct}%)
+                            </span>
+                            <span className="flex items-center gap-1">
+                              <span className="inline-block h-1.5 w-1.5 rounded-full bg-rose-400" />
+                              Khấu trừ ({dedPct}%)
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Tăng ca tổng (nếu có) */}
+                        {luongTangCaTong > 0 && (
+                          <div className="flex items-center justify-between border-b border-violet-100 bg-violet-50 px-4 py-2.5">
+                            <span className="text-xs font-semibold text-violet-700">Lương tăng ca (tổng các loại)</span>
+                            <span className="text-sm font-black tabular-nums text-violet-800">{money(luongTangCaTong)}</span>
+                          </div>
+                        )}
+
+                        {/* 2 đợt + tổng */}
+                        <div className="divide-y divide-slate-100">
+                          <div className="flex items-center gap-3 px-4 py-3.5">
+                            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-emerald-600 text-xs font-black text-white">1</div>
+                            <div className="min-w-0 flex-1">
+                              <div className="text-sm font-semibold text-slate-800">Đợt 1 — Đầu tháng</div>
+                              <div className="text-xs text-slate-400">Lương + phụ cấp + các khoản cố định</div>
+                            </div>
+                            <div className="text-base font-black text-emerald-700 tabular-nums">{money(luongDot1)}</div>
+                          </div>
+                          <div className="flex items-center gap-3 px-4 py-3.5">
+                            <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-xs font-black text-white ${hasBonus ? "bg-violet-600" : "bg-slate-300"}`}>2</div>
+                            <div className="min-w-0 flex-1">
+                              <div className="text-sm font-semibold text-slate-800">Đợt 2 — Giữa tháng</div>
+                              <div className="flex flex-wrap gap-x-3 text-xs text-slate-400">
+                                {thuongKPI > 0 && <span>KPI <span className="font-semibold text-violet-600">{money(thuongKPI)}</span></span>}
+                                {hoaHong > 0 && <span>Hoa hồng <span className="font-semibold text-violet-600">{money(hoaHong)}</span></span>}
+                                {!hasBonus && <span className="italic">Không có thưởng kỳ này</span>}
+                              </div>
+                            </div>
+                            <div className={`text-base font-black tabular-nums ${hasBonus ? "text-violet-700" : "text-slate-400"}`}>{money(luongDot2)}</div>
+                          </div>
+                          <div className="flex items-center justify-between bg-emerald-50 px-4 py-3">
+                            <span className="text-sm font-bold text-emerald-800">Tổng thực lĩnh</span>
+                            <span className="text-lg font-black text-emerald-900 tabular-nums">{money(tongThucLinh)}</span>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  </div>
 
-                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                    <PayrollStatCard label="Tháng lương" value={formatPeriod(payroll.period)} icon={CalendarDays} />
-                    <PayrollStatCard label="Ngày công thực tế" value={toNumber(payroll.thuNhapTheoNgayCong?.ngayCong)} icon={BriefcaseBusiness} />
-                    <PayrollStatCard label="Tổng thu nhập" value={money(payroll.thuNhapTheoNgayCong?.tongThuNhap)} icon={Wallet} />
-                    <PayrollStatCard label="Lương thực lĩnh" value={money(payroll.luongThucLinh)} icon={BadgeCheck} highlight />
-                  </div>
-
-                  <div className="grid gap-4 xl:grid-cols-2">
-                    <PayrollDetailList
-                      title="Chi tiết thu nhập"
-                      icon={Wallet}
-                      rows={incomeRows}
-                      payroll={payroll}
-                      totalLabel="Tổng thu nhập"
-                      totalValue={payroll.thuNhapTheoNgayCong?.tongThuNhap}
-                    />
-                    <PayrollDetailList
-                      title="Khấu trừ & thuế"
-                      icon={ReceiptText}
-                      rows={deductionRows}
-                      payroll={payroll}
-                      totalLabel="Tổng khấu trừ"
-                      totalValue={toNumber(payroll.khauTru?.tongKhauTru) + toNumber(payroll.tinhThueTNCN?.thueTNCNTamTinh)}
-                      tone="rose"
-                    />
-                  </div>
-
-                  {payroll.note && (
-                    <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-700 shadow-sm">
-                      <div className="mb-2 flex items-center gap-2 font-bold text-amber-800">
-                        <AlertCircle size={16} /> Ghi chú
+                      {/* Chi tiết thu nhập & khấu trừ */}
+                      <div className="grid gap-4 xl:grid-cols-2">
+                        <PayrollDetailList
+                          title="Chi tiết thu nhập"
+                          icon={Wallet}
+                          rows={incomeRows}
+                          payroll={payroll}
+                          totalLabel="Tổng thu nhập"
+                          totalValue={payroll.thuNhapTheoNgayCong?.tongThuNhap}
+                        />
+                        <PayrollDetailList
+                          title="Khấu trừ & thuế"
+                          icon={ReceiptText}
+                          rows={deductionRows}
+                          payroll={payroll}
+                          totalLabel="Tổng khấu trừ"
+                          totalValue={toNumber(payroll.khauTru?.tongKhauTru) + toNumber(payroll.tinhThueTNCN?.thueTNCNTamTinh)}
+                          tone="rose"
+                        />
                       </div>
-                      <p>{payroll.note}</p>
-                    </div>
-                  )}
-                </>
+
+                      {/* Giảm lương chưa trừ */}
+                      {toNumber(payroll.khauTru?.giamLuongKhongTru) > 0 && (
+                        <div className="rounded-2xl border border-orange-200 bg-orange-50 p-4 text-sm text-orange-800 shadow-sm">
+                          <div className="mb-2 flex items-center gap-2 font-bold">
+                            <AlertCircle size={16} className="text-orange-500" />
+                            Lưu ý: Giam lương chưa trừ kỳ này
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <span>Số tiền giam lương (sẽ trừ vào kỳ sau)</span>
+                            <span className="font-bold tabular-nums">{money(payroll.khauTru.giamLuongKhongTru)}</span>
+                          </div>
+                          <p className="mt-2 text-xs text-orange-600">
+                            Khoản này chỉ để thông báo, chưa được trừ vào lương kỳ hiện tại.
+                          </p>
+                        </div>
+                      )}
+
+                      {/* Ghi chú */}
+                      {payroll.note && (
+                        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-700 shadow-sm">
+                          <div className="mb-2 flex items-center gap-2 font-bold text-amber-800">
+                            <AlertCircle size={16} /> Ghi chú
+                          </div>
+                          <p>{payroll.note}</p>
+                        </div>
+                      )}
+                    </>
+                  );
+                })()
               ) : (
                 <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-5 py-10 text-center">
                   <ReceiptText size={34} className="mx-auto text-slate-300" />

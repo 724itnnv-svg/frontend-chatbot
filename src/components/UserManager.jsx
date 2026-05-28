@@ -49,7 +49,6 @@ export default function UsersPage() {
   const [pages, setPages] = useState([]);
   const [loadingPages, setLoadingPages] = useState(false);
   const [importingCodes, setImportingCodes] = useState(false);
-  const [qrLoadingId, setQrLoadingId] = useState(null);
   const [linkLoadingId, setLinkLoadingId] = useState(null);
   const [bulkQrLoading, setBulkQrLoading] = useState(false);
   const [importSummary, setImportSummary] = useState(null);
@@ -185,23 +184,6 @@ export default function UsersPage() {
     } finally {
       setActionLoadingId(null);
     }
-  };
-
-  const renderApproveBadge = (user) => {
-    const approved = user.approveStatus === 1;
-    return (
-      <span
-        className={
-          "inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold border " +
-          (approved
-            ? "bg-cyan-50 border-cyan-200 text-cyan-700"
-            : "bg-sky-50 border-sky-200 text-sky-700")
-        }
-        title={approved ? "Tài khoản đã được duyệt" : "Tài khoản đang chờ duyệt"}
-      >
-        {approved ? "✅ Đã duyệt" : "⏳ Chờ duyệt"}
-      </span>
-    );
   };
 
   const getAvatarSrc = (user) => {
@@ -466,15 +448,6 @@ export default function UsersPage() {
       },
     });
 
-  const downloadDataUrl = (dataUrl, fileName) => {
-    const link = document.createElement("a");
-    link.href = dataUrl;
-    link.download = fileName;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-  };
-
   const getQrFileBaseName = (user) =>
     sanitizeFileName(`${user?.code || "no-code"}_${user?.fullName || user?.email || user?._id}`);
 
@@ -491,20 +464,6 @@ export default function UsersPage() {
     if (!res.ok) throw new Error(payload?.message || "Không thể tạo link đăng nhập");
 
     return payload?.data || {};
-  };
-
-  const handleExportQrForUser = async (user) => {
-    try {
-      setQrLoadingId(user._id);
-      const data = await createQrLoginToken(user);
-      const qrImage = await createQrImage(data.loginUrl);
-      downloadDataUrl(qrImage, `QR_Login_${getQrFileBaseName(data.user || user)}.png`);
-    } catch (err) {
-      console.error("Lỗi xuất QR:", err);
-      alert(err.message || "Không thể xuất QR login");
-    } finally {
-      setQrLoadingId(null);
-    }
   };
 
   const handleCopyLoginLinkForUser = async (user) => {
@@ -866,25 +825,35 @@ export default function UsersPage() {
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="min-w-full text-sm">
+              <table className="w-full min-w-[920px] table-fixed text-sm lg:min-w-[1032px] xl:min-w-[1252px]">
+                <colgroup>
+                  <col className="w-[56px]" />
+                  <col className="w-[150px]" />
+                  <col className="w-[86px]" />
+                  <col className="w-[190px]" />
+                  <col className="w-[100px]" />
+                  <col className="w-[84px]" />
+                  <col className="w-[84px]" />
+                  <col className="hidden xl:table-column xl:w-[220px]" />
+                  <col className="w-[144px]" />
+                </colgroup>
                 <thead className="bg-cyan-50/70">
                   <tr className="text-xs text-slate-600">
-                    <th className="px-3 py-3 text-left">Avatar</th>
+                    <th className="px-2 py-3 text-left">Avatar</th>
                     <th className="px-3 py-3 text-left">Họ tên</th>
-                    <th className="px-3 py-3 text-left">Mã NV</th>
+                    <th className="px-2 py-3 text-left">Mã NV</th>
                     <th className="px-3 py-3 text-left">Email</th>
-                    <th className="px-3 py-3 text-left">SĐT</th>
-                    <th className="px-3 py-3 text-left">Role</th>
-                    <th className="px-3 py-3 text-left">Team ID</th>
+                    <th className="px-2 py-3 text-left">SĐT</th>
+                    <th className="px-2 py-3 text-left">Role</th>
+                    <th className="px-2 py-3 text-left">Team ID</th>
 
-                    <th className="px-3 py-3 text-center hidden md:table-cell">
+                    <th className="hidden px-3 py-3 text-center xl:table-cell">
                       Page quản lý
                       {loadingPages && (
                         <span className="ml-1 text-[10px] text-slate-400">(đang tải...)</span>
                       )}
                     </th>
 
-                    <th className="px-3 py-3 text-center hidden md:table-cell">Trạng thái</th>
                     <th className="px-3 py-3 text-right">Hành động</th>
                   </tr>
                 </thead>
@@ -892,7 +861,6 @@ export default function UsersPage() {
                 <tbody>
                   {filteredUsers.map((u) => {
                     const isProcessing = actionLoadingId === u._id;
-                    const isQrLoading = qrLoadingId === u._id;
                     const isLinkLoading = linkLoadingId === u._id;
                     const approved = u.approveStatus === 1;
                     const pageNames = getUserPageNames(u);
@@ -904,7 +872,7 @@ export default function UsersPage() {
                         className="border-t border-cyan-50 hover:bg-cyan-50/50"
                       >
                         {/* Avatar */}
-                        <td className="px-3 py-3">
+                        <td className="px-2 py-3">
                           <div className="relative inline-block">
                             <img
                               src={getAvatarSrc(u)}
@@ -927,14 +895,14 @@ export default function UsersPage() {
 
                         {/* Họ tên */}
                         <td className="px-3 py-3">
-                          <div className={"font-semibold " + (isMaster ? "text-cyan-700" : "text-slate-800")}>
+                          <div className={"truncate font-semibold " + (isMaster ? "text-cyan-700" : "text-slate-800")} title={u.fullName}>
                             {u.fullName}
                           </div>
                         </td>
 
-                        <td className="px-3 py-3 text-slate-700">
+                        <td className="px-2 py-3 text-slate-700">
                           {u.code ? (
-                            <span className="inline-flex items-center rounded-full border border-cyan-100 bg-cyan-50 px-2.5 py-1 text-xs font-semibold text-cyan-700">
+                            <span className="inline-flex max-w-full items-center truncate rounded-full border border-cyan-100 bg-cyan-50 px-2 py-1 text-xs font-semibold text-cyan-700" title={u.code}>
                               {u.code}
                             </span>
                           ) : (
@@ -943,33 +911,37 @@ export default function UsersPage() {
                         </td>
 
                         {/* Email */}
-                        <td className="px-3 py-3 text-slate-700">{u.email}</td>
-
                         <td className="px-3 py-3 text-slate-700">
-                          {u.phone || <span className="text-slate-400">Chưa có</span>}
+                          <div className="truncate" title={u.email}>{u.email}</div>
+                        </td>
+
+                        <td className="px-2 py-3 text-slate-700">
+                          <div className="truncate" title={u.phone || ""}>
+                            {u.phone || <span className="text-slate-400">Chưa có</span>}
+                          </div>
                         </td>
 
                         {/* Role */}
-                        <td className="px-3 py-3">
-                            <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold border bg-sky-50 border-sky-200 text-sky-700">
+                        <td className="px-2 py-3">
+                          <span className="inline-flex max-w-full items-center truncate px-2 py-1 rounded-full text-xs font-semibold border bg-sky-50 border-sky-200 text-sky-700" title={u.role}>
                             {u.role}
                           </span>
                         </td>
 
-                        <td className="px-3 py-3">
-                          <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold border bg-cyan-50 border-cyan-100 text-cyan-700">
+                        <td className="px-2 py-3">
+                          <span className="inline-flex max-w-full items-center truncate px-2 py-1 rounded-full text-xs font-semibold border bg-cyan-50 border-cyan-100 text-cyan-700" title={u.teamId || "Chưa gán"}>
                             {u.teamId || "Chưa gán"}
                           </span>
                         </td>
 
                         {/* Page quản lý */}
-                        <td className="px-3 py-3 text-center hidden md:table-cell text-slate-700">
+                        <td className="hidden px-3 py-3 text-center text-slate-700 xl:table-cell">
                           {pageNames.length ? (
                             <div className="flex flex-wrap gap-2 justify-center">
                               {pageNames.slice(0, 3).map((name, idx) => (
                                 <span
                                   key={idx}
-                                  className="text-xs px-2 py-1 rounded-full border border-cyan-100 bg-white text-cyan-700"
+                                  className="max-w-[92px] truncate text-xs px-2 py-1 rounded-full border border-cyan-100 bg-white text-cyan-700"
                                   title={name}
                                 >
                                   {name}
@@ -991,51 +963,36 @@ export default function UsersPage() {
                           )}
                         </td>
 
-                        {/* Trạng thái */}
-                        <td className="px-3 py-3 text-center hidden md:table-cell">
-                          {renderApproveBadge(u)}
-                        </td>
-
                         {/* Actions */}
-                        <td className="px-3 py-3 text-right">
-                          <div className="inline-flex items-center gap-1">
+                        <td className="px-3 py-3 text-right align-top">
+                          <div className="ml-auto grid w-[120px] grid-cols-2 gap-1">
                             <button
                               disabled={isProcessing}
                               onClick={() => requireMasterPassword(u, () => handleToggleApprove(u))}
                               className={
-                                "px-2.5 py-1.5 text-xs rounded-xl border font-semibold transition " +
+                                "px-2 py-1.5 text-xs rounded-xl border font-semibold transition " +
                                 (approved
                                   ? "border-sky-200 bg-sky-50 text-sky-700 hover:bg-sky-100"
                                   : "border-cyan-200 bg-cyan-50 text-cyan-700 hover:bg-cyan-100") +
                                 (isProcessing ? " opacity-60" : "")
                               }
                             >
-                              {isProcessing ? "Đang xử lý..." : approved ? "Hủy duyệt" : "Duyệt"}
-                            </button>
-
-                            <button
-                              disabled={isQrLoading}
-                              onClick={() => handleExportQrForUser(u)}
-                              className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs rounded-xl border font-semibold transition disabled:opacity-60 border-cyan-100 bg-white text-cyan-700 hover:bg-cyan-50"
-                              title="Xuất QR login cho user này"
-                            >
-                              <QrCode size={13} />
-                              {isQrLoading ? "Đang tạo..." : "QR"}
+                              {isProcessing ? "..." : approved ? "Hủy" : "Duyệt"}
                             </button>
 
                             <button
                               disabled={isLinkLoading}
                               onClick={() => handleCopyLoginLinkForUser(u)}
-                              className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs rounded-xl border font-semibold transition disabled:opacity-60 border-cyan-100 bg-white text-cyan-700 hover:bg-cyan-50"
+                              className="inline-flex items-center justify-center gap-1 px-2 py-1.5 text-xs rounded-xl border font-semibold transition disabled:opacity-60 border-cyan-100 bg-white text-cyan-700 hover:bg-cyan-50"
                               title="Copy link đăng nhập cho user này"
                             >
                               <LinkIcon size={13} />
-                              {isLinkLoading ? "Đang lấy..." : "Link"}
+                              {isLinkLoading ? "..." : "Link"}
                             </button>
 
                             <button
                               onClick={() => requireMasterPassword(u, () => handleEdit(u))}
-                              className="px-2.5 py-1.5 text-xs rounded-xl border font-semibold transition border-cyan-100 bg-white text-cyan-700 hover:bg-cyan-50"
+                              className="px-2 py-1.5 text-xs rounded-xl border font-semibold transition border-cyan-100 bg-white text-cyan-700 hover:bg-cyan-50"
                             >
                               Sửa
                             </button>
@@ -1043,7 +1000,7 @@ export default function UsersPage() {
                             <button
                               disabled={isProcessing}
                               onClick={() => requireMasterPassword(u, () => handleDelete(u))}
-                              className="px-2.5 py-1.5 text-xs rounded-xl border font-semibold transition disabled:opacity-60 border-red-200 bg-red-50 text-red-700 hover:bg-red-100"
+                              className="px-2 py-1.5 text-xs rounded-xl border font-semibold transition disabled:opacity-60 border-red-200 bg-red-50 text-red-700 hover:bg-red-100"
                             >
                               Xóa
                             </button>
@@ -1070,4 +1027,3 @@ export default function UsersPage() {
     </div>
   );
 }
-

@@ -113,6 +113,7 @@ const PAYROLL_COLUMNS = [
   { key: "khauTru.bhxh", label: "BHXH", width: 120, type: "number" },
   { key: "khauTru.congDoan", label: "Công đoàn", width: 130, type: "number" },
   { key: "khauTru.giamLuong", label: "Giam lương", width: 140, type: "number" },
+  { key: "khauTru.giamLuongKhongTru", label: "Giam lương (chưa trừ)", width: 180, type: "number" },
   { key: "khauTru.tamUng", label: "Tạm ứng", width: 130, type: "number" },
   { key: "khauTru.phiDienThoai", label: "Phí điện thoại", width: 150, type: "number" },
   { key: "khauTru.truKhac", label: "Trừ khác", width: 130, type: "number" },
@@ -562,6 +563,14 @@ function getNextPeriod(value) {
   const nextMonth = month === 12 ? 1 : month + 1;
   const nextYear = month === 12 ? year + 1 : year;
   return `${nextYear}-${String(nextMonth).padStart(2, "0")}`;
+}
+
+function getPreviousPeriod(value) {
+  const [year, month] = String(value || "").split("-").map(Number);
+  if (!year || !month) return "";
+  const prevMonth = month === 1 ? 12 : month - 1;
+  const prevYear = month === 1 ? year - 1 : year;
+  return `${prevYear}-${String(prevMonth).padStart(2, "0")}`;
 }
 
 function isKiotEmployeeCode(value) {
@@ -1689,8 +1698,13 @@ export default function PayrollManager() {
       return;
     }
 
-    const sourcePeriod = period;
-    const targetPeriod = getNextPeriod(sourcePeriod);
+    const sourcePeriod = getPreviousPeriod(period);
+    const targetPeriod = period;
+
+    if (!sourcePeriod) {
+      setMessage("Không thể xác định kỳ lương trước đó.");
+      return;
+    }
 
     if (
       !window.confirm(
@@ -2013,9 +2027,9 @@ export default function PayrollManager() {
             {canCreate && (
               <button
                 onClick={clonePayroll}
-                disabled={isCloning}
-                title="Tạo bảng lương cho tháng tiếp theo dựa trên dữ liệu tháng hiện tại"
-                className="inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-50 disabled:opacity-50"
+                disabled={isCloning || rows.length > 0}
+                title={rows.length > 0 ? "Kỳ lương này đã có dữ liệu, không thể nhân bản" : "Nhân bản dữ liệu lương từ tháng trước vào tháng hiện tại"}
+                className="inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {isCloning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Copy className="h-4 w-4" />}
                 Tạo bảng lương

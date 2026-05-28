@@ -1496,13 +1496,12 @@ export default function AttendanceManager() {
                         return (
                           <label
                             key={value}
-                            className={`flex cursor-pointer items-center gap-1 rounded-lg border px-2.5 py-1 text-xs font-bold transition-colors ${
-                              checked
-                                ? isSun
-                                  ? "border-rose-300 bg-rose-50 text-rose-700"
-                                  : "border-violet-300 bg-violet-50 text-violet-700"
-                                : "border-slate-200 bg-slate-50 text-slate-400"
-                            }`}
+                            className={`flex cursor-pointer items-center gap-1 rounded-lg border px-2.5 py-1 text-xs font-bold transition-colors ${checked
+                              ? isSun
+                                ? "border-rose-300 bg-rose-50 text-rose-700"
+                                : "border-violet-300 bg-violet-50 text-violet-700"
+                              : "border-slate-200 bg-slate-50 text-slate-400"
+                              }`}
                           >
                             <input
                               type="checkbox"
@@ -1784,7 +1783,7 @@ export default function AttendanceManager() {
                                 openCreateFormFromOverviewCell(employee, date);
                               }}
                               className={`w-full rounded-lg border px-2 py-2 text-left transition ${isWeek ? "min-h-[100px]" : "min-h-[92px]"} ${dayStyle.bg} ${dayStyle.border} ${record ? "hover:shadow-sm" : `${dayStyle.text} hover:bg-violet-50/50`}`}
-                              title={record ? "Sửa bản ghi" : "Chưa có lượt chấm"}
+                              title={record ? "Sửa bản ghi" : "Chưa chấm công - click đúp chuột vào để chấm"}
                             >
                               {record ? (
                                 <div className="space-y-1.5">

@@ -970,6 +970,9 @@ export default function CommissionABCCalculator() {
   const [missingPriceModalMode, setMissingPriceModalMode] =
     useState("calculation");
   const [missingReturns, setMissingReturns] = useState([]);
+  const [returnPriceReviewModalOpen, setReturnPriceReviewModalOpen] =
+    useState(false);
+  const [pendingReturnPrices, setPendingReturnPrices] = useState([]);
   const [missingGifts, setMissingGifts] = useState([]);
   const [invoiceGiftRows, setInvoiceGiftRows] = useState([]);
   const [cashflowNoteModalOpen, setCashflowNoteModalOpen] = useState(false);
@@ -1602,6 +1605,8 @@ export default function CommissionABCCalculator() {
     setWarnings([]);
     setResults([]);
     setMissingReturns([]);
+    setReturnPriceReviewModalOpen(false);
+    setPendingReturnPrices([]);
     setMissingGifts([]);
     setMissingPriceModalOpen(false);
     setMissingPriceModalMode("calculation");
@@ -1630,6 +1635,8 @@ export default function CommissionABCCalculator() {
     setWarnings([]);
     setResults([]);
     setMissingReturns([]);
+    setReturnPriceReviewModalOpen(false);
+    setPendingReturnPrices([]);
     setMissingGifts([]);
     setPendingCashflowNotes([]);
     setCashflowNoteModalOpen(false);
@@ -1642,6 +1649,7 @@ export default function CommissionABCCalculator() {
       overrideCashflowNotes = cashflowNoteOverrides,
       overrideAdCosts = adCostOverrides,
       reviewCashflowNotes = false,
+      reviewReturnPrices = false,
       forceModal = false,
     } = options;
 
@@ -1653,6 +1661,7 @@ export default function CommissionABCCalculator() {
     const missingGiftsLocal = [];
     const unknownCashflowRows = [];
     const pendingCashflowNoteMap = new Map();
+    const pendingReturnPriceMap = new Map();
     const pendingAdCostMap = new Map();
 
     const selectedSet = new Set(selectedEmployees);
@@ -2229,10 +2238,69 @@ export default function CommissionABCCalculator() {
             cls.priceKey = `${sku}__agency`;
           }
 
-          if (basePrice > 0) {
-            const lineValue = qty * basePrice * 1.05;
+          const overrideKey = `${cls.priceKey}__normal`;
+          const priceFromReview = overrideReturnsPrices[overrideKey];
+          const effectiveBasePrice =
+            priceFromReview != null ? priceFromReview : basePrice;
+
+          if (reviewReturnPrices) {
+            const priceFromFile = basePrice > 0 ? basePrice : "";
+            const manualPrice =
+              priceFromReview ??
+              storedPrices[overrideKey] ??
+              (basePrice > 0 ? basePrice : "");
+            const prev = pendingReturnPriceMap.get(overrideKey);
+            if (prev) {
+              prev.qty += qty || 0;
+              prev.count += 1;
+              if (employee && !prev.employees.includes(employee)) {
+                prev.employees.push(employee);
+              }
+              if (priceFromFile !== "" && !prev.filePrices.includes(priceFromFile)) {
+                prev.filePrices.push(priceFromFile);
+              }
+              if (salePrice > 0 && !prev.salePrices.includes(salePrice)) {
+                prev.salePrices.push(salePrice);
+              }
+            } else {
+              pendingReturnPriceMap.set(overrideKey, {
+                priceKey: overrideKey,
+                sourceLabel: def.label,
+                employees: employee ? [employee] : [],
+                sku,
+                groupLabel:
+                  sku === DSCP1_SKU_1200000
+                    ? "DSCP1 (nhập giá để xác định mốc)"
+                    : sku === DSCP2_SKU_1500000
+                      ? "DSCP2 (nhập giá để xác định mốc)"
+                      : cls.label,
+                unit,
+                qty: qty || 0,
+                count: 1,
+                filePrices: priceFromFile !== "" ? [priceFromFile] : [],
+                salePrices: salePrice > 0 ? [salePrice] : [],
+                manualPrice,
+              });
+            }
+            return;
+          }
+
+          if (effectiveBasePrice > 0) {
+            const pricedCls = classifyReturnGroup(
+              sku,
+              customer,
+              note,
+              effectiveBasePrice,
+              unit,
+            );
+            if (getEmployeeType(employee) === "admin" && pricedCls.group === "PB") {
+              pricedCls.customer = "agency";
+              pricedCls.label = "PB Đại lý";
+              pricedCls.priceKey = `${sku}__agency`;
+            }
+            const lineValue = qty * effectiveBasePrice * 1.05;
             const deduction = lineValue * 0.1;
-            applyDelta(stats, cls, -deduction);
+            applyDelta(stats, pricedCls, -deduction);
             const log = getReturnLog(employee);
             log.normalDeduct += deduction;
             const returnDeductRow = [
@@ -2240,20 +2308,20 @@ export default function CommissionABCCalculator() {
               sku,
               unit,
               qty,
-              basePrice,
+              effectiveBasePrice,
               salePrice,
               deduction,
-              cls.label,
+              pricedCls.label,
             ];
             details.returnDeduct.push(returnDeductRow);
-            if (cls.group === "CG") {
+            if (pricedCls.group === "CG") {
               details.returnDeductCG.push(returnDeductRow);
             } else {
               details.returnDeductPB.push(returnDeductRow);
             }
             const summary = getSummary(employee);
             summary.deduct.returnDeduct += deduction;
-            if (cls.group === "CG") {
+            if (pricedCls.group === "CG") {
               summary.deduct.returnDeductCG += deduction;
             } else {
               summary.deduct.returnDeductPB += deduction;
@@ -2261,7 +2329,6 @@ export default function CommissionABCCalculator() {
             return;
           }
 
-          const overrideKey = `${cls.priceKey}__normal`;
           const priceValue =
             overrideReturnsPrices[overrideKey] ?? storedPrices[overrideKey];
           if (!(priceValue > 0)) {
@@ -2310,6 +2377,17 @@ export default function CommissionABCCalculator() {
           const summary = getSummary(employee);
           summary.deduct.returnAdd += addValue;
         });
+      }
+
+      if (pendingReturnPriceMap.size > 0) {
+        setPendingReturnPrices(
+          Array.from(pendingReturnPriceMap.values()).sort((a, b) =>
+            a.sku.localeCompare(b.sku),
+          ),
+        );
+        setReturnPriceReviewModalOpen(true);
+        setWarnings(newWarnings);
+        return;
       }
 
       {
@@ -2661,6 +2739,7 @@ export default function CommissionABCCalculator() {
       overrideCashflowNotes: storedCashflowNoteOverrides,
       overrideAdCosts: storedAdCostOverrides,
       reviewCashflowNotes: true,
+      reviewReturnPrices: true,
     });
   };
 
@@ -2675,6 +2754,36 @@ export default function CommissionABCCalculator() {
     runClassification({
       overrideGiftPrices: buildOverrideGiftPriceMap(),
       overrideCashflowNotes: nextOverrides,
+      overrideAdCosts: adCostOverrides,
+      reviewReturnPrices: true,
+    });
+  };
+
+  const handleConfirmReturnPrices = async () => {
+    const returnsPriceMap = {};
+    let invalid = false;
+
+    pendingReturnPrices.forEach((item) => {
+      if (item.manualPrice == null || item.manualPrice === "") invalid = true;
+      const val = parseNumber(item.manualPrice);
+      if (!Number.isFinite(val) || val <= 0) invalid = true;
+      returnsPriceMap[item.priceKey] = val;
+    });
+
+    if (invalid) {
+      setErrors(["Vui lòng nhập giá hợp lệ cho tất cả hàng trả về."]);
+      return;
+    }
+
+    const existing = await getStoredManualPrices("abc");
+    await saveAllManualPrices("abc", { ...existing, ...returnsPriceMap });
+
+    setErrors([]);
+    setReturnPriceReviewModalOpen(false);
+    runClassification({
+      overrideReturnsPrices: returnsPriceMap,
+      overrideGiftPrices: buildOverrideGiftPriceMap(),
+      overrideCashflowNotes: cashflowNoteOverrides,
       overrideAdCosts: adCostOverrides,
     });
   };
@@ -3347,6 +3456,98 @@ export default function CommissionABCCalculator() {
             <button
               type="button"
               onClick={handleConfirmCashflowNotes}
+              className="inline-flex items-center justify-center gap-2 rounded-2xl bg-amber-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-amber-700 active:scale-[0.98]"
+            >
+              Tiếp tục tính
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        open={returnPriceReviewModalOpen}
+        onClose={() => setReturnPriceReviewModalOpen(false)}
+        title="Kiểm tra giá hàng trả về"
+        subtitle="Rà soát và sửa giá dùng tính cho các mã hàng trả về trước khi tiếp tục."
+        showClose={false}
+      >
+        <div className="space-y-4">
+          <div className="overflow-auto rounded-2xl border bg-white/80">
+            <table className="w-full min-w-[900px] text-xs">
+              <thead className="bg-slate-50 text-slate-600">
+                <tr>
+                  <th className="px-3 py-2 text-left">File</th>
+                  <th className="px-3 py-2 text-left">Mã hàng</th>
+                  <th className="px-3 py-2 text-left">Nhóm</th>
+                  <th className="px-3 py-2 text-left">ĐVT</th>
+                  <th className="px-3 py-2 text-left">Nhân viên</th>
+                  <th className="px-3 py-2 text-right">Số dòng</th>
+                  <th className="px-3 py-2 text-right">Số lượng</th>
+                  <th className="px-3 py-2 text-right">Giá trong file</th>
+                  <th className="px-3 py-2 text-right">Giá bán</th>
+                  <th className="px-3 py-2 text-right">Giá dùng tính</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pendingReturnPrices.map((item, idx) => (
+                  <tr key={item.priceKey} className="border-t">
+                    <td className="px-3 py-2">{item.sourceLabel || "—"}</td>
+                    <td className="px-3 py-2 font-medium text-slate-800">
+                      {item.sku}
+                    </td>
+                    <td className="px-3 py-2">{item.groupLabel}</td>
+                    <td className="px-3 py-2">{item.unit || "—"}</td>
+                    <td className="px-3 py-2">
+                      {item.employees?.length ? item.employees.join(", ") : "—"}
+                    </td>
+                    <td className="px-3 py-2 text-right">{item.count}</td>
+                    <td className="px-3 py-2 text-right">
+                      {formatMoney(item.qty)}
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      {item.filePrices?.length
+                        ? item.filePrices.map(formatMoney).join(", ")
+                        : "—"}
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      {item.salePrices?.length
+                        ? item.salePrices.map(formatMoney).join(", ")
+                        : "—"}
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      <input
+                        className="w-28 rounded border px-2 py-1 text-right"
+                        value={item.manualPrice ?? ""}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          setPendingReturnPrices((prev) => {
+                            const next = [...prev];
+                            next[idx] = {
+                              ...next[idx],
+                              manualPrice: value,
+                            };
+                            return next;
+                          });
+                        }}
+                      />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">
+            <button
+              type="button"
+              onClick={() => setReturnPriceReviewModalOpen(false)}
+              className="inline-flex items-center justify-center rounded-2xl border bg-white/70 px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-white active:scale-[0.98]"
+            >
+              Hủy
+            </button>
+            <button
+              type="button"
+              onClick={handleConfirmReturnPrices}
               className="inline-flex items-center justify-center gap-2 rounded-2xl bg-amber-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-amber-700 active:scale-[0.98]"
             >
               Tiếp tục tính
