@@ -51,6 +51,9 @@ const StandaloneAttendance = lazy(() => import("./components/attendance/Standalo
 const TestCaseChatBotManager = lazy(() => import("./components/testChatBot/TestChatBot"));
 const ChatV4RulesManager = lazy(() => import("./components/chatV4/ChatV4RulesManager"));
 const ChatV4FunctionCallsManager = lazy(() => import("./components/chatV4/ChatV4FunctionCallsManager"));
+const ChatV4ContextManager = lazy(() => import("./components/chatV4/ChatV4ContextManager"));
+const ChatV4SettingsManager = lazy(() => import("./components/chatV4/ChatV4SettingsManager"));
+const ChatV4EventSimulator = lazy(() => import("./components/chatV4/ChatV4EventSimulator"));
 
 const ADMIN_ROUTE_BY_SCREEN = {
   pages: "/admin/pages",
@@ -76,6 +79,9 @@ const ADMIN_ROUTE_BY_SCREEN = {
   admin_testcase: "/admin/test-chat",
   admin_chat_v4_rules: "/admin/chat-v4-rules",
   admin_chat_v4_function_calls: "/admin/chat-v4-function-calls",
+  admin_chat_v4_contexts: "/admin/chat-v4-contexts",
+  admin_chat_v4_settings: "/admin/chat-v4-settings",
+  admin_chat_v4_simulator: "/admin/chat-v4-simulator",
   admin_logs: "/admin/logs",
   notifications: "/admin/notifications",
   attendance: "/admin/attendance",
@@ -108,6 +114,9 @@ const adminRoutes = [
   { path: "test-cases", screenId: "admin_testcase", element: <TestCaseChatBotManager /> },
   { path: "chat-v4-rules", screenId: "admin_chat_v4_rules", element: <ChatV4RulesManager /> },
   { path: "chat-v4-function-calls", screenId: "admin_chat_v4_function_calls", element: <ChatV4FunctionCallsManager /> },
+  { path: "chat-v4-contexts", screenId: "admin_chat_v4_contexts", element: <ChatV4ContextManager /> },
+  { path: "chat-v4-settings", screenId: "admin_chat_v4_settings", element: <ChatV4SettingsManager /> },
+  { path: "chat-v4-simulator", screenId: "admin_chat_v4_simulator", element: <ChatV4EventSimulator /> },
   { path: "logs", screenId: "admin_logs", element: <LogsManage /> },
   { path: "notifications", screenId: "notifications", element: <NotificationManager /> },
   { path: "my-attendance", screenId: "attendance_self", element: <AttendancePage /> },

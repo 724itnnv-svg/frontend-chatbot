@@ -23,7 +23,9 @@ import {
   Wallet,
   Workflow,
   BellRing,
+  BrainCircuit,
   Code2,
+  MousePointerClick,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { canAccessScreen, getAllowedScreens, hasFullAccess } from "../utils/screenAccess";
@@ -48,6 +50,9 @@ const MENU_CONFIG = [
   { id: "admin_testcase", path: "/admin/test-cases", label: "Test ChatBOT", icon: Database },
   { id: "admin_chat_v4_rules", path: "/admin/chat-v4-rules", label: "Quy tắc Chat V4", icon: Settings2 },
   { id: "admin_chat_v4_function_calls", path: "/admin/chat-v4-function-calls", label: "Function Call V4", icon: Code2 },
+  { id: "admin_chat_v4_contexts", path: "/admin/chat-v4-contexts", label: "Ngữ cảnh Chat V4", icon: BrainCircuit },
+  { id: "admin_chat_v4_settings", path: "/admin/chat-v4-settings", label: "Cài đặt Chat V4", icon: Settings2 },
+  { id: "admin_chat_v4_simulator", path: "/admin/chat-v4-simulator", label: "Giả lập Event V4", icon: MousePointerClick },
   { id: "admin_agent", path: "/admin/agents", label: "Quản trị Agent", icon: BotMessageSquare },
   { id: "admin_agent_promo", path: "/admin/agent-promotions", label: "Quản lý khuyến mãi", icon: BotMessageSquare },
   { id: "admin_chatbot_config", path: "/admin/chatbot-config", label: "Cấu hình ChatBot", icon: Settings2 },
@@ -67,7 +72,7 @@ const MENU_GROUPS = [
     id: "business",
     label: "Kinh doanh",
     icon: MessageCircle,
-    items: ["business_stats", "pages", "pagesmessage", "chatweb", "donhang", "donhangWeb", "admin_event_promo"],
+    items: ["business_stats", "pages", "pagesmessage", "chatweb", "donhang", "donhangWeb"],
   },
   {
     id: "attendance",
@@ -91,13 +96,13 @@ const MENU_GROUPS = [
     id: "system",
     label: "Hệ thống & AI",
     icon: ShieldCheck,
-    items: ["admin_dashboard", "admin_products_tool", "admin_vectorstore_tool", "admin_agent", "admin_agent_promo", "admin_chatbot_config", "admin_faq", "admin_logs", "notifications"],
+    items: ["admin_dashboard", "admin_products_tool", "admin_vectorstore_tool", "admin_agent", "admin_agent_promo", "admin_chatbot_config", "admin_faq", "admin_testcase", "admin_logs", "notifications"],
   },
   {
     id: "experimental",
     label: "Phiên bản thử nghiệm",
     icon: BotMessageSquare,
-    items: ["admin_chat_v4_rules", "admin_chat_v4_function_calls", "admin_testcase"],
+    items: ["admin_event_promo", "admin_chat_v4_rules", "admin_chat_v4_function_calls", "admin_chat_v4_contexts", "admin_chat_v4_settings", "admin_chat_v4_simulator"],
   },
 ];
 

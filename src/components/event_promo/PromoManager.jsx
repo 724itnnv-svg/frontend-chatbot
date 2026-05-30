@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { Tag, Plus, Search, Edit3, Trash2, Percent, Gift, Truck, Calendar, AlertCircle } from "lucide-react";
+import { Tag, Plus, Search, Edit3, Trash2, Percent, Gift, Truck, Calendar, AlertCircle, Copy, ToggleLeft, ToggleRight } from "lucide-react";
 import PromotionModal from "./PromotionModal";
 import { useAuth } from "../../context/AuthContext";
 
@@ -109,6 +109,59 @@ export default function PromotionManage() {
         setIsModalOpen(true);
     };
 
+    const handleClone = (promo) => {
+        const {
+            _id,
+            id,
+            createdAt,
+            updatedAt,
+            __v,
+            ...cloneData
+        } = promo || {};
+
+        setEditingPromo({
+            ...cloneData,
+            name: `Bản sao - ${promo?.name || "Khuyến mãi"}`,
+            content: Array.isArray(promo?.content)
+                ? promo.content.map((rule, index) => ({
+                    ...rule,
+                    _id: undefined,
+                    id: `clone-rule-${Date.now()}-${index}`,
+                }))
+                : [],
+            applicableProductCodes: Array.isArray(promo?.applicableProductCodes)
+                ? [...promo.applicableProductCodes]
+                : [],
+        });
+        setIsModalOpen(true);
+    };
+
+    const handleToggleActive = async (promo) => {
+        const nextActive = promo.isActive === false;
+        try {
+            setLoading(true);
+            const response = await fetch(`${API_URL}/${promo._id}`, {
+                method: "PUT",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${token}`,
+                },
+                body: JSON.stringify({ ...promo, isActive: nextActive }),
+            });
+            const result = await response.json();
+
+            if (result.success) {
+                setPromotions(prev => prev.map(item => item._id === promo._id ? result.data : item));
+            } else {
+                alert("Không thể cập nhật trạng thái: " + result.message);
+            }
+        } catch (error) {
+            alert("Lỗi mạng khi cập nhật trạng thái kích hoạt!");
+        } finally {
+            setLoading(false);
+        }
+    };
+
     const handleCloseModal = () => {
         setIsModalOpen(false);
         setEditingPromo(null);
@@ -199,7 +252,10 @@ export default function PromotionManage() {
                 ) : filtered.length > 0 ? (
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                         {filtered.map(promo => {
-                            const isActive = new Date(promo.endDate) > new Date();
+                            const now = new Date();
+                            const isInDateRange = new Date(promo.startDate) <= now && new Date(promo.endDate) > now;
+                            const isEnabled = promo.isActive !== false;
+                            const isRunning = isEnabled && isInDateRange;
                             return (
                                 <div key={promo._id} className="bg-white p-6 rounded-[1rem] border border-slate-200 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all group relative">
                                     <div className="flex justify-between items-start mb-5">
@@ -211,6 +267,16 @@ export default function PromotionManage() {
                                         <div className="flex gap-1">
                                             <button onClick={() => handleOpenModal(promo)} className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-colors">
                                                 <Edit3 size={18} />
+                                            </button>
+                                            <button onClick={() => handleClone(promo)} className="p-2 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-xl transition-colors" title="Clone khuyến mãi">
+                                                <Copy size={18} />
+                                            </button>
+                                            <button
+                                                onClick={() => handleToggleActive(promo)}
+                                                className={`p-2 rounded-xl transition-colors ${isEnabled ? "text-emerald-500 hover:bg-emerald-50" : "text-slate-400 hover:text-amber-600 hover:bg-amber-50"}`}
+                                                title={isEnabled ? "Tắt kích hoạt" : "Kích hoạt"}
+                                            >
+                                                {isEnabled ? <ToggleRight size={18} /> : <ToggleLeft size={18} />}
                                             </button>
                                             <button onClick={() => handleDelete(promo._id)} className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-colors">
                                                 <Trash2 size={18} />
@@ -229,6 +295,12 @@ export default function PromotionManage() {
                                         </p>
                                     </div>
 
+                                    {promo.promoPrompt && (
+                                        <p className="mb-4 line-clamp-2 rounded-xl bg-indigo-50 px-3 py-2 text-xs font-medium text-indigo-700">
+                                            {promo.promoPrompt}
+                                        </p>
+                                    )}
+
                                     <div className="space-y-2 mb-6">
                                         <div className="flex items-center gap-2 text-slate-500">
                                             <Calendar size={14} />
@@ -239,10 +311,16 @@ export default function PromotionManage() {
                                     </div>
 
                                     <div className="pt-4 border-t border-slate-100 flex items-center justify-between">
-                                        <span className={`text-[10px] px-3 py-1 rounded-full font-bold uppercase tracking-wider ${isActive ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-400'}`}>
-                                            {isActive ? "Đang chạy" : "Kết thúc"}
+                                        <span className={`text-[10px] px-3 py-1 rounded-full font-bold uppercase tracking-wider ${
+                                            isRunning
+                                                ? "bg-emerald-100 text-emerald-700"
+                                                : isEnabled
+                                                    ? "bg-amber-100 text-amber-700"
+                                                    : "bg-slate-100 text-slate-400"
+                                        }`}>
+                                            {isRunning ? "Đang chạy" : isEnabled ? "Đang bật" : "Đã tắt"}
                                         </span>
-                                        <div className={`w-2.5 h-2.5 rounded-full ${isActive ? 'bg-emerald-500 animate-pulse' : 'bg-slate-300'}`} />
+                                        <div className={`w-2.5 h-2.5 rounded-full ${isRunning ? "bg-emerald-500 animate-pulse" : isEnabled ? "bg-amber-400" : "bg-slate-300"}`} />
                                     </div>
                                 </div>
                             )
