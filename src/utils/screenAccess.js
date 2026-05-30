@@ -1,5 +1,8 @@
+import APP_PERMISSIONS from "../components/role/configRole";
+
 export function hasFullAccess(user) {
-  return Number(user?.allpage) === 1;
+  const allowedScreens = getAllowedScreens(user);
+  return APP_PERMISSIONS.screens.every((screen) => allowedScreens.includes(screen.id));
 }
 
 export function getAllowedScreens(user) {

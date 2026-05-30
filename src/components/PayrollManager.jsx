@@ -46,7 +46,6 @@ const COMPUTED_PAYROLL_KEYS = new Set([
   "thuNhapTheoNgayCong.luongPhepNam",
   "thuNhapTheoNgayCong.luongTangCaThuong",
   "thuNhapTheoNgayCong.luongTangCaChuNhat",
-  "thuNhapTheoNgayCong.comTangCa",
   "thuNhapTheoNgayCong.luongTangCaLeTet",
   "thuNhapTheoNgayCong.thuongKPI",
   "thuNhapTheoNgayCong.tongThuNhap",
@@ -114,6 +113,7 @@ const PAYROLL_COLUMNS = [
   { key: "khauTru.bhxh", label: "BHXH", width: 120, type: "number" },
   { key: "khauTru.congDoan", label: "Công đoàn", width: 130, type: "number" },
   { key: "khauTru.giamLuong", label: "Giam lương", width: 140, type: "number" },
+  { key: "khauTru.giamLuongKhongTru", label: "Giam lương (chưa trừ)", width: 180, type: "number" },
   { key: "khauTru.tamUng", label: "Tạm ứng", width: 130, type: "number" },
   { key: "khauTru.phiDienThoai", label: "Phí điện thoại", width: 150, type: "number" },
   { key: "khauTru.truKhac", label: "Trừ khác", width: 130, type: "number" },
@@ -314,6 +314,12 @@ const DEFAULT_PAYROLL_FORMULA_SETTINGS = {
       enabled: true,
       expression: "khauTru.bhxh + khauTru.congDoan + khauTru.giamLuong + khauTru.tamUng + khauTru.phiDienThoai + khauTru.truKhac",
       note: "Tong khau tru",
+    },
+    {
+      target: "tinhThueTNCN.tongThuNhapChiuThue",
+      enabled: true,
+      expression: "thuNhapTheoNgayCong.tongThuNhap - khauTru.tongKhauTru",
+      note: "TN chiu thue = Tong thu nhap - Tong khau tru",
     },
     {
       target: "tinhThueTNCN.thuNhapTinhThue",
@@ -557,6 +563,14 @@ function getNextPeriod(value) {
   const nextMonth = month === 12 ? 1 : month + 1;
   const nextYear = month === 12 ? year + 1 : year;
   return `${nextYear}-${String(nextMonth).padStart(2, "0")}`;
+}
+
+function getPreviousPeriod(value) {
+  const [year, month] = String(value || "").split("-").map(Number);
+  if (!year || !month) return "";
+  const prevMonth = month === 1 ? 12 : month - 1;
+  const prevYear = month === 1 ? year - 1 : year;
+  return `${prevYear}-${String(prevMonth).padStart(2, "0")}`;
 }
 
 function isKiotEmployeeCode(value) {
@@ -1684,8 +1698,13 @@ export default function PayrollManager() {
       return;
     }
 
-    const sourcePeriod = period;
-    const targetPeriod = getNextPeriod(sourcePeriod);
+    const sourcePeriod = getPreviousPeriod(period);
+    const targetPeriod = period;
+
+    if (!sourcePeriod) {
+      setMessage("Không thể xác định kỳ lương trước đó.");
+      return;
+    }
 
     if (
       !window.confirm(
@@ -1965,14 +1984,14 @@ export default function PayrollManager() {
               <Download className="h-4 w-4" />
               Xuất Excel
             </button>
-            <button
+            {/* <button
               onClick={() => exportPayrollQrCards(selectedRows.length ? selectedRows : sortedRows)}
               disabled={!sortedRows.length}
               className="inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-50 disabled:opacity-50"
             >
               <Download className="h-4 w-4" />
               Xuat QR
-            </button>
+            </button> */}
             <button onClick={() => setShowColumns(true)} className="inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-50">
               <Columns3 className="h-4 w-4" />
               Ẩn/hiện cột
@@ -1990,7 +2009,7 @@ export default function PayrollManager() {
                 className="inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-50 disabled:opacity-50"
               >
                 <ListChecks className="h-4 w-4" />
-                Nhap hang loat
+                Nhập hàng loạt
               </button>
             )}
             {(canCreate || canEdit) && (
@@ -2008,9 +2027,9 @@ export default function PayrollManager() {
             {canCreate && (
               <button
                 onClick={clonePayroll}
-                disabled={isCloning}
-                title="Tạo bảng lương cho tháng tiếp theo dựa trên dữ liệu tháng hiện tại"
-                className="inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-50 disabled:opacity-50"
+                disabled={isCloning || rows.length > 0}
+                title={rows.length > 0 ? "Kỳ lương này đã có dữ liệu, không thể nhân bản" : "Nhân bản dữ liệu lương từ tháng trước vào tháng hiện tại"}
+                className="inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {isCloning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Copy className="h-4 w-4" />}
                 Tạo bảng lương
@@ -2054,7 +2073,7 @@ export default function PayrollManager() {
           </select>
           <select value={insuranceCompany} onChange={(event) => setInsuranceCompany(event.target.value)} className="rounded-xl border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-sky-100">
             {insuranceCompanyOptions.map((item) => (
-              <option key={item} value={item}>{item === "ALL" ? "Tat ca cty BHXH" : item}</option>
+              <option key={item} value={item}>{item === "ALL" ? "Tất cả CTY" : item}</option>
             ))}
           </select>
           <select value={status} onChange={(event) => setStatus(event.target.value)} className="rounded-xl border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-sky-100">
@@ -2077,7 +2096,7 @@ export default function PayrollManager() {
         {message ? <div className="rounded-xl border bg-amber-50 px-3 py-2 text-sm text-amber-800">{message}</div> : null}
         {selectedRowIds.size ? (
           <div className="rounded-xl border bg-sky-50 px-3 py-2 text-sm text-sky-800">
-            Da chon {selectedRowIds.size} dong. Co the bam Nhap hang loat de cap nhat chung mot cot.
+            Đã chọn {selectedRowIds.size} đóng. Có thể bấm Nhập hàng loạt để cập nhật chung một cột.
           </div>
         ) : null}
       </div>

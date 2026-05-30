@@ -1,9 +1,11 @@
 // src/App.jsx
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import { Capacitor } from "@capacitor/core";
-import { Routes, Route, Navigate, useLocation } from "react-router-dom";
+import { App as CapacitorApp } from "@capacitor/app";
+import { Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "./context/AuthContext";
 import { canAccessScreen, getAllowedScreens } from "./utils/screenAccess";
+import { requestStartupNativePermissions } from "./utils/nativeAppPermissions";
 
 import DashboardLayout from "./components/DashboardLayout";
 
@@ -49,6 +51,9 @@ const WorkLocationManager = lazy(() => import("./components/attendance/WorkLocat
 const AttendanceManager = lazy(() => import("./components/attendance/AttendanceManager"));
 const StandaloneAttendance = lazy(() => import("./components/attendance/StandaloneAttendance"));
 const TestCaseChatBotManager = lazy(() => import("./components/testChatBot/TestChatBot"));
+const DuaSapPublicPage = lazy(() => import("./components/duasap/DuaSapPublicPage"));
+const DuaSapDetailPage = lazy(() => import("./components/duasap/DuaSapDetailPage"));
+const DuaSapManager = lazy(() => import("./components/duasap/DuaSapManager"));
 const ChatV4RulesManager = lazy(() => import("./components/chatV4/ChatV4RulesManager"));
 const ChatV4FunctionCallsManager = lazy(() => import("./components/chatV4/ChatV4FunctionCallsManager"));
 const ChatV4ContextManager = lazy(() => import("./components/chatV4/ChatV4ContextManager"));
@@ -89,6 +94,7 @@ const ADMIN_ROUTE_BY_SCREEN = {
   attendance_locations: "/admin/attendance-locations",
   attendance_self: "/admin/my-attendance",
   payroll: "/admin/payroll",
+  dua_sap: "/admin/dua-sap",
 };
 
 const adminRoutes = [
@@ -124,6 +130,7 @@ const adminRoutes = [
   { path: "attendance-shifts", screenId: "attendance_shifts", element: <AttendanceShiftManager /> },
   { path: "attendance-locations", screenId: "attendance_locations", element: <WorkLocationManager /> },
   { path: "payroll", screenId: "payroll", element: <PayrollManager /> },
+  { path: "dua-sap", screenId: "dua_sap", element: <DuaSapManager /> },
 ];
 
 // Guard cho trang độc lập: chưa login → /login?redirect=<current>
@@ -203,6 +210,28 @@ function HomeRoute() {
 
 export default function App() {
   const { isLoggedIn } = useAuth();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    requestStartupNativePermissions();
+  }, []);
+
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+    let listenerHandle;
+    CapacitorApp.addListener("appUrlOpen", (event) => {
+      const raw = event?.url || "";
+      if (!raw.startsWith("nnvchamcong://")) return;
+      try {
+        const url = new URL(raw);
+        const path = `/${url.hostname}${url.pathname !== "/" ? url.pathname : ""}${url.search}`;
+        navigate(path, { replace: true });
+      } catch {
+        // ignore malformed URL
+      }
+    }).then((handle) => { listenerHandle = handle; });
+    return () => { listenerHandle?.remove(); };
+  }, [navigate]);
 
   return (
     <Suspense fallback={<AppLoader />}>
@@ -250,6 +279,10 @@ export default function App() {
             </RequireAuth>
           }
         />
+
+        {/* Trang công khai cây dừa sáp — không cần đăng nhập */}
+        <Route path="/dua-sap" element={<DuaSapPublicPage />} />
+        <Route path="/dua-sap/:maCay" element={<DuaSapDetailPage />} />
 
         <Route path="/policy" element={<PolicyPage />} />
         <Route path="/terms-of-service" element={<TermsOfServicePage />} />
