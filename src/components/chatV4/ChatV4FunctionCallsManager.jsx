@@ -261,8 +261,6 @@ export default function ChatV4FunctionCallsManager() {
   useEffect(() => {
     fetchItems();
     fetchFileSearchItems();
-    fetchPageStyleItems();
-    fetchPages();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
@@ -653,8 +651,6 @@ export default function ChatV4FunctionCallsManager() {
   const refreshActiveTab = () => {
     if (activeTab === "fileSearch") {
       fetchFileSearchItems();
-    } else if (activeTab === "styles") {
-      fetchPageStyleItems();
     } else {
       fetchItems();
     }
@@ -696,16 +692,6 @@ export default function ChatV4FunctionCallsManager() {
               >
                 <Database size={16} />
                 File Search
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveTab("styles")}
-                className={`inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-bold ${
-                  activeTab === "styles" ? "bg-white text-cyan-700 shadow-sm" : "text-slate-600"
-                }`}
-              >
-                <Palette size={16} />
-                Phong Cách
               </button>
             </div>
             <button

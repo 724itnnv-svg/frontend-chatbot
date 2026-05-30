@@ -96,13 +96,13 @@ const MENU_GROUPS = [
     id: "system",
     label: "Hệ thống & AI",
     icon: ShieldCheck,
-    items: ["admin_dashboard", "admin_products_tool", "admin_vectorstore_tool", "admin_agent", "admin_agent_promo", "admin_chatbot_config", "admin_faq", "admin_testcase", "admin_logs", "notifications"],
+    items: ["admin_dashboard", "admin_products_tool", "admin_vectorstore_tool", "admin_agent", "admin_agent_promo", "admin_chatbot_config", "admin_testcase", "admin_logs", "notifications"],
   },
   {
     id: "experimental",
     label: "Phiên bản thử nghiệm",
     icon: BotMessageSquare,
-    items: ["admin_event_promo", "admin_chat_v4_rules", "admin_chat_v4_function_calls", "admin_chat_v4_contexts", "admin_chat_v4_settings", "admin_chat_v4_simulator"],
+    items: ["admin_event_promo", "admin_chat_v4_rules", "admin_faq", "admin_chat_v4_function_calls", "admin_chat_v4_contexts", "admin_chat_v4_settings", "admin_chat_v4_simulator"],
   },
 ];
 

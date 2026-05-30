@@ -3,6 +3,7 @@ import {
   BotMessageSquare,
   Edit3,
   Loader2,
+  Palette,
   Plus,
   RefreshCw,
   Save,
@@ -11,6 +12,7 @@ import {
   X,
 } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
+import ChatV4PageStylesPanel from "./ChatV4PageStylesPanel";
 
 const EMPTY_FORM = {
   title: "",
@@ -47,6 +49,7 @@ function formatDateTime(value) {
 
 export default function ChatV4RulesManager() {
   const { token } = useAuth();
+  const [activeTab, setActiveTab] = useState("rules");
   const [profile, setProfile] = useState(DEFAULT_PROFILE);
   const [form, setForm] = useState(EMPTY_FORM);
   const [editingId, setEditingId] = useState(null);
@@ -181,25 +184,50 @@ export default function ChatV4RulesManager() {
               Quản lý các quy tắc chung và phong cách được đưa vào prompt khi Chat V4 trả lời khách.
             </p>
           </div>
-          <button
-            type="button"
-            onClick={fetchProfile}
-            disabled={loading}
-            className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-60"
-          >
-            <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
-            Làm mới
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="inline-flex rounded-xl bg-slate-100 p-1">
+              <button
+                type="button"
+                onClick={() => setActiveTab("rules")}
+                className={`inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-bold transition ${activeTab === "rules" ? "bg-white text-cyan-700 shadow-sm" : "text-slate-600"}`}
+              >
+                <BotMessageSquare size={16} />
+                Quy tắc
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab("styles")}
+                className={`inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-bold transition ${activeTab === "styles" ? "bg-white text-cyan-700 shadow-sm" : "text-slate-600"}`}
+              >
+                <Palette size={16} />
+                Phong cách
+              </button>
+            </div>
+            {activeTab === "rules" && (
+              <button
+                type="button"
+                onClick={fetchProfile}
+                disabled={loading}
+                className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-60"
+              >
+                <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
+                Làm mới
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-4 py-4 md:px-6">
-        {message && (
+        {activeTab === "rules" && message && (
           <div className="mb-4 shrink-0 rounded-xl border border-cyan-200 bg-cyan-50 px-4 py-3 text-sm font-semibold text-cyan-800">
             {message}
           </div>
         )}
 
+        {activeTab === "styles" ? (
+          <ChatV4PageStylesPanel />
+        ) : (
         <div className="grid min-h-0 flex-1 gap-4 xl:grid-cols-[440px_minmax(0,1fr)]">
           <form onSubmit={handleSubmit} className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
             <div className="flex shrink-0 items-center gap-2 border-b border-slate-100 px-5 py-4">
@@ -338,6 +366,7 @@ export default function ChatV4RulesManager() {
             </div>
           </section>
         </div>
+        )}
       </div>
     </div>
   );
