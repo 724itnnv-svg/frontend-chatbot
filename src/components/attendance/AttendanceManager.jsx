@@ -49,8 +49,6 @@ const TABS = [
   { id: "report", label: "Báo cáo", icon: BarChart3 },
 ];
 
-const TEAM_OPTIONS = ["NNV", "KF", "ABC", "VN"];
-
 const DEFAULT_SHIFT_FORM = [
   { shiftNo: 1, name: "Ca sáng", scheduledStart: "07:30", scheduledEnd: "11:30" },
   { shiftNo: 2, name: "Ca chiều", scheduledStart: "13:00", scheduledEnd: "17:00" },
@@ -563,7 +561,7 @@ function Badge({ tone = "slate", children, icon: Icon }) {
 }
 
 export default function AttendanceManager() {
-  const { api } = useAuth();
+  const { api, user: authUser } = useAuth();
   const formRef = useRef(null);
   const [tab, setTab] = useState("overview");
   const [from, setFrom] = useState(firstDayOfMonth());
@@ -648,7 +646,6 @@ export default function AttendanceManager() {
 
       do {
         const params = new URLSearchParams({ from: effectiveFrom, to: effectiveTo, page: currentPage, limit: pageSize });
-        if (teamFilter) params.set("teamId", normalizeTeam(teamFilter));
         const res = await api.get(`/attendance?${params}`);
         const rows = res.data?.data || [];
         totalItems = Number(res.data?.total || rows.length);
@@ -663,7 +660,7 @@ export default function AttendanceManager() {
     } finally {
       setOverviewLoading(false);
     }
-  }, [api, from, to, teamFilter, weekMode, weekStart]);
+  }, [api, from, to, weekMode, weekStart]);
 
   const loadReport = useCallback(async () => {
     setReportLoading(true);
@@ -880,6 +877,10 @@ export default function AttendanceManager() {
     setBulkStampUserIds(new Set(filtered.map((u) => u._id)));
   }
 
+  function deselectAllBulkUsers(filtered) {
+    setBulkStampUserIds(new Set([...bulkStampUserIds].filter((id) => !filtered.some((u) => u._id === id))));
+  }
+
   function updateBulkShift(index, key, value) {
     setBulkStampForm((prev) => ({
       ...prev,
@@ -911,27 +912,23 @@ export default function AttendanceManager() {
     const totalOps = userIds.length * dates.length;
     if (!window.confirm(`Chấm công cho ${userIds.length} nhân viên × ${dates.length} ngày = ${totalOps} bản ghi?`)) return;
 
-    setBulkStamping(true);
-    let success = 0;
-    let skipped = 0;
+    const records = [];
     for (const userId of userIds) {
       for (const date of dates) {
-        try {
-          await api.post("/attendance", {
-            userId,
-            locationId: bulkStampForm.locationId,
-            date,
-            shifts: enabledShifts,
-          });
-          success++;
-        } catch {
-          skipped++;
-        }
+        records.push({ userId, locationId: bulkStampForm.locationId, date, shifts: enabledShifts });
       }
     }
-    setBulkStamping(false);
-    showFlash(true, `Đã tạo ${success} bản ghi${skipped > 0 ? `, bỏ qua ${skipped} (đã tồn tại hoặc lỗi)` : ""}.`);
-    if (success > 0) refreshCurrentTab();
+
+    setBulkStamping(true);
+    try {
+      const res = await api.post("/attendance/bulk", { records });
+      setBulkStamping(false);
+      showFlash(true, res.data.message || `Đã tạo ${res.data.success} bản ghi.`);
+      if (res.data.success > 0) refreshCurrentTab();
+    } catch (err) {
+      setBulkStamping(false);
+      showFlash(false, err?.response?.data?.message || "Lỗi khi chấm công hàng loạt.");
+    }
   }
 
   function togglePendingSelect(id) {
@@ -1134,7 +1131,10 @@ export default function AttendanceManager() {
     let invalid = 0;
     let missingPast = 0;
     const today = todayVN();
+    const visibleEmployeeIds = new Set(overviewEmployees.map((e) => e.id));
     overviewRecords.forEach((record) => {
+      const uid = getRecordUserKey(record);
+      if (!visibleEmployeeIds.has(uid)) return;
       if (record.status === "present") present += 1;
       if (record.status === "incomplete") incomplete += 1;
       if (record.status === "invalid") invalid += 1;
@@ -1148,6 +1148,12 @@ export default function AttendanceManager() {
     });
     return { present, incomplete, invalid, missingPast };
   }, [overviewByUserDate, overviewDates, overviewEmployees, overviewRecords]);
+
+  const teamOptions = useMemo(() => {
+    const teams = new Set();
+    users.forEach((u) => { if (u.teamId) teams.add(normalizeTeam(u.teamId)); });
+    return [...teams].sort();
+  }, [users]);
 
   const totalPages = Math.ceil(total / PAGE_LIMIT);
 
@@ -1429,6 +1435,7 @@ export default function AttendanceManager() {
                     <label className="text-xs font-semibold text-slate-500">
                       CHỌN NHÂN VIÊN ({bulkStampUserIds.size}/{filteredBulkUsers.length})
                     </label>
+
                     <button
                       type="button"
                       onClick={() => selectAllBulkUsers(filteredBulkUsers)}
@@ -1436,6 +1443,15 @@ export default function AttendanceManager() {
                     >
                       Chọn tất cả
                     </button>
+
+                    <button
+                      type="button"
+                      onClick={() => deselectAllBulkUsers(filteredBulkUsers)}
+                      className="text-xs font-semibold text-red-600 hover:underline"
+                    >
+                      Bỏ chọn tất cả
+                    </button>
+
                   </div>
                   <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5">
                     <Search size={13} className="text-slate-400" />
@@ -1496,13 +1512,12 @@ export default function AttendanceManager() {
                         return (
                           <label
                             key={value}
-                            className={`flex cursor-pointer items-center gap-1 rounded-lg border px-2.5 py-1 text-xs font-bold transition-colors ${
-                              checked
-                                ? isSun
-                                  ? "border-rose-300 bg-rose-50 text-rose-700"
-                                  : "border-violet-300 bg-violet-50 text-violet-700"
-                                : "border-slate-200 bg-slate-50 text-slate-400"
-                            }`}
+                            className={`flex cursor-pointer items-center gap-1 rounded-lg border px-2.5 py-1 text-xs font-bold transition-colors ${checked
+                              ? isSun
+                                ? "border-rose-300 bg-rose-50 text-rose-700"
+                                : "border-violet-300 bg-violet-50 text-violet-700"
+                              : "border-slate-200 bg-slate-50 text-slate-400"
+                              }`}
                           >
                             <input
                               type="checkbox"
@@ -1621,7 +1636,7 @@ export default function AttendanceManager() {
               className="w-32 rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
             >
               <option value="">Tất cả</option>
-              {TEAM_OPTIONS.map((team) => (
+              {teamOptions.map((team) => (
                 <option key={team} value={team}>{team}</option>
               ))}
             </select>
@@ -1784,7 +1799,7 @@ export default function AttendanceManager() {
                                 openCreateFormFromOverviewCell(employee, date);
                               }}
                               className={`w-full rounded-lg border px-2 py-2 text-left transition ${isWeek ? "min-h-[100px]" : "min-h-[92px]"} ${dayStyle.bg} ${dayStyle.border} ${record ? "hover:shadow-sm" : `${dayStyle.text} hover:bg-violet-50/50`}`}
-                              title={record ? "Sửa bản ghi" : "Chưa có lượt chấm"}
+                              title={record ? "Sửa bản ghi" : "Chưa chấm công - click đúp chuột vào để chấm"}
                             >
                               {record ? (
                                 <div className="space-y-1.5">

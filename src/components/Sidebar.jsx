@@ -23,12 +23,13 @@ import {
   Wallet,
   Workflow,
   BellRing,
+  TreePine,
   BrainCircuit,
   Code2,
   MousePointerClick,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
-import { canAccessScreen, getAllowedScreens, hasFullAccess } from "../utils/screenAccess";
+import { canAccessScreen, hasFullAccess } from "../utils/screenAccess";
 
 const ACTIVE_TAB_KEY = "dashboard_active_tab";
 
@@ -66,6 +67,7 @@ const MENU_CONFIG = [
 ];
 
 MENU_CONFIG.push({ id: "payroll", path: "/admin/payroll", label: "Chấm công tính lương", icon: Wallet });
+MENU_CONFIG.push({ id: "dua_sap", path: "/admin/dua-sap", label: "Quản lý Dừa Sáp", icon: TreePine });
 
 const MENU_GROUPS = [
   {
@@ -104,6 +106,12 @@ const MENU_GROUPS = [
     icon: BotMessageSquare,
     items: ["admin_event_promo", "admin_chat_v4_rules", "admin_chat_v4_function_calls", "admin_chat_v4_contexts", "admin_chat_v4_settings", "admin_chat_v4_simulator"],
   },
+  {
+    id: "agriculture",
+    label: "Nông nghiệp",
+    icon: TreePine,
+    items: ["dua_sap"],
+  },
 ];
 
 function getLinkClass({ isActive, isFocused, isCollapsed }) {
@@ -139,14 +147,12 @@ const Sidebar = memo(() => {
     localStorage.setItem("sidebar_collapsed", isCollapsed ? "1" : "0");
   }, [isCollapsed]);
 
-  const isAdmin = hasFullAccess(user);
-  const roleDetails = getAllowedScreens(user);
-  const roleKey = roleDetails.join("|");
+  const isFullAdmin = hasFullAccess(user);
 
-  const filteredMenus = useMemo(() => {
-    return MENU_CONFIG.filter((item) => canAccessScreen(user, item.id));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAdmin, roleKey]);
+  const filteredMenus = useMemo(
+    () => MENU_CONFIG.filter((item) => canAccessScreen(user, item.id)),
+    [user],
+  );
 
   const groupedMenus = useMemo(() => {
     const menuById = new Map(filteredMenus.map((item) => [item.id, item]));
@@ -280,8 +286,8 @@ const Sidebar = memo(() => {
               <div className={`min-w-0 overflow-hidden transition-all duration-300 ${isCollapsed ? "md:w-0 md:opacity-0" : "md:w-auto md:opacity-100"}`}>
                 <div className="rainbow-text whitespace-nowrap overflow-hidden text-ellipsis text-sm font-semibold text-slate-900">{displayName}</div>
                 <div className="mt-1">
-                  <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold ${isAdmin ? "border-cyan-200 bg-cyan-50 text-cyan-700" : "border-sky-200 bg-sky-50 text-sky-700"}`}>
-                    {isAdmin ? "Admin" : "User"}
+                  <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold ${isFullAdmin ? "border-cyan-200 bg-cyan-50 text-cyan-700" : "border-sky-200 bg-sky-50 text-sky-700"}`}>
+                    {isFullAdmin ? "Admin" : "User"}
                   </span>
                 </div>
               </div>

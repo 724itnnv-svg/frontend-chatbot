@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { CheckCircle2, Loader2, QrCode, ShieldAlert } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
+import { apiUrl } from "../../api/baseUrl";
 
 function getSafeRedirect(value) {
   if (!value || !value.startsWith("/") || value.startsWith("//")) return "/cham-cong?tab=attendance";
@@ -66,7 +67,7 @@ export default function QrLogin() {
         setStatus("loading");
         setMessage("Đang xác thực mã QR...");
 
-        const res = await fetch("/api/auth/qr-login", {
+        const res = await fetch(apiUrl("/api/auth/qr-login"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ token }),

@@ -1,8 +1,9 @@
 import { Capacitor } from "@capacitor/core";
 import { PushNotifications } from "@capacitor/push-notifications";
-import { getApiBaseUrl } from "../api/baseUrl.js";
+import { apiUrl } from "../api/baseUrl.js";
 
 const PUSH_CHANNEL_ID = "server_push_high";
+const PUSH_TOKEN_KEY = "nnvPushToken";
 let listenersReady = false;
 
 function getDeviceId() {
@@ -43,7 +44,7 @@ async function sendDeviceTokenToServer(fcmToken) {
   const authToken = localStorage.getItem("token");
   if (!authToken || !fcmToken) return;
 
-  const res = await fetch(`${getApiBaseUrl()}/api/notifications/device-token`, {
+  const res = await fetch(apiUrl("/api/notifications/device-token"), {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -63,6 +64,12 @@ async function sendDeviceTokenToServer(fcmToken) {
   }
 }
 
+async function persistAndSyncToken(fcmToken) {
+  if (!fcmToken) return;
+  localStorage.setItem(PUSH_TOKEN_KEY, fcmToken);
+  await sendDeviceTokenToServer(fcmToken);
+}
+
 export async function setupServerPushNotifications() {
   if (!Capacitor.isNativePlatform()) return;
 
@@ -72,7 +79,7 @@ export async function setupServerPushNotifications() {
     listenersReady = true;
 
     PushNotifications.addListener("registration", (token) => {
-      sendDeviceTokenToServer(token.value).catch((err) => {
+      persistAndSyncToken(token.value).catch((err) => {
         console.warn("Khong the dang ky FCM token:", err);
       });
     });
@@ -88,6 +95,13 @@ export async function setupServerPushNotifications() {
 
   const permission = await PushNotifications.requestPermissions();
   if (permission.receive !== "granted") return;
+
+  const cachedToken = localStorage.getItem(PUSH_TOKEN_KEY);
+  if (cachedToken) {
+    sendDeviceTokenToServer(cachedToken).catch((err) => {
+      console.warn("Khong the dong bo lai FCM token:", err);
+    });
+  }
 
   await PushNotifications.register();
 }
