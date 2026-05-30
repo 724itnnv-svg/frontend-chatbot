@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from "react";
-import { Bot, Plus, Search, Edit3, Trash2, Loader2, CheckCircle2, XCircle, Tag, MapPin, Globe, Zap } from "lucide-react";
+import React, { useState, useEffect, useMemo } from "react";
+import { AlertCircle, Bot, Copy, Plus, Search, Edit3, Trash2, Loader2, CheckCircle2, XCircle, Tag, MapPin, Globe, Zap } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import InstructionModal from "./AgentModel";
 
@@ -12,11 +12,11 @@ const TEAMS = [
 ];
 
 const TEAM_COLORS = {
-    NNV: { badge: "bg-indigo-100 text-indigo-700 border border-indigo-200", dot: "bg-indigo-500", accent: "border-l-indigo-400" },
-    KF:  { badge: "bg-emerald-100 text-emerald-700 border border-emerald-200", dot: "bg-emerald-500", accent: "border-l-emerald-400" },
-    ABC: { badge: "bg-amber-100 text-amber-700 border border-amber-200", dot: "bg-amber-500", accent: "border-l-amber-400" },
-    VN:  { badge: "bg-rose-100 text-rose-700 border border-rose-200", dot: "bg-rose-500", accent: "border-l-rose-400" },
-    Intent: { badge: "bg-blue-100 text-blue-700 border border-blue-200", dot: "bg-blue-500", accent: "border-l-blue-400" },
+    NNV: { badge: "bg-indigo-100 text-indigo-700", dot: "bg-indigo-500", icon: "bg-indigo-600", ring: "hover:border-indigo-200" },
+    KF:  { badge: "bg-emerald-100 text-emerald-700", dot: "bg-emerald-500", icon: "bg-emerald-600", ring: "hover:border-emerald-200" },
+    ABC: { badge: "bg-amber-100 text-amber-700", dot: "bg-amber-500", icon: "bg-amber-500", ring: "hover:border-amber-200" },
+    VN:  { badge: "bg-rose-100 text-rose-700", dot: "bg-rose-500", icon: "bg-rose-500", ring: "hover:border-rose-200" },
+    Intent: { badge: "bg-blue-100 text-blue-700", dot: "bg-blue-500", icon: "bg-blue-600", ring: "hover:border-blue-200" },
 };
 
 const DEFAULT_CREATE = {
@@ -31,8 +31,7 @@ export default function AgentManage() {
     const [loading, setLoading]           = useState(false);
     const [isModalOpen, setIsModalOpen]   = useState(false);
     const [searchQuery, setSearchQuery]   = useState("");
-    const [selectedTeam, setSelectedTeam] = useState("all");
-    const [selectedType, setSelectedType] = useState("all");
+    const [selectedTeam, setSelectedTeam] = useState("NNV");
     const [editing, setEditing]           = useState(DEFAULT_CREATE);
     const [isSaving, setIsSaving]         = useState(false);
     const [activatingId, setActivatingId] = useState(null); // "teamId-version"
@@ -73,9 +72,23 @@ export default function AgentManage() {
 
     const handleOpenModal = (item = null) => {
         setEditing(item
-            ? { ...item, options: { title: "", diachi: "", website: "", ...item.options } }
+            ? { ...item, type: "instruction", options: { title: "", diachi: "", website: "", ...item.options } }
             : { ...DEFAULT_CREATE }
         );
+        setIsModalOpen(true);
+    };
+
+    const handleClone = (item) => {
+        const { _id, id, isActive, createdAt, updatedAt, createdBy, ...rest } = item || {};
+        const isSimplifiedClone = rest.teamId === "Intent" || rest.type === "promo";
+        setEditing({
+            ...rest,
+            type: "instruction",
+            version: isSimplifiedClone ? "" : rest.version,
+            label: rest.label ? `${rest.label} - copy` : "",
+            activate: false,
+            options: { title: "", diachi: "", website: "", ...rest.options },
+        });
         setIsModalOpen(true);
     };
 
@@ -165,213 +178,232 @@ export default function AgentManage() {
         } catch (err) { console.error(err); }
     };
 
-    const filtered = instructions.filter(item => {
+    const visibleInstructions = useMemo(
+        () => instructions.filter(item => (item.type || "instruction") !== "promo"),
+        [instructions]
+    );
+
+    const stats = useMemo(() => {
+        const byTeam = TEAMS.map(team => {
+            const teamItems = visibleInstructions.filter(item => item.teamId === team.id);
+            return {
+                ...team,
+                total: teamItems.length,
+                active: teamItems.filter(item => item.isActive).length,
+            };
+        });
+        const selected = byTeam.find(team => team.id === selectedTeam);
+        return {
+            total: visibleInstructions.length,
+            active: visibleInstructions.filter(item => item.isActive).length,
+            selectedTotal: selected?.total || 0,
+            byTeam,
+        };
+    }, [visibleInstructions, selectedTeam]);
+
+    const filtered = visibleInstructions.filter(item => {
         const q = searchQuery.toLowerCase();
         const matchSearch = !q
             || (item.label || "").toLowerCase().includes(q)
             || (item.system || "").toLowerCase().includes(q)
             || (item.options?.title || "").toLowerCase().includes(q);
-        const matchTeam = selectedTeam === "all" || item.teamId === selectedTeam;
-        const matchType = selectedType === "all" || (item.type || "instruction") === selectedType;
-        return matchSearch && matchTeam && matchType;
+        const matchTeam = item.teamId === selectedTeam;
+        return matchSearch && matchTeam;
     });
 
     return (
-        <div className="min-h-screen bg-slate-50 flex flex-col font-sans text-slate-900">
-            {/* HEADER */}
-            <header className="bg-white border-b border-slate-200 px-8 py-4 flex items-center justify-between sticky top-0 z-10 shadow-sm">
+        <div className="min-h-screen bg-slate-50 font-sans text-slate-900">
+            <header className="sticky top-0 z-10 flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 bg-white px-8 py-4">
                 <div className="flex items-center gap-3">
-                    <div className="bg-indigo-600 p-2 rounded-lg text-white"><Bot size={24} /></div>
+                    <div className="rounded-xl bg-indigo-600 p-2.5 text-white shadow-lg shadow-indigo-200">
+                        <Bot size={24} />
+                    </div>
                     <div>
-                        <h1 className="text-xl font-bold">Instruction Manager</h1>
-                        <p className="text-xs text-slate-500 font-medium tracking-tight">Quản lý cấu hình hệ thống AI theo từng nhóm</p>
+                        <h1 className="text-xl font-bold tracking-tight">Quản lý Agent</h1>
+                        <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                            Quản lý cấu hình hệ thống AI theo từng nhóm
+                        </p>
                     </div>
                 </div>
                 <button
                     onClick={() => handleOpenModal()}
-                    className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-xl flex items-center gap-2 font-semibold transition-all shadow-md active:scale-95"
+                    className="flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-xs font-bold text-white shadow-md transition-all hover:bg-indigo-700 active:scale-95"
                 >
-                    <Plus size={18} /> Thêm mới
+                    <Plus size={18} strokeWidth={3} /> Tạo Agent
                 </button>
             </header>
 
-            <main className="p-8 max-w-7xl mx-auto w-full">
-                {/* FILTER + SEARCH */}
-                <div className="mb-6 flex flex-col gap-3">
-                <div className="flex items-center gap-2">
-                    {[{ v: "all", label: "Tất cả loại" }, { v: "instruction", label: "Instruction" }, { v: "promo", label: "Promo" }].map(opt => (
-                        <button
-                            key={opt.v}
-                            onClick={() => setSelectedType(opt.v)}
-                            className={`px-4 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all border ${selectedType === opt.v ? "bg-violet-600 text-white border-violet-600 shadow" : "bg-white text-slate-500 border-slate-200 hover:border-violet-300"}`}
-                        >
-                            {opt.label}
-                        </button>
-                    ))}
+            <main className="mx-auto w-full max-w-7xl p-8">
+                <div className="mb-6 grid gap-4 md:grid-cols-3">
+                    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                        <p className="text-xs font-bold uppercase text-slate-400">Tổng cấu hình</p>
+                        <p className="mt-2 text-3xl font-black text-slate-900">{stats.total}</p>
+                    </div>
+                    <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-4 shadow-sm">
+                        <p className="text-xs font-bold uppercase text-emerald-600">Đang hoạt động</p>
+                        <p className="mt-2 text-3xl font-black text-emerald-700">{stats.active}</p>
+                    </div>
+                    <div className="rounded-2xl border border-indigo-100 bg-indigo-50 p-4 shadow-sm">
+                        <p className="text-xs font-bold uppercase text-indigo-600">Nhóm đang xem</p>
+                        <p className="mt-2 text-3xl font-black text-indigo-700">{stats.selectedTotal}</p>
+                    </div>
                 </div>
-                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-                    <div className="flex items-center gap-2 overflow-x-auto pb-1">
-                        <button
-                            onClick={() => setSelectedTeam("all")}
-                            className={`px-4 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${selectedTeam === "all" ? "bg-indigo-600 text-white shadow-lg" : "bg-white text-slate-500 border border-slate-200 hover:border-indigo-300"}`}
-                        >
-                            Tất cả
-                        </button>
-                        {TEAMS.map(t => (
+
+                <div className="mb-8 flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+                    <div className="flex max-w-full items-center gap-2 overflow-x-auto rounded-2xl bg-slate-200/50 p-1">
+                        {stats.byTeam.map(t => (
                             <button
                                 key={t.id}
                                 onClick={() => setSelectedTeam(t.id)}
-                                className={`px-4 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${selectedTeam === t.id ? "bg-indigo-600 text-white shadow-lg" : "bg-white text-slate-500 border border-slate-200 hover:border-indigo-300"}`}
+                                className={`whitespace-nowrap rounded-xl px-5 py-2 text-xs font-bold transition-all ${
+                                    selectedTeam === t.id ? "bg-white text-indigo-600 shadow-sm" : "text-slate-500 hover:text-slate-700"
+                                }`}
                             >
-                                <span className={`inline-block w-1.5 h-1.5 rounded-full mr-1.5 ${TEAM_COLORS[t.id]?.dot}`} />
-                                {t.id} — {t.label}
+                                <span className={`mr-1.5 inline-block h-1.5 w-1.5 rounded-full ${TEAM_COLORS[t.id]?.dot}`} />
+                                {t.id} · {t.total}
                             </button>
                         ))}
                     </div>
-                    <div className="relative w-full lg:w-72 flex-shrink-0">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={15} />
+                    <div className="relative w-full lg:w-96">
+                        <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
                         <input
                             type="text"
-                            placeholder="Tìm theo nhãn, nội dung..."
+                            placeholder="Tìm theo nhãn, đơn vị, nội dung..."
                             value={searchQuery}
                             onChange={e => setSearchQuery(e.target.value)}
-                            className="w-full pl-9 pr-4 py-2.5 bg-white border border-slate-200 rounded-2xl outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm transition-all text-sm"
+                            className="w-full rounded-2xl border border-slate-200 bg-white py-3 pl-12 pr-4 text-sm shadow-sm outline-none transition-all focus:ring-4 focus:ring-indigo-500/10"
                         />
                     </div>
                 </div>
-                </div>
 
-                {/* STATS ROW */}
-                <div className="mb-7 flex gap-3 flex-wrap">
-                    {TEAMS.map(t => {
-                        const all    = instructions.filter(i => i.teamId === t.id);
-                        const active = all.filter(i => i.isActive).length;
-                        const c      = TEAM_COLORS[t.id];
-                        return (
-                            <div key={t.id} className="bg-white border border-slate-200 rounded-2xl px-4 py-3 flex items-center gap-3 shadow-sm">
-                                <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${c.dot}`} />
-                                <div>
-                                    <p className="text-xs font-black text-slate-700">{t.id} · {t.label}</p>
-                                    <p className="text-[10px] text-slate-400">{all.length} phiên bản · {active} đang bật</p>
-                                </div>
-                            </div>
-                        );
-                    })}
-                </div>
-
-                {/* GRID */}
                 {loading ? (
-                    <div className="flex flex-col items-center py-20 text-slate-400">
-                        <Loader2 className="animate-spin mb-4" size={40} />
-                        <p className="font-medium">Đang tải dữ liệu...</p>
+                    <div className="flex h-80 flex-col items-center justify-center gap-4">
+                        <Loader2 className="animate-spin text-indigo-600" size={42} />
+                        <p className="font-medium text-slate-500">Đang tải dữ liệu...</p>
                     </div>
-                ) : filtered.length === 0 ? (
-                    <div className="flex flex-col items-center py-20 text-slate-300">
-                        <Bot size={48} className="mb-4" />
-                        <p className="font-medium text-slate-400">Không có dữ liệu phù hợp</p>
-                    </div>
-                ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                ) : filtered.length > 0 ? (
+                    <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
                         {filtered.map((item, idx) => {
+                            const team = TEAMS.find(entry => entry.id === item.teamId);
                             const c   = TEAM_COLORS[item.teamId] || TEAM_COLORS.NNV;
                             const key = item._id ?? (item.teamId ? `${item.teamId}-${item.version}` : `row-${idx}`);
+                            const actionKey = `${item.teamId}-${item.version}`;
                             return (
                                 <div
                                     key={key}
-                                    className={`bg-white rounded-3xl border border-slate-200 border-l-4 ${c.accent} shadow-sm hover:shadow-md transition-all group overflow-hidden`}
+                                    className={`group relative rounded-2xl border border-slate-200 bg-white p-6 shadow-sm transition-all hover:-translate-y-1 hover:shadow-xl ${c.ring}`}
                                 >
-                                    <div className="p-5">
-                                        {/* Top row */}
-                                        <div className="flex items-start justify-between mb-3">
-                                            <div className="flex items-center gap-2 flex-wrap">
-                                                <span className={`text-[10px] font-black px-2.5 py-1 rounded-lg uppercase tracking-wider ${c.badge}`}>
-                                                    {item.teamId}
-                                                </span>
-                                                <span className="text-[10px] font-mono font-bold bg-slate-100 text-slate-500 px-2 py-0.5 rounded-md">
-                                                    v{item.version}
-                                                </span>
-                                                <span className={`text-[9px] font-black px-2 py-0.5 rounded-full flex items-center gap-1 ${item.isActive ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-400"}`}>
-                                                    {item.isActive ? <CheckCircle2 size={9} /> : <XCircle size={9} />}
-                                                    {item.isActive ? "Active" : "Inactive"}
-                                                </span>
-                                            </div>
-
-                                            {/* Action buttons */}
-                                            <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity ml-2 flex-shrink-0">
-                                                {!item.isActive && (
-                                                    <button
-                                                        onClick={() => handleActivate(item)}
-                                                        title="Kích hoạt version này"
-                                                        disabled={activatingId === key}
-                                                        className="p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors disabled:opacity-50"
-                                                    >
-                                                        {activatingId === key
-                                                            ? <Loader2 size={14} className="animate-spin" />
-                                                            : <Zap size={14} />
-                                                        }
-                                                    </button>
-                                                )}
-                                                <button
-                                                    onClick={() => handleOpenModal(item)}
-                                                    title="Chỉnh sửa"
-                                                    className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
-                                                >
-                                                    <Edit3 size={14} />
-                                                </button>
-                                                <button
-                                                    onClick={() => handleDelete(item)}
-                                                    title={item.isActive ? "Không thể xóa version đang Active" : "Xóa"}
-                                                    disabled={item.isActive}
-                                                    className={`p-1.5 rounded-lg transition-colors ${item.isActive ? "text-slate-200 cursor-not-allowed" : "text-slate-400 hover:text-red-500 hover:bg-red-50"}`}
-                                                >
-                                                    <Trash2 size={14} />
-                                                </button>
-                                            </div>
+                                    <div className="mb-5 flex items-start justify-between">
+                                        <div className={`rounded-2xl p-3 text-white ${c.icon}`}>
+                                            <Bot size={18} />
                                         </div>
-
-                                        {/* Label */}
-                                        <h3 className="font-bold text-base text-slate-800 mb-2 truncate">
-                                            {item.label
-                                                ? item.label
-                                                : <span className="text-slate-400 font-normal italic text-sm">Không có nhãn</span>
-                                            }
-                                        </h3>
-
-                                        {/* Options */}
-                                        <div className="space-y-1 mb-3">
-                                            {item.options?.title && (
-                                                <p className="text-xs text-slate-700 flex items-center gap-1.5 font-semibold">
-                                                    <Tag size={11} className="text-slate-400 flex-shrink-0" />
-                                                    <span className="truncate">{item.options.title}</span>
-                                                </p>
+                                        <div className="flex gap-1">
+                                            {!item.isActive && (
+                                                <button
+                                                    onClick={() => handleActivate(item)}
+                                                    title="Kích hoạt version này"
+                                                    disabled={activatingId === actionKey}
+                                                    className="rounded-xl p-2 text-slate-400 transition-colors hover:bg-emerald-50 hover:text-emerald-600 disabled:opacity-50"
+                                                >
+                                                    {activatingId === actionKey
+                                                        ? <Loader2 size={18} className="animate-spin" />
+                                                        : <Zap size={18} />
+                                                    }
+                                                </button>
                                             )}
-                                            {item.options?.diachi && (
-                                                <p className="text-xs text-slate-500 flex items-center gap-1.5">
-                                                    <MapPin size={11} className="text-slate-400 flex-shrink-0" />
-                                                    <span className="truncate">{item.options.diachi}</span>
-                                                </p>
-                                            )}
-                                            {item.options?.website && (
-                                                <p className="text-xs text-slate-500 flex items-center gap-1.5">
-                                                    <Globe size={11} className="text-slate-400 flex-shrink-0" />
-                                                    <span className="truncate font-mono">{item.options.website}</span>
-                                                </p>
-                                            )}
+                                            <button
+                                                onClick={() => handleOpenModal(item)}
+                                                title="Chỉnh sửa"
+                                                className="rounded-xl p-2 text-slate-400 transition-colors hover:bg-indigo-50 hover:text-indigo-600"
+                                            >
+                                                <Edit3 size={18} />
+                                            </button>
+                                            <button
+                                                onClick={() => handleClone(item)}
+                                                title="Nhân bản"
+                                                className="rounded-xl p-2 text-slate-400 transition-colors hover:bg-sky-50 hover:text-sky-600"
+                                            >
+                                                <Copy size={18} />
+                                            </button>
+                                            <button
+                                                onClick={() => handleDelete(item)}
+                                                title={item.isActive ? "Không thể xóa version đang Active" : "Xóa"}
+                                                disabled={item.isActive}
+                                                className={`rounded-xl p-2 transition-colors ${item.isActive ? "cursor-not-allowed text-slate-200" : "text-slate-400 hover:bg-red-50 hover:text-red-500"}`}
+                                            >
+                                                <Trash2 size={18} />
+                                            </button>
                                         </div>
+                                    </div>
 
-                                        {/* System preview */}
-                                        {item.system && (
-                                            <div className="bg-slate-50 rounded-xl px-3 py-2 border border-slate-100">
-                                                <p className="text-[9px] font-black text-slate-400 uppercase tracking-wider mb-1">System Prompt</p>
-                                                <p className="text-[11px] text-slate-500 line-clamp-2 font-mono leading-relaxed">{item.system}</p>
-                                            </div>
+                                    <h3 className="mb-2 line-clamp-1 text-lg font-bold leading-tight text-slate-800">
+                                        {item.label || item.options?.title || `Agent ${team?.label || item.teamId}`}
+                                    </h3>
+
+                                    <div className="mb-4 flex flex-wrap items-center gap-2">
+                                        <span className={`rounded-md px-2 py-0.5 text-[10px] font-bold uppercase ${c.badge}`}>
+                                            {item.teamId}
+                                        </span>
+                                        <span className="rounded-md bg-slate-100 px-2 py-0.5 font-mono text-[10px] font-bold text-slate-500">
+                                            v{item.version}
+                                        </span>
+                                        <span className={`flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${item.isActive ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-400"}`}>
+                                            {item.isActive ? <CheckCircle2 size={10} /> : <XCircle size={10} />}
+                                            {item.isActive ? "Active" : "Inactive"}
+                                        </span>
+                                    </div>
+
+                                    <div className="mb-4 space-y-1">
+                                        {item.options?.title && (
+                                            <p className="flex items-center gap-1.5 text-xs font-semibold text-slate-700">
+                                                <Tag size={11} className="shrink-0 text-slate-400" />
+                                                <span className="truncate">{item.options.title}</span>
+                                            </p>
                                         )}
+                                        {item.options?.diachi && (
+                                            <p className="flex items-center gap-1.5 text-xs text-slate-500">
+                                                <MapPin size={11} className="shrink-0 text-slate-400" />
+                                                <span className="truncate">{item.options.diachi}</span>
+                                            </p>
+                                        )}
+                                        {item.options?.website && (
+                                            <p className="flex items-center gap-1.5 text-xs text-slate-500">
+                                                <Globe size={11} className="shrink-0 text-slate-400" />
+                                                <span className="truncate font-mono">{item.options.website}</span>
+                                            </p>
+                                        )}
+                                    </div>
 
-                                        <p className="text-[9px] text-slate-300 mt-3">by {item.createdBy}</p>
+                                    <div className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-3">
+                                        <p className="mb-1 text-[10px] font-black uppercase tracking-wider text-slate-400">System Prompt</p>
+                                        <p className="line-clamp-4 font-mono text-xs leading-relaxed text-slate-500">
+                                            {item.system || "Chưa có nội dung"}
+                                        </p>
+                                    </div>
+
+                                    <div className="mt-5 flex items-center justify-between border-t border-slate-100 pt-4">
+                                        <span className="text-[10px] font-medium text-slate-400">
+                                            {team?.label || item.teamId}
+                                        </span>
+                                        <div className={`h-2.5 w-2.5 rounded-full ${item.isActive ? "bg-emerald-500" : "bg-slate-300"}`} />
                                     </div>
                                 </div>
                             );
                         })}
+                    </div>
+                ) : (
+                    <div className="flex h-80 flex-col items-center justify-center rounded-[2rem] border-2 border-dashed border-slate-200 bg-white">
+                        <AlertCircle size={40} className="mb-4 text-slate-300" />
+                        <p className="font-medium text-slate-500">Không tìm thấy cấu hình Agent nào.</p>
+                        <button
+                            onClick={() => {
+                                setSelectedTeam("NNV");
+                                setSearchQuery("");
+                            }}
+                            className="mt-4 text-sm font-bold text-indigo-600 hover:underline"
+                        >
+                            Quay về NNV
+                        </button>
                     </div>
                 )}
             </main>
@@ -381,9 +413,10 @@ export default function AgentManage() {
                 onClose={() => setIsModalOpen(false)}
                 onSave={handleSave}
                 editing={editing}
-                setEditing={setEditing}
+                setEditing={(next) => setEditing({ ...next, type: "instruction" })}
                 teams={TEAMS}
                 isSaving={isSaving}
+                lockedType="instruction"
             />
         </div>
     );

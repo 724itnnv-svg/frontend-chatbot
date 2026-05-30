@@ -18,6 +18,11 @@ import {
     Square,
     BarChart2,
     Lock,
+    MessageSquare,
+    ShoppingCart,
+    TrendingUp,
+    RefreshCw,
+    CircleDollarSign
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { canAccessScreen } from "../utils/screenAccess";
@@ -44,6 +49,24 @@ const DEFAULT_FIELDS = new Set(["stt", "createdAt", "teamId", "pageName", "custo
 
 // Các field chứa thông tin nhạy cảm — chỉ admin mới được chọn
 const SENSITIVE_FIELDS = new Set(["phoneNumber", "address"]);
+function formatDateInput(date = new Date()) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+}
+
+function formatNumber(value) {
+    return new Intl.NumberFormat("vi-VN").format(Number(value) || 0);
+}
+
+function formatCurrency(value) {
+    return new Intl.NumberFormat("vi-VN", {
+        style: "currency",
+        currency: "VND",
+        maximumFractionDigits: 0,
+    }).format(Number(value) || 0);
+}
 
 export default function AdminDashboard() {
     const { user, token } = useAuth() || {};
@@ -67,6 +90,10 @@ export default function AdminDashboard() {
     const [logs, setLogs] = useState([]);
     const [filterLevel, setFilterLevel] = useState("all");
     const [isLoadingLogs, setIsLoadingLogs] = useState(false);
+    const [statsDate, setStatsDate] = useState(() => formatDateInput());
+    const [dailyStats, setDailyStats] = useState(null);
+    const [isLoadingStats, setIsLoadingStats] = useState(false);
+    const [statsError, setStatsError] = useState("");
 
     // ===== Load Pages để lấy teamId mapping =====
     useEffect(() => {
@@ -291,6 +318,55 @@ export default function AdminDashboard() {
         }
     };
 
+    const fetchDailyStats = async () => {
+        if (!token || !statsDate) return;
+        setIsLoadingStats(true);
+        setStatsError("");
+        try {
+            const timezoneOffset = -new Date().getTimezoneOffset();
+            const queryParams = new URLSearchParams({
+                date: statsDate,
+                timezoneOffset: String(timezoneOffset),
+            }).toString();
+            const res = await fetch(`/api/chat/stats/daily?${queryParams}`, {
+                method: "GET",
+                headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.message || "Khong the tai thong ke");
+            setDailyStats(data.stats || null);
+        } catch (err) {
+            console.error(err);
+            setDailyStats(null);
+            setStatsError(err.message || "Khong the tai thong ke");
+        } finally {
+            setIsLoadingStats(false);
+        }
+    };
+
+    useEffect(() => {
+        fetchDailyStats();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [token, statsDate]);
+
+    // ===== Logic Logs =====
+    useEffect(() => {
+        const fetchSystemLogs = async () => {
+            setIsLoadingLogs(true);
+            setTimeout(() => {
+                const mockLogs = Array.from({ length: 10 }).map((_, i) => ({
+                    id: i,
+                    timestamp: new Date(Date.now() - i * 3600000).toISOString(),
+                    level: i % 5 === 0 ? "error" : i % 3 === 0 ? "warning" : "info",
+                    message: i % 5 === 0 ? `Database timeout shard-0${i}` : `User ${100 + i} action`,
+                }));
+                setLogs(mockLogs);
+                setIsLoadingLogs(false);
+            }, 800);
+        };
+        if (isAdmin) fetchSystemLogs();
+    }, [isAdmin]);
+
     // ===== Styles =====
     const pageBg = "bg-gradient-to-b from-rose-50 via-white to-amber-50 text-slate-800";
     const cardBg = "bg-white/85 border-slate-200";
@@ -358,6 +434,90 @@ export default function AdminDashboard() {
                     <form onSubmit={handleExportOrders} className="space-y-5">
                         {/* Ngày */}
                         <div className="grid grid-cols-2 gap-3">
+                {/* DAILY STATS */}
+                <section className={`rounded-2xl border ${cardBg} backdrop-blur-xl shadow-[0_8px_30px_rgba(0,0,0,0.04)] p-5`}>
+                    <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                        <div>
+                            <h2 className="text-base font-bold text-slate-800">Thống kê chốt đơn trong ngày</h2>
+                            <p className="text-xs text-slate-500">Tính theo số hội thoại có phát sinh, đơn hàng active và tỉ lệ chuyển đổi.</p>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                            <input
+                                type="date"
+                                className={`rounded-xl border px-3 py-2 text-sm outline-none focus:ring-2 ${inputBg}`}
+                                value={statsDate}
+                                onChange={(e) => setStatsDate(e.target.value)}
+                            />
+                            <button
+                                type="button"
+                                onClick={fetchDailyStats}
+                                disabled={isLoadingStats}
+                                className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
+                            >
+                                <RefreshCw size={15} className={isLoadingStats ? "animate-spin" : ""} />
+                                Làm mới
+                            </button>
+                        </div>
+                    </div>
+
+                    {statsError && (
+                        <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                            {statsError}
+                        </div>
+                    )}
+
+                    <div className="mt-5 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+                        <div className="rounded-xl border border-sky-100 bg-sky-50/70 p-4">
+                            <div className="flex items-center justify-between gap-3">
+                                <div className="min-w-0">
+                                    <p className="text-xs font-semibold uppercase text-sky-600">Hội thoại</p>
+                                    <p className="mt-2 text-3xl font-bold text-slate-900">{isLoadingStats ? "..." : formatNumber(dailyStats?.conversationCount)}</p>
+                                </div>
+                                <MessageSquare className="h-9 w-9 text-sky-500" />
+                            </div>
+                        </div>
+
+                        <div className="rounded-xl border border-emerald-100 bg-emerald-50/70 p-4">
+                            <div className="flex items-center justify-between gap-3">
+                                <div className="min-w-0">
+                                    <p className="text-xs font-semibold uppercase text-emerald-600">Đơn hàng</p>
+                                    <p className="mt-2 text-3xl font-bold text-slate-900">{isLoadingStats ? "..." : formatNumber(dailyStats?.orderCount)}</p>
+                                    {Number(dailyStats?.cancelledOrderCount || 0) > 0 && (
+                                        <p className="mt-1 text-xs text-slate-500">Hủy: {formatNumber(dailyStats.cancelledOrderCount)}</p>
+                                    )}
+                                </div>
+                                <ShoppingCart className="h-9 w-9 text-emerald-500" />
+                            </div>
+                        </div>
+
+                        <div className="rounded-xl border border-violet-100 bg-violet-50/70 p-4">
+                            <div className="flex items-center justify-between gap-3">
+                                <div className="min-w-0">
+                                    <p className="text-xs font-semibold uppercase text-violet-600">Tổng tiền đơn</p>
+                                    <p className="mt-2 text-2xl font-bold text-slate-900">{isLoadingStats ? "..." : formatCurrency(dailyStats?.totalOrderAmount)}</p>
+                                </div>
+                                <CircleDollarSign className="h-9 w-9 text-violet-500" />
+                            </div>
+                        </div>
+
+                        <div className="rounded-xl border border-amber-100 bg-amber-50/70 p-4">
+                            <div className="flex items-center justify-between gap-3">
+                                <div className="min-w-0">
+                                    <p className="text-xs font-semibold uppercase text-amber-600">Tỉ lệ chốt</p>
+                                    <p className="mt-2 text-3xl font-bold text-slate-900">{isLoadingStats ? "..." : `${Number(dailyStats?.conversionRate || 0).toFixed(2)}%`}</p>
+                                </div>
+                                <TrendingUp className="h-9 w-9 text-amber-500" />
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                {/* SECTION 1: EXPORT & LOGS */}
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    {/* Card Export */}
+                    <div className={`lg:col-span-1 rounded-3xl border ${cardBg} backdrop-blur-xl shadow-[0_8px_30px_rgba(0,0,0,0.04)] p-5 flex flex-col h-fit`}>
+                        <div className="flex items-center gap-2 mb-4 pb-3 border-b border-slate-100">
+                            <div className="p-2 rounded-lg bg-emerald-50 text-emerald-600 border border-emerald-100"><FileSpreadsheet size={20} /></div>
                             <div>
                                 <label className="mb-1.5 flex items-center gap-1 text-xs font-medium text-slate-600">
                                     <Calendar size={11} /> Từ ngày

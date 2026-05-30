@@ -27,6 +27,7 @@ const PageMessage = lazy(() => import("./components/PageMessage"));
 const ChatwebManager = lazy(() => import("./components/ChatwebManager"));
 const DonHang = lazy(() => import("./components/DonHang"));
 const DonHangWeb = lazy(() => import("./components/DonHangWeb"));
+const BusinessStats = lazy(() => import("./components/BusinessStats"));
 const UsersPage = lazy(() => import("./components/UserManager"));
 const RolePage = lazy(() => import("./components/role/RoleList"));
 const UserProfile = lazy(() => import("./components/UserProfile"));
@@ -37,6 +38,9 @@ const ProductTool = lazy(() => import("./components/products/ProductsTool"));
 const PromoManager = lazy(() => import("./components/event_promo/PromoManager"));
 const VectorStoreManage = lazy(() => import("./components/vectorstores/VectorStore"));
 const AgentManage = lazy(() => import("./components/agentAI/AgentManage"));
+const AgentPromoManage = lazy(() => import("./components/agentAI/AgentPromoManage"));
+const ChatbotConfigManager = lazy(() => import("./components/chatbotConfig/ChatbotConfigManager"));
+const FAQManager = lazy(() => import("./components/FAQManager"));
 const LogsManage = lazy(() => import("./components/logs/LogsManager"));
 const NotificationManager = lazy(() => import("./components/NotificationManager"));
 const PayrollManager = lazy(() => import("./components/PayrollManager"));
@@ -50,6 +54,11 @@ const TestCaseChatBotManager = lazy(() => import("./components/testChatBot/TestC
 const DuaSapPublicPage = lazy(() => import("./components/duasap/DuaSapPublicPage"));
 const DuaSapDetailPage = lazy(() => import("./components/duasap/DuaSapDetailPage"));
 const DuaSapManager = lazy(() => import("./components/duasap/DuaSapManager"));
+const ChatV4RulesManager = lazy(() => import("./components/chatV4/ChatV4RulesManager"));
+const ChatV4FunctionCallsManager = lazy(() => import("./components/chatV4/ChatV4FunctionCallsManager"));
+const ChatV4ContextManager = lazy(() => import("./components/chatV4/ChatV4ContextManager"));
+const ChatV4SettingsManager = lazy(() => import("./components/chatV4/ChatV4SettingsManager"));
+const ChatV4EventSimulator = lazy(() => import("./components/chatV4/ChatV4EventSimulator"));
 
 const ADMIN_ROUTE_BY_SCREEN = {
   pages: "/admin/pages",
@@ -57,6 +66,7 @@ const ADMIN_ROUTE_BY_SCREEN = {
   chatweb: "/admin/chatweb",
   donhang: "/admin/orders",
   donhangWeb: "/admin/orders-web",
+  business_stats: "/admin/business-stats",
   users: "/admin/users",
   roles: "/admin/roles",
   profile: "/admin/profile",
@@ -67,8 +77,16 @@ const ADMIN_ROUTE_BY_SCREEN = {
   admin_event_promo: "/admin/promotions",
   admin_vectorstore_tool: "/admin/vector-stores",
   admin_agent: "/admin/agents",
+  admin_agent_promo: "/admin/agent-promotions",
+  admin_chatbot_config: "/admin/chatbot-config",
+  admin_faq: "/admin/faqs",
   admin_test_chatbot_v2: "/admin/test-chatbot-v2", // New route for TestChatBotV2
   admin_testcase: "/admin/test-chat",
+  admin_chat_v4_rules: "/admin/chat-v4-rules",
+  admin_chat_v4_function_calls: "/admin/chat-v4-function-calls",
+  admin_chat_v4_contexts: "/admin/chat-v4-contexts",
+  admin_chat_v4_settings: "/admin/chat-v4-settings",
+  admin_chat_v4_simulator: "/admin/chat-v4-simulator",
   admin_logs: "/admin/logs",
   notifications: "/admin/notifications",
   attendance: "/admin/attendance",
@@ -85,6 +103,7 @@ const adminRoutes = [
   { path: "chatweb", screenId: "chatweb", element: <ChatwebManager /> },
   { path: "orders", screenId: "donhang", element: <DonHang /> },
   { path: "orders-web", screenId: "donhangWeb", element: <DonHangWeb /> },
+  { path: "business-stats", screenId: "business_stats", element: <BusinessStats /> },
   { path: "users", screenId: "users", element: <UsersPage /> },
   { path: "roles", screenId: "roles", element: <RolePage /> },
   { path: "profile", screenId: "profile", element: <UserProfile /> },
@@ -95,7 +114,15 @@ const adminRoutes = [
   { path: "promotions", screenId: "admin_event_promo", element: <PromoManager /> },
   { path: "vector-stores", screenId: "admin_vectorstore_tool", element: <VectorStoreManage /> },
   { path: "agents", screenId: "admin_agent", element: <AgentManage /> },// New route
-  { path: "test-chat", screenId: "admin_testcase", element: <TestCaseChatBotManager /> },
+  { path: "agent-promotions", screenId: "admin_agent_promo", element: <AgentPromoManage /> },
+  { path: "chatbot-config", screenId: "admin_chatbot_config", element: <ChatbotConfigManager /> },
+  { path: "faqs", screenId: "admin_faq", element: <FAQManager /> },
+  { path: "test-cases", screenId: "admin_testcase", element: <TestCaseChatBotManager /> },
+  { path: "chat-v4-rules", screenId: "admin_chat_v4_rules", element: <ChatV4RulesManager /> },
+  { path: "chat-v4-function-calls", screenId: "admin_chat_v4_function_calls", element: <ChatV4FunctionCallsManager /> },
+  { path: "chat-v4-contexts", screenId: "admin_chat_v4_contexts", element: <ChatV4ContextManager /> },
+  { path: "chat-v4-settings", screenId: "admin_chat_v4_settings", element: <ChatV4SettingsManager /> },
+  { path: "chat-v4-simulator", screenId: "admin_chat_v4_simulator", element: <ChatV4EventSimulator /> },
   { path: "logs", screenId: "admin_logs", element: <LogsManage /> },
   { path: "notifications", screenId: "notifications", element: <NotificationManager /> },
   { path: "my-attendance", screenId: "attendance_self", element: <AttendancePage /> },

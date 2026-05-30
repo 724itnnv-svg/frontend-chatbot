@@ -1,59 +1,82 @@
 import React, { useState } from "react";
-import { X, BookOpen, Power, Save, Loader2, Globe, MapPin, Tag, FileText, Zap, Lock, Maximize2, Minimize2 } from "lucide-react";
+import {
+    X,
+    BookOpen,
+    Power,
+    Save,
+    Loader2,
+    Globe,
+    MapPin,
+    Tag,
+    FileText,
+    Zap,
+    Lock,
+    Maximize2,
+    Minimize2,
+    Layers,
+} from "lucide-react";
 
-export default function InstructionModal({ isOpen, onClose, onSave, editing, setEditing, teams, isSaving }) {
+export default function InstructionModal({ isOpen, onClose, onSave, editing, setEditing, teams, isSaving, lockedType = null }) {
+    const [activeTab, setActiveTab] = useState("system");
+    const [promptExpanded, setPromptExpanded] = useState(false);
+    const [expandedTool, setExpandedTool] = useState(null);
+
     if (!isOpen) return null;
 
-    const [promptExpanded, setPromptExpanded] = useState(false);
-    const [promptExpanded1, setPromptExpanded1] = useState(false);
-    const [promptExpanded2, setPromptExpanded2] = useState(false);
-    const [promptExpanded3, setPromptExpanded3] = useState(false);
-    const [promptExpanded4, setPromptExpanded4] = useState(false);
-
     const isCreate = !editing._id;
-    const isPromo = editing.type === "promo";
+    const isPromo = (lockedType || editing.type) === "promo";
     const isSimplified = editing.teamId === "Intent" || isPromo;
     const visibleTeams = isPromo ? teams.filter(t => t.id !== "Intent") : teams;
     const set = (field, value) => setEditing({ ...editing, [field]: value });
     const setOpt = (key, value) => setEditing({ ...editing, options: { ...editing.options, [key]: value } });
 
-    return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 md:p-8 bg-slate-900/60 backdrop-blur-sm">
-            <div className="bg-white w-full max-w-7xl max-h-[90vh] min-h-[80vh] rounded-[2rem] shadow-2xl overflow-hidden flex flex-col">
+    const toolPrompts = [
+        { key: "createOrderFromAssistant", label: "CreateOrderFromAssistant" },
+        { key: "fileSearch", label: "FileSearch" },
+        { key: "calculateShipping", label: "CalculateShipping" },
+        { key: "findPromoEvent", label: "FindPromoEvent" },
+    ];
+    const rightTabs = [
+        ...(!isSimplified ? [{ id: "options", label: "Thông tin đơn vị", icon: Tag }] : []),
+        { id: "system", label: isPromo ? "Nội dung khuyến mãi" : "System Prompt", icon: FileText },
+        ...(!isSimplified ? [{ id: "tools", label: "Prompt công cụ", icon: Layers }] : []),
+    ];
+    const currentTab = rightTabs.some(tab => tab.id === activeTab) ? activeTab : "system";
+    const expandedToolMeta = toolPrompts.find(item => item.key === expandedTool);
 
-                {/* HEADER */}
-                <div className="px-8 py-5 border-b flex justify-between items-center bg-white flex-shrink-0">
+    return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm md:p-8">
+            <div className="flex max-h-[90vh] min-h-[80vh] w-full max-w-7xl flex-col overflow-hidden rounded-[2rem] bg-white shadow-2xl">
+                <div className="flex shrink-0 items-center justify-between border-b bg-white px-8 py-5">
                     <div>
-                        <h2 className="font-bold text-xl flex items-center gap-2 text-slate-800">
+                        <h2 className="flex items-center gap-2 text-xl font-bold text-slate-800">
                             <BookOpen className="text-indigo-600" size={22} />
-                            {isCreate ? "Tạo Instruction mới" : "Chỉnh sửa Instruction"}
+                            {isPromo
+                                ? (isCreate ? "Tạo khuyến mãi mới" : "Chỉnh sửa khuyến mãi")
+                                : (isCreate ? "Tạo Instruction mới" : "Chỉnh sửa Instruction")
+                            }
                         </h2>
-                        <p className="text-xs text-slate-400 font-medium">
+                        <p className="text-xs font-medium text-slate-400">
                             {isCreate
-                                ? "Version sẽ được tự động gán bởi hệ thống"
+                                ? (isPromo ? "Nhập version và nội dung khuyến mãi cho nhóm áp dụng" : "Version sẽ được tự động gán bởi hệ thống")
                                 : `Đang chỉnh sửa: ${editing.teamId} · v${editing.version}`
                             }
                         </p>
                     </div>
-                    <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-full transition-colors">
+                    <button onClick={onClose} className="rounded-full p-2 transition-colors hover:bg-slate-100">
                         <X size={22} />
                     </button>
                 </div>
 
-                {/* BODY */}
-                <div className="flex-1 flex overflow-hidden min-h-0">
-
-                    {/* LEFT PANEL */}
-                    <div className="w-72 flex-shrink-0 border-r border-slate-100 p-6 space-y-5 overflow-y-auto bg-slate-50/40">
-
+                <div className="flex min-h-0 flex-1 overflow-hidden">
+                    <div className="w-72 shrink-0 space-y-5 overflow-y-auto border-r border-slate-100 bg-slate-50/40 p-6">
                         {isCreate ? (
-                            /* CREATE MODE — activate flag */
                             <div
                                 onClick={() => set("activate", !editing.activate)}
-                                className={`p-4 rounded-2xl border cursor-pointer flex items-center justify-between transition-colors select-none ${editing.activate ? "bg-emerald-50 border-emerald-200" : "bg-slate-100 border-slate-200"}`}
+                                className={`flex cursor-pointer select-none items-center justify-between rounded-2xl border p-4 transition-colors ${editing.activate ? "border-emerald-200 bg-emerald-50" : "border-slate-200 bg-slate-100"}`}
                             >
                                 <div className="flex items-center gap-3">
-                                    <div className={`p-2 rounded-lg ${editing.activate ? "bg-emerald-500 text-white" : "bg-slate-400 text-white"}`}>
+                                    <div className={`rounded-lg p-2 text-white ${editing.activate ? "bg-emerald-500" : "bg-slate-400"}`}>
                                         <Zap size={15} />
                                     </div>
                                     <div>
@@ -62,14 +85,13 @@ export default function InstructionModal({ isOpen, onClose, onSave, editing, set
                                     </div>
                                 </div>
                                 <div className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${editing.activate ? "bg-emerald-500" : "bg-slate-300"}`}>
-                                    <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${editing.activate ? "translate-x-6" : "translate-x-1"}`} />
+                                    <span className={`inline-block h-4 w-4 rounded-full bg-white transition-transform ${editing.activate ? "translate-x-6" : "translate-x-1"}`} />
                                 </div>
                             </div>
                         ) : (
-                            /* EDIT MODE — status display (read-only) + identity info */
                             <>
-                                <div className={`p-4 rounded-2xl border flex items-center gap-3 ${editing.isActive ? "bg-emerald-50 border-emerald-100" : "bg-slate-100 border-slate-200"}`}>
-                                    <div className={`p-2 rounded-lg ${editing.isActive ? "bg-emerald-500 text-white" : "bg-slate-400 text-white"}`}>
+                                <div className={`flex items-center gap-3 rounded-2xl border p-4 ${editing.isActive ? "border-emerald-100 bg-emerald-50" : "border-slate-200 bg-slate-100"}`}>
+                                    <div className={`rounded-lg p-2 text-white ${editing.isActive ? "bg-emerald-500" : "bg-slate-400"}`}>
                                         <Power size={15} />
                                     </div>
                                     <div className="flex-1">
@@ -82,69 +104,74 @@ export default function InstructionModal({ isOpen, onClose, onSave, editing, set
                                     </div>
                                 </div>
 
-                                <div className="p-4 rounded-2xl bg-slate-100 border border-slate-200 space-y-2">
-                                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
+                                <div className="space-y-2 rounded-2xl border border-slate-200 bg-slate-100 p-4">
+                                    <p className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest text-slate-400">
                                         <Lock size={9} /> Định danh (chỉ đọc)
                                     </p>
                                     <div className="flex items-center gap-2">
                                         <span className="text-xs font-bold text-slate-700">Team:</span>
-                                        <span className="font-mono text-xs font-black text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-md">{editing.teamId}</span>
+                                        <span className="rounded-md bg-indigo-50 px-2 py-0.5 font-mono text-xs font-black text-indigo-600">{editing.teamId}</span>
                                     </div>
                                     <div className="flex items-center gap-2">
                                         <span className="text-xs font-bold text-slate-700">Version:</span>
-                                        <span className="font-mono text-xs font-black text-slate-600 bg-white px-2 py-0.5 rounded-md border border-slate-200">v{editing.version}</span>
+                                        <span className="rounded-md border border-slate-200 bg-white px-2 py-0.5 font-mono text-xs font-black text-slate-600">v{editing.version}</span>
                                     </div>
                                     <div className="flex items-center gap-2">
                                         <span className="text-xs font-bold text-slate-700">Type:</span>
-                                        <span className={`text-xs font-black px-2 py-0.5 rounded-md ${isPromo ? "bg-violet-100 text-violet-700" : "bg-slate-200 text-slate-600"}`}>{editing.type || "instruction"}</span>
+                                        <span className={`rounded-md px-2 py-0.5 text-xs font-black ${isPromo ? "bg-violet-100 text-violet-700" : "bg-slate-200 text-slate-600"}`}>
+                                            {editing.type || "instruction"}
+                                        </span>
                                     </div>
                                 </div>
                             </>
                         )}
 
-                        {/* Type selector */}
                         <div className="space-y-1.5">
-                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Loại</label>
-                            <div className="grid grid-cols-2 gap-2">
-                                {[{ v: "instruction", label: "Instruction" }, { v: "promo", label: "Promo" }].map(opt => (
-                                    <button
-                                        key={opt.v}
-                                        type="button"
-                                        onClick={() => isCreate
-                                            ? setEditing({ ...editing, type: opt.v, teamId: "", version: "", system: "" })
-                                            : set("type", opt.v)
-                                        }
-                                        className={`py-2 rounded-xl text-xs font-bold border transition-colors ${editing.type === opt.v ? "bg-indigo-600 text-white border-indigo-600 shadow" : "bg-white text-slate-500 border-slate-200 hover:border-indigo-300"}`}
-                                    >
-                                        {opt.label}
-                                    </button>
-                                ))}
-                            </div>
+                            <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Loại</label>
+                            {lockedType ? (
+                                <div className="rounded-xl border border-indigo-100 bg-indigo-50 px-4 py-2.5 text-xs font-bold uppercase text-indigo-700">
+                                    {lockedType === "promo" ? "Promo" : lockedType}
+                                </div>
+                            ) : (
+                                <div className="grid grid-cols-2 gap-2">
+                                    {[{ v: "instruction", label: "Instruction" }, { v: "promo", label: "Promo" }].map(opt => (
+                                        <button
+                                            key={opt.v}
+                                            type="button"
+                                            onClick={() => isCreate
+                                                ? setEditing({ ...editing, type: opt.v, teamId: "", version: "", system: "" })
+                                                : set("type", opt.v)
+                                            }
+                                            className={`rounded-xl border py-2 text-xs font-bold transition-colors ${editing.type === opt.v ? "border-indigo-600 bg-indigo-600 text-white shadow" : "border-slate-200 bg-white text-slate-500 hover:border-indigo-300"}`}
+                                        >
+                                            {opt.label}
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
                         </div>
 
-                        {/* Team ID — only on create */}
                         {isCreate && (
                             <div className="space-y-1.5">
-                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                                <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">
                                     Team ID <span className="text-red-400">*</span>
                                 </label>
                                 <select
                                     value={editing.teamId}
                                     onChange={e => setEditing({ ...editing, teamId: e.target.value, version: "", system: "" })}
-                                    className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none bg-white text-sm appearance-none cursor-pointer shadow-sm"
+                                    className="w-full cursor-pointer appearance-none rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm shadow-sm outline-none focus:ring-2 focus:ring-indigo-500"
                                 >
                                     <option value="" disabled>-- Chọn nhóm --</option>
                                     {visibleTeams.map(t => (
-                                        <option key={t.id} value={t.id}>{t.id} — {t.label}</option>
+                                        <option key={t.id} value={t.id}>{t.id} - {t.label}</option>
                                     ))}
                                 </select>
                             </div>
                         )}
 
-                        {/* Version — only on create after teamId picked */}
                         {isSimplified && (
                             <div className="space-y-1.5">
-                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                                <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">
                                     Version <span className="text-red-400">*</span>
                                 </label>
                                 <input
@@ -152,323 +179,227 @@ export default function InstructionModal({ isOpen, onClose, onSave, editing, set
                                     value={editing.version ?? ""}
                                     onChange={e => set("version", e.target.value)}
                                     placeholder="VD: 1.0.0"
-                                    className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none shadow-sm text-sm"
+                                    className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm shadow-sm outline-none focus:ring-2 focus:ring-indigo-500"
                                 />
                             </div>
                         )}
 
-                        {/* Label — hidden when teamId is picked */}
                         {!isSimplified && (
                             <div className="space-y-1.5">
-                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Nhãn (Label)</label>
+                                <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Nhãn (Label)</label>
                                 <input
                                     type="text"
                                     value={editing.label}
                                     onChange={e => set("label", e.target.value)}
                                     placeholder="VD: Phiên bản tháng 5"
-                                    className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none shadow-sm text-sm"
+                                    className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm shadow-sm outline-none focus:ring-2 focus:ring-indigo-500"
                                 />
                             </div>
                         )}
                     </div>
 
-                    {/* RIGHT PANEL */}
-                    <div className="flex-1 flex flex-col min-h-0 max-h-[900px] overflow-hidden">
-                        {!isSimplified && <div className="flex-1 min-h-0 overflow-y-auto">
-
-                            {/* Options block — hidden when teamId is picked in create mode */}
-                            {!isSimplified && <div className="flex-shrink-0 p-6 border-b border-slate-100 bg-white">
-                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">
-                                    Thông tin đơn vị (Options)
-                                </p>
-                                <div className="grid grid-cols-1 gap-3">
-                                    <div className="space-y-1.5">
-                                        <label className="text-[10px] font-bold text-slate-500 flex items-center gap-1.5">
-                                            <Tag size={10} /> Tên đơn vị <span className="text-red-400">*</span>
-                                        </label>
-                                        <input
-                                            type="text"
-                                            value={editing.options.title}
-                                            onChange={e => setOpt("title", e.target.value)}
-                                            placeholder="VD: Công ty TNHH Phân Bón Nông Nghiệp Việt"
-                                            className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none shadow-sm text-sm"
-                                        />
-                                    </div>
-                                    <div className="space-y-1.5">
-                                        <label className="text-[10px] font-bold text-slate-500 flex items-center gap-1.5">
-                                            <MapPin size={10} /> Địa chỉ <span className="text-red-400">*</span>
-                                        </label>
-                                        <input
-                                            type="text"
-                                            value={editing.options.diachi}
-                                            onChange={e => setOpt("diachi", e.target.value)}
-                                            placeholder="VD: 123 Đường ABC, Quận 1, TP.HCM"
-                                            className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none shadow-sm text-sm"
-                                        />
-                                    </div>
-                                    <div className="space-y-1.5">
-                                        <label className="text-[10px] font-bold text-slate-500 flex items-center gap-1.5">
-                                            <Globe size={10} /> Website <span className="text-red-400">*</span>
-                                        </label>
-                                        <input
-                                            type="text"
-                                            value={editing.options.website}
-                                            onChange={e => setOpt("website", e.target.value)}
-                                            placeholder="VD: https://phanbon.com.vn"
-                                            className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none shadow-sm text-sm"
-                                        />
-                                    </div>
-                                    <div className="flex items-center justify-between mb-2 flex-shrink-0">
-                                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
-                                            <FileText size={10} /> createOrderFromAssistant <span className="text-red-400">*</span>
-                                        </label>
+                    <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+                        <div className="shrink-0 border-b border-slate-100 bg-white px-6 py-3">
+                            <div className="flex flex-wrap items-center gap-2">
+                                {rightTabs.map(tab => {
+                                    const Icon = tab.icon;
+                                    return (
                                         <button
+                                            key={tab.id}
                                             type="button"
-                                            onClick={() => setPromptExpanded1(true)}
-                                            className="flex items-center gap-1 text-[10px] font-bold text-indigo-500 hover:text-indigo-700 hover:bg-indigo-50 px-2 py-1 rounded-lg transition-colors"
+                                            onClick={() => setActiveTab(tab.id)}
+                                            className={`flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-bold transition-all ${
+                                                currentTab === tab.id
+                                                    ? "bg-indigo-600 text-white shadow-md shadow-indigo-100"
+                                                    : "border border-slate-200 bg-white text-slate-500 hover:border-indigo-200 hover:text-indigo-600"
+                                            }`}
                                         >
-                                            <Maximize2 size={11} /> Mở rộng
+                                            <Icon size={14} />
+                                            {tab.label}
                                         </button>
-                                    </div>
-                                    <textarea
-                                        rows={10}
-                                        value={editing.options.createOrderFromAssistant}
-                                        onChange={e => setOpt("createOrderFromAssistant", e.target.value)}
-                                        placeholder="Nhập nội dung createOrderFromAssistant cho AI Agent..."
-                                        className="flex-1 w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none font-mono text-xs leading-relaxed resize-none"
-                                    />
-                                    <div className="flex items-center justify-between mb-2 flex-shrink-0">
-                                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
-                                            <FileText size={10} /> fileSearch <span className="text-red-400">*</span>
-                                        </label>
-                                        <button
-                                            type="button"
-                                            onClick={() => setPromptExpanded2(true)}
-                                            className="flex items-center gap-1 text-[10px] font-bold text-indigo-500 hover:text-indigo-700 hover:bg-indigo-50 px-2 py-1 rounded-lg transition-colors"
-                                        >
-                                            <Maximize2 size={11} /> Mở rộng
-                                        </button>
-                                    </div>
-                                    <textarea
-                                        rows={10}
-                                        value={editing.options.fileSearch}
-                                        onChange={e => setOpt("fileSearch", e.target.value)}
-                                        placeholder="Nhập nội dung fileSearch cho AI Agent..."
-                                        className="flex-1 w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none font-mono text-xs leading-relaxed resize-none"
-                                    />
-                                    <div className="flex items-center justify-between mb-2 flex-shrink-0">
-                                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
-                                            <FileText size={10} /> calculateShipping <span className="text-red-400">*</span>
-                                        </label>
-                                        <button
-                                            type="button"
-                                            onClick={() => setPromptExpanded3(true)}
-                                            className="flex items-center gap-1 text-[10px] font-bold text-indigo-500 hover:text-indigo-700 hover:bg-indigo-50 px-2 py-1 rounded-lg transition-colors"
-                                        >
-                                            <Maximize2 size={11} /> Mở rộng
-                                        </button>
-                                    </div>
-                                    <textarea
-                                        rows={10}
-                                        value={editing.options.calculateShipping}
-                                        onChange={e => setOpt("calculateShipping", e.target.value)}
-                                        placeholder="Nhập nội dung calculateShipping cho AI Agent..."
-                                        className="flex-1 w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none font-mono text-xs leading-relaxed resize-none"
-                                    />
-                                    <div className="flex items-center justify-between mb-2 flex-shrink-0">
-                                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
-                                            <FileText size={10} /> findPromoEvent <span className="text-red-400">*</span>
-                                        </label>
-                                        <button
-                                            type="button"
-                                            onClick={() => setPromptExpanded4(true)}
-                                            className="flex items-center gap-1 text-[10px] font-bold text-indigo-500 hover:text-indigo-700 hover:bg-indigo-50 px-2 py-1 rounded-lg transition-colors"
-                                        >
-                                            <Maximize2 size={11} /> Mở rộng
-                                        </button>
-                                    </div>
-                                    <textarea
-                                        rows={10}
-                                        value={editing.options.findPromoEvent}
-                                        onChange={e => setOpt("findPromoEvent", e.target.value)}
-                                        placeholder="Nhập nội dung findPromoEvent cho AI Agent..."
-                                        className="flex-1 w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none font-mono text-xs leading-relaxed resize-none"
-                                    />
-                                </div>
-                            </div>}
-                        </div>}
-
-                        {/* System prompt */}
-                        <div className="flex-1 flex flex-col p-6 min-h-0">
-                            <div className="flex items-center justify-between mb-2 flex-shrink-0">
-                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
-                                    <FileText size={10} /> System Prompt <span className="text-red-400">*</span>
-                                </label>
-                                <button
-                                    type="button"
-                                    onClick={() => setPromptExpanded(true)}
-                                    className="flex items-center gap-1 text-[10px] font-bold text-indigo-500 hover:text-indigo-700 hover:bg-indigo-50 px-2 py-1 rounded-lg transition-colors"
-                                >
-                                    <Maximize2 size={11} /> Mở rộng
-                                </button>
+                                    );
+                                })}
                             </div>
-                            <textarea
-                                rows={10}
-                                value={editing.system}
-                                onChange={e => set("system", e.target.value)}
-                                placeholder="Nhập nội dung system prompt cho AI Agent..."
-                                className="flex-1 w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none font-mono text-xs leading-relaxed resize-none"
-                            />
                         </div>
 
-                        {/* Fullscreen prompt editor */}
-                        {promptExpanded && (
-                            <div className="fixed inset-0 z-[60] flex flex-col bg-slate-900/70 backdrop-blur-sm p-6">
-                                <div className="bg-white rounded-2xl flex flex-col flex-1 overflow-hidden shadow-2xl">
-                                    <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 flex-shrink-0">
-                                        <span className="text-sm font-black text-slate-700 flex items-center gap-2">
-                                            <FileText size={15} className="text-indigo-500" /> System Prompt
-                                        </span>
+                        <div className="min-h-0 flex-1 overflow-y-auto bg-white p-6">
+                            {currentTab === "options" && !isSimplified && (
+                                <div className="rounded-2xl border border-slate-200 bg-white p-5">
+                                    <p className="mb-4 text-[10px] font-black uppercase tracking-widest text-slate-400">
+                                        Thông tin đơn vị (Options)
+                                    </p>
+                                    <div className="grid gap-4 lg:grid-cols-2">
+                                        <div className="space-y-1.5">
+                                            <label className="flex items-center gap-1.5 text-[10px] font-bold text-slate-500">
+                                                <Tag size={10} /> Tên đơn vị <span className="text-red-400">*</span>
+                                            </label>
+                                            <input
+                                                type="text"
+                                                value={editing.options.title}
+                                                onChange={e => setOpt("title", e.target.value)}
+                                                placeholder="VD: Công ty TNHH Phân Bón Nông Nghiệp Việt"
+                                                className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm shadow-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                                            />
+                                        </div>
+                                        <div className="space-y-1.5">
+                                            <label className="flex items-center gap-1.5 text-[10px] font-bold text-slate-500">
+                                                <Globe size={10} /> Website <span className="text-red-400">*</span>
+                                            </label>
+                                            <input
+                                                type="text"
+                                                value={editing.options.website}
+                                                onChange={e => setOpt("website", e.target.value)}
+                                                placeholder="VD: https://phanbon.com.vn"
+                                                className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm shadow-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                                            />
+                                        </div>
+                                        <div className="space-y-1.5 lg:col-span-2">
+                                            <label className="flex items-center gap-1.5 text-[10px] font-bold text-slate-500">
+                                                <MapPin size={10} /> Địa chỉ <span className="text-red-400">*</span>
+                                            </label>
+                                            <input
+                                                type="text"
+                                                value={editing.options.diachi}
+                                                onChange={e => setOpt("diachi", e.target.value)}
+                                                placeholder="VD: 123 Đường ABC, Quận 1, TP.HCM"
+                                                className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm shadow-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                                            />
+                                        </div>
+                                        <div className="space-y-1.5">
+                                            <label className="flex items-center gap-1.5 text-[10px] font-bold text-slate-500">
+                                                <Globe size={10} /> Hotline <span className="text-red-400">*</span>
+                                            </label>
+                                            <input
+                                                type="text"
+                                                value={editing.options.hotline}
+                                                onChange={e => setOpt("hotline", e.target.value)}
+                                                placeholder="VD: 19008020"
+                                                className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm shadow-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                                            />
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {currentTab === "system" && (
+                                <div className="flex min-h-[calc(90vh-250px)] flex-col">
+                                    <div className="mb-2 flex shrink-0 items-center justify-between">
+                                        <label className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest text-slate-400">
+                                            <FileText size={10} /> {isPromo ? "Nội dung khuyến mãi" : "System Prompt"} <span className="text-red-400">*</span>
+                                        </label>
                                         <button
                                             type="button"
-                                            onClick={() => setPromptExpanded(false)}
-                                            className="flex items-center gap-1.5 text-xs font-bold text-slate-500 hover:text-slate-800 hover:bg-slate-100 px-3 py-1.5 rounded-lg transition-colors"
+                                            onClick={() => setPromptExpanded(true)}
+                                            className="flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] font-bold text-indigo-500 transition-colors hover:bg-indigo-50 hover:text-indigo-700"
                                         >
-                                            <Minimize2 size={13} /> Thu nhỏ
+                                            <Maximize2 size={11} /> Mở rộng
                                         </button>
                                     </div>
                                     <textarea
-                                        autoFocus
                                         value={editing.system}
                                         onChange={e => set("system", e.target.value)}
-                                        placeholder="Nhập nội dung system prompt cho AI Agent..."
-                                        className="flex-1 w-full px-6 py-5 outline-none font-mono text-sm leading-relaxed resize-none"
+                                        placeholder={isPromo ? "Nhập nội dung khuyến mãi cho AI Agent..." : "Nhập nội dung system prompt cho AI Agent..."}
+                                        className="min-h-0 flex-1 resize-none rounded-2xl border border-slate-200 px-5 py-4 font-mono text-sm leading-relaxed outline-none focus:ring-2 focus:ring-indigo-500"
                                     />
                                 </div>
-                            </div>
-                        )}
-                        {/* Fullscreen prompt editor */}
-                        {promptExpanded1 && (
-                            <div className="fixed inset-0 z-[60] flex flex-col bg-slate-900/70 backdrop-blur-sm p-6">
-                                <div className="bg-white rounded-2xl flex flex-col flex-1 overflow-hidden shadow-2xl">
-                                    <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 flex-shrink-0">
-                                        <span className="text-sm font-black text-slate-700 flex items-center gap-2">
-                                            <FileText size={15} className="text-indigo-500" /> Prompt CreateOrderFromAssistant
-                                        </span>
-                                        <button
-                                            type="button"
-                                            onClick={() => setPromptExpanded1(false)}
-                                            className="flex items-center gap-1.5 text-xs font-bold text-slate-500 hover:text-slate-800 hover:bg-slate-100 px-3 py-1.5 rounded-lg transition-colors"
-                                        >
-                                            <Minimize2 size={13} /> Thu nhỏ
-                                        </button>
-                                    </div>
-                                    <textarea
-                                        autoFocus
-                                        value={editing.options.createOrderFromAssistant}
-                                        onChange={e => setOpt("createOrderFromAssistant", e.target.value)}
-                                        placeholder="Nhập nội dung createOrderFromAssistant prompt cho AI Agent..."
-                                        className="flex-1 w-full px-6 py-5 outline-none font-mono text-sm leading-relaxed resize-none"
-                                    />
+                            )}
+
+                            {currentTab === "tools" && !isSimplified && (
+                                <div className="grid gap-5 lg:grid-cols-2">
+                                    {toolPrompts.map(item => (
+                                        <div key={item.key} className="flex min-h-[300px] flex-col rounded-2xl border border-slate-200 bg-white p-4">
+                                            <div className="mb-2 flex shrink-0 items-center justify-between">
+                                                <label className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest text-slate-400">
+                                                    <FileText size={10} /> {item.label}
+                                                </label>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setExpandedTool(item.key)}
+                                                    className="flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] font-bold text-indigo-500 transition-colors hover:bg-indigo-50 hover:text-indigo-700"
+                                                >
+                                                    <Maximize2 size={11} /> Mở rộng
+                                                </button>
+                                            </div>
+                                            <textarea
+                                                value={editing.options[item.key] || ""}
+                                                onChange={e => setOpt(item.key, e.target.value)}
+                                                placeholder={`Nhập nội dung ${item.label} cho AI Agent...`}
+                                                className="min-h-0 flex-1 resize-none rounded-xl border border-slate-200 px-4 py-3 font-mono text-xs leading-relaxed outline-none focus:ring-2 focus:ring-indigo-500"
+                                            />
+                                        </div>
+                                    ))}
                                 </div>
-                            </div>
-                        )}
-                        {/* Fullscreen prompt editor */}
-                        {promptExpanded2 && (
-                            <div className="fixed inset-0 z-[60] flex flex-col bg-slate-900/70 backdrop-blur-sm p-6">
-                                <div className="bg-white rounded-2xl flex flex-col flex-1 overflow-hidden shadow-2xl">
-                                    <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 flex-shrink-0">
-                                        <span className="text-sm font-black text-slate-700 flex items-center gap-2">
-                                            <FileText size={15} className="text-indigo-500" /> Prompt FileSearch
-                                        </span>
-                                        <button
-                                            type="button"
-                                            onClick={() => setPromptExpanded2(false)}
-                                            className="flex items-center gap-1.5 text-xs font-bold text-slate-500 hover:text-slate-800 hover:bg-slate-100 px-3 py-1.5 rounded-lg transition-colors"
-                                        >
-                                            <Minimize2 size={13} /> Thu nhỏ
-                                        </button>
-                                    </div>
-                                    <textarea
-                                        autoFocus
-                                        value={editing.options.fileSearch}
-                                        onChange={e => setOpt("fileSearch", e.target.value)}
-                                        placeholder="Nhập nội dung fileSearch prompt cho AI Agent..."
-                                        className="flex-1 w-full px-6 py-5 outline-none font-mono text-sm leading-relaxed resize-none"
-                                    />
-                                </div>
-                            </div>
-                        )}
-                        {/* Fullscreen prompt editor */}
-                        {promptExpanded3 && (
-                            <div className="fixed inset-0 z-[60] flex flex-col bg-slate-900/70 backdrop-blur-sm p-6">
-                                <div className="bg-white rounded-2xl flex flex-col flex-1 overflow-hidden shadow-2xl">
-                                    <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 flex-shrink-0">
-                                        <span className="text-sm font-black text-slate-700 flex items-center gap-2">
-                                            <FileText size={15} className="text-indigo-500" /> Prompt CalculateShipping
-                                        </span>
-                                        <button
-                                            type="button"
-                                            onClick={() => setPromptExpanded3(false)}
-                                            className="flex items-center gap-1.5 text-xs font-bold text-slate-500 hover:text-slate-800 hover:bg-slate-100 px-3 py-1.5 rounded-lg transition-colors"
-                                        >
-                                            <Minimize2 size={13} /> Thu nhỏ
-                                        </button>
-                                    </div>
-                                    <textarea
-                                        autoFocus
-                                        value={editing.options.calculateShipping}
-                                        onChange={e => setOpt("calculateShipping", e.target.value)}
-                                        placeholder="Nhập nội dung calculateShipping prompt cho AI Agent..."
-                                        className="flex-1 w-full px-6 py-5 outline-none font-mono text-sm leading-relaxed resize-none"
-                                    />
-                                </div>
-                            </div>
-                        )}
-                        {/* Fullscreen prompt editor */}
-                        {promptExpanded4 && (
-                            <div className="fixed inset-0 z-[60] flex flex-col bg-slate-900/70 backdrop-blur-sm p-6">
-                                <div className="bg-white rounded-2xl flex flex-col flex-1 overflow-hidden shadow-2xl">
-                                    <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 flex-shrink-0">
-                                        <span className="text-sm font-black text-slate-700 flex items-center gap-2">
-                                            <FileText size={15} className="text-indigo-500" /> Prompt FindPromoEvent
-                                        </span>
-                                        <button
-                                            type="button"
-                                            onClick={() => setPromptExpanded4(false)}
-                                            className="flex items-center gap-1.5 text-xs font-bold text-slate-500 hover:text-slate-800 hover:bg-slate-100 px-3 py-1.5 rounded-lg transition-colors"
-                                        >
-                                            <Minimize2 size={13} /> Thu nhỏ
-                                        </button>
-                                    </div>
-                                    <textarea
-                                        autoFocus
-                                        value={editing.options.findPromoEvent}
-                                        onChange={e => setOpt("findPromoEvent", e.target.value)}
-                                        placeholder="Nhập nội dung findPromoEvent prompt cho AI Agent..."
-                                        className="flex-1 w-full px-6 py-5 outline-none font-mono text-sm leading-relaxed resize-none"
-                                    />
-                                </div>
-                            </div>
-                        )}
+                            )}
+                        </div>
                     </div>
                 </div>
 
-                {/* FOOTER */}
-                <div className="flex-shrink-0 p-5 bg-white border-t border-slate-100 flex justify-end items-center gap-4 px-8">
+                {promptExpanded && (
+                    <div className="fixed inset-0 z-[60] flex flex-col bg-slate-900/70 p-6 backdrop-blur-sm">
+                        <div className="flex flex-1 flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+                            <div className="flex shrink-0 items-center justify-between border-b border-slate-100 px-6 py-4">
+                                <span className="flex items-center gap-2 text-sm font-black text-slate-700">
+                                    <FileText size={15} className="text-indigo-500" /> {isPromo ? "Nội dung khuyến mãi" : "System Prompt"}
+                                </span>
+                                <button
+                                    type="button"
+                                    onClick={() => setPromptExpanded(false)}
+                                    className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800"
+                                >
+                                    <Minimize2 size={13} /> Thu nhỏ
+                                </button>
+                            </div>
+                            <textarea
+                                autoFocus
+                                value={editing.system}
+                                onChange={e => set("system", e.target.value)}
+                                placeholder={isPromo ? "Nhập nội dung khuyến mãi cho AI Agent..." : "Nhập nội dung system prompt cho AI Agent..."}
+                                className="flex-1 resize-none px-6 py-5 font-mono text-sm leading-relaxed outline-none"
+                            />
+                        </div>
+                    </div>
+                )}
+
+                {expandedToolMeta && (
+                    <div className="fixed inset-0 z-[60] flex flex-col bg-slate-900/70 p-6 backdrop-blur-sm">
+                        <div className="flex flex-1 flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+                            <div className="flex shrink-0 items-center justify-between border-b border-slate-100 px-6 py-4">
+                                <span className="flex items-center gap-2 text-sm font-black text-slate-700">
+                                    <FileText size={15} className="text-indigo-500" /> Prompt {expandedToolMeta.label}
+                                </span>
+                                <button
+                                    type="button"
+                                    onClick={() => setExpandedTool(null)}
+                                    className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800"
+                                >
+                                    <Minimize2 size={13} /> Thu nhỏ
+                                </button>
+                            </div>
+                            <textarea
+                                autoFocus
+                                value={editing.options[expandedToolMeta.key] || ""}
+                                onChange={e => setOpt(expandedToolMeta.key, e.target.value)}
+                                placeholder={`Nhập nội dung ${expandedToolMeta.label} prompt cho AI Agent...`}
+                                className="flex-1 resize-none px-6 py-5 font-mono text-sm leading-relaxed outline-none"
+                            />
+                        </div>
+                    </div>
+                )}
+
+                <div className="flex shrink-0 items-center justify-end gap-4 border-t border-slate-100 bg-white px-8 py-5">
                     <button
                         onClick={onClose}
-                        className="px-6 py-2 text-sm font-bold text-slate-400 hover:text-slate-600 transition-colors"
+                        className="px-6 py-2 text-sm font-bold text-slate-400 transition-colors hover:text-slate-600"
                     >
                         Hủy bỏ
                     </button>
                     <button
                         onClick={onSave}
                         disabled={isSaving}
-                        className="bg-indigo-600 text-white px-10 py-3 rounded-2xl font-bold flex items-center gap-2 shadow-xl shadow-indigo-200 hover:bg-indigo-700 transition-all active:scale-95 disabled:opacity-50"
+                        className="flex items-center gap-2 rounded-2xl bg-indigo-600 px-10 py-3 font-bold text-white shadow-xl shadow-indigo-200 transition-all hover:bg-indigo-700 active:scale-95 disabled:opacity-50"
                     >
                         {isSaving ? <Loader2 className="animate-spin" size={18} /> : <Save size={18} />}
-                        {isCreate ? "Tạo Instruction" : "Lưu thay đổi"}
+                        {isCreate ? (isPromo ? "Tạo khuyến mãi" : "Tạo Instruction") : "Lưu thay đổi"}
                     </button>
                 </div>
             </div>

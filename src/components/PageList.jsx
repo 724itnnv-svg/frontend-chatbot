@@ -1,5 +1,6 @@
 // src/components/PageList.jsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { Filter, Search } from "lucide-react";
 import defaultAvatar from "../assets/default-avatar.png";
 
 export default function PageList({
@@ -118,14 +119,14 @@ export default function PageList({
             node.scrollIntoView({ block: "nearest", behavior: "smooth" });
         }
     }, [selectedPageId]);
-
+    
     return (
-        <div className={["h-full bg-gray-50", className].join(" ")}>
+        <div className={["flex h-full flex-col bg-white", className].join(" ")}>
             {/* ✅ Header 2 tầng: headerTitle + (subTitle | Tổng) */}
             {(headerTitle || subTitle || showTotal) && (
-                <div className="border-b bg-white p-2 md:p-4">
+                <div className="border-b border-slate-200 bg-white px-4 py-4">
                     {headerTitle ? (
-                        <div className="text-sm md:text-lg font-bold text-slate-800 truncate">
+                        <div className="truncate text-lg font-extrabold tracking-tight text-slate-950">
                             {headerTitle}
                         </div>
                     ) : null}
@@ -137,14 +138,14 @@ export default function PageList({
                                 "flex items-center justify-between gap-2",
                             ].join(" ")}
                         >
-                            <div className="text-[11px] md:text-xs font-medium text-slate-500 truncate">
+                            <div className="truncate text-xs font-semibold text-slate-500">
                                 {subTitle}
                             </div>
 
                             {showTotal ? (
-                                <div className="text-[11px] md:text-xs font-medium text-slate-500 shrink-0">
+                                <div className="shrink-0 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-500">
                                     Tổng:{" "}
-                                    <span className="font-semibold text-slate-700">
+                                    <span className="font-bold text-slate-800">
                                         {list.length}
                                     </span>
                                 </div>
@@ -155,33 +156,37 @@ export default function PageList({
             )}
 
             {/* ✅ Container focusable để nhận phím Arrow */}
-            <div className="p-2 border-b bg-gray-50">
-                <input
-                    value={chatSearch}
-                    onChange={(e) => {
-                        setChatSearch(e.target.value)
-                        handleSearch(e.target.value)
-                    }}
-                    placeholder="Tìm theo tên page hoặc ID..."
-                    className="mt-2 w-full px-3 py-2 text-sm border rounded outline-none focus:ring-2 focus:ring-sky-200"
-                />
-                <select
-                    value={teamFilter}
-                    onChange={handleTeamFilter}
-                    className="mt-2 w-full px-3 py-2 text-sm border rounded outline-none focus:ring-2 focus:ring-sky-200"
-                    title="Lọc theo Team"
-                >
-                    {teamOptions.map((t) => (
-                        <option key={t} value={t}>
-                            {t === "ALL" ? "Tất cả Team" : `Team: ${t}`}
-                        </option>
-                    ))}
-                </select>
+            <div className="space-y-2 border-b border-slate-200 bg-slate-50/80 px-3 py-3">
+                <label className="relative block">
+                    <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <input
+                        value={chatSearch}
+                        onChange={(e) => setChatSearch(e.target.value)}
+                        placeholder="Tìm theo tên page hoặc ID..."
+                        className="h-10 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-sky-200 focus:ring-4 focus:ring-sky-100"
+                    />
+                </label>
+                <label className="relative block">
+                    <Filter size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <select
+                        value={teamFilter}
+                        onChange={handleTeamFilter}
+                        className="h-10 w-full appearance-none rounded-xl border border-slate-200 bg-white pl-9 pr-8 text-sm font-medium text-slate-700 outline-none transition focus:border-sky-200 focus:ring-4 focus:ring-sky-100"
+                        title="Lọc theo Team"
+                    >
+                        {teamOptions.map((t) => (
+                            <option key={t} value={t}>
+                                {t === "ALL" ? "Tất cả Team" : `Team: ${t}`}
+                            </option>
+                        ))}
+                    </select>
+                    <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400">⌄</span>
+                </label>
             </div>
             <div
                 ref={containerRef}
                 tabIndex={0}
-                className="overflow-y-auto h-[calc(100vh-104px)] outline-none focus:ring-2 focus:ring-blue-200"
+                className="min-h-0 flex-1 overflow-y-auto bg-slate-50/70 p-2 outline-none focus:ring-2 focus:ring-sky-100"
                 title="Dùng phím ↑ / ↓ để chuyển Page"
             >
                 {filteredList.map((page) => {
@@ -198,8 +203,10 @@ export default function PageList({
                             }}
                             onClick={() => onSelectPage?.(page)}
                             className={[
-                                "flex items-center px-2 py-2 md:p-3 cursor-pointer hover:bg-blue-50",
-                                isSelected ? "bg-blue-100" : "bg-transparent",
+                                "mb-2 flex cursor-pointer items-center rounded-2xl border px-2.5 py-2.5 transition",
+                                isSelected
+                                    ? "border-sky-200 bg-sky-50 shadow-sm ring-1 ring-sky-100"
+                                    : "border-transparent bg-white hover:border-sky-100 hover:bg-sky-50/70 hover:shadow-sm",
                             ].join(" ")}
                             role="button"
                             tabIndex={-1} // ✅ để focus nằm ở container, tránh tab vào từng item (đỡ mệt)
@@ -215,17 +222,17 @@ export default function PageList({
                                         : `https://graph.facebook.com/v22.0/${page.facebookId}/picture?height=100`
                                 }
                                 alt={page?.name || "Page"}
-                                className="w-7 h-7 md:w-12 md:h-12 rounded-full border bg-white flex-shrink-0"
+                                className="h-11 w-11 flex-shrink-0 rounded-full border border-white bg-white object-cover shadow-sm ring-1 ring-slate-200 md:h-12 md:w-12"
                                 onError={(e) => {
                                     e.currentTarget.src = defaultAvatar;
                                 }}
                             />
 
-                            <div className="ml-3 flex-1 min-w-0">
-                                <p className="text-[11px] md:text-base font-semibold text-gray-800 whitespace-normal break-words">
+                            <div className="ml-3 min-w-0 flex-1">
+                                <p className="line-clamp-2 text-sm font-bold leading-5 text-slate-900 md:text-[15px]">
                                     {page?.name || "Không có tên"}
                                 </p>
-                                <p className="text-[10px] md:text-xs text-gray-500 whitespace-normal break-all">
+                                <p className="mt-0.5 truncate font-mono text-[11px] text-slate-500 md:text-xs">
                                     {page?.facebookId || ""}
                                 </p>
                             </div>
@@ -234,7 +241,7 @@ export default function PageList({
                 })}
 
                 {list.length === 0 && (
-                    <div className="p-4 text-sm text-gray-500">
+                    <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-4 text-sm text-slate-500">
                         Chưa có Page nào được phân quyền.
                     </div>
                 )}

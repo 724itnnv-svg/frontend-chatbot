@@ -4,9 +4,92 @@ import defaultAvatar from "../assets/default-avatar.png";
 import { useAuth } from "../context/AuthContext";
 import PageList from "./PageList";
 import ChatMessagesPanel from "./ChatMessagesPanel";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, FileText, Flag, Image, MessageSquarePlus, Paperclip, Plus, Send, ShoppingCart, Trash2, Video, X } from "lucide-react";
+import { io } from "socket.io-client";
+import { getApiOrigin } from "../api/baseUrl";
 
 const HISTORY_ENDPOINT = "/chatweb/history"; // <- đổi nếu backend khác
+const isViteDevServer =
+  typeof window !== "undefined" && window.location.port === "5173";
+const SOCKET_URL =
+  import.meta.env.VITE_SOCKET_URL ||
+  (isViteDevServer ? "http://localhost:5000" : getApiOrigin() || undefined);
+const QUICK_REPLY_STORAGE_KEY = "page_message_quick_replies";
+const DEFAULT_QUICK_REPLIES = [
+  {
+    id: "greeting",
+    title: "Chào khách",
+    text: "Dạ em chào anh/chị, em có thể hỗ trợ mình thông tin gì ạ?",
+  },
+  {
+    id: "price",
+    title: "Báo giá",
+    text: "Dạ anh/chị cho em xin sản phẩm và số lượng mình cần, em báo giá chính xác ngay ạ.",
+  },
+  {
+    id: "shipping",
+    title: "Xin địa chỉ",
+    text: "Dạ anh/chị cho em xin tên, số điện thoại và địa chỉ nhận hàng để em lên đơn ạ.",
+  },
+  {
+    id: "thanks",
+    title: "Cảm ơn",
+    text: "Dạ em cảm ơn anh/chị. Đơn hàng của mình em đã ghi nhận và sẽ xử lý sớm ạ.",
+  },
+];
+const MESSAGE_REPORT_CATEGORIES = [
+  "Sai giá",
+  "Sai tài liệu",
+  "Phong cách tư vấn không đúng",
+  "Chốt sai giá",
+  "Chốt sai số lượng",
+  "Sai khuyến mãi",
+  "Khác",
+];
+
+function normalizeMessageText(message = {}) {
+  const text =
+    (typeof message.text === "string" ? message.text : "") ||
+    (typeof message.content === "string" ? message.content : "") ||
+    message.content?.[0]?.text?.value ||
+    "";
+  return String(text).replace(/\s+/g, " ").trim();
+}
+
+function upsertRealtimeMessage(messages, incoming) {
+  if (!incoming) return messages;
+  const incomingId = incoming.id ? String(incoming.id) : "";
+  const incomingText = normalizeMessageText(incoming);
+
+  if (incomingId && messages.some((message) => String(message.id || "") === incomingId)) {
+    return messages;
+  }
+
+  const pendingIndex = messages.findIndex((message) => {
+    if (!message.pending || message.role !== incoming.role) return false;
+    if (normalizeMessageText(message) !== incomingText) return false;
+    const oldTime = message.createdAt ? new Date(message.createdAt).getTime() : 0;
+    const newTime = incoming.createdAt ? new Date(incoming.createdAt).getTime() : Date.now();
+    return !oldTime || Math.abs(newTime - oldTime) <= 30000;
+  });
+
+  if (pendingIndex >= 0) {
+    return messages.map((message, index) =>
+      index === pendingIndex ? { ...incoming, pending: false } : message,
+    );
+  }
+
+  const last = messages[messages.length - 1];
+  if (last && last.role === incoming.role && normalizeMessageText(last) === incomingText) {
+    const lastTime = last.createdAt ? new Date(last.createdAt).getTime() : 0;
+    const incomingTime = incoming.createdAt ? new Date(incoming.createdAt).getTime() : Date.now();
+    if (!lastTime || Math.abs(incomingTime - lastTime) <= 15000) {
+      return messages;
+    }
+  }
+
+  return [...messages, incoming];
+}
 
 function PageMessage() {
   const [pages, setPages] = useState([]);
@@ -22,6 +105,37 @@ function PageMessage() {
   const [loadingPages, setLoadingPages] = useState(false);
   const [loadingChats, setLoadingChats] = useState(false);
   const [sendingBulk, setSendingBulk] = useState(false);
+  const [replyText, setReplyText] = useState("");
+  const [replyAttachmentUrl, setReplyAttachmentUrl] = useState("");
+  const [replyAttachmentType, setReplyAttachmentType] = useState("image");
+  const [replyAttachmentFile, setReplyAttachmentFile] = useState(null);
+  const [sendingReply, setSendingReply] = useState(false);
+  const [chatReplyState, setChatReplyState] = useState({ mode: "bot", loading: false });
+  const [releasingToBot, setReleasingToBot] = useState(false);
+  const [, setRealtimeConnected] = useState(false);
+  const [showComposerTools, setShowComposerTools] = useState(false);
+  const [showQuickReplyPanel, setShowQuickReplyPanel] = useState(false);
+  const [quickReplies, setQuickReplies] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(QUICK_REPLY_STORAGE_KEY) || "[]");
+      return Array.isArray(saved) ? saved : [];
+    } catch {
+      return [];
+    }
+  });
+  const [quickReplyDraft, setQuickReplyDraft] = useState({ title: "", text: "" });
+  const [messengerQuickReplyOptions, setMessengerQuickReplyOptions] = useState([]);
+  const [messengerQuickReplyDraft, setMessengerQuickReplyDraft] = useState({
+    title: "",
+    payload: "",
+  });
+  const [showButtonTemplatePanel, setShowButtonTemplatePanel] = useState(false);
+  const [buttonTemplateButtons, setButtonTemplateButtons] = useState([]);
+  const [buttonTemplateDraft, setButtonTemplateDraft] = useState({
+    title: "",
+    type: "postback",
+    value: "",
+  });
 
   // UI giống ChatwebManager
   const [selectedChat, setSelectedChat] = useState(null);
@@ -32,9 +146,28 @@ function PageMessage() {
   const [mobileTab, setMobileTab] = useState("customers"); // customers | messages
 
   const messageFetchRef = useRef(null);
+  const replyFileInputRef = useRef(null);
+  const replyTextareaRef = useRef(null);
+  const realtimeSocketRef = useRef(null);
+  const selectedPageRef = useRef(null);
+  const selectedChatRef = useRef(null);
 
   const [orderedCustomerSet, setOrderedCustomerSet] = useState(() => new Set());
+  const [ordersByCustomer, setOrdersByCustomer] = useState(() => new Map());
   const [loadingOrders, setLoadingOrders] = useState(false);
+  const [isOrderPopupOpen, setIsOrderPopupOpen] = useState(false);
+  const [isContextPopupOpen, setIsContextPopupOpen] = useState(false);
+  const [orderDrafts, setOrderDrafts] = useState({});
+  const [savingOrderId, setSavingOrderId] = useState("");
+  const [isReportMode, setIsReportMode] = useState(false);
+  const [selectedReportMessages, setSelectedReportMessages] = useState({});
+  const [savingMessageReport, setSavingMessageReport] = useState(false);
+  const [messageReportCategory, setMessageReportCategory] = useState("");
+  const [messageReportCustomCategory, setMessageReportCustomCategory] = useState("");
+  const [messageReportNote, setMessageReportNote] = useState("");
+  const [isMessageReportListOpen, setIsMessageReportListOpen] = useState(false);
+  const [messageReports, setMessageReports] = useState([]);
+  const [loadingMessageReports, setLoadingMessageReports] = useState(false);
 
 
   const [isDesktop, setIsDesktop] = useState(() =>
@@ -75,6 +208,22 @@ function PageMessage() {
   const isAdmin = roleLower === "admin";
   const isUser = roleLower === "user";
 
+  useEffect(() => {
+    selectedPageRef.current = selectedPage;
+  }, [selectedPage]);
+
+  useEffect(() => {
+    selectedChatRef.current = selectedChat;
+  }, [selectedChat]);
+
+  useEffect(() => {
+    const textarea = replyTextareaRef.current;
+    if (!textarea) return;
+
+    textarea.style.height = "auto";
+    textarea.style.height = `${Math.min(textarea.scrollHeight, 160)}px`;
+  }, [replyText]);
+
   // 🔐 Mảng pageId (facebookId) của user
   const rawUserPageIds = user?.pageId || user?.pageIds || [];
   const userPageIds = Array.isArray(rawUserPageIds)
@@ -88,7 +237,7 @@ function PageMessage() {
     const fetchPages = async () => {
       try {
         setLoadingPages(true);
-        const res = await fetch("/api/page", {
+        const res = await fetch("/api/page?autoReply=true", {
           headers: {
             Authorization: `Bearer ${token}`,
           },
@@ -114,26 +263,26 @@ function PageMessage() {
     const updatedInfo = { ...currentInfo };
 
     try {
-      const convRes = await fetch(
-        `https://graph.facebook.com/v19.0/${page.facebookId}/conversations?fields=participants,message_count,updated_time&access_token=${page.accessToken}`
-      );
+      const profileRes = await fetch("/api/chat/profiles", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          page: page.facebookId,
+          userIds: localUserIds,
+        }),
+      });
 
-      if (!convRes.ok) throw new Error("Không lấy được danh sách hội thoại từ Facebook");
+      const profileData = await profileRes.json();
+      if (!profileRes.ok) throw new Error(profileData?.message || "Không lấy được avatar khách");
 
-      const convData = await convRes.json();
-      const conversations = convData.data || [];
-
-      conversations.forEach((conv) => {
-        conv.participants?.data?.forEach((p) => {
-          if (String(p.id) !== String(page.facebookId)) {
-            if (localUserIds.includes(p.id)) {
-              updatedInfo[p.id] = {
-                name: p.name || p.id,
-                picture: p.picture?.data?.url || defaultAvatar,
-              };
-            }
-          }
-        });
+      Object.entries(profileData?.profiles || {}).forEach(([id, profile]) => {
+        updatedInfo[id] = {
+          name: profile?.name || updatedInfo[id]?.name || id,
+          picture: profile?.picture || updatedInfo[id]?.picture || defaultAvatar,
+        };
       });
 
       setUserInfo((prev) => ({ ...prev, ...updatedInfo }));
@@ -143,6 +292,38 @@ function PageMessage() {
   };
 
   // ✅ Chọn Page → load chats local + load userInfo từ FB
+  const refreshChatsForPage = async (page, { updateUserNames = false } = {}) => {
+    if (!page?.facebookId || !token) return [];
+
+    const chatRes = await fetch("/api/chat/recent", {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    const allChats = await chatRes.json();
+    const filteredChats = (Array.isArray(allChats) ? allChats : []).filter(
+      (c) => String(c.page) === String(page.facebookId) && c.conversationId,
+    );
+
+    setChats(filteredChats);
+
+    if (updateUserNames) {
+      const localUserIds = [...new Set(filteredChats.map((chat) => chat.user))];
+      const tempUserInfo = {};
+      filteredChats.forEach((chat) => {
+        const id = chat.user;
+        tempUserInfo[id] = {
+          name: chat.userName || id,
+          picture: chat.userPicture || defaultAvatar,
+        };
+      });
+      setUserInfo(tempUserInfo);
+      fetchUserInfo(page, localUserIds, tempUserInfo);
+    }
+
+    return filteredChats;
+  };
+
   const handleSelectPage = async (page) => {
     if (isUser && !userPageIds.includes(page.facebookId)) {
       alert("⚠️ Bạn không có quyền truy cập Page này");
@@ -158,38 +339,29 @@ function PageMessage() {
     setSelectedChat(null);
     setCurrentMessages([]);
     setActiveThreadId(null);
+    setReplyText("");
+    setReplyAttachmentUrl("");
+    setReplyAttachmentFile(null);
+    setChatReplyState({ mode: "bot", loading: false });
     setChatSearch("");
+    setOrdersByCustomer(new Map());
+    setIsOrderPopupOpen(false);
+    setIsReportMode(false);
+    setSelectedReportMessages({});
+    setMessageReportCategory("");
+    setMessageReportCustomCategory("");
+    setMessageReportNote("");
+    setMessageReports([]);
+    setIsMessageReportListOpen(false);
     setMobileTab("customers");
 
     try {
       setLoadingChats(true);
 
-      const chatRes = await fetch("/api/chat/recent", {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
-      const allChats = await chatRes.json();
-      console.log(allChats);
+      const filteredChats = await refreshChatsForPage(page, { updateUserNames: true });
       
 
-      const filteredChats = (Array.isArray(allChats) ? allChats : []).filter(
-        (c) => (String(c.page) === String(page.facebookId)) && c.conversationId
-      );
-
-      setChats(filteredChats);
-
-      const localUserIds = [...new Set(filteredChats.map((chat) => chat.user))];
-
-      const tempUserInfo = {};
-      localUserIds.forEach((id) => {
-        tempUserInfo[id] = { name: id, picture: defaultAvatar };
-      });
-      setUserInfo(tempUserInfo);
-
       // fetch tên/avatar thật từ Facebook
-      fetchUserInfo(page, localUserIds, tempUserInfo);
-
       // auto chọn khách đầu tiên
       setTimeout(() => {
         if (filteredChats.length > 0) {
@@ -247,6 +419,16 @@ function PageMessage() {
       setActiveThreadId(chat.conversationId);
     }
     setCurrentMessages([]);
+    setReplyText("");
+    setReplyAttachmentUrl("");
+    setReplyAttachmentFile(null);
+    setChatReplyState({ mode: "bot", loading: true });
+    setIsReportMode(false);
+    setSelectedReportMessages({});
+    setMessageReportCategory("");
+    setMessageReportCustomCategory("");
+    setMessageReportNote("");
+    setMessageReports([]);
     setMobileTab("messages");
     if (!isDesktop) setIsPageListOpen(false);
 
@@ -278,6 +460,8 @@ function PageMessage() {
       else if (data && Array.isArray(data.messages)) msgs = data.messages;
 
       setCurrentMessages(msgs);
+      fetchChatReplyState(chat);
+      fetchMessageReports({ chatOverride: chat, open: false });
     } catch (err) {
       if (err.name === "AbortError") return;
       console.error("Lỗi lấy lịch sử chat:", err);
@@ -287,15 +471,88 @@ function PageMessage() {
     }
   };
 
-  const refreshThreadMessages = async (threadId, { retries = 3, delayMs = 800 } = {}) => {
-    if (!threadId) return;
+  const buildHistoryEndpoint = (chatOrId) => {
+    const conversationId =
+      typeof chatOrId === "object" ? chatOrId?.conversationId : null;
+    const threadId =
+      typeof chatOrId === "object" ? chatOrId?.threadId : chatOrId;
+
+    if (conversationId) {
+      return `${HISTORY_ENDPOINT}?conversationId=${encodeURIComponent(conversationId)}`;
+    }
+    if (threadId) {
+      return `${HISTORY_ENDPOINT}?threadId=${encodeURIComponent(threadId)}`;
+    }
+    return "";
+  };
+
+  const fetchChatReplyState = async (chat) => {
+    if (!chat?.user || !chat?.page || !token) return;
+
+    try {
+      setChatReplyState((prev) => ({ ...prev, loading: true }));
+      const params = new URLSearchParams({
+        pageId: chat.page,
+        userId: chat.user,
+      });
+      const res = await fetch(`/api/page-message/state?${params.toString()}`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data?.ok === false) {
+        throw new Error(data?.message || "Không lấy được trạng thái trả lời");
+      }
+      setChatReplyState({
+        mode: data.mode === "human" ? "human" : "bot",
+        loading: false,
+        humanPausedAt: data.humanPausedAt || null,
+      });
+    } catch (err) {
+      console.error("fetchChatReplyState error:", err);
+      setChatReplyState((prev) => ({ ...prev, loading: false }));
+    }
+  };
+
+  const handleReleaseToBot = async () => {
+    if (!selectedPage?.facebookId || !selectedChat?.user || releasingToBot) return;
+
+    try {
+      setReleasingToBot(true);
+      const res = await fetch("/api/page-message/handoff/release", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          pageId: selectedPage.facebookId,
+          userId: selectedChat.user,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data?.ok === false) {
+        throw new Error(data?.message || "Không nhường lại BOT được");
+      }
+      setChatReplyState({ mode: "bot", loading: false });
+    } catch (err) {
+      alert(err?.message || "Lỗi khi nhường lại BOT");
+    } finally {
+      setReleasingToBot(false);
+    }
+  };
+
+  const refreshThreadMessages = async (chatOrId, { retries = 3, delayMs = 800, silent = false } = {}) => {
+    const endpoint = buildHistoryEndpoint(chatOrId);
+    if (!endpoint) return;
 
     for (let attempt = 0; attempt < retries; attempt++) {
       try {
-        if (attempt === 0) setLoadingMessages(true);
+        if (!silent && attempt === 0) setLoadingMessages(true);
 
         const res = await fetch(
-          `${HISTORY_ENDPOINT}?threadId=${encodeURIComponent(threadId)}`,
+          endpoint,
           {
             headers: {
               Authorization: `Bearer ${token}`,
@@ -323,7 +580,335 @@ function PageMessage() {
       await new Promise((r) => setTimeout(r, delayMs));
     }
 
-    setLoadingMessages(false);
+    if (!silent) setLoadingMessages(false);
+  };
+
+  const handleRealtimeChatEvent = (payload = {}) => {
+    const page = selectedPageRef.current;
+    const payloadPage = String(payload.page || "");
+    const payloadUser = String(payload.user || "");
+    if (!page?.facebookId || !payloadPage || !payloadUser) return;
+    if (String(payloadPage) !== String(page.facebookId)) return;
+
+    if (payload.chat?.userPicture || payload.chat?.userName) {
+      setUserInfo((prev) => ({
+        ...prev,
+        [payloadUser]: {
+          name: payload.chat.userName || prev[payloadUser]?.name || payloadUser,
+          picture: payload.chat.userPicture || prev[payloadUser]?.picture || defaultAvatar,
+        },
+      }));
+    }
+
+    setChats((prev) => {
+      const index = prev.findIndex(
+        (chat) => String(chat.page) === payloadPage && String(chat.user) === payloadUser,
+      );
+      if (index < 0) {
+        if (!payload.chat) return prev;
+        return [
+          {
+            ...payload.chat,
+            updatedAt: payload.createdAt || payload.chat.updatedAt || new Date().toISOString(),
+            lastMessage: payload.text || payload.chat.lastMessage,
+          },
+          ...prev,
+        ];
+      }
+
+      const next = [...prev];
+      next[index] = {
+        ...next[index],
+        updatedAt: payload.createdAt || new Date().toISOString(),
+        lastMessage: payload.text || next[index].lastMessage,
+      };
+      return next;
+    });
+
+    const selected = selectedChatRef.current;
+    const isActiveThread =
+      selected &&
+      String(selected.page) === payloadPage &&
+      String(selected.user) === payloadUser;
+
+    if (!isActiveThread) return;
+
+    const nextSelected = payload.chat
+      ? {
+        ...selected,
+        ...payload.chat,
+        threadId: payload.chat.conversationId || payload.chat.threadId || selected.threadId,
+        conversationId: payload.chat.conversationId || selected.conversationId,
+      }
+      : selected;
+
+    selectedChatRef.current = nextSelected;
+    setSelectedChat(nextSelected);
+
+    if (payload.message) {
+      setCurrentMessages((prev) => upsertRealtimeMessage(prev, payload.message));
+    }
+
+    window.setTimeout(() => {
+      refreshThreadMessages(nextSelected, { retries: 2, delayMs: 300, silent: true });
+    }, 150);
+  };
+
+  useEffect(() => {
+    if (!token) return undefined;
+
+    const socket = io(SOCKET_URL, {
+      auth: { token },
+      transports: ["polling", "websocket"],
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 800,
+      reconnectionDelayMax: 5000,
+      timeout: 20000,
+    });
+
+    realtimeSocketRef.current = socket;
+
+    const joinCurrentRooms = () => {
+      const page = selectedPageRef.current;
+      const chat = selectedChatRef.current;
+      if (page?.facebookId) socket.emit("page:join", page.facebookId);
+      if (page?.facebookId && chat?.user) {
+        socket.emit("thread:join", { pageId: page.facebookId, userId: chat.user });
+      }
+    };
+
+    socket.on("connect", () => {
+      setRealtimeConnected(true);
+      joinCurrentRooms();
+    });
+    socket.on("disconnect", () => setRealtimeConnected(false));
+    socket.on("connect_error", (error) => {
+      setRealtimeConnected(false);
+      console.warn("Socket realtime connect error:", error?.message || error);
+    });
+    socket.on("chat:event", handleRealtimeChatEvent);
+    socket.on("chat:state", (payload = {}) => {
+      const page = selectedPageRef.current;
+      const selected = selectedChatRef.current;
+      if (!page?.facebookId || !selected?.user) return;
+      if (String(payload.page) !== String(page.facebookId)) return;
+      if (String(payload.user) !== String(selected.user)) return;
+
+      setChatReplyState({
+        mode: payload.mode === "human" || payload.humanPausedAutoReply ? "human" : "bot",
+        loading: false,
+        humanPausedAt: payload.humanPausedAt || null,
+      });
+    });
+
+    return () => {
+      socket.off("connect");
+      socket.off("disconnect");
+      socket.off("connect_error");
+      socket.off("chat:event");
+      socket.off("chat:state");
+      socket.disconnect();
+      setRealtimeConnected(false);
+      if (realtimeSocketRef.current === socket) realtimeSocketRef.current = null;
+    };
+  }, [token]);
+
+  useEffect(() => {
+    const socket = realtimeSocketRef.current;
+    const pageId = selectedPage?.facebookId;
+    if (!socket || !pageId) return undefined;
+
+    socket.emit("page:join", pageId);
+    return () => socket.emit("page:leave", pageId);
+  }, [selectedPage?.facebookId]);
+
+  useEffect(() => {
+    const socket = realtimeSocketRef.current;
+    const pageId = selectedPage?.facebookId;
+    const userId = selectedChat?.user;
+    if (!socket || !pageId || !userId) return undefined;
+
+    socket.emit("thread:join", { pageId, userId });
+    return () => socket.emit("thread:leave", { pageId, userId });
+  }, [selectedPage?.facebookId, selectedChat?.user]);
+
+  useEffect(() => {
+    if (!token) return undefined;
+
+    const controller = new AbortController();
+    let cancelled = false;
+
+    const connectEventStream = async () => {
+      try {
+        const res = await fetch("/api/realtime/events", {
+          signal: controller.signal,
+          headers: {
+            Authorization: `Bearer ${token}`,
+            Accept: "text/event-stream",
+          },
+        });
+        if (!res.ok || !res.body) return;
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        while (!cancelled) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+
+          const chunks = buffer.split("\n\n");
+          buffer = chunks.pop() || "";
+
+          chunks.forEach((chunk) => {
+            const eventLine = chunk.split("\n").find((line) => line.startsWith("event:"));
+            const dataLine = chunk.split("\n").find((line) => line.startsWith("data:"));
+            const eventName = eventLine ? eventLine.slice(6).trim() : "message";
+            if (eventName !== "chat:event" || !dataLine) return;
+
+            try {
+              handleRealtimeChatEvent(JSON.parse(dataLine.slice(5).trim()));
+            } catch (err) {
+              console.warn("Realtime stream parse error:", err);
+            }
+          });
+        }
+      } catch (err) {
+        if (!cancelled) console.warn("Realtime stream error:", err);
+      }
+    };
+
+    connectEventStream();
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [token]);
+
+  const handleSendReply = async () => {
+    const hasMessengerQuickReplies = messengerQuickReplyOptions.length > 0;
+    const hasButtonTemplate = buttonTemplateButtons.length > 0;
+    const text = replyText.trim() || ((hasMessengerQuickReplies || hasButtonTemplate) ? "Anh/chị chọn giúp em một lựa chọn bên dưới ạ." : "");
+    const hasAttachment = Boolean(replyAttachmentFile);
+    let attachmentUrl = "";
+    let attachmentType = replyAttachmentType;
+    let attachmentFileName = "";
+    let attachmentMimeType = "";
+    let attachmentDisplayName = replyAttachmentFile?.name || "";
+    if (replyAttachmentFile) {
+      attachmentType = replyAttachmentFile.type?.startsWith("video/") ? "video" : "image";
+    }
+    if ((!text && !replyAttachmentFile && !hasMessengerQuickReplies && !hasButtonTemplate) || sendingReply) return;
+
+    if (!selectedPage?.facebookId || !selectedChat?.user) {
+      alert("Vui lòng chọn Page và khách cần trả lời");
+      return;
+    }
+
+    const tempId = `manual_${Date.now()}`;
+    const optimisticMessage = {
+      id: tempId,
+      role: "user",
+      text: `Admin: ${[
+        text,
+        hasAttachment ? `[${replyAttachmentType === "video" ? "Video" : "Hình ảnh"}] ${attachmentDisplayName}` : "",
+        hasButtonTemplate ? `[Button template] ${buttonTemplateButtons.map((item) => item.title).join(", ")}` : "",
+        hasMessengerQuickReplies ? `[Quick replies] ${messengerQuickReplyOptions.map((item) => item.title).join(", ")}` : "",
+      ].filter(Boolean).join("\n")}`,
+      createdAt: new Date().toISOString(),
+      pending: true,
+    };
+
+    const fileToUpload = replyAttachmentFile;
+    setCurrentMessages((prev) => [...prev, optimisticMessage]);
+    setReplyText("");
+    setReplyAttachmentUrl("");
+    setReplyAttachmentFile(null);
+    setMessengerQuickReplyOptions([]);
+    setButtonTemplateButtons([]);
+    setShowComposerTools(false);
+    setSendingReply(true);
+
+    try {
+      if (fileToUpload) {
+        const formData = new FormData();
+        formData.append("file", fileToUpload);
+
+        const uploadRes = await fetch("/api/page-message/upload", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+          body: formData,
+        });
+
+        const uploadData = await uploadRes.json().catch(() => ({}));
+        if (!uploadRes.ok || uploadData?.ok === false) {
+          throw new Error(uploadData?.message || "Không upload được file");
+        }
+        attachmentType = uploadData.attachmentType || attachmentType;
+        attachmentFileName = uploadData.attachmentFileName || "";
+        attachmentMimeType = uploadData.attachmentMimeType || fileToUpload.type || "";
+        attachmentDisplayName = uploadData.fileName || attachmentDisplayName;
+      }
+
+      const res = await fetch("/api/page-message/reply", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          pageId: selectedPage.facebookId,
+          userId: selectedChat.user,
+          text,
+          attachmentUrl,
+          attachmentFileName,
+          attachmentDisplayName,
+          attachmentMimeType,
+          attachmentType,
+          quickReplies: messengerQuickReplyOptions,
+          buttonTemplate: hasButtonTemplate
+            ? {
+              text,
+              buttons: buttonTemplateButtons,
+            }
+            : null,
+        }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data?.ok === false) {
+        throw new Error(data?.message || "Không gửi được tin nhắn");
+      }
+
+      setCurrentMessages((prev) =>
+        prev.map((message) =>
+          message.id === tempId
+            ? {
+              ...message,
+              id: data?.message?.id || message.id,
+              pending: false,
+              createdAt: data?.message?.createdAt || message.createdAt,
+            }
+            : message
+        )
+      );
+
+      setTimeout(() => refreshThreadMessages(selectedChat), 800);
+    } catch (err) {
+      setCurrentMessages((prev) =>
+        prev.map((message) =>
+          message.id === tempId ? { ...message, pending: false, error: true } : message
+        )
+      );
+      alert(err?.message || "Lỗi khi gửi tin nhắn");
+    } finally {
+      setSendingReply(false);
+    }
   };
 
 
@@ -334,6 +919,77 @@ function PageMessage() {
   };
 
   const allSelected = chats.length > 0 && chats.every((c) => selectedUsers[c.user]);
+
+  const allQuickReplies = useMemo(
+    () => [...DEFAULT_QUICK_REPLIES, ...quickReplies],
+    [quickReplies]
+  );
+
+  const insertQuickReply = (templateText) => {
+    const text = String(templateText || "").trim();
+    if (!text) return;
+    setReplyText((prev) => (prev.trim() ? `${prev.trim()}\n${text}` : text));
+    setShowComposerTools(false);
+    window.setTimeout(() => replyTextareaRef.current?.focus(), 0);
+  };
+
+  const saveQuickReply = () => {
+    const title = quickReplyDraft.title.trim();
+    const text = quickReplyDraft.text.trim();
+    if (!title || !text) return;
+
+    const next = [
+      ...quickReplies,
+      {
+        id: `custom_${Date.now()}`,
+        title,
+        text,
+      },
+    ];
+    setQuickReplies(next);
+    localStorage.setItem(QUICK_REPLY_STORAGE_KEY, JSON.stringify(next));
+    setQuickReplyDraft({ title: "", text: "" });
+  };
+
+  const deleteQuickReply = (id) => {
+    const next = quickReplies.filter((item) => item.id !== id);
+    setQuickReplies(next);
+    localStorage.setItem(QUICK_REPLY_STORAGE_KEY, JSON.stringify(next));
+  };
+
+  const addMessengerQuickReplyOption = (value = messengerQuickReplyDraft) => {
+    const rawTitle = typeof value === "string" ? value : value?.title;
+    const rawPayload = typeof value === "string" ? value : value?.payload;
+    const title = String(rawTitle || "").trim().slice(0, 20);
+    const payload = String(rawPayload || title).trim().slice(0, 1000);
+    if (!title) return;
+    setMessengerQuickReplyOptions((prev) => {
+      if (prev.some((item) => item.title.toLowerCase() === title.toLowerCase())) return prev;
+      return [...prev, { title, payload }].slice(0, 13);
+    });
+    setMessengerQuickReplyDraft({ title: "", payload: "" });
+  };
+
+  const removeMessengerQuickReplyOption = (index) => {
+    setMessengerQuickReplyOptions((prev) => prev.filter((_, itemIndex) => itemIndex !== index));
+  };
+
+  const addButtonTemplateButton = () => {
+    const title = buttonTemplateDraft.title.trim().slice(0, 20);
+    const value = buttonTemplateDraft.value.trim();
+    if (!title || !value) return;
+
+    const button = buttonTemplateDraft.type === "web_url"
+      ? { type: "web_url", title, url: value }
+      : { type: "postback", title, payload: value };
+
+    setButtonTemplateButtons((prev) => [...prev, button].slice(0, 3));
+    setButtonTemplateDraft({ title: "", type: "postback", value: "" });
+  };
+
+  const removeButtonTemplateButton = (index) => {
+    setButtonTemplateButtons((prev) => prev.filter((_, itemIndex) => itemIndex !== index));
+  };
 
   const handleCheckAll = () => {
     if (allSelected) {
@@ -449,8 +1105,8 @@ function PageMessage() {
       setBulkMessage("");
       setImageUrl("");
 
-      if (selectedChat?.threadId) {
-        setTimeout(() => refreshThreadMessages(selectedChat.threadId), 800);
+      if (selectedChat?.threadId || selectedChat?.conversationId) {
+        setTimeout(() => refreshThreadMessages(selectedChat), 800);
       }
     } catch (err) {
       console.error("❌ Lỗi tổng khi gửi bulk:", err);
@@ -511,22 +1167,459 @@ function PageMessage() {
           .map((id) => String(id))
       );
 
+      const groupedOrders = new Map();
+      filteredOrders.forEach((order) => {
+        const customerId = order?.customerId ? String(order.customerId) : "";
+        if (!customerId) return;
+        const current = groupedOrders.get(customerId) || [];
+        groupedOrders.set(customerId, [...current, order]);
+      });
+
       setOrderedCustomerSet(setIds);
+      setOrdersByCustomer(groupedOrders);
     } catch (err) {
       console.error("❌ Lỗi load orders:", err);
       setOrderedCustomerSet(new Set());
+      setOrdersByCustomer(new Map());
     } finally {
       setLoadingOrders(false);
     }
   };
 
+  const selectedCustomerOrders = useMemo(() => {
+    if (!selectedChat?.user) return [];
+    return ordersByCustomer.get(String(selectedChat.user)) || [];
+  }, [ordersByCustomer, selectedChat?.user]);
+
+  const selectedReportIds = useMemo(
+    () => new Set(Object.keys(selectedReportMessages)),
+    [selectedReportMessages],
+  );
+  const selectedReportCount = selectedReportIds.size;
+  const reportedMessageCount = useMemo(
+    () =>
+      (Array.isArray(messageReports) ? messageReports : []).reduce(
+        (sum, report) => sum + (Array.isArray(report?.messages) ? report.messages.length : 0),
+        0,
+      ),
+    [messageReports],
+  );
+
+  const toggleReportMessage = (message) => {
+    if (!message?.id) return;
+    const id = String(message.id);
+    setSelectedReportMessages((current) => {
+      const next = { ...current };
+      if (next[id]) {
+        delete next[id];
+      } else {
+        next[id] = {
+          messageId: id,
+          role:
+            message.kind === "admin"
+              ? "human_admin"
+              : message.role === "assistant"
+                ? "bot"
+                : "customer",
+          text: message.text || "",
+          imageUrl: message.imageUrl || "",
+          createdAt: message.ts || null,
+        };
+      }
+      return next;
+    });
+  };
+
+  const fetchMessageReports = async ({ open = false, chatOverride = null } = {}) => {
+    if (!selectedPage?.facebookId || !token) return;
+    const targetChat = chatOverride || selectedChat;
+    try {
+      setLoadingMessageReports(true);
+      const params = new URLSearchParams({ pageId: selectedPage.facebookId });
+      if (targetChat?.user) params.set("userId", targetChat.user);
+      if (targetChat?.conversationId) params.set("conversationId", targetChat.conversationId);
+      if (targetChat?.threadId) params.set("threadId", targetChat.threadId);
+
+      const res = await fetch(`/api/message-reports?${params.toString()}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data?.ok === false) {
+        throw new Error(data?.message || "Không tải được danh sách báo lỗi");
+      }
+      setMessageReports(Array.isArray(data.reports) ? data.reports : []);
+      if (open) setIsMessageReportListOpen(true);
+    } catch (err) {
+      alert(err?.message || "Lỗi khi tải danh sách báo lỗi");
+    } finally {
+      setLoadingMessageReports(false);
+    }
+  };
+
+  const submitMessageReport = async () => {
+    const messages = Object.values(selectedReportMessages);
+    if (!selectedPage?.facebookId || !selectedChat?.user || messages.length === 0 || savingMessageReport) return;
+    if (!messageReportCategory) {
+      alert("Vui lòng chọn nhóm lỗi.");
+      return;
+    }
+    if (messageReportCategory === "Khác" && !messageReportCustomCategory.trim()) {
+      alert("Vui lòng nhập nhóm lỗi khác.");
+      return;
+    }
+
+    try {
+      setSavingMessageReport(true);
+      const res = await fetch("/api/message-reports", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          pageId: selectedPage.facebookId,
+          pageName: selectedPage.name || "",
+          userId: selectedChat.user,
+          customerName:
+            selectedChat.userName ||
+            userInfo?.[selectedChat.user]?.name ||
+            selectedChat.user,
+          conversationId: selectedChat.conversationId || "",
+          threadId: selectedChat.threadId || "",
+          category: messageReportCategory,
+          customCategory: messageReportCustomCategory,
+          messages,
+          note: messageReportNote,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data?.ok === false) {
+        throw new Error(data?.message || "Không lưu được báo lỗi");
+      }
+      setSelectedReportMessages({});
+      setMessageReportCategory("");
+      setMessageReportCustomCategory("");
+      setMessageReportNote("");
+      setIsReportMode(false);
+      setMessageReports((current) => [data.report, ...current].filter(Boolean));
+      alert("Đã lưu báo lỗi tin nhắn.");
+    } catch (err) {
+      alert(err?.message || "Lỗi khi lưu báo lỗi");
+    } finally {
+      setSavingMessageReport(false);
+    }
+  };
+
+  useEffect(() => {
+    setOrderDrafts((current) => {
+      const next = { ...current };
+      selectedCustomerOrders.forEach((order) => {
+        const id = String(order?._id || "");
+        if (!id || next[id]) return;
+        next[id] = {
+          customerName: order.customerName || "",
+          phoneNumber: order.phoneNumber || "",
+          address: order.address || "",
+          adName: order.adName || "",
+          note: order.note || "",
+          shippingFee: order.shippingFee == null ? "" : String(order.shippingFee),
+          items: Array.isArray(order.items)
+            ? order.items.map((item) => ({
+              productName: item.productName || "",
+              sku: item.sku || "",
+              unitName: item.unitName || "",
+              quantity: item.quantity == null ? "" : String(item.quantity),
+              price: item.price == null ? "" : String(item.price),
+            }))
+            : [],
+        };
+      });
+      return next;
+    });
+  }, [selectedCustomerOrders]);
+
+  const formatMoney = (value) =>
+    new Intl.NumberFormat("vi-VN", {
+      style: "currency",
+      currency: "VND",
+      maximumFractionDigits: 0,
+    }).format(Number(value) || 0);
+
+  const formatDateTime = (value) => {
+    if (!value) return "";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "";
+    return date.toLocaleString("vi-VN");
+  };
+
+  const conversationContext = useMemo(() => {
+    if (!selectedChat) return null;
+
+    const messages = [...(Array.isArray(currentMessages) ? currentMessages : [])].sort((a, b) => {
+      const ta = new Date(a.createdAt || a.created_at || 0).getTime();
+      const tb = new Date(b.createdAt || b.created_at || 0).getTime();
+      return (ta || 0) - (tb || 0);
+    });
+
+    const getRoleLabel = (message) => {
+      const role = String(message?.role || "").toLowerCase();
+      const text = normalizeMessageText(message);
+      if (/^\s*admin\s*:/i.test(text) || role.includes("admin") || role.includes("human")) {
+        return "Nhân viên";
+      }
+      if (role === "assistant" || role.includes("bot") || role.includes("page")) {
+        return "Page/BOT";
+      }
+      return "Khách hàng";
+    };
+
+    const counts = messages.reduce(
+      (acc, message) => {
+        const label = getRoleLabel(message);
+        if (label === "Khách hàng") acc.customer += 1;
+        else if (label === "Nhân viên") acc.staff += 1;
+        else acc.page += 1;
+        return acc;
+      },
+      { customer: 0, page: 0, staff: 0 },
+    );
+
+    const recentMessages = messages
+      .slice(-8)
+      .map((message) => {
+        const label = getRoleLabel(message);
+        const text = normalizeMessageText(message).replace(/^\s*admin\s*:\s*/i, "");
+        return {
+          id: message?._id || message?.id || `${label}_${message?.createdAt || message?.created_at || Math.random()}`,
+          role: label,
+          text: text || "[Đính kèm / nội dung không phải chữ]",
+          time: formatDateTime(message?.createdAt || message?.created_at),
+        };
+      });
+
+    const firstOrder = selectedCustomerOrders[0] || null;
+    const firstItem = Array.isArray(firstOrder?.items) ? firstOrder.items[0] : null;
+    const productName =
+      selectedChat.activeProductName ||
+      selectedChat.productName ||
+      firstItem?.productName ||
+      selectedChat.activeSku ||
+      firstItem?.sku ||
+      "";
+
+    return {
+      customerName:
+        selectedChat.userName ||
+        userInfo?.[selectedChat.user]?.name ||
+        selectedChat.verifiedCustomerName ||
+        selectedChat.user ||
+        "Không rõ khách",
+      customerId: selectedChat.user || "",
+      pageName: selectedPage?.name || selectedChat.pageName || selectedChat.page || "Không rõ Page",
+      conversationId: selectedChat.conversationId || selectedChat.threadId || "",
+      adName: selectedChat.adName || selectedChat.adNameInjected || firstOrder?.adName || "",
+      phoneNumber: selectedChat.phoneNumber || firstOrder?.phoneNumber || "",
+      address: selectedChat.address || firstOrder?.address || "",
+      productName,
+      intent: selectedChat.lastIntent || selectedChat.intent || "",
+      stage: selectedChat.consultationStage || "",
+      summary: selectedChat.conversationSummary || selectedChat.summary || "",
+      replyMode: chatReplyState.mode === "human" ? "Người đang trả lời" : "BOT đang trả lời",
+      updatedAt: formatDateTime(selectedChat.updatedAt),
+      orderCount: selectedCustomerOrders.length,
+      counts,
+      recentMessages,
+    };
+  }, [
+    selectedChat,
+    currentMessages,
+    selectedCustomerOrders,
+    selectedPage?.name,
+    userInfo,
+    chatReplyState.mode,
+  ]);
+
+  const isSpamChat = (chat) => {
+    const values = [
+      chat?.isSpam,
+      chat?.spam,
+      chat?.status,
+      chat?.tag,
+      chat?.label,
+      chat?.customerStatus,
+    ];
+
+    return values.some((value) => {
+      if (value === true) return true;
+      return String(value || "").trim().toLowerCase() === "spam";
+    });
+  };
+
+  const updateOrderDraft = (orderId, field, value) => {
+    setOrderDrafts((current) => ({
+      ...current,
+      [orderId]: {
+        ...(current[orderId] || {}),
+        [field]: value,
+      },
+    }));
+  };
+
+  const updateOrderDraftItem = (orderId, itemIndex, field, value) => {
+    setOrderDrafts((current) => {
+      const draft = current[orderId] || {};
+      const items = Array.isArray(draft.items) ? [...draft.items] : [];
+      items[itemIndex] = {
+        ...(items[itemIndex] || {}),
+        [field]: value,
+      };
+      return {
+        ...current,
+        [orderId]: {
+          ...draft,
+          items,
+        },
+      };
+    });
+  };
+
+  const addOrderDraftItem = (orderId) => {
+    setOrderDrafts((current) => {
+      const draft = current[orderId] || {};
+      return {
+        ...current,
+        [orderId]: {
+          ...draft,
+          items: [
+            ...(Array.isArray(draft.items) ? draft.items : []),
+            { productName: "", sku: "", unitName: "", quantity: "1", price: "" },
+          ],
+        },
+      };
+    });
+  };
+
+  const removeOrderDraftItem = (orderId, itemIndex) => {
+    setOrderDrafts((current) => {
+      const draft = current[orderId] || {};
+      return {
+        ...current,
+        [orderId]: {
+          ...draft,
+          items: (Array.isArray(draft.items) ? draft.items : []).filter((_, index) => index !== itemIndex),
+        },
+      };
+    });
+  };
+
+  const replaceOrderInCustomerMap = (updatedOrder) => {
+    if (!updatedOrder?.customerId) return;
+    const customerId = String(updatedOrder.customerId);
+    setOrdersByCustomer((current) => {
+      const next = new Map(current);
+      const orders = next.get(customerId) || [];
+      next.set(
+        customerId,
+        orders.map((order) =>
+          String(order._id) === String(updatedOrder._id) ? updatedOrder : order,
+        ),
+      );
+      return next;
+    });
+  };
+
+  const handleUpdateOrder = async (order) => {
+    const orderId = String(order?._id || "");
+    if (!orderId || savingOrderId) return;
+    const draft = orderDrafts[orderId] || {};
+
+    try {
+      setSavingOrderId(orderId);
+      const shippingFeeNumber = draft.shippingFee === "" ? 0 : Number(draft.shippingFee);
+      if (!Number.isFinite(shippingFeeNumber) || shippingFeeNumber < 0) {
+        throw new Error("Phí ship không hợp lệ");
+      }
+
+      const phoneNumber = String(order.phoneNumber || "").trim();
+      const address = String(draft.address || "").trim();
+      if (!phoneNumber || !address) {
+        throw new Error("Vui lòng nhập số điện thoại và địa chỉ");
+      }
+
+      const cleanItems = (Array.isArray(draft.items) ? draft.items : [])
+        .filter((item) => String(item?.productName || "").trim())
+        .map((item) => {
+          const quantity = item.quantity === "" || item.quantity == null ? 0 : Number(item.quantity);
+          const price = item.price === "" || item.price == null ? 0 : Number(item.price);
+          if (!Number.isFinite(quantity) || quantity < 0) throw new Error("Số lượng sản phẩm không hợp lệ");
+          if (!Number.isFinite(price) || price < 0) throw new Error("Giá sản phẩm không hợp lệ");
+          return {
+            productName: String(item.productName || "").trim(),
+            sku: String(item.sku || "").trim(),
+            unitName: String(item.unitName || "").trim(),
+            quantity,
+            price,
+          };
+        });
+
+      const res = await fetch(`/api/order/${orderId}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          pageId: order.pageId,
+          pageName: order.pageName,
+          customerId: order.customerId,
+          customerName: String(draft.customerName || "").trim(),
+          adName: String(draft.adName || "").trim(),
+          phoneNumber,
+          address,
+          note: String(draft.note || "").trim(),
+          shippingFee: shippingFeeNumber,
+          items: cleanItems,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.message || "Không cập nhật được đơn hàng");
+
+      replaceOrderInCustomerMap(data);
+      setOrderDrafts((current) => ({
+        ...current,
+        [orderId]: {
+          customerName: data.customerName || "",
+          phoneNumber: data.phoneNumber || "",
+          address: data.address || "",
+          adName: data.adName || "",
+          note: data.note || "",
+          shippingFee: data.shippingFee == null ? "" : String(data.shippingFee),
+          items: Array.isArray(data.items)
+            ? data.items.map((item) => ({
+              productName: item.productName || "",
+              sku: item.sku || "",
+              unitName: item.unitName || "",
+              quantity: item.quantity == null ? "" : String(item.quantity),
+              price: item.price == null ? "" : String(item.price),
+            }))
+            : [],
+        },
+      }));
+    } catch (err) {
+      alert(err?.message || "Lỗi khi cập nhật đơn hàng");
+    } finally {
+      setSavingOrderId("");
+    }
+  };
+
 
   return (
-    <div className="flex h-screen w-full overflow-hidden min-w-0">
+    <div className="flex h-screen w-full min-w-0 overflow-hidden bg-slate-100 text-slate-900">
       {/* LEFT - PAGE LIST */}
       <div
         className={[
-          "bg-gray-50 overflow-hidden transition-all duration-300 ease-in-out shrink-0",
+          "overflow-hidden border-r border-slate-200/80 bg-white transition-all duration-300 ease-in-out shrink-0 shadow-sm",
           isPageListOpen ? "w-40 md:w-80" : "w-0",
         ].join(" ")}
       >
@@ -547,15 +1640,15 @@ function PageMessage() {
       </div>
 
       {/* DIVIDER + TOGGLE */}
-      <div className="relative w-[1px] bg-gray-200 shrink-0">
+      <div className="relative w-[1px] shrink-0 bg-slate-200">
         <button
           type="button"
           onClick={() => setIsPageListOpen((v) => !v)}
           className={[
             "absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2",
-            "h-12 w-7 rounded-full border border-gray-300 bg-white shadow-sm",
+            "h-12 w-7 rounded-full border border-slate-200 bg-white text-slate-500 shadow-md shadow-slate-900/10",
             "flex items-center justify-center",
-            "hover:bg-gray-50 active:scale-95 transition",
+            "hover:bg-sky-50 hover:text-sky-700 active:scale-95 transition",
             "z-20",
           ].join(" ")}
           title={isPageListOpen ? "Ẩn danh sách Page" : "Hiện danh sách Page"}
@@ -565,38 +1658,93 @@ function PageMessage() {
       </div>
 
       {/* RIGHT CONTENT */}
-      <div className="flex-1 overflow-hidden flex flex-col bg-white">
+      <div className="flex flex-1 flex-col overflow-hidden bg-slate-100">
         {/* Header */}
-        <div className="border-b p-4 bg-gray-100 flex items-center justify-between gap-3">
+        <div className="flex items-center justify-between gap-3 border-b border-slate-200 bg-white/95 px-4 py-3 shadow-sm backdrop-blur">
           <div className="min-w-0">
-            <h2 className="text-lg font-bold text-gray-700 truncate">
+            <h2 className="truncate text-lg font-bold text-slate-900">
               {selectedPage ? `Tin nhắn của Page: ${selectedPage.name}` : "Chọn một Page để xem tin nhắn"}
             </h2>
             {selectedPage && (
-              <div className="text-xs text-gray-500 truncate">
+              <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                <span className="inline-flex h-2 w-2 rounded-full bg-emerald-500 shadow-[0_0_0_3px_rgba(16,185,129,0.14)]" />
                 {loadingChats ? "Đang tải dữ liệu khách..." : `Tổng khách: ${filteredChats.length}`}
               </div>
+            )}
+          </div>
+
+          <div className="flex shrink-0 items-center gap-2">
+            {selectedChat && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setIsContextPopupOpen(true)}
+                  className="grid h-10 w-10 place-items-center rounded-full border border-sky-200 bg-sky-50 text-sky-700 shadow-sm transition hover:bg-sky-100"
+                  title="Xem ngữ cảnh cuộc trò chuyện"
+                >
+                  <FileText size={18} />
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setIsOrderPopupOpen(true)}
+                  className={[
+                    "relative grid h-10 w-10 place-items-center rounded-full border shadow-sm transition",
+                    selectedCustomerOrders.length > 0
+                      ? "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                      : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50",
+                  ].join(" ")}
+                  title={
+                    selectedCustomerOrders.length > 0
+                      ? `Xem ${selectedCustomerOrders.length} đơn hàng của khách`
+                      : "Khách này chưa có đơn trong mốc đã tải"
+                  }
+                >
+                  <ShoppingCart size={18} />
+                  {selectedCustomerOrders.length > 0 && (
+                    <span className="absolute -right-1 -top-1 grid h-4 min-w-4 place-items-center rounded-full bg-emerald-600 px-1 text-[10px] font-bold leading-none text-white">
+                      {selectedCustomerOrders.length}
+                    </span>
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => fetchMessageReports({ open: true })}
+                  className="relative grid h-10 w-10 place-items-center rounded-full border border-rose-200 bg-rose-50 text-rose-700 shadow-sm transition hover:bg-rose-100"
+                  title="Xem danh sách đoạn tin nhắn lỗi được báo"
+                >
+                  <Flag size={18} />
+                  {messageReports.length > 0 && (
+                    <span className="absolute -right-1 -top-1 grid h-4 min-w-4 place-items-center rounded-full bg-rose-600 px-1 text-[10px] font-bold leading-none text-white">
+                      {messageReports.length}
+                    </span>
+                  )}
+                </button>
+              </>
             )}
           </div>
         </div>
 
         {/* Nếu chưa chọn page */}
         {!selectedPage ? (
-          <div className="flex-1 flex items-center justify-center text-gray-500">
-            Chọn một Page để xem danh sách tin nhắn
+          <div className="flex flex-1 items-center justify-center p-6 text-slate-500">
+            <div className="rounded-2xl border border-dashed border-slate-300 bg-white px-6 py-5 text-center shadow-sm">
+              Chọn một Page để xem danh sách tin nhắn
+            </div>
           </div>
         ) : (
           <>
             {/* MOBILE TAB BAR */}
-            <div className="md:hidden grid grid-cols-2 gap-2 p-2 border-b bg-white">
+            <div className="grid grid-cols-2 gap-2 border-b border-slate-200 bg-white p-2 md:hidden">
               <button
                 type="button"
                 onClick={() => setMobileTab("customers")}
                 className={[
-                  "py-2 rounded border text-sm font-semibold",
+                  "rounded-xl border py-2 text-sm font-semibold transition",
                   mobileTab === "customers"
-                    ? "bg-sky-600 text-white border-sky-600"
-                    : "bg-white text-gray-700 border-gray-300",
+                    ? "border-sky-600 bg-sky-600 text-white shadow-sm"
+                    : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50",
                 ].join(" ")}
               >
                 Khách ({filteredChats.length})
@@ -606,10 +1754,10 @@ function PageMessage() {
                 type="button"
                 onClick={() => setMobileTab("messages")}
                 className={[
-                  "py-2 rounded border text-sm font-semibold",
+                  "rounded-xl border py-2 text-sm font-semibold transition",
                   mobileTab === "messages"
-                    ? "bg-sky-600 text-white border-sky-600"
-                    : "bg-white text-gray-700 border-gray-300",
+                    ? "border-sky-600 bg-sky-600 text-white shadow-sm"
+                    : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50",
                 ].join(" ")}
                 disabled={!selectedChat}
                 title={!selectedChat ? "Chọn khách trước" : ""}
@@ -619,23 +1767,23 @@ function PageMessage() {
             </div>
 
             {/* MAIN 2 COLUMNS */}
-            <div className="flex-1 overflow-hidden flex p-2 gap-2">
+            <div className="flex flex-1 gap-3 overflow-hidden p-3">
               {/* CỘT KHÁCH */}
               <div
                 className={[
-                  "md:w-[360px] md:shrink-0 md:flex md:flex-col md:border md:rounded md:bg-white md:overflow-hidden",
+                  "md:w-[372px] md:shrink-0 md:flex md:flex-col md:overflow-hidden md:rounded-2xl md:border md:border-slate-200 md:bg-white md:shadow-sm",
                   "w-full flex flex-col",
                   mobileTab === "customers" ? "flex" : "hidden md:flex",
                 ].join(" ")}
               >
                 {/* Bulk send box */}
-                <div className="p-2 border-b bg-gray-50 space-y-2">
+                <div className="space-y-3 border-b border-slate-200 bg-white p-3">
                   <div className="flex items-center justify-between">
-                    <div className="text-sm font-semibold text-gray-700">
+                    <div className="text-sm font-bold text-slate-800">
                       Danh sách khách
                     </div>
 
-                    <label className="flex items-center gap-2 text-xs text-gray-600 select-none">
+                    <label className="flex select-none items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-600">
                       <input
                         type="checkbox"
                         checked={allSelected}
@@ -650,7 +1798,7 @@ function PageMessage() {
                     value={chatSearch}
                     onChange={(e) => setChatSearch(e.target.value)}
                     placeholder="Tìm theo tên / adName / userId / threadId..."
-                    className="w-full px-3 py-2 text-sm border rounded outline-none focus:ring-2 focus:ring-sky-200"
+                    className="h-10 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm outline-none transition placeholder:text-slate-400 focus:border-sky-200 focus:bg-white focus:ring-4 focus:ring-sky-100"
                   />
 
                   <input
@@ -658,7 +1806,7 @@ function PageMessage() {
                     value={imageUrl}
                     onChange={(e) => setImageUrl(e.target.value)}
                     placeholder="URL hình (tùy chọn) .jpg/.png/.webp"
-                    className="w-full border px-3 py-2 rounded text-sm"
+                    className="h-10 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm outline-none transition placeholder:text-slate-400 focus:border-sky-200 focus:bg-white focus:ring-4 focus:ring-sky-100"
                   />
 
                   <div className="flex">
@@ -673,12 +1821,12 @@ function PageMessage() {
                         }
                       }}
                       placeholder="Nhập tin nhắn cần gửi"
-                      className="flex-1 border px-3 py-2 rounded-l text-sm"
+                      className="h-10 min-w-0 flex-1 rounded-l-xl border border-r-0 border-slate-200 bg-slate-50 px-3 text-sm outline-none transition placeholder:text-slate-400 focus:border-sky-200 focus:bg-white focus:ring-4 focus:ring-sky-100"
                     />
 
                     <button
                       onClick={handleSendBulk}
-                      className="px-4 py-2 bg-green-500 text-white rounded-r text-sm disabled:opacity-60"
+                      className="h-10 rounded-r-xl bg-emerald-600 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 disabled:opacity-60"
                       disabled={sendingBulk}
                       title={sendingBulk ? "Đang gửi..." : "Gửi hàng loạt"}
                     >
@@ -688,28 +1836,30 @@ function PageMessage() {
                 </div>
 
                 {/* List khách */}
-                <div className="flex-1 overflow-y-auto">
+                <div className="min-h-0 flex-1 overflow-y-auto bg-slate-50/80 p-2">
                   {loadingOrders && (
-                    <div className="text-xs text-gray-500">Đang tải đơn hàng...</div>
+                    <div className="px-2 py-1 text-xs text-slate-500">Đang tải đơn hàng...</div>
                   )}
 
                   {loadingChats ? (
-                    <div className="p-4 text-sm text-gray-500">Đang tải danh sách khách...</div>
+                    <div className="rounded-xl bg-white p-4 text-sm text-slate-500 shadow-sm">Đang tải danh sách khách...</div>
                   ) : filteredChats.length === 0 ? (
-                    <div className="p-4 text-sm text-gray-500">Chưa có tin nhắn nào.</div>
+                    <div className="rounded-xl border border-dashed border-slate-300 bg-white p-4 text-sm text-slate-500 shadow-sm">Chưa có tin nhắn nào.</div>
                   ) : (
                     filteredChats.map((chat) => {
                       const u = userInfo[chat.user];
                       const hasOrder = orderedCustomerSet.has(String(chat.user));
-                      const isActive = activeThreadId === chat.threadId;
+                      const isSpam = isSpamChat(chat);
+                      const isActive = activeThreadId === (chat.conversationId || chat.threadId);
 
                       return (
                         <div
                           key={chat._id}
                           className={[
-                            "border-b hover:bg-sky-50",
-                            isActive ? "bg-sky-100" : "bg-white",
-                            hasOrder ? "bg-green-50" : "",
+                            "mb-2 overflow-hidden rounded-xl border transition",
+                            isActive ? "border-sky-200 bg-sky-50 shadow-sm" : "border-transparent bg-white hover:border-sky-100 hover:bg-sky-50/60",
+                            isSpam && !isActive ? "bg-rose-50/80" : "",
+                            hasOrder && !isActive ? "bg-emerald-50/80" : "",
                           ].join(" ")}
                         >
                           <div className="flex items-center gap-2 px-3 py-3">
@@ -728,38 +1878,47 @@ function PageMessage() {
                                 checkOnlyForViewing(chat.user);  // ✅ reset checkbox chỉ còn khách đang xem
                                 handleSelectChat(chat);          // ✅ mở hội thoại
                               }}
-                              className="w-full text-left flex items-center gap-3 min-w-0"
+                              className="relative flex w-full min-w-0 items-center gap-3 text-left"
                             >
 
                               <img
                                 src={u?.picture || defaultAvatar}
                                 alt={u?.name}
-                                className="w-10 h-10 rounded-full border bg-white shrink-0"
+                                className="h-11 w-11 shrink-0 rounded-full border border-white bg-white object-cover shadow-sm ring-1 ring-slate-200"
                                 onError={(e) => (e.currentTarget.src = defaultAvatar)}
                               />
 
                               <div className="min-w-0 flex-1">
 
-                                <div className="flex items-center gap-2 min-w-0">
-                                  <div className="text-[14px] font-semibold text-gray-800 truncate">
+                                <div className="min-w-0 pr-24">
+                                  <div className="truncate text-[14px] font-bold text-slate-800">
                                     {chat.userName || u?.name || chat.user}
                                   </div>
-
-                                  {hasOrder && (
-                                    <span className="shrink-0 text-[10px] px-2 py-0.5 rounded-full bg-green-600 text-white">
-                                      Đã có đơn
-                                    </span>
-                                  )}
                                 </div>
-
-
-                                <div className="text-[12px] text-gray-500 truncate">
+                                <div
+                                  className="mt-0.5 truncate pr-28 text-[12px] text-slate-500"
+                                  title={chat.adName || "Không rõ nguồn quảng cáo"}
+                                >
                                   {chat.adName || "Không rõ nguồn quảng cáo"}
                                 </div>
                               </div>
 
-                              <div className="hidden md:block text-[10px] text-gray-400 whitespace-nowrap">
-                                {chat.updatedAt ? new Date(chat.updatedAt).toLocaleString("vi-VN") : ""}
+                              <div className="absolute inset-y-0 right-0 flex max-w-[96px] flex-col items-end justify-between">
+                                <span
+                                  className={[
+                                    "shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold",
+                                    isSpam
+                                      ? "bg-rose-100 text-rose-700 ring-1 ring-rose-200"
+                                      : hasOrder
+                                        ? "bg-emerald-600 text-white"
+                                        : "bg-amber-100 text-amber-700 ring-1 ring-amber-200",
+                                  ].join(" ")}
+                                >
+                                  {isSpam ? "Spam" : hasOrder ? "Đã có đơn" : "Chưa chốt"}
+                                </span>
+                                <span className="hidden max-w-[96px] truncate text-right text-[10px] leading-4 text-slate-400 md:block">
+                                  {chat.updatedAt ? new Date(chat.updatedAt).toLocaleString("vi-VN") : ""}
+                                </span>
                               </div>
                             </button>
                           </div>
@@ -768,20 +1927,21 @@ function PageMessage() {
                     })
                   )}
                 </div>
+
               </div>
 
               {/* CỘT TIN NHẮN */}
               <div
                 className={[
-                  "flex-1 md:border md:rounded md:bg-white md:overflow-hidden md:flex md:flex-col",
+                  "flex-1 md:overflow-hidden md:rounded-2xl md:border md:border-slate-200 md:bg-white md:shadow-sm md:flex md:flex-col",
                   "w-full flex flex-col",
                   mobileTab === "messages" ? "flex" : "hidden md:flex",
                 ].join(" ")}
               >
-                <div className="p-3 border-b bg-gray-50 flex items-center justify-between gap-3">
+                <div className="flex items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3">
                   {selectedChat ? (
                     <div className="min-w-0">
-                      <div className="font-semibold text-gray-800 truncate flex items-center gap-2 min-w-0">
+                      <div className="flex min-w-0 items-center gap-2 truncate font-bold text-slate-900">
                         <span className="truncate">
                           {selectedChat.userName ||
                             userInfo?.[selectedChat.user]?.name ||
@@ -789,46 +1949,604 @@ function PageMessage() {
                         </span>
 
                         {selectedChat.threadId ? (
-                          <span className="text-xs font-normal text-gray-500 shrink-0">
+                          <span className="shrink-0 text-xs font-normal text-slate-500">
                             • {selectedChat.threadId}
                           </span>
                         ) : null}
                       </div>
 
                       {/* Dòng 3: Ad name */}
-                      <div className="text-xs text-gray-500 truncate">
+                      <div className="mt-0.5 truncate text-xs text-slate-500">
                         {selectedChat.adName ? `QC: ${selectedChat.adName}` : "Không rõ QC"}
                       </div>
                     </div>
 
                   ) : (
-                    <div className="text-sm text-gray-500">Chọn một khách để xem tin nhắn</div>
+                    <div className="text-sm text-slate-500">Chọn một khách để xem tin nhắn</div>
                   )}
 
                   <div className="flex items-center gap-2">
-                    {loadingMessages && (
-                      <div className="text-xs text-gray-500 whitespace-nowrap">Đang tải...</div>
+                    {selectedChat && (
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsReportMode((value) => !value);
+                            setSelectedReportMessages({});
+                            setMessageReportCategory("");
+                            setMessageReportCustomCategory("");
+                            setMessageReportNote("");
+                          }}
+                          className={[
+                            "relative rounded-full border px-3 py-1 text-xs font-medium shadow-sm transition",
+                            isReportMode
+                              ? "border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100"
+                              : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50",
+                          ].join(" ")}
+                          title="Bật chế độ chọn tin nhắn để báo lỗi"
+                        >
+                          {isReportMode ? "Hủy chọn lỗi" : "Báo lỗi tin"}
+                          {(isReportMode ? selectedReportCount : reportedMessageCount) > 0 && (
+                            <span className="absolute -right-1.5 -top-2 grid h-5 min-w-5 place-items-center rounded-full bg-emerald-600 px-1 text-[10px] font-black leading-none text-white ring-2 ring-white">
+                              {isReportMode ? selectedReportCount : reportedMessageCount}
+                            </span>
+                          )}
+                        </button>
+
+                        {isReportMode && selectedReportCount > 0 && (
+                          <button
+                            type="button"
+                            onClick={submitMessageReport}
+                            disabled={savingMessageReport}
+                            className="rounded-full bg-rose-600 px-3 py-1 text-xs font-bold text-white shadow-sm transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+                            title="Lưu các đoạn tin nhắn đã chọn vào bảng báo lỗi"
+                          >
+                            {savingMessageReport ? "Đang lưu..." : `Lưu lỗi (${selectedReportCount})`}
+                          </button>
+                        )}
+
+                        <div
+                          className={[
+                            "inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium ring-1",
+                            chatReplyState.mode === "human"
+                              ? "bg-amber-50 text-amber-700 ring-amber-200"
+                              : "bg-emerald-50 text-emerald-700 ring-emerald-200",
+                          ].join(" ")}
+                          title={chatReplyState.mode === "human" ? "Người đang trả lời" : "BOT đang trả lời"}
+                        >
+                          <span
+                            className={[
+                              "h-2 w-2 rounded-full",
+                              chatReplyState.loading
+                                ? "bg-slate-300"
+                                : chatReplyState.mode === "human"
+                                  ? "bg-amber-500"
+                                  : "bg-emerald-500",
+                            ].join(" ")}
+                          />
+                          {chatReplyState.loading
+                            ? "Đang kiểm tra"
+                            : chatReplyState.mode === "human"
+                              ? "Người đang trả lời"
+                              : "BOT đang trả lời"}
+                        </div>
+
+                        {chatReplyState.mode === "human" && (
+                          <button
+                            type="button"
+                            onClick={handleReleaseToBot}
+                            disabled={releasingToBot}
+                            className="rounded-full border border-sky-200 bg-white px-3 py-1 text-xs font-medium text-sky-700 shadow-sm hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-60"
+                            title="Nhường lại cho BOT tự động trả lời"
+                          >
+                            {releasingToBot ? "Đang nhường..." : "Nhường BOT"}
+                          </button>
+                        )}
+                      </div>
                     )}
 
                     <button
                       type="button"
                       onClick={() => setMobileTab("customers")}
-                      className="md:hidden px-3 py-1.5 text-xs rounded border border-gray-300 bg-white"
+                      className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm md:hidden"
                     >
                       Danh sách khách
                     </button>
                   </div>
                 </div>
 
-                <div className="flex-1 overflow-y-auto">
+                <div className="min-h-0 flex-1 overflow-y-auto bg-slate-50">
                   {selectedChat ? (
-                    <ChatMessagesPanel messages={currentMessages} />
+                    <>
+                      {isReportMode && (
+                        <div className="border-b border-rose-100 bg-rose-50 px-4 py-3">
+                          <div className="space-y-2">
+                            <div className="text-xs font-semibold text-rose-700">
+                              Chọn nhóm lỗi và các bong bóng tin nhắn bị lỗi, sau đó bấm lưu.
+                            </div>
+                            <div className="grid gap-2 md:grid-cols-[220px_1fr]">
+                              <select
+                                value={messageReportCategory}
+                                onChange={(event) => {
+                                  setMessageReportCategory(event.target.value);
+                                  if (event.target.value !== "Khác") {
+                                    setMessageReportCustomCategory("");
+                                  }
+                                }}
+                                className="h-9 rounded-xl border border-rose-100 bg-white px-3 text-xs font-semibold text-slate-700 outline-none focus:border-rose-300 focus:ring-2 focus:ring-rose-100"
+                              >
+                                <option value="">Chọn nhóm lỗi</option>
+                                {MESSAGE_REPORT_CATEGORIES.map((category) => (
+                                  <option key={category} value={category}>
+                                    {category}
+                                  </option>
+                                ))}
+                              </select>
+                              {messageReportCategory === "Khác" ? (
+                                <input
+                                  value={messageReportCustomCategory}
+                                  onChange={(event) => setMessageReportCustomCategory(event.target.value)}
+                                  placeholder="Nhập nhóm lỗi khác"
+                                  className="h-9 min-w-0 rounded-xl border border-rose-100 bg-white px-3 text-xs text-slate-700 outline-none focus:border-rose-300 focus:ring-2 focus:ring-rose-100"
+                                />
+                              ) : (
+                                <input
+                                  value={messageReportNote}
+                                  onChange={(event) => setMessageReportNote(event.target.value)}
+                                  placeholder="Ghi chú lỗi (tùy chọn)"
+                                  className="h-9 min-w-0 rounded-xl border border-rose-100 bg-white px-3 text-xs text-slate-700 outline-none focus:border-rose-300 focus:ring-2 focus:ring-rose-100"
+                                />
+                              )}
+                            </div>
+                            {messageReportCategory === "Khác" && (
+                              <input
+                                value={messageReportNote}
+                                onChange={(event) => setMessageReportNote(event.target.value)}
+                                placeholder="Ghi chú lỗi (tùy chọn)"
+                                className="h-9 w-full rounded-xl border border-rose-100 bg-white px-3 text-xs text-slate-700 outline-none focus:border-rose-300 focus:ring-2 focus:ring-rose-100"
+                              />
+                            )}
+                          </div>
+                        </div>
+                      )}
+                      <ChatMessagesPanel
+                        messages={currentMessages}
+                        customerAvatarUrl={userInfo?.[selectedChat.user]?.picture || ""}
+                        reportMode={isReportMode}
+                        selectedReportIds={selectedReportIds}
+                        onToggleReportMessage={toggleReportMessage}
+                      />
+                    </>
                   ) : (
-                    <div className="h-full flex items-center justify-center text-gray-400">
-                      👈 Chọn khách để xem hội thoại
+                    <div className="flex h-full items-center justify-center p-6 text-slate-400">
+                      <div className="rounded-2xl border border-dashed border-slate-300 bg-white px-6 py-5 text-center shadow-sm">
+                        Chọn khách để xem hội thoại
+                      </div>
                     </div>
                   )}
                 </div>
+
+                {selectedChat && (
+                  <>
+                  <div className="hidden">
+                    <div className="rounded-3xl border border-slate-200 bg-slate-50 px-2 py-2 shadow-sm">
+                      <textarea
+                        value={replyText}
+                        onChange={(e) => setReplyText(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && !e.shiftKey) {
+                            e.preventDefault();
+                            handleSendReply();
+                          }
+                        }}
+                        rows={1}
+                        disabled={sendingReply}
+                        placeholder="Nhập tin nhắn trả lời khách..."
+                        className="max-h-28 min-h-10 w-full resize-none rounded-3xl border-0 bg-white px-4 py-2.5 text-sm leading-5 text-slate-800 outline-none ring-1 ring-slate-200 placeholder:text-slate-400 focus:ring-2 focus:ring-sky-200 disabled:bg-slate-100"
+                      />
+                      <div className="mt-2 flex items-center gap-2">
+                        <div className="hidden">
+                          <button
+                            type="button"
+                            onClick={() => setReplyAttachmentType("image")}
+                            className={[
+                              "grid h-10 w-10 place-items-center rounded-full transition",
+                              replyAttachmentType === "image" ? "bg-sky-100 text-sky-700" : "text-slate-500 hover:bg-white hover:text-sky-700",
+                            ].join(" ")}
+                            title="Đính kèm hình ảnh"
+                          >
+                            <Image size={17} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setReplyAttachmentType("video")}
+                            className={[
+                              "grid h-10 w-10 place-items-center rounded-full transition",
+                              replyAttachmentType === "video" ? "bg-sky-100 text-sky-700" : "text-slate-500 hover:bg-white hover:text-sky-700",
+                            ].join(" ")}
+                            title="Đính kèm video"
+                          >
+                            <Video size={17} />
+                          </button>
+                        </div>
+                        <input
+                          ref={replyFileInputRef}
+                          type="file"
+                          accept="image/*,video/*"
+                          className="hidden"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0] || null;
+                            setReplyAttachmentFile(file);
+                            if (file) {
+                              setReplyAttachmentType(file.type?.startsWith("video/") ? "video" : "image");
+                            }
+                          }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => replyFileInputRef.current?.click()}
+                          disabled={sendingReply}
+                          className={[
+                            "relative grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-full transition",
+                            replyAttachmentFile
+                              ? "bg-sky-100 text-sky-700 ring-2 ring-sky-200"
+                              : "text-slate-500 hover:bg-white hover:text-sky-700",
+                          ].join(" ")}
+                          aria-label="Đính kèm file"
+                          title={replyAttachmentFile?.name || "Đính kèm file"}
+                        >
+                          <Paperclip className="absolute text-current" size={19} />{replyAttachmentFile && (<span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-sky-600" />)}
+                        </button>
+                        {replyAttachmentFile && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setReplyAttachmentFile(null);
+                              if (replyFileInputRef.current) replyFileInputRef.current.value = "";
+                            }}
+                            className="hidden"
+                            title="Bỏ file"
+                          >
+                            <X size={17} />
+                          </button>
+                        )}
+                        <input
+                          type="hidden"
+                          value={replyAttachmentUrl}
+                          onChange={(e) => setReplyAttachmentUrl(e.target.value)}
+                          disabled={sendingReply}
+                          placeholder={replyAttachmentType === "video" ? "URL video .mp4/.mov..." : "URL hình ảnh .jpg/.png/.webp..."}
+                          className="h-10 min-w-0 flex-1 rounded border border-slate-300 px-3 text-sm outline-none focus:ring-2 focus:ring-sky-200 disabled:bg-slate-50"
+                        />
+                        <button
+                          type="button"
+                          onClick={handleSendReply}
+                          disabled={sendingReply || (!replyText.trim() && !replyAttachmentFile)}
+                          className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-sky-600 text-white shadow-sm transition hover:bg-sky-700 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:shadow-none"
+                          title={sendingReply ? "Đang gửi..." : "Gửi tin nhắn"}
+                        >
+                          <Send size={18} />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="relative border-t border-slate-200 bg-white px-4 py-3 shadow-[0_-10px_30px_-28px_rgba(15,23,42,0.45)]">
+                    {showComposerTools && (
+                      <div className="absolute bottom-full left-4 right-4 z-30 mb-3 max-h-[70vh] overflow-y-auto rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl shadow-slate-900/14">
+                        <div className="mb-3 flex items-center justify-between gap-2">
+                          <div className="min-w-0">
+                            <div className="text-sm font-semibold text-slate-800">Công cụ tin nhắn</div>
+                            <div className="text-xs text-slate-500">Mẫu trả lời, Text Quick Reply và Button Template</div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setShowComposerTools(false)}
+                            className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-slate-500 transition hover:bg-slate-100 hover:text-slate-800"
+                            title="Đóng công cụ"
+                          >
+                            <X size={16} />
+                          </button>
+                        </div>
+
+                    <div className="mb-3 flex items-center gap-2 overflow-x-auto pb-1">
+                      <button
+                        type="button"
+                        onClick={() => setShowQuickReplyPanel((value) => !value)}
+                        className={[
+                          "inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition",
+                          showQuickReplyPanel
+                            ? "border-sky-200 bg-sky-50 text-sky-700"
+                            : "border-slate-200 bg-white text-slate-600 hover:border-sky-100 hover:bg-sky-50",
+                        ].join(" ")}
+                        title={showQuickReplyPanel ? "Ẩn quản lý mẫu trả lời nhanh" : "Hiện quản lý mẫu trả lời nhanh"}
+                      >
+                        <MessageSquarePlus size={14} />
+                        Mẫu trả lời
+                      </button>
+                      {allQuickReplies.slice(0, 8).map((item) => (
+                        <button
+                          key={item.id}
+                          type="button"
+                          onClick={() => insertQuickReply(item.text)}
+                          className="shrink-0 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:border-sky-200 hover:bg-sky-50 hover:text-sky-700"
+                          title={`Chèn mẫu: ${item.text}`}
+                        >
+                          {item.title}
+                        </button>
+                      ))}
+                    </div>
+
+                    {showQuickReplyPanel && (
+                      <div className="mb-3 rounded-2xl border border-slate-200 bg-slate-50 p-3 shadow-sm">
+                        <div className="mb-2 flex items-center justify-between gap-2">
+                          <div className="text-xs font-semibold text-slate-700">Quản lý mẫu trả lời nhanh</div>
+                          <div className="text-[11px] text-slate-500">Bấm mẫu để chèn vào ô chat</div>
+                        </div>
+                        <div className="grid gap-2 md:grid-cols-2">
+                          <input
+                            value={quickReplyDraft.title}
+                            onChange={(e) => setQuickReplyDraft((prev) => ({ ...prev, title: e.target.value }))}
+                            placeholder="Tên mẫu"
+                            className="h-9 rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none transition focus:border-sky-300 focus:ring-4 focus:ring-sky-100"
+                          />
+                          <div className="flex gap-2">
+                            <input
+                              value={quickReplyDraft.text}
+                              onChange={(e) => setQuickReplyDraft((prev) => ({ ...prev, text: e.target.value }))}
+                              placeholder="Nội dung câu trả lời"
+                              className="h-9 min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none transition focus:border-sky-300 focus:ring-4 focus:ring-sky-100"
+                            />
+                            <button
+                              type="button"
+                              onClick={saveQuickReply}
+                              disabled={!quickReplyDraft.title.trim() || !quickReplyDraft.text.trim()}
+                              className="inline-flex shrink-0 items-center gap-1 rounded-xl bg-sky-600 px-3 text-xs font-semibold text-white shadow-sm transition hover:bg-sky-700 disabled:bg-slate-300"
+                              title="Lưu mẫu trả lời nhanh"
+                            >
+                              <Plus size={13} />
+                              Lưu
+                            </button>
+                          </div>
+                        </div>
+
+                        {quickReplies.length > 0 && (
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            {quickReplies.map((item) => (
+                              <div
+                                key={item.id}
+                                className="flex items-center gap-1 rounded-full border border-white bg-white pl-3 pr-1 py-1 text-xs text-slate-700 shadow-sm"
+                              >
+                                <button
+                                  type="button"
+                                  onClick={() => insertQuickReply(item.text)}
+                                  className="font-medium hover:text-sky-700"
+                                  title={item.text}
+                                >
+                                  {item.title}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => deleteQuickReply(item.id)}
+                                  className="grid h-6 w-6 place-items-center rounded-full text-slate-400 hover:bg-rose-50 hover:text-rose-600"
+                                  title="Xóa mẫu"
+                                >
+                                  <Trash2 size={12} />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    <div className="mb-3 rounded-2xl border border-sky-100 bg-sky-50/70 p-3">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-xs font-semibold text-sky-800">Text Quick Reply</span>
+                        {messengerQuickReplyOptions.map((item, index) => (
+                          <span
+                            key={`${item.title}_${index}`}
+                            className="inline-flex items-center gap-1 rounded-full bg-white px-2.5 py-1 text-xs font-medium text-slate-700 ring-1 ring-sky-100"
+                          >
+                            {item.title}
+                            <button
+                              type="button"
+                              onClick={() => removeMessengerQuickReplyOption(index)}
+                              className="grid h-4 w-4 place-items-center rounded-full text-slate-400 hover:bg-rose-50 hover:text-rose-600"
+                              title="Bỏ lựa chọn"
+                            >
+                              <X size={11} />
+                            </button>
+                          </span>
+                        ))}
+                        {messengerQuickReplyOptions.length === 0 && (
+                          <span className="text-xs text-slate-500">Nút pill hiện trên Messenger, khách bấm sẽ gửi payload về bot.</span>
+                        )}
+                      </div>
+                      <div className="mt-2 grid gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)_auto]">
+                        <input
+                          value={messengerQuickReplyDraft.title}
+                          onChange={(e) => setMessengerQuickReplyDraft((prev) => ({ ...prev, title: e.target.value }))}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              addMessengerQuickReplyOption();
+                            }
+                          }}
+                          maxLength={20}
+                          placeholder="Tiêu đề, tối đa 20 ký tự"
+                          className="h-9 min-w-0 flex-1 rounded-xl border border-sky-100 bg-white px-3 text-sm outline-none transition focus:border-sky-300 focus:ring-4 focus:ring-sky-100"
+                        />
+                        <input
+                          value={messengerQuickReplyDraft.payload}
+                          onChange={(e) => setMessengerQuickReplyDraft((prev) => ({ ...prev, payload: e.target.value }))}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              addMessengerQuickReplyOption();
+                            }
+                          }}
+                          placeholder="Payload, bỏ trống sẽ dùng tiêu đề"
+                          className="h-9 min-w-0 flex-1 rounded-xl border border-sky-100 bg-white px-3 text-sm outline-none transition focus:border-sky-300 focus:ring-4 focus:ring-sky-100"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => addMessengerQuickReplyOption()}
+                          disabled={!messengerQuickReplyDraft.title.trim() || messengerQuickReplyOptions.length >= 13}
+                          className="inline-flex h-9 items-center justify-center gap-1 rounded-xl bg-sky-600 px-3 text-xs font-semibold text-white shadow-sm transition hover:bg-sky-700 disabled:bg-slate-300"
+                          title="Thêm Text Quick Reply gửi cho khách"
+                        >
+                          <Plus size={13} />
+                          Thêm
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="mb-3 rounded-2xl border border-indigo-100 bg-indigo-50/70 p-3">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setShowButtonTemplatePanel((value) => !value)}
+                          className={[
+                            "inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold transition",
+                            showButtonTemplatePanel
+                              ? "border-indigo-200 bg-white text-indigo-700"
+                              : "border-indigo-100 bg-white/70 text-indigo-700 hover:bg-white",
+                          ].join(" ")}
+                          title={showButtonTemplatePanel ? "Ẩn thiết lập Button Template" : "Hiện thiết lập Button Template"}
+                        >
+                          <Plus size={13} />
+                          Button Template
+                        </button>
+                        {buttonTemplateButtons.map((item, index) => (
+                          <span
+                            key={`${item.title}_${index}`}
+                            className="inline-flex items-center gap-1 rounded-full bg-white px-2.5 py-1 text-xs font-medium text-slate-700 ring-1 ring-indigo-100"
+                          >
+                            {item.title}
+                            <button
+                              type="button"
+                              onClick={() => removeButtonTemplateButton(index)}
+                              className="grid h-4 w-4 place-items-center rounded-full text-slate-400 hover:bg-rose-50 hover:text-rose-600"
+                              title="Bỏ nút"
+                            >
+                              <X size={11} />
+                            </button>
+                          </span>
+                        ))}
+                        {buttonTemplateButtons.length === 0 && (
+                          <span className="text-xs text-slate-500">Tối đa 3 nút cố định dưới tin nhắn.</span>
+                        )}
+                      </div>
+
+                      {showButtonTemplatePanel && (
+                        <div className="mt-2 grid gap-2 md:grid-cols-[minmax(0,1fr)_120px_minmax(0,1.4fr)_auto]">
+                          <input
+                            value={buttonTemplateDraft.title}
+                            onChange={(e) => setButtonTemplateDraft((prev) => ({ ...prev, title: e.target.value }))}
+                            maxLength={20}
+                            placeholder="Tiêu đề nút"
+                            className="h-9 min-w-0 rounded-xl border border-indigo-100 bg-white px-3 text-sm outline-none transition focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100"
+                          />
+                          <select
+                            value={buttonTemplateDraft.type}
+                            onChange={(e) => setButtonTemplateDraft((prev) => ({ ...prev, type: e.target.value }))}
+                            className="h-9 rounded-xl border border-indigo-100 bg-white px-2 text-sm outline-none transition focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100"
+                          >
+                            <option value="postback">Phản hồi</option>
+                            <option value="web_url">Mở link</option>
+                          </select>
+                          <input
+                            value={buttonTemplateDraft.value}
+                            onChange={(e) => setButtonTemplateDraft((prev) => ({ ...prev, value: e.target.value }))}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                e.preventDefault();
+                                addButtonTemplateButton();
+                              }
+                            }}
+                            placeholder={buttonTemplateDraft.type === "web_url" ? "https://..." : "Payload gửi về bot"}
+                            className="h-9 min-w-0 rounded-xl border border-indigo-100 bg-white px-3 text-sm outline-none transition focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100"
+                          />
+                          <button
+                            type="button"
+                            onClick={addButtonTemplateButton}
+                            disabled={!buttonTemplateDraft.title.trim() || !buttonTemplateDraft.value.trim() || buttonTemplateButtons.length >= 3}
+                            className="inline-flex h-9 items-center justify-center gap-1 rounded-xl bg-indigo-600 px-3 text-xs font-semibold text-white shadow-sm transition hover:bg-indigo-700 disabled:bg-slate-300"
+                            title="Thêm nút Button Template"
+                          >
+                            <Plus size={13} />
+                            Thêm
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                      </div>
+                    )}
+
+                    <div className="flex items-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setShowComposerTools((value) => !value)}
+                        disabled={sendingReply}
+                        className={[
+                          "relative grid h-10 w-10 shrink-0 place-items-center rounded-full text-slate-600 transition hover:bg-slate-100 disabled:opacity-50",
+                          showComposerTools ? "bg-sky-50 text-sky-700 ring-1 ring-sky-200" : "",
+                        ].join(" ")}
+                        title={showComposerTools ? "Đóng công cụ tin nhắn" : "Mở công cụ tin nhắn"}
+                      >
+                        <MessageSquarePlus size={18} />
+                        {(messengerQuickReplyOptions.length > 0 || buttonTemplateButtons.length > 0) && (
+                          <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-sky-600" />
+                        )}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => replyFileInputRef.current?.click()}
+                        disabled={sendingReply}
+                        className={[
+                          "relative grid h-10 w-10 shrink-0 place-items-center rounded-full text-sky-600 transition hover:bg-sky-50 disabled:opacity-50",
+                          replyAttachmentFile ? "bg-sky-50 ring-1 ring-sky-200" : "",
+                        ].join(" ")}
+                        title={replyAttachmentFile?.name || "Đính kèm file"}
+                      >
+                        <Image size={18} />
+                        {replyAttachmentFile && (
+                          <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-sky-600" />
+                        )}
+                      </button>
+
+                      <div className="flex min-w-0 flex-1 items-end rounded-[22px] bg-slate-100 px-4 ring-1 ring-slate-200 transition focus-within:bg-white focus-within:ring-2 focus-within:ring-sky-200">
+                        <textarea
+                          ref={replyTextareaRef}
+                          value={replyText}
+                          onChange={(e) => setReplyText(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" && !e.shiftKey) {
+                              e.preventDefault();
+                              handleSendReply();
+                            }
+                          }}
+                          rows={1}
+                          disabled={sendingReply}
+                          placeholder="Aa"
+                          className="max-h-40 min-h-10 flex-1 resize-none overflow-y-auto border-0 bg-transparent py-2.5 text-sm leading-5 text-slate-800 outline-none placeholder:text-slate-400 disabled:opacity-60"
+                        />
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={handleSendReply}
+                        disabled={sendingReply || (!replyText.trim() && !replyAttachmentFile && messengerQuickReplyOptions.length === 0 && buttonTemplateButtons.length === 0)}
+                        className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-sky-600 text-white shadow-sm transition hover:bg-sky-700 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none"
+                        title={sendingReply ? "Đang gửi..." : "Gửi tin nhắn"}
+                      >
+                        <Send size={21} />
+                      </button>
+                    </div>
+                  </div>
+                  </>
+                )}
               </div>
             </div>
           </>
@@ -838,6 +2556,515 @@ function PageMessage() {
         open={sendingBulk}
         text={`Đang gửi ${bulkProgress.current}/${bulkProgress.total} khách...`}
       />
+
+      {isContextPopupOpen && selectedChat && conversationContext && (
+        <div className="fixed inset-0 z-[9998] flex items-start justify-end bg-slate-950/30 p-4 backdrop-blur-[2px]">
+          <div className="flex max-h-[calc(100vh-2rem)] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-950/20">
+            <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <div className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-sky-50 text-sky-700 ring-1 ring-sky-100">
+                    <FileText size={19} />
+                  </div>
+                  <div className="min-w-0">
+                    <h3 className="truncate text-base font-extrabold text-slate-950">
+                      Ngữ cảnh cuộc trò chuyện
+                    </h3>
+                    <p className="mt-0.5 truncate text-xs text-slate-500">
+                      {conversationContext.customerName}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setIsContextPopupOpen(false)}
+                className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
+                title="Đóng"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-y-auto bg-slate-50 p-4">
+              <div className="grid gap-3 sm:grid-cols-3">
+                <div className="rounded-2xl border border-sky-100 bg-sky-50 p-4">
+                  <div className="text-[11px] font-bold uppercase text-sky-700">Tin khách</div>
+                  <div className="mt-1 text-2xl font-black text-slate-950">{conversationContext.counts.customer}</div>
+                </div>
+                <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-4">
+                  <div className="text-[11px] font-bold uppercase text-emerald-700">Page/BOT</div>
+                  <div className="mt-1 text-2xl font-black text-slate-950">{conversationContext.counts.page}</div>
+                </div>
+                <div className="rounded-2xl border border-amber-100 bg-amber-50 p-4">
+                  <div className="text-[11px] font-bold uppercase text-amber-700">Nhân viên</div>
+                  <div className="mt-1 text-2xl font-black text-slate-950">{conversationContext.counts.staff}</div>
+                </div>
+              </div>
+
+              <div className="mt-4 grid gap-3 md:grid-cols-2">
+                <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <div className="text-sm font-extrabold text-slate-900">Thông tin chính</div>
+                  <div className="mt-3 space-y-2 text-sm">
+                    {[
+                      ["Khách hàng", conversationContext.customerName],
+                      ["User ID", conversationContext.customerId],
+                      ["Page", conversationContext.pageName],
+                      ["Hội thoại", conversationContext.conversationId],
+                      ["Chế độ", conversationContext.replyMode],
+                      ["Cập nhật", conversationContext.updatedAt],
+                    ].map(([label, value]) => (
+                      <div key={label} className="grid grid-cols-[92px_1fr] gap-3">
+                        <span className="text-xs font-bold uppercase text-slate-400">{label}</span>
+                        <span className="min-w-0 break-words font-medium text-slate-800">{value || "Chưa có"}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <div className="text-sm font-extrabold text-slate-900">Bán hàng</div>
+                  <div className="mt-3 space-y-2 text-sm">
+                    {[
+                      ["Sản phẩm", conversationContext.productName],
+                      ["Nguồn QC", conversationContext.adName],
+                      ["SĐT", conversationContext.phoneNumber],
+                      ["Địa chỉ", conversationContext.address],
+                      ["Đơn hàng", conversationContext.orderCount ? `${conversationContext.orderCount} đơn` : ""],
+                    ].map(([label, value]) => (
+                      <div key={label} className="grid grid-cols-[92px_1fr] gap-3">
+                        <span className="text-xs font-bold uppercase text-slate-400">{label}</span>
+                        <span className="min-w-0 break-words font-medium text-slate-800">{value || "Chưa có"}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="text-sm font-extrabold text-slate-900">Tóm tắt ngữ cảnh</div>
+                  {(conversationContext.intent || conversationContext.stage) && (
+                    <div className="flex flex-wrap gap-2">
+                      {conversationContext.intent && (
+                        <span className="rounded-full bg-indigo-50 px-2.5 py-1 text-[11px] font-bold text-indigo-700 ring-1 ring-indigo-100">
+                          {conversationContext.intent}
+                        </span>
+                      )}
+                      {conversationContext.stage && (
+                        <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-600 ring-1 ring-slate-200">
+                          {conversationContext.stage}
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
+                <div className="mt-3 whitespace-pre-wrap break-words rounded-xl bg-slate-50 px-3 py-3 text-sm leading-6 text-slate-700">
+                  {conversationContext.summary || "Chưa có tóm tắt tự động cho hội thoại này."}
+                </div>
+              </div>
+
+              <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="text-sm font-extrabold text-slate-900">Tin gần nhất</div>
+                {conversationContext.recentMessages.length === 0 ? (
+                  <div className="mt-3 rounded-xl border border-dashed border-slate-300 bg-slate-50 px-3 py-4 text-center text-sm text-slate-500">
+                    Chưa có tin nhắn trong hội thoại.
+                  </div>
+                ) : (
+                  <div className="mt-3 space-y-2">
+                    {conversationContext.recentMessages.map((message) => (
+                      <div key={message.id} className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
+                        <div className="flex flex-wrap items-center gap-2 text-[11px]">
+                          <span
+                            className={[
+                              "rounded-full px-2 py-0.5 font-bold",
+                              message.role === "Khách hàng"
+                                ? "bg-sky-100 text-sky-700"
+                                : message.role === "Nhân viên"
+                                  ? "bg-amber-100 text-amber-700"
+                                  : "bg-emerald-100 text-emerald-700",
+                            ].join(" ")}
+                          >
+                            {message.role}
+                          </span>
+                          {message.time && <span className="text-slate-400">{message.time}</span>}
+                        </div>
+                        <div className="mt-1 line-clamp-3 break-words text-sm leading-5 text-slate-700">
+                          {message.text}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isMessageReportListOpen && selectedChat && (
+        <div className="fixed inset-0 z-[9998] flex items-start justify-end bg-slate-950/30 p-4 backdrop-blur-[2px]">
+          <div className="flex max-h-[calc(100vh-2rem)] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-950/20">
+            <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <div className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-rose-50 text-rose-700 ring-1 ring-rose-100">
+                    <Flag size={19} />
+                  </div>
+                  <div className="min-w-0">
+                    <h3 className="truncate text-base font-extrabold text-slate-950">
+                      Tin nhắn lỗi được báo
+                    </h3>
+                    <p className="mt-0.5 truncate text-xs text-slate-500">
+                      {selectedChat.userName || userInfo?.[selectedChat.user]?.name || selectedChat.user}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setIsMessageReportListOpen(false)}
+                className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
+                title="Đóng"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-y-auto bg-slate-50 p-4">
+              {loadingMessageReports ? (
+                <div className="rounded-2xl border border-slate-200 bg-white p-5 text-sm text-slate-500 shadow-sm">
+                  Đang tải danh sách báo lỗi...
+                </div>
+              ) : messageReports.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-5 text-sm text-slate-500 shadow-sm">
+                  Chưa có đoạn tin nhắn lỗi nào được báo trong hội thoại này.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {messageReports.map((report) => (
+                    <div key={report._id} className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 px-4 py-3">
+                        <div className="min-w-0">
+                          <div className="text-xs font-bold text-slate-500">
+                            {formatDateTime(report.createdAt)}
+                          </div>
+                          <div className="mt-1 text-sm font-bold text-slate-900">
+                            {report.reportedByName || "Người dùng"} đã báo {report.messages?.length || 0} đoạn
+                          </div>
+                          <div className="mt-1 inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-bold text-slate-700">
+                            {report.category === "Khác" && report.customCategory
+                              ? `Khác: ${report.customCategory}`
+                              : report.category || "Chưa phân loại"}
+                          </div>
+                          {report.note ? (
+                            <div className="mt-1 text-xs text-slate-500">Ghi chú: {report.note}</div>
+                          ) : null}
+                        </div>
+                        <span className="rounded-full bg-rose-50 px-2.5 py-1 text-[11px] font-bold text-rose-700 ring-1 ring-rose-100">
+                          {report.status === "resolved" ? "Đã xử lý" : report.status === "reviewing" ? "Đang xem" : "Mới"}
+                        </span>
+                      </div>
+                      <div className="space-y-2 px-4 py-3">
+                        {(report.messages || []).map((message, index) => (
+                          <div key={`${report._id}_${message.messageId || index}`} className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
+                            <div className="mb-1 flex flex-wrap items-center gap-2 text-[11px] font-semibold text-slate-500">
+                              <span>{message.role || "message"}</span>
+                              {message.createdAt ? <span>• {formatDateTime(message.createdAt)}</span> : null}
+                            </div>
+                            {message.text ? (
+                              <div className="whitespace-pre-wrap break-words text-sm leading-6 text-slate-800">
+                                {message.text}
+                              </div>
+                            ) : null}
+                            {message.imageUrl ? (
+                              <a href={message.imageUrl} target="_blank" rel="noreferrer" className="mt-2 block text-xs font-semibold text-sky-700 hover:underline">
+                                Xem ảnh đính kèm
+                              </a>
+                            ) : null}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isOrderPopupOpen && selectedChat && (
+        <div className="fixed inset-0 z-[9998] flex items-start justify-end bg-slate-950/30 p-4 backdrop-blur-[2px]">
+          <div className="flex max-h-[calc(100vh-2rem)] w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-950/20">
+            <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <div className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-emerald-50 text-emerald-700 ring-1 ring-emerald-100">
+                    <ShoppingCart size={19} />
+                  </div>
+                  <div className="min-w-0">
+                    <h3 className="truncate text-base font-extrabold text-slate-950">
+                      Đơn hàng của khách
+                    </h3>
+                    <p className="mt-0.5 truncate text-xs text-slate-500">
+                      {selectedChat.userName || userInfo?.[selectedChat.user]?.name || selectedChat.user}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setIsOrderPopupOpen(false)}
+                className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
+                title="Đóng"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-y-auto bg-slate-50 p-4">
+              {loadingOrders ? (
+                <div className="rounded-2xl border border-slate-200 bg-white p-5 text-sm text-slate-500 shadow-sm">
+                  Đang tải đơn hàng...
+                </div>
+              ) : selectedCustomerOrders.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-5 text-sm text-slate-500 shadow-sm">
+                  Chưa tìm thấy đơn hàng của khách này trong khoảng dữ liệu đã tải.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {selectedCustomerOrders.map((order, index) => {
+                    const items = Array.isArray(order.items) ? order.items : [];
+                    const status = String(order.status || "active");
+                    const isCancelled = status === "cancelled";
+                    const orderId = String(order._id || "");
+                    const draft = orderDrafts[orderId] || {
+                      customerName: order.customerName || "",
+                      phoneNumber: order.phoneNumber || "",
+                      address: order.address || "",
+                      adName: order.adName || "",
+                      note: order.note || "",
+                      shippingFee: order.shippingFee == null ? "" : String(order.shippingFee),
+                      items: Array.isArray(order.items)
+                        ? order.items.map((item) => ({
+                          productName: item.productName || "",
+                          sku: item.sku || "",
+                          unitName: item.unitName || "",
+                          quantity: item.quantity == null ? "" : String(item.quantity),
+                          price: item.price == null ? "" : String(item.price),
+                        }))
+                        : [],
+                    };
+                    const isSavingThisOrder = savingOrderId === orderId;
+                    const draftItems = Array.isArray(draft.items) ? draft.items : [];
+                    return (
+                      <div
+                        key={order._id || `${order.customerId}_${index}`}
+                        className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
+                      >
+                        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 px-4 py-3">
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="font-mono text-xs font-bold text-slate-500">
+                                #{String(order._id || "").slice(-8) || index + 1}
+                              </span>
+                              <span
+                                className={[
+                                  "rounded-full px-2.5 py-1 text-[11px] font-bold",
+                                  isCancelled
+                                    ? "bg-rose-50 text-rose-700 ring-1 ring-rose-100"
+                                    : "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-100",
+                                ].join(" ")}
+                              >
+                                {isCancelled ? "Đã hủy" : "Đang hiệu lực"}
+                              </span>
+                            </div>
+                            <div className="mt-1 text-xs text-slate-500">
+                              {formatDateTime(order.createdAt)}
+                            </div>
+                          </div>
+
+                          <div className="text-right">
+                            <div className="text-sm font-extrabold text-slate-950">
+                              {formatMoney(order.total)}
+                            </div>
+                            <div className="text-[11px] text-slate-500">
+                              Ship: {formatMoney(order.shippingFee)}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="space-y-4 px-4 py-4 text-sm">
+                          <section className="rounded-2xl border border-slate-200 bg-white p-4">
+                            <div className="mb-3 flex items-start justify-between gap-3">
+                              <div>
+                                <div className="text-sm font-extrabold text-slate-800">Thông tin khách</div>
+                                <div className="mt-0.5 text-xs text-slate-500">Nhập càng chuẩn, ship càng nhanh</div>
+                              </div>
+                              <span className="text-xs text-slate-500">* bắt buộc</span>
+                            </div>
+
+                            <div className="grid gap-3 sm:grid-cols-2">
+                              <label className="block">
+                                <span className="mb-1 block text-xs font-semibold text-slate-600">Tên khách hàng</span>
+                                <input value={draft.customerName} onChange={(event) => updateOrderDraft(orderId, "customerName", event.target.value)} className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none transition focus:border-sky-300 focus:ring-4 focus:ring-sky-100" placeholder="Tên khách hàng" />
+                              </label>
+                              <label className="block">
+                                <span className="mb-1 block text-xs font-semibold text-slate-600">Số điện thoại <span className="text-rose-500">*</span></span>
+                                <input value={order.phoneNumber || draft.phoneNumber || ""} readOnly disabled className="h-10 w-full cursor-not-allowed rounded-xl border border-slate-200 bg-slate-100 px-3 text-sm text-slate-500 outline-none" placeholder="Số điện thoại" title="Không được phép sửa số điện thoại" />
+                              </label>
+                            </div>
+
+                            <label className="mt-3 block">
+                              <span className="mb-1 block text-xs font-semibold text-slate-600">Địa chỉ <span className="text-rose-500">*</span></span>
+                              <input value={draft.address} onChange={(event) => updateOrderDraft(orderId, "address", event.target.value)} className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none transition focus:border-sky-300 focus:ring-4 focus:ring-sky-100" placeholder="Ấp, xã, huyện, tỉnh..." />
+                            </label>
+
+                            <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_160px]">
+                              <label className="block">
+                                <span className="mb-1 block text-xs font-semibold text-slate-600">Tên bài quảng cáo</span>
+                                <input value={draft.adName} onChange={(event) => updateOrderDraft(orderId, "adName", event.target.value)} className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none transition focus:border-sky-300 focus:ring-4 focus:ring-sky-100" placeholder="Tên bài quảng cáo" />
+                              </label>
+                              <label className="block">
+                                <span className="mb-1 block text-xs font-semibold text-slate-600">Phí giao hàng</span>
+                                <input type="number" min="0" value={draft.shippingFee} onChange={(event) => updateOrderDraft(orderId, "shippingFee", event.target.value)} className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none transition focus:border-sky-300 focus:ring-4 focus:ring-sky-100" placeholder="0" />
+                              </label>
+                            </div>
+
+                            <label className="mt-3 block">
+                              <span className="mb-1 block text-xs font-semibold text-slate-600">Ghi chú</span>
+                              <textarea value={draft.note} onChange={(event) => updateOrderDraft(orderId, "note", event.target.value)} rows={3} className="min-h-20 w-full resize-y rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm leading-5 text-slate-800 outline-none transition focus:border-sky-300 focus:ring-4 focus:ring-sky-100" placeholder="Ví dụ: giao buổi sáng, kiểm hàng trước khi nhận..." />
+                            </label>
+                          </section>
+
+                          <section className="rounded-2xl border border-slate-200 bg-white p-4">
+                            <div className="mb-3 flex items-start justify-between gap-3">
+                              <div>
+                                <div className="text-sm font-extrabold text-slate-800">Sản phẩm trong đơn</div>
+                                <div className="mt-0.5 text-xs text-slate-500">Tip: nhập Giá + SL để tính tổng nhanh ở backend</div>
+                              </div>
+                              <button type="button" onClick={() => addOrderDraftItem(orderId)} className="h-9 shrink-0 rounded-xl bg-slate-900 px-3 text-xs font-bold text-white shadow-sm transition hover:bg-slate-800">+ Thêm dòng</button>
+                            </div>
+
+                            <div className="space-y-2">
+                              {draftItems.length === 0 ? (
+                                <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-3 py-4 text-center text-xs text-slate-500">Chưa có sản phẩm trong đơn.</div>
+                              ) : (
+                                draftItems.map((item, itemIndex) => (
+                                  <div key={`${orderId}_item_${itemIndex}`} className="grid gap-2 rounded-xl border border-slate-100 bg-slate-50 p-2 sm:grid-cols-[1.5fr_0.8fr_80px_110px_auto]">
+                                    <input value={item.productName} onChange={(event) => updateOrderDraftItem(orderId, itemIndex, "productName", event.target.value)} className="h-9 min-w-0 rounded-lg border border-slate-200 bg-white px-3 text-xs outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100" placeholder="Tên sản phẩm" />
+                                    <input value={item.sku} onChange={(event) => updateOrderDraftItem(orderId, itemIndex, "sku", event.target.value)} className="h-9 min-w-0 rounded-lg border border-slate-200 bg-white px-3 text-xs outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100" placeholder="SKU" />
+                                    <input type="number" min="0" value={item.quantity} onChange={(event) => updateOrderDraftItem(orderId, itemIndex, "quantity", event.target.value)} className="h-9 min-w-0 rounded-lg border border-slate-200 bg-white px-3 text-xs outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100" placeholder="SL" />
+                                    <input type="number" min="0" value={item.price} onChange={(event) => updateOrderDraftItem(orderId, itemIndex, "price", event.target.value)} className="h-9 min-w-0 rounded-lg border border-slate-200 bg-white px-3 text-xs outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-100" placeholder="Giá" />
+                                    <button type="button" onClick={() => removeOrderDraftItem(orderId, itemIndex)} className="h-9 rounded-lg border border-rose-200 bg-rose-50 px-3 text-xs font-bold text-rose-600 transition hover:bg-rose-100">Xóa</button>
+                                  </div>
+                                ))
+                              )}
+                            </div>
+                          </section>
+
+                          <div className="flex justify-end gap-2 border-t border-slate-100 pt-3">
+                            <button type="button" onClick={() => setIsOrderPopupOpen(false)} className="inline-flex h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-bold text-slate-600 shadow-sm transition hover:bg-slate-50">Hủy</button>
+                            <button type="button" onClick={() => handleUpdateOrder(order)} disabled={isSavingThisOrder} className="inline-flex h-10 items-center justify-center rounded-xl bg-sky-600 px-4 text-sm font-bold text-white shadow-sm transition hover:bg-sky-700 disabled:cursor-not-allowed disabled:bg-slate-300">{isSavingThisOrder ? "Đang lưu..." : "Lưu cập nhật"}</button>
+                          </div>
+
+                          <div className="hidden">
+                          <div className="grid gap-2 text-xs text-slate-600 sm:grid-cols-2">
+                            <div className="min-w-0 rounded-xl bg-slate-50 px-3 py-2">
+                              <span className="font-semibold text-slate-500">SĐT: </span>
+                              <span className="font-medium text-slate-800">{order.phoneNumber || "Chưa có"}</span>
+                            </div>
+                            <div className="min-w-0 rounded-xl bg-slate-50 px-3 py-2">
+                              <span className="font-semibold text-slate-500">Tên: </span>
+                              <span className="font-medium text-slate-800">{order.customerName || "Chưa có"}</span>
+                            </div>
+                          </div>
+
+                          <div className="grid gap-2 sm:grid-cols-[1fr_160px]">
+                            <label className="block">
+                              <span className="mb-1 block text-[11px] font-bold uppercase text-slate-500">Địa chỉ</span>
+                              <input
+                                value={draft.address}
+                                onChange={(event) => updateOrderDraft(orderId, "address", event.target.value)}
+                                className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none transition focus:border-sky-300 focus:ring-4 focus:ring-sky-100"
+                                placeholder="Nhập địa chỉ giao hàng"
+                              />
+                            </label>
+                            <label className="block">
+                              <span className="mb-1 block text-[11px] font-bold uppercase text-slate-500">Phí ship</span>
+                              <input
+                                type="number"
+                                min="0"
+                                value={draft.shippingFee}
+                                onChange={(event) => updateOrderDraft(orderId, "shippingFee", event.target.value)}
+                                className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none transition focus:border-sky-300 focus:ring-4 focus:ring-sky-100"
+                                placeholder="0"
+                              />
+                            </label>
+                          </div>
+
+                          {items.length > 0 && (
+                            <div className="overflow-hidden rounded-xl border border-slate-100">
+                              {items.map((item, itemIndex) => (
+                                <div
+                                  key={`${item.sku || item.productName}_${itemIndex}`}
+                                  className="grid grid-cols-[1fr_auto] gap-3 border-b border-slate-100 px-3 py-2 last:border-b-0"
+                                >
+                                  <div className="min-w-0">
+                                    <div className="truncate text-sm font-semibold text-slate-800">
+                                      {item.productName || "Sản phẩm"}
+                                    </div>
+                                    <div className="mt-0.5 text-[11px] text-slate-500">
+                                      SKU: {item.sku || "N/A"} · SL: {Number(item.quantity || 0).toLocaleString("vi-VN")} {item.unitName || ""}
+                                    </div>
+                                  </div>
+                                  <div className="text-right text-xs font-bold text-slate-700">
+                                    {formatMoney((Number(item.price) || 0) * (Number(item.quantity) || 0))}
+                                    <div className="mt-0.5 font-normal text-slate-400">
+                                      {formatMoney(item.price)}
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          <label className="block">
+                            <span className="mb-1 block text-[11px] font-bold uppercase text-slate-500">Ghi chú</span>
+                            <textarea
+                              value={draft.note}
+                              onChange={(event) => updateOrderDraft(orderId, "note", event.target.value)}
+                              rows={3}
+                              className="min-h-20 w-full resize-y rounded-xl border border-amber-100 bg-amber-50/70 px-3 py-2 text-sm leading-5 text-amber-950 outline-none transition focus:border-amber-300 focus:bg-white focus:ring-4 focus:ring-amber-100"
+                              placeholder="Nhập ghi chú đơn hàng..."
+                            />
+                          </label>
+
+                          <div className="flex justify-end">
+                            <button
+                              type="button"
+                              onClick={() => handleUpdateOrder(order)}
+                              disabled={isSavingThisOrder}
+                              className="inline-flex h-9 items-center justify-center rounded-xl bg-slate-900 px-4 text-xs font-bold text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+                            >
+                              {isSavingThisOrder ? "Đang lưu..." : "Cập nhật đơn hàng"}
+                            </button>
+                          </div>
+                        </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
 
     </div>
@@ -883,3 +3110,4 @@ function SpinnerOverlay({ open, text = "Đang gửi..." }) {
 
 
 export default PageMessage;
+

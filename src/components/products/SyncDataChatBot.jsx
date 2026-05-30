@@ -19,7 +19,7 @@ function SyncDataChatBot({ open, onClose, onSubmit }) {
   const [vectorStores, setVectorStores] = useState([]);
   const [vectorId, setVectorId] = useState("");
   const [options, setOptions] = useState({
-    byProduct: true,
+    byProduct: false,
     byMKTPromo: false,
     byPromo: false
   });
@@ -29,6 +29,16 @@ function SyncDataChatBot({ open, onClose, onSubmit }) {
 
   const inputBg =
     "bg-white border-slate-200 text-slate-800 focus:ring-rose-400/50";
+
+  useEffect(() => {
+    if (!open) return;
+
+    setOptions({
+      byProduct: false,
+      byMKTPromo: false,
+      byPromo: false,
+    });
+  }, [open]);
 
   const companies = [
     { _id: "nnvtv", name: "Công ty Phân Bón Nông Nghiệp Việt" },
@@ -443,7 +453,7 @@ function SyncDataChatBot({ open, onClose, onSubmit }) {
             {/* Checkbox */}
             <div className="pt-3">
               <label className="block text-xs font-semibold text-slate-600">
-                Kiểu xuất dữ liệu và các loại chương trình khuyến mãi (nếu có)
+                Kiểu xuất dữ liệu
               </label>
             </div>
 
@@ -479,71 +489,6 @@ function SyncDataChatBot({ open, onClose, onSubmit }) {
                   </div>
                   <span className="ml-2 text-gray-700">
                     Xuất mỗi sản phẩm thành 1 file vector chunk
-                  </span>
-                </label>
-                <label className="inline-flex items-center cursor-pointer pt-2">
-                  <input
-                    type="checkbox"
-                    className="peer hidden"
-                    checked={options.byMKTPromo}
-                    onChange={() =>
-                      setOptions((prev) => ({
-                        ...prev,
-                        byMKTPromo: !prev.byMKTPromo,
-                        byPromo: false, // Tự động tắt cái kia
-                      }))
-                    }
-                  />
-                  <div className="w-6 h-6 border-2 border-gray-300 rounded flex items-center justify-center peer-checked:bg-blue-500 peer-checked:border-blue-500">
-                    <svg
-                      className="hidden w-4 h-4 text-white peer-checked:block"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        d="M5 13l4 4L19 7"
-                      />
-                    </svg>
-                  </div>
-                  <span className="ml-2 text-gray-700">
-                    Khuyến mãi phòng MKT
-                  </span>
-                </label>
-
-                <label className="inline-flex items-center cursor-pointer pt-2">
-                  <input
-                    type="checkbox"
-                    className="peer hidden"
-                    checked={options.byPromo}
-                    onChange={() =>
-                      setOptions((prev) => ({
-                        ...prev,
-                        byPromo: !prev.byPromo,
-                        byMKTPromo: false, // Tự động tắt cái kia
-                      }))
-                    }
-                  />
-                  <div className="w-6 h-6 border-2 border-gray-300 rounded flex items-center justify-center peer-checked:bg-blue-500 peer-checked:border-blue-500">
-                    <svg
-                      className="hidden w-4 h-4 text-white peer-checked:block"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        d="M5 13l4 4L19 7"
-                      />
-                    </svg>
-                  </div>
-                  <span className="ml-2 text-gray-700">
-                    Khuyến mãi công ty
                   </span>
                 </label>
               </div>
