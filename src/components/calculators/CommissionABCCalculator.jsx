@@ -459,6 +459,7 @@ const exportResultsXLSX = (summaryRows, logRows, detailsByEmployee) => {
       "Trừ chi phí quảng cáo",
       [
         "Sản phẩm chạy quảng cáo",
+        "Ghi chú",
         "ROAS",
         "TỔNG CHI",
         "Doanh thu",
@@ -676,6 +677,12 @@ const classifyAdCostType = (type) => {
     return { group: "CG", program: "normal" };
   }
   return { group: "PB", customer: "retail", program: "normal" };
+};
+
+const classifyAdCostTypeFromNote = (note) => {
+  const text = normalizeNotePlain(note);
+  if (text === "CG") return "CG";
+  return "";
 };
 
 const classifyReturnGroup = (
@@ -2423,8 +2430,11 @@ export default function CommissionABCCalculator() {
                 const campaignName = normalizeText(
                   getCell(row, headerMap, "Sản phẩm chạy quảng cáo"),
                 );
+                const adNote = normalizeText(getCell(row, headerMap, "Ghi chú"));
+                const adTypeFromNote = classifyAdCostTypeFromNote(adNote);
+                const isTcpAd = normalizeNotePlain(adNote) === "TCP";
                 const adKey = `${employee}||${campaignName || "(trống)"}`;
-                const selectedAdType = overrideAdCosts[adKey];
+                const selectedAdType = adTypeFromNote || overrideAdCosts[adKey];
                 if (!selectedAdType) {
                   const prev = pendingAdCostMap.get(adKey);
                   if (prev) {
@@ -2436,6 +2446,7 @@ export default function CommissionABCCalculator() {
                       key: adKey,
                       employee,
                       campaignName,
+                      adNote,
                       cost,
                       revenue,
                       count: 1,
@@ -2452,11 +2463,18 @@ export default function CommissionABCCalculator() {
                   deductValue = cost;
                   if (deductValue) applyDelta(stats, cls, -deductValue);
                 } else if (roas > 2) {
-                  const nonCommissionValue = Math.max(0, revenue);
-                  if (nonCommissionValue > 0) {
-                    applyNoCommission(stats, cls, nonCommissionValue);
+                  if (isTcpAd) {
+                    deductValue = Math.max(0, revenue - cost) * 0.5;
+                    if (deductValue) applyDelta(stats, cls, -deductValue);
+                  } else {
+                    const nonCommissionValue = Math.max(0, revenue);
+                    if (nonCommissionValue > 0) {
+                      applyNoCommission(stats, cls, nonCommissionValue);
+                    }
                   }
-                  status = "2 < ROAS < 8: Ghi nhận doanh thu không hưởng hoa hồng";
+                  status = isTcpAd
+                    ? "2 < ROAS < 8 + TCP: Trừ 50% chênh lệch doanh thu - chi phí"
+                    : "2 < ROAS < 8: Ghi nhận doanh thu không hưởng hoa hồng";
                 } else {
                   deductValue = Math.abs(revenue - cost);
                   if (deductValue) applyDelta(stats, cls, -deductValue);
@@ -2464,6 +2482,7 @@ export default function CommissionABCCalculator() {
                 }
                 details.adCosts.push([
                   campaignName,
+                  adNote,
                   roas,
                   cost,
                   revenue,
@@ -3572,6 +3591,7 @@ export default function CommissionABCCalculator() {
                   <th className="px-3 py-2 text-left">
                     Sản phẩm chạy quảng cáo
                   </th>
+                  <th className="px-3 py-2 text-left">Ghi chú</th>
                   <th className="px-3 py-2 text-right">Tổng chi</th>
                   <th className="px-3 py-2 text-right">Doanh thu</th>
                   <th className="px-3 py-2 text-right">Số dòng</th>
@@ -3585,6 +3605,7 @@ export default function CommissionABCCalculator() {
                     <td className="px-3 py-2 font-medium text-slate-800">
                       {item.campaignName || "—"}
                     </td>
+                    <td className="px-3 py-2">{item.adNote || "—"}</td>
                     <td className="px-3 py-2 text-right">
                       {formatMoney(item.cost)}
                     </td>

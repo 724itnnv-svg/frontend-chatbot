@@ -323,6 +323,7 @@ const exportResultsXLSX = (summaryRows, logRows, detailsByEmployee) => {
       "Trừ chi phí quảng cáo",
       [
         "Sản phẩm chạy quảng cáo",
+        "Ghi chú",
         "ROAS",
         "TỔNG CHI",
         "Doanh thu",
@@ -1248,6 +1249,8 @@ export default function CommissionOnlineCalculator() {
               const campaignName = normalizeText(
                 getCell(row, headerMap, "Sản phẩm chạy quảng cáo")
               );
+              const adNote = normalizeText(getCell(row, headerMap, "Ghi chú"));
+              const isTcpAd = adNote.toUpperCase() === "TCP";
               const cost = parseNumber(
                 getCell(row, headerMap, "TỔNG CHI")
               );
@@ -1261,10 +1264,16 @@ export default function CommissionOnlineCalculator() {
                 stats.Retail_Normal -= deductValue;
                 log.adCostDeduction += deductValue;
               } else if (roas > 2) {
-                deductValue = Math.max(0, revenue);
-                stats.Retail_Normal -= deductValue;
-                log.adCostDeduction += deductValue;
-                status = "2 < ROAS < 8: Trừ doanh thu quảng cáo";
+                if (isTcpAd) {
+                  deductValue = Math.max(0, revenue - cost) * 0.5;
+                  stats.Retail_Normal -= deductValue;
+                  log.adCostDeduction += deductValue;
+                } else {
+                  stats.Retail_NoCommission += Math.max(0, revenue);
+                }
+                status = isTcpAd
+                  ? "2 < ROAS < 8 + TCP: Trừ 50% chênh lệch doanh thu - chi phí"
+                  : "2 < ROAS < 8: Ghi nhận doanh thu không hưởng hoa hồng";
               } else {
                 deductValue = Math.abs(revenue - cost);
                 stats.Retail_Normal -= deductValue;
@@ -1274,6 +1283,7 @@ export default function CommissionOnlineCalculator() {
 
               details.adCosts.push([
                 campaignName,
+                adNote,
                 roas,
                 cost,
                 revenue,

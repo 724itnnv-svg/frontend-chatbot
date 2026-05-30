@@ -115,6 +115,13 @@ function valueAt(source, path) {
   return path.split(".").reduce((cursor, key) => cursor?.[key], source);
 }
 
+function prevMonthPeriod() {
+  const now = new Date();
+  const year = now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear();
+  const month = now.getMonth() === 0 ? 12 : now.getMonth();
+  return `${year}-${String(month).padStart(2, "0")}`;
+}
+
 function formatPeriod(period) {
   if (!period || !/^\d{4}-\d{2}$/.test(period)) return period || "-";
   const [year, month] = period.split("-");
@@ -424,6 +431,8 @@ export default function AttendancePage() {
   const [payrollMessage, setPayrollMessage] = useState("");
   const msgTimer = useRef(null);
   const gpsRequestRef = useRef(null);
+  const payrollPeriodRef = useRef(payrollPeriod);
+  useEffect(() => { payrollPeriodRef.current = payrollPeriod; }, [payrollPeriod]);
 
   const activeWindow = useMemo(() => getActiveAttendanceWindow(new Date(clockNow), assignedShifts), [assignedShifts, clockNow]);
   const adminConfirmPromptVisible = adminConfirmFailureCount >= ADMIN_CONFIRM_FAILURE_LIMIT;
@@ -634,7 +643,8 @@ export default function AttendancePage() {
     setPayrollMessage("");
     try {
       const params = new URLSearchParams({ employeeCode: payrollEmployeeCode });
-      if (payrollPeriod) params.set("period", payrollPeriod);
+      const period = payrollPeriodRef.current;
+      if (period) params.set("period", period);
       const res = await api.get(`/public/payroll/lookup?${params.toString()}`);
       const data = res.data?.data || null;
       const responseCode = String(data?.maNhanVien || data?.employeeCode || "").trim().toUpperCase();
@@ -642,13 +652,15 @@ export default function AttendancePage() {
         throw new Error("Không thể hiển thị bảng lương không thuộc tài khoản đang đăng nhập.");
       }
       setPayroll(data);
+      if (data?.period) setPayrollPeriod(data.period);
     } catch (err) {
       setPayroll(null);
       setPayrollMessage(err.response?.data?.message || err.message || "Không tìm thấy bảng lương đã duyệt.");
+      if (!payrollPeriodRef.current) setPayrollPeriod(prevMonthPeriod());
     } finally {
       setPayrollLoading(false);
     }
-  }, [api, payrollEmployeeCode, payrollPeriod]);
+  }, [api, payrollEmployeeCode]);
 
   useEffect(() => {
     loadLocations();

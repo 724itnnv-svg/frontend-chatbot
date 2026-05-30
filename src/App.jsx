@@ -1,7 +1,8 @@
 // src/App.jsx
 import { lazy, Suspense, useEffect } from "react";
 import { Capacitor } from "@capacitor/core";
-import { Routes, Route, Navigate, useLocation } from "react-router-dom";
+import { App as CapacitorApp } from "@capacitor/app";
+import { Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "./context/AuthContext";
 import { canAccessScreen, getAllowedScreens } from "./utils/screenAccess";
 import { requestStartupNativePermissions } from "./utils/nativeAppPermissions";
@@ -182,10 +183,28 @@ function HomeRoute() {
 
 export default function App() {
   const { isLoggedIn } = useAuth();
+  const navigate = useNavigate();
 
   useEffect(() => {
     requestStartupNativePermissions();
   }, []);
+
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+    let listenerHandle;
+    CapacitorApp.addListener("appUrlOpen", (event) => {
+      const raw = event?.url || "";
+      if (!raw.startsWith("nnvchamcong://")) return;
+      try {
+        const url = new URL(raw);
+        const path = `/${url.hostname}${url.pathname !== "/" ? url.pathname : ""}${url.search}`;
+        navigate(path, { replace: true });
+      } catch {
+        // ignore malformed URL
+      }
+    }).then((handle) => { listenerHandle = handle; });
+    return () => { listenerHandle?.remove(); };
+  }, [navigate]);
 
   return (
     <Suspense fallback={<AppLoader />}>

@@ -1984,14 +1984,14 @@ export default function PayrollManager() {
               <Download className="h-4 w-4" />
               Xuất Excel
             </button>
-            <button
+            {/* <button
               onClick={() => exportPayrollQrCards(selectedRows.length ? selectedRows : sortedRows)}
               disabled={!sortedRows.length}
               className="inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-50 disabled:opacity-50"
             >
               <Download className="h-4 w-4" />
               Xuat QR
-            </button>
+            </button> */}
             <button onClick={() => setShowColumns(true)} className="inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-50">
               <Columns3 className="h-4 w-4" />
               Ẩn/hiện cột
@@ -2009,7 +2009,7 @@ export default function PayrollManager() {
                 className="inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-50 disabled:opacity-50"
               >
                 <ListChecks className="h-4 w-4" />
-                Nhap hang loat
+                Nhập hàng loạt
               </button>
             )}
             {(canCreate || canEdit) && (
@@ -2073,7 +2073,7 @@ export default function PayrollManager() {
           </select>
           <select value={insuranceCompany} onChange={(event) => setInsuranceCompany(event.target.value)} className="rounded-xl border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-sky-100">
             {insuranceCompanyOptions.map((item) => (
-              <option key={item} value={item}>{item === "ALL" ? "Tat ca cty BHXH" : item}</option>
+              <option key={item} value={item}>{item === "ALL" ? "Tất cả CTY" : item}</option>
             ))}
           </select>
           <select value={status} onChange={(event) => setStatus(event.target.value)} className="rounded-xl border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-sky-100">
@@ -2096,7 +2096,7 @@ export default function PayrollManager() {
         {message ? <div className="rounded-xl border bg-amber-50 px-3 py-2 text-sm text-amber-800">{message}</div> : null}
         {selectedRowIds.size ? (
           <div className="rounded-xl border bg-sky-50 px-3 py-2 text-sm text-sky-800">
-            Da chon {selectedRowIds.size} dong. Co the bam Nhap hang loat de cap nhat chung mot cot.
+            Đã chọn {selectedRowIds.size} đóng. Có thể bấm Nhập hàng loạt để cập nhật chung một cột.
           </div>
         ) : null}
       </div>
