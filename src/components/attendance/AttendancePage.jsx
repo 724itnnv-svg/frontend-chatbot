@@ -429,10 +429,15 @@ export default function AttendancePage() {
   const [payroll, setPayroll] = useState(null);
   const [payrollLoading, setPayrollLoading] = useState(false);
   const [payrollMessage, setPayrollMessage] = useState("");
+  const [lookupCode, setLookupCode] = useState(() =>
+    String(user?.code || user?.employeeCode || user?.maNhanVien || "").trim().toUpperCase()
+  );
   const msgTimer = useRef(null);
   const gpsRequestRef = useRef(null);
   const payrollPeriodRef = useRef(payrollPeriod);
   useEffect(() => { payrollPeriodRef.current = payrollPeriod; }, [payrollPeriod]);
+  const lookupCodeRef = useRef(lookupCode);
+  useEffect(() => { lookupCodeRef.current = lookupCode; }, [lookupCode]);
 
   const activeWindow = useMemo(() => getActiveAttendanceWindow(new Date(clockNow), assignedShifts), [assignedShifts, clockNow]);
   const adminConfirmPromptVisible = adminConfirmFailureCount >= ADMIN_CONFIRM_FAILURE_LIMIT;
@@ -442,6 +447,10 @@ export default function AttendancePage() {
     () => String(user?.code || user?.employeeCode || user?.maNhanVien || "").trim().toUpperCase(),
     [user?.code, user?.employeeCode, user?.maNhanVien]
   );
+
+  useEffect(() => {
+    if (payrollEmployeeCode) setLookupCode(payrollEmployeeCode);
+  }, [payrollEmployeeCode]);
   const payrollMeta = useMemo(() => statusMeta(payroll?.status), [payroll?.status]);
 
   const requestNativeGpsPermission = useCallback(async () => {
@@ -633,24 +642,21 @@ export default function AttendancePage() {
   }, [api]);
 
   const loadPayroll = useCallback(async () => {
-    if (!payrollEmployeeCode) {
+    const code = lookupCodeRef.current.trim().toUpperCase();
+    if (!code) {
       setPayroll(null);
-      setPayrollMessage("Tài khoản của bạn chưa có mã nhân viên. Vui lòng liên hệ admin để cập nhật mã trước khi xem bảng lương.");
+      setPayrollMessage("Vui lòng nhập mã nhân viên để tra cứu bảng lương.");
       return;
     }
 
     setPayrollLoading(true);
     setPayrollMessage("");
     try {
-      const params = new URLSearchParams({ employeeCode: payrollEmployeeCode });
+      const params = new URLSearchParams({ employeeCode: code });
       const period = payrollPeriodRef.current;
       if (period) params.set("period", period);
       const res = await api.get(`/public/payroll/lookup?${params.toString()}`);
       const data = res.data?.data || null;
-      const responseCode = String(data?.maNhanVien || data?.employeeCode || "").trim().toUpperCase();
-      if (data && responseCode && responseCode !== payrollEmployeeCode) {
-        throw new Error("Không thể hiển thị bảng lương không thuộc tài khoản đang đăng nhập.");
-      }
       setPayroll(data);
       if (data?.period) setPayrollPeriod(data.period);
     } catch (err) {
@@ -660,7 +666,7 @@ export default function AttendancePage() {
     } finally {
       setPayrollLoading(false);
     }
-  }, [api, payrollEmployeeCode]);
+  }, [api]);
 
   useEffect(() => {
     loadLocations();
@@ -1372,12 +1378,16 @@ export default function AttendancePage() {
                 </div>
 
                 <div className="grid gap-3 sm:grid-cols-[1fr_150px_auto] lg:grid-cols-[1fr_220px_auto]">
-                  <div className="block text-xs font-semibold text-slate-500">
+                  <label className="block text-xs font-semibold text-slate-500">
                     MÃ NHÂN VIÊN
-                    <div className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold uppercase text-slate-800">
-                      {payrollEmployeeCode || "Chưa gán mã"}
-                    </div>
-                  </div>
+                    <input
+                      type="text"
+                      value={lookupCode}
+                      onChange={(e) => setLookupCode(e.target.value.toUpperCase())}
+                      placeholder={payrollEmployeeCode || "Nhập mã nhân viên..."}
+                      className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold uppercase text-slate-800 outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
+                    />
+                  </label>
                   <label className="block text-xs font-semibold text-slate-500">
                     KỲ LƯƠNG
                     <input
@@ -1444,7 +1454,7 @@ export default function AttendancePage() {
                                 </span>
                               </div>
                               <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-emerald-100/80">
-                                <span className="font-mono">{payroll.maNhanVien || payrollEmployeeCode}</span>
+                                <span className="font-mono">{payroll.maNhanVien || lookupCode || payrollEmployeeCode}</span>
                                 {payroll.chucVu && <><span className="opacity-50">·</span><span>{payroll.chucVu}</span></>}
                                 {(payroll.khoiPhongBan || user?.teamId) && (
                                   <><span className="opacity-50">·</span><span>{payroll.khoiPhongBan || user?.teamId}</span></>

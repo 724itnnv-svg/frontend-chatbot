@@ -434,6 +434,7 @@ export default function AdminDashboard() {
                     <form onSubmit={handleExportOrders} className="space-y-5">
                         {/* Ngày */}
                         <div className="grid grid-cols-2 gap-3">
+                        </div>
                 {/* DAILY STATS */}
                 <section className={`rounded-2xl border ${cardBg} backdrop-blur-xl shadow-[0_8px_30px_rgba(0,0,0,0.04)] p-5`}>
                     <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
@@ -635,6 +636,8 @@ export default function AdminDashboard() {
                                 {isExporting ? <><Loader2 size={15} className="animate-spin" /> Đang xuất...</> : <><Download size={15} /> Xuất Excel</>}
                             </button>
                         </div>
+                    </div>
+                </div>
                     </form>
                 </div>
 

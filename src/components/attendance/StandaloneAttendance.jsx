@@ -10,7 +10,7 @@ export default function StandaloneAttendance() {
 
   const displayName = user?.fullName || user?.email || "Nhân viên";
   const avatarInitial = displayName.trim().charAt(0).toUpperCase();
-  const isAdmin = Number(user?.allpage) === 1;
+  const isAdmin = user?.role === "admin";
 
   function handleLogout() {
     logout(false);
