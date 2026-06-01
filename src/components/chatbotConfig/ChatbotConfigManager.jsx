@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Clock3, Loader2, RefreshCw, Save, Settings2, Smile, ToggleLeft, ToggleRight } from "lucide-react";
+import { Clock3, Globe2, Loader2, RefreshCw, Save, Settings2, Smile, ToggleLeft, ToggleRight } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 
 const DEFAULT_SETTINGS = {
@@ -9,6 +9,7 @@ const DEFAULT_SETTINGS = {
   replyDebounceMs: 1200,
   aggregateWindowMs: 5000,
   messageSplitMaxLength: 1800,
+  chatV3FaqPageIds: [],
 };
 
 function formatDateTime(value) {
@@ -67,6 +68,8 @@ function StatusTile({ label, value }) {
 export default function ChatbotConfigManager() {
   const { token } = useAuth();
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
+  const [pages, setPages] = useState([]);
+  const [chatV3FaqApplyAllPages, setChatV3FaqApplyAllPages] = useState(true);
   const [emojiText, setEmojiText] = useState(DEFAULT_SETTINGS.stripEmojiList.join(" "));
   const [updatedAt, setUpdatedAt] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -80,6 +83,7 @@ export default function ChatbotConfigManager() {
   const replyDebounceMs = Number(settings.responseDelayMs ?? settings.replyDebounceMs ?? 0);
   const replyDebounceSeconds = replyDebounceMs / 1000;
   const aggregateWindowSeconds = Number(settings.aggregateWindowMs || 0) / 1000;
+  const chatV3FaqPageIds = Array.isArray(settings.chatV3FaqPageIds) ? settings.chatV3FaqPageIds.map(String) : [];
 
   const fetchConfig = async () => {
     if (!token) return;
@@ -97,6 +101,9 @@ export default function ChatbotConfigManager() {
         ...(json.config?.settings || {}),
       };
       setSettings(nextSettings);
+      setChatV3FaqApplyAllPages(
+        !Array.isArray(nextSettings.chatV3FaqPageIds) || nextSettings.chatV3FaqPageIds.length === 0,
+      );
       setEmojiText((nextSettings.stripEmojiList || DEFAULT_SETTINGS.stripEmojiList).join(" "));
       setUpdatedAt(json.config?.updatedAt || json.config?.createdAt || null);
     } catch (err) {
@@ -106,12 +113,63 @@ export default function ChatbotConfigManager() {
     }
   };
 
+  const fetchPages = async () => {
+    if (!token) return;
+    try {
+      const response = await fetch("/api/chatbot-config/pages", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const json = await response.json();
+      if (!response.ok || !json.ok) throw new Error(json.message || "Không thể tải danh sách Page");
+      setPages(Array.isArray(json.pages) ? json.pages : []);
+    } catch (err) {
+      setMessage(err.message || "Không thể tải danh sách Page.");
+      setPages([]);
+    }
+  };
+
   useEffect(() => {
     fetchConfig();
+    fetchPages();
   }, [token]);
+
+  const toggleChatV3FaqPage = (pageId) => {
+    const normalizedPageId = String(pageId || "");
+    if (!normalizedPageId) return;
+    setSettings((prev) => {
+      const current = Array.isArray(prev.chatV3FaqPageIds) ? prev.chatV3FaqPageIds.map(String) : [];
+      const next = current.includes(normalizedPageId)
+        ? current.filter((id) => id !== normalizedPageId)
+        : [...current, normalizedPageId];
+      return { ...prev, chatV3FaqPageIds: next };
+    });
+  };
+
+  const setChatV3FaqAllPages = (enabled) => {
+    setChatV3FaqApplyAllPages(Boolean(enabled));
+    setSettings((prev) => ({
+      ...prev,
+      chatV3FaqPageIds: enabled ? [] : (Array.isArray(prev.chatV3FaqPageIds) ? prev.chatV3FaqPageIds : []),
+    }));
+  };
+
+  const selectAllChatV3FaqPages = () => {
+    setSettings((prev) => ({
+      ...prev,
+      chatV3FaqPageIds: pages.map((page) => String(page.facebookId)).filter(Boolean),
+    }));
+  };
+
+  const clearChatV3FaqPages = () => {
+    setSettings((prev) => ({ ...prev, chatV3FaqPageIds: [] }));
+  };
 
   const handleSave = async () => {
     if (!token) return;
+    if (!chatV3FaqApplyAllPages && chatV3FaqPageIds.length === 0) {
+      setMessage("Vui lòng chọn ít nhất 1 Page hoặc bật áp dụng tất cả Page.");
+      return;
+    }
     setSaving(true);
     setMessage("");
     try {
@@ -129,6 +187,7 @@ export default function ChatbotConfigManager() {
             replyDebounceMs: settings.responseDelayMs,
             aggregateWindowMs: settings.aggregateWindowMs,
             messageSplitMaxLength: settings.messageSplitMaxLength,
+            chatV3FaqPageIds: chatV3FaqApplyAllPages ? [] : chatV3FaqPageIds,
           },
         }),
       });
@@ -140,6 +199,9 @@ export default function ChatbotConfigManager() {
         ...(json.config?.settings || {}),
       };
       setSettings(nextSettings);
+      setChatV3FaqApplyAllPages(
+        !Array.isArray(nextSettings.chatV3FaqPageIds) || nextSettings.chatV3FaqPageIds.length === 0,
+      );
       setEmojiText((nextSettings.stripEmojiList || DEFAULT_SETTINGS.stripEmojiList).join(" "));
       setUpdatedAt(json.config?.updatedAt || new Date().toISOString());
       setMessage("Đã lưu cấu hình ChatBot.");
@@ -166,7 +228,10 @@ export default function ChatbotConfigManager() {
 
           <button
             type="button"
-            onClick={fetchConfig}
+            onClick={() => {
+              fetchConfig();
+              fetchPages();
+            }}
             disabled={loading}
             className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-cyan-200 hover:bg-cyan-50 disabled:opacity-60"
           >
@@ -244,6 +309,106 @@ export default function ChatbotConfigManager() {
               {message}
             </div>
           ) : null}
+        </section>
+
+        <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <div className="flex flex-col gap-4 border-b border-slate-100 bg-gradient-to-r from-white to-cyan-50 px-5 py-5 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-start gap-3">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-cyan-50 text-cyan-700 ring-1 ring-cyan-100">
+                <Globe2 size={21} />
+              </span>
+              <div>
+                <h2 className="text-lg font-bold text-slate-900">Page áp dụng FAQ ChatV3</h2>
+                <p className="max-w-2xl text-sm text-slate-500">
+                  Chọn những Page được dùng “Bộ câu hỏi dùng chung” trong luồng chat_v3.
+                </p>
+              </div>
+            </div>
+
+            <SaveButton loading={loading} saving={saving} onClick={handleSave} />
+          </div>
+
+          <div className="grid gap-5 p-5 lg:grid-cols-[320px_minmax(0,1fr)]">
+            <div className="rounded-2xl border border-cyan-100 bg-cyan-50/70 p-4">
+              <label className="flex items-start gap-3 text-sm font-semibold text-slate-800">
+                <input
+                  type="checkbox"
+                  checked={chatV3FaqApplyAllPages}
+                  onChange={(event) => setChatV3FaqAllPages(event.target.checked)}
+                  className="mt-1 h-4 w-4 accent-cyan-600"
+                />
+                <span>
+                  Áp dụng tất cả Page
+                  <span className="mt-1 block text-xs font-normal leading-5 text-slate-500">
+                    Khi bật, mọi Page đều được dùng FAQ ChatV3. Khi tắt, chỉ các Page được tick bên phải mới áp dụng.
+                  </span>
+                </span>
+              </label>
+
+              <div className="mt-4 rounded-xl bg-white px-3 py-2 text-sm text-slate-600">
+                Đang áp dụng:{" "}
+                <span className="font-bold text-slate-950">
+                  {chatV3FaqApplyAllPages ? "Tất cả Page" : `${chatV3FaqPageIds.length}/${pages.length} Page`}
+                </span>
+              </div>
+            </div>
+
+            <div className={chatV3FaqApplyAllPages ? "opacity-60" : ""}>
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <div className="text-sm font-semibold text-slate-700">Danh sách Page</div>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={selectAllChatV3FaqPages}
+                    disabled={chatV3FaqApplyAllPages}
+                    className="rounded-lg border border-cyan-200 bg-white px-3 py-1.5 text-xs font-bold text-cyan-700 hover:bg-cyan-50 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Chọn tất cả
+                  </button>
+                  <button
+                    type="button"
+                    onClick={clearChatV3FaqPages}
+                    disabled={chatV3FaqApplyAllPages}
+                    className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Bỏ chọn
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid max-h-72 gap-2 overflow-y-auto rounded-2xl border border-slate-200 bg-slate-50 p-3 md:grid-cols-2">
+                {pages.length === 0 ? (
+                  <div className="col-span-full px-3 py-8 text-center text-sm text-slate-500">Chưa có Page để chọn.</div>
+                ) : (
+                  pages.map((page) => {
+                    const pageId = String(page.facebookId || "");
+                    const checked = chatV3FaqPageIds.includes(pageId);
+                    return (
+                      <label
+                        key={pageId}
+                        className="flex cursor-pointer items-center gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm shadow-sm transition hover:border-cyan-200 hover:bg-cyan-50/50"
+                      >
+                        <input
+                          type="checkbox"
+                          disabled={chatV3FaqApplyAllPages}
+                          checked={checked}
+                          onChange={() => toggleChatV3FaqPage(pageId)}
+                          className="h-4 w-4 accent-cyan-600"
+                        />
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate font-semibold text-slate-800">{page.name || pageId}</span>
+                          <span className="block truncate text-xs text-slate-400">{pageId}</span>
+                        </span>
+                        <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-bold text-slate-500">
+                          {page.teamId || "N/A"}
+                        </span>
+                      </label>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          </div>
         </section>
 
         <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">

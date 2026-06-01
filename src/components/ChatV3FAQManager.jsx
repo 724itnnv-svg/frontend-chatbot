@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import {
   CheckCircle2,
   Edit3,
+  Globe2,
   HelpCircle,
   Loader2,
   Plus,
@@ -17,6 +18,8 @@ const EMPTY_FORM = {
   question: "",
   answer: "",
   keywords: "",
+  pageIds: [],
+  applyAllPages: true,
   priority: 100,
   active: true,
 };
@@ -29,6 +32,7 @@ function keywordString(value) {
 export default function ChatV3FAQManager() {
   const { token } = useAuth() || {};
   const [faqs, setFaqs] = useState([]);
+  const [pages, setPages] = useState([]);
   const [search, setSearch] = useState("");
   const [form, setForm] = useState(EMPTY_FORM);
   const [editingId, setEditingId] = useState(null);
@@ -40,10 +44,10 @@ export default function ChatV3FAQManager() {
     const q = search.trim().toLowerCase();
     if (!q) return faqs;
     return faqs.filter((faq) => {
-      const text = [faq.question, faq.answer, keywordString(faq.keywords)].join(" ").toLowerCase();
+      const text = [faq.question, faq.answer, keywordString(faq.keywords), getFaqPageLabel(faq)].join(" ").toLowerCase();
       return text.includes(q);
     });
-  }, [faqs, search]);
+  }, [faqs, pages, search]);
 
   const authHeaders = () => ({
     "Content-Type": "application/json",
@@ -68,8 +72,22 @@ export default function ChatV3FAQManager() {
     }
   };
 
+  const loadPages = async () => {
+    if (!token) return;
+    try {
+      const res = await fetch("/api/chat-v3/faqs/pages", { headers: authHeaders() });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Không thể tải danh sách Page");
+      setPages(Array.isArray(data.pages) ? data.pages : []);
+    } catch (err) {
+      console.error(err);
+      setPages([]);
+    }
+  };
+
   useEffect(() => {
     loadFaqs();
+    loadPages();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
@@ -84,16 +102,56 @@ export default function ChatV3FAQManager() {
       question: faq.question || "",
       answer: faq.answer || "",
       keywords: keywordString(faq.keywords),
+      pageIds: Array.isArray(faq.pageIds) ? faq.pageIds.map(String) : [],
+      applyAllPages: !Array.isArray(faq.pageIds) || faq.pageIds.length === 0,
       priority: faq.priority ?? 100,
       active: faq.active !== false,
     });
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
+  const togglePage = (pageId) => {
+    const normalizedPageId = String(pageId || "");
+    if (!normalizedPageId) return;
+    setForm((current) => {
+      const pageIds = Array.isArray(current.pageIds) ? current.pageIds.map(String) : [];
+      const nextPageIds = pageIds.includes(normalizedPageId)
+        ? pageIds.filter((id) => id !== normalizedPageId)
+        : [...pageIds, normalizedPageId];
+      return { ...current, pageIds: nextPageIds };
+    });
+  };
+
+  const selectAllPages = () => {
+    setForm((current) => ({
+      ...current,
+      pageIds: pages.map((page) => String(page.facebookId)).filter(Boolean),
+    }));
+  };
+
+  const clearSelectedPages = () => {
+    setForm((current) => ({ ...current, pageIds: [] }));
+  };
+
+  function getFaqPageLabel(faq) {
+    const pageIds = Array.isArray(faq?.pageIds) ? faq.pageIds.map(String).filter(Boolean) : [];
+    if (pageIds.length === 0) return "Tất cả Page";
+    const names = pageIds.map((pageId) => {
+      const page = pages.find((item) => String(item.facebookId) === String(pageId));
+      return page?.name || pageId;
+    });
+    if (names.length <= 2) return names.join(", ");
+    return `${names.slice(0, 2).join(", ")} +${names.length - 2} Page`;
+  }
+
   const handleSubmit = async (event) => {
     event.preventDefault();
     if (!form.question.trim() || !form.answer.trim()) {
       setError("Vui lòng nhập câu hỏi và câu trả lời.");
+      return;
+    }
+    if (!form.applyAllPages && (!Array.isArray(form.pageIds) || form.pageIds.length === 0)) {
+      setError("Vui lòng chọn ít nhất 1 Page hoặc bật áp dụng tất cả Page.");
       return;
     }
 
@@ -105,6 +163,7 @@ export default function ChatV3FAQManager() {
         headers: authHeaders(),
         body: JSON.stringify({
           ...form,
+          pageIds: form.applyAllPages ? [] : form.pageIds,
           priority: Number(form.priority) || 100,
         }),
       });
@@ -155,7 +214,10 @@ export default function ChatV3FAQManager() {
           </div>
           <button
             type="button"
-            onClick={loadFaqs}
+            onClick={() => {
+              loadFaqs();
+              loadPages();
+            }}
             disabled={loading}
             className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-60"
           >
@@ -211,6 +273,82 @@ export default function ChatV3FAQManager() {
                   placeholder="đổi trả, bảo hành, giao hàng"
                 />
               </label>
+
+              <div className="space-y-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                <label className="flex items-start gap-2 text-sm font-semibold text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={form.applyAllPages}
+                    onChange={(e) =>
+                      setForm((current) => ({
+                        ...current,
+                        applyAllPages: e.target.checked,
+                        pageIds: e.target.checked ? [] : current.pageIds,
+                      }))
+                    }
+                    className="mt-1 h-4 w-4 accent-cyan-600"
+                  />
+                  <span>
+                    Áp dụng tất cả Page
+                    <span className="block text-xs font-normal text-slate-500">
+                      Tắt lựa chọn này để gán FAQ cho từng Page cụ thể.
+                    </span>
+                  </span>
+                </label>
+
+                {!form.applyAllPages && (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-bold uppercase text-slate-500">
+                        Page áp dụng ({form.pageIds.length}/{pages.length})
+                      </span>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={selectAllPages}
+                          className="text-xs font-semibold text-cyan-700 hover:text-cyan-900"
+                        >
+                          Chọn tất cả
+                        </button>
+                        <button
+                          type="button"
+                          onClick={clearSelectedPages}
+                          className="text-xs font-semibold text-slate-500 hover:text-slate-700"
+                        >
+                          Bỏ chọn
+                        </button>
+                      </div>
+                    </div>
+                    <div className="max-h-44 space-y-1 overflow-y-auto rounded-lg border border-slate-200 bg-white p-2">
+                      {pages.length === 0 ? (
+                        <div className="px-2 py-4 text-center text-xs text-slate-500">Chưa có Page để chọn.</div>
+                      ) : (
+                        pages.map((page) => {
+                          const pageId = String(page.facebookId || "");
+                          const checked = form.pageIds.includes(pageId);
+                          return (
+                            <label
+                              key={pageId}
+                              className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-cyan-50"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={() => togglePage(pageId)}
+                                className="h-4 w-4 accent-cyan-600"
+                              />
+                              <span className="min-w-0 flex-1 truncate text-slate-700">
+                                {page.name || pageId}
+                              </span>
+                              <span className="shrink-0 text-xs text-slate-400">{page.teamId || ""}</span>
+                            </label>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <label className="block space-y-1">
@@ -298,6 +436,10 @@ export default function ChatV3FAQManager() {
                           ) : (
                             <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-bold text-slate-500">Tắt</span>
                           )}
+                        </div>
+                        <div className="mt-2 inline-flex max-w-full items-center gap-1 rounded-full bg-slate-50 px-2 py-0.5 text-xs font-semibold text-slate-600 ring-1 ring-slate-200">
+                          <Globe2 size={12} />
+                          <span className="truncate">{getFaqPageLabel(faq)}</span>
                         </div>
                         <h3 className="mt-2 font-bold text-slate-900">{faq.question}</h3>
                         <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-600">{faq.answer}</p>
