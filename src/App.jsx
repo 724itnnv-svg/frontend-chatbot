@@ -242,6 +242,7 @@ export default function App() {
         <Route path="/forgot-password" element={<ForgotPassword />} />
         <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/qr-login" element={<QrLogin />} />
+        <Route path="/app-login" element={<QrLogin />} />
 
         <Route
           path="/login"

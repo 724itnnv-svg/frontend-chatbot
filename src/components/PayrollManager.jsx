@@ -1580,8 +1580,9 @@ export default function PayrollManager() {
     markSaving(row.__clientId, true);
     try {
       const res = await fetch(`/api/payroll/${row._id}`, { method: "DELETE", headers: authHeader });
-      if (!res.ok) throw new Error("Không xóa được dòng lương");
-      setRows((current) => current.filter((item) => item._id !== row._id));
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data?.success === false) throw new Error(data?.message || "Không xóa được dòng lương");
+      setRows((current) => current.filter((item) => String(item._id) !== String(row._id)));
       setMessage("Đã xóa dòng lương.");
     } catch (error) {
       console.error(error);
