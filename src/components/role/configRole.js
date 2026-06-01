@@ -17,6 +17,7 @@ const APP_PERMISSIONS = {
     { id: "admin_agent", name: "Quản Trị Agent" },
     { id: "admin_agent_promo", name: "Quản Lý Khuyến Mãi" },
     { id: "admin_chatbot_config", name: "Cấu Hình ChatBot" },
+    { id: "admin_chat_v3_faq", name: "Bộ câu hỏi dùng chung" },
     { id: "admin_faq", name: "FAQ Theo Page" },
     { id: "admin_testcase", name: "Quản Trị Test Case ChatBot" },
     { id: "admin_chat_v4_rules", name: "Quy tắc Chat V4" },

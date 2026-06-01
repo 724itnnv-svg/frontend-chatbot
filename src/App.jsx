@@ -41,6 +41,7 @@ const AgentManage = lazy(() => import("./components/agentAI/AgentManage"));
 const AgentPromoManage = lazy(() => import("./components/agentAI/AgentPromoManage"));
 const ChatbotConfigManager = lazy(() => import("./components/chatbotConfig/ChatbotConfigManager"));
 const FAQManager = lazy(() => import("./components/FAQManager"));
+const ChatV3FAQManager = lazy(() => import("./components/ChatV3FAQManager"));
 const LogsManage = lazy(() => import("./components/logs/LogsManager"));
 const NotificationManager = lazy(() => import("./components/NotificationManager"));
 const PayrollManager = lazy(() => import("./components/PayrollManager"));
@@ -80,6 +81,7 @@ const ADMIN_ROUTE_BY_SCREEN = {
   admin_agent_promo: "/admin/agent-promotions",
   admin_chatbot_config: "/admin/chatbot-config",
   admin_faq: "/admin/faqs",
+  admin_chat_v3_faq: "/admin/chat-v3-faqs",
   admin_test_chatbot_v2: "/admin/test-chatbot-v2", // New route for TestChatBotV2
   admin_testcase: "/admin/test-chat",
   admin_chat_v4_rules: "/admin/chat-v4-rules",
@@ -117,6 +119,7 @@ const adminRoutes = [
   { path: "agent-promotions", screenId: "admin_agent_promo", element: <AgentPromoManage /> },
   { path: "chatbot-config", screenId: "admin_chatbot_config", element: <ChatbotConfigManager /> },
   { path: "faqs", screenId: "admin_faq", element: <FAQManager /> },
+  { path: "chat-v3-faqs", screenId: "admin_chat_v3_faq", element: <ChatV3FAQManager /> },
   { path: "test-cases", screenId: "admin_testcase", element: <TestCaseChatBotManager /> },
   { path: "chat-v4-rules", screenId: "admin_chat_v4_rules", element: <ChatV4RulesManager /> },
   { path: "chat-v4-function-calls", screenId: "admin_chat_v4_function_calls", element: <ChatV4FunctionCallsManager /> },

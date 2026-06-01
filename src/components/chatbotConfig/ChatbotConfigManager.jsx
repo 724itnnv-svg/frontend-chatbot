@@ -6,6 +6,7 @@ const DEFAULT_SETTINGS = {
   allowEmoji: false,
   stripEmojiList: ["🌱", "😊", "😄", "👍", "📦"],
   responseDelayMs: 1200,
+  replyDebounceMs: 1200,
   aggregateWindowMs: 5000,
   messageSplitMaxLength: 1800,
 };
@@ -54,6 +55,15 @@ function NumberSettingCard({ label, value, unit, min, max, step, onChange, descr
   );
 }
 
+function StatusTile({ label, value }) {
+  return (
+    <div className="rounded-lg border border-cyan-100 bg-cyan-50 px-3 py-2">
+      <div className="text-[11px] font-semibold uppercase tracking-wide text-cyan-700">{label}</div>
+      <div className="mt-1 text-sm font-bold text-slate-950">{value}</div>
+    </div>
+  );
+}
+
 export default function ChatbotConfigManager() {
   const { token } = useAuth();
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
@@ -67,6 +77,9 @@ export default function ChatbotConfigManager() {
     () => emojiText.split(/[\s,]+/).map((item) => item.trim()).filter(Boolean),
     [emojiText],
   );
+  const replyDebounceMs = Number(settings.responseDelayMs ?? settings.replyDebounceMs ?? 0);
+  const replyDebounceSeconds = replyDebounceMs / 1000;
+  const aggregateWindowSeconds = Number(settings.aggregateWindowMs || 0) / 1000;
 
   const fetchConfig = async () => {
     if (!token) return;
@@ -113,6 +126,7 @@ export default function ChatbotConfigManager() {
             allowEmoji: settings.allowEmoji,
             stripEmojiList: emojiList.length ? emojiList : DEFAULT_SETTINGS.stripEmojiList,
             responseDelayMs: settings.responseDelayMs,
+            replyDebounceMs: settings.responseDelayMs,
             aggregateWindowMs: settings.aggregateWindowMs,
             messageSplitMaxLength: settings.messageSplitMaxLength,
           },
@@ -249,10 +263,16 @@ export default function ChatbotConfigManager() {
             <SaveButton loading={loading} saving={saving} onClick={handleSave} />
           </div>
 
+          <div className="grid gap-3 border-b border-slate-100 p-5 sm:grid-cols-3">
+            <StatusTile label="Gom tin" value={`${replyDebounceSeconds}s`} />
+            <StatusTile label="Khoảng gom ý" value={`${aggregateWindowSeconds}s`} />
+            <StatusTile label="Chờ khi AI đang xử lý" value="Bật" />
+          </div>
+
           <div className="grid gap-4 p-5 md:grid-cols-3">
             <NumberSettingCard
               label="Delay trả lời khách"
-              value={Number(settings.responseDelayMs || 0) / 1000}
+              value={replyDebounceSeconds}
               unit="giây"
               min="0"
               max="30"
@@ -262,13 +282,14 @@ export default function ChatbotConfigManager() {
                 setSettings((prev) => ({
                   ...prev,
                   responseDelayMs: Math.round(Number(event.target.value || 0) * 1000),
+                  replyDebounceMs: Math.round(Number(event.target.value || 0) * 1000),
                 }))
               }
             />
 
             <NumberSettingCard
               label="Cửa sổ gom tin nhắn"
-              value={Number(settings.aggregateWindowMs || 0) / 1000}
+              value={aggregateWindowSeconds}
               unit="giây"
               min="1"
               max="60"

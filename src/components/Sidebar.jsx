@@ -57,6 +57,7 @@ const MENU_CONFIG = [
   { id: "admin_agent", path: "/admin/agents", label: "Quản trị Agent", icon: BotMessageSquare },
   { id: "admin_agent_promo", path: "/admin/agent-promotions", label: "Quản lý khuyến mãi", icon: BotMessageSquare },
   { id: "admin_chatbot_config", path: "/admin/chatbot-config", label: "Cấu hình ChatBot", icon: Settings2 },
+  { id: "admin_chat_v3_faq", path: "/admin/chat-v3-faqs", label: "Bộ câu hỏi dùng chung", icon: HelpCircle },
   { id: "admin_faq", path: "/admin/faqs", label: "FAQ theo Page", icon: HelpCircle },
   { id: "admin_logs", path: "/admin/logs", label: "Log hệ thống", icon: Database },
   { id: "notifications", path: "/admin/notifications", label: "Thông báo thiết bị", icon: BellRing },
@@ -98,7 +99,7 @@ const MENU_GROUPS = [
     id: "system",
     label: "Hệ thống & AI",
     icon: ShieldCheck,
-    items: ["admin_dashboard", "admin_products_tool", "admin_vectorstore_tool", "admin_agent", "admin_agent_promo", "admin_chatbot_config", "admin_testcase", "admin_logs", "notifications"],
+    items: ["admin_dashboard", "admin_products_tool", "admin_vectorstore_tool", "admin_agent", "admin_agent_promo", "admin_chatbot_config", "admin_chat_v3_faq", "admin_testcase", "admin_logs", "notifications"],
   },
   {
     id: "experimental",
