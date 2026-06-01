@@ -11,7 +11,7 @@ function ProductForm({ open, onClose, onSubmit, onSubmitCreate, productId }) {
     VARIANT: "",
     PRICE_VND: 0,
     PROMO: "",
-    PROMO_MKT: "",  
+    PROMO_MKT: "",
     INGREDIENTS: "",
     BENEFITS: [""],
     USAGE: "",
@@ -23,29 +23,31 @@ function ProductForm({ open, onClose, onSubmit, onSubmitCreate, productId }) {
   });
 
   const [fetching, setFetching] = useState(false);
+  const [fetchError, setFetchError] = useState("");
   const companies = [
-      { _id: "nnvtv", name: "Công ty Phân Bón Nông Nghiệp Việt" },
-      { _id: "kingfarm", name: "Công ty Phân Bón Kingfarm" },
-      { _id: "abctv", name: "Công ty Phân Bón ABC" },
-      { _id: "vietnhattv", name: "Công ty Phân Bón Việt Nhật" },
+    { _id: "nnvtv", name: "Công ty Phân Bón Nông Nghiệp Việt" },
+    { _id: "kingfarm", name: "Công ty Phân Bón Kingfarm" },
+    { _id: "abctv", name: "Công ty Phân Bón ABC" },
+    { _id: "vietnhattv", name: "Công ty Phân Bón Việt Nhật" },
   ];
   // Fetch chi tiết sản phẩm theo productId
   useEffect(() => {
-    if (!productId || !open) return; 
+    if (!productId || !open) return;
+    setFetchError("");
 
     const fetchProduct = async () => {
       try {
         setFetching(true);
-        const res = await fetch(`/api/products/${productId}`,
-          {
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-          }
-        );
-        let data = await res.json();
-        data = data.product;
-        
+        const res = await fetch(`/api/products/${productId}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const json = await res.json();
+        if (!res.ok) {
+          throw new Error(json.message || `Lỗi ${res.status}: Không thể tải sản phẩm`);
+        }
+        const data = json.product;
+        if (!data) throw new Error("Dữ liệu sản phẩm không hợp lệ");
+
         setForm({
           PRODUCT_CODE: data.PRODUCT_CODE || "",
           PRODUCT_NAME: data.PRODUCT_NAME || "",
@@ -53,7 +55,7 @@ function ProductForm({ open, onClose, onSubmit, onSubmitCreate, productId }) {
           VARIANT: data.VARIANT || "",
           PRICE_VND: data.PRICE_VND || 0,
           PROMO: data.PROMO || "",
-          PROMO_MKT: data.PROMO_MKT || "",        
+          PROMO_MKT: data.PROMO_MKT || "",
           INGREDIENTS: data.INGREDIENTS || "",
           BENEFITS: data.BENEFITS?.length ? data.BENEFITS : [""],
           USAGE: data.USAGE || "",
@@ -65,6 +67,7 @@ function ProductForm({ open, onClose, onSubmit, onSubmitCreate, productId }) {
         });
       } catch (error) {
         console.error(error);
+        setFetchError(error.message || "Không thể tải dữ liệu sản phẩm");
       } finally {
         setFetching(false);
       }
@@ -100,12 +103,12 @@ function ProductForm({ open, onClose, onSubmit, onSubmitCreate, productId }) {
     e.preventDefault();
     setLoading(true);
     try {
-      if(productId){
-         await onSubmit(form); // callback trả về kết quả cho component cha
-      }else{
+      if (productId) {
+        await onSubmit(form); // callback trả về kết quả cho component cha
+      } else {
         await onSubmitCreate(form); // callback trả về kết quả cho component cha
       }
-     
+
     } catch (err) {
       console.error(err);
     } finally {
@@ -157,6 +160,10 @@ function ProductForm({ open, onClose, onSubmit, onSubmitCreate, productId }) {
         <div className="max-h-[72vh] min-h-[72vh] overflow-y-auto px-5 py-4">
           {fetching ? (
             <div className="text-center py-10 text-slate-500">Đang tải dữ liệu...</div>
+          ) : fetchError ? (
+            <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-6 text-center text-sm font-medium text-rose-700">
+              {fetchError}
+            </div>
           ) : (
             <form onSubmit={handleSubmit} className="space-y-5">
               {/* PRODUCT_CODE & PRODUCT_NAME */}
@@ -237,7 +244,7 @@ function ProductForm({ open, onClose, onSubmit, onSubmitCreate, productId }) {
                   />
                 </div>
               </div>
-               <div className="grid gap-3 md:grid-cols-1">
+              <div className="grid gap-3 md:grid-cols-1">
                 <div className="space-y-1">
                   <label className="block text-xs font-semibold text-slate-600">PROMO_MKT (Khuyến mãi phòng MKT)</label>
                   <input
@@ -247,7 +254,7 @@ function ProductForm({ open, onClose, onSubmit, onSubmitCreate, productId }) {
                     onChange={handleChange}
                     className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-sky-300 focus:ring-4 focus:ring-sky-100"
                   />
-                </div>                
+                </div>
               </div>
 
               {/* INGREDIENTS */}
@@ -390,18 +397,18 @@ function ProductForm({ open, onClose, onSubmit, onSubmitCreate, productId }) {
 
               {/* COMANY */}
               <div className="space-y-1">
-                <label className="block text-xs font-semibold text-slate-600">Công ty</label>         
+                <label className="block text-xs font-semibold text-slate-600">Công ty</label>
                 <select
-                        value={form.COMANY}
-                        onChange={(e) => setForm(prev => ({ ...prev, COMANY: e.target.value }))}
-                        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-sky-300 focus:ring-4 focus:ring-sky-100"
-                    >                      
-                        {companies.map(c => (
-                            <option key={c._id} value={c._id}>
-                                {c.name}
-                            </option>
-                        ))}
-                    </select>
+                  value={form.COMANY}
+                  onChange={(e) => setForm(prev => ({ ...prev, COMANY: e.target.value }))}
+                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-sky-300 focus:ring-4 focus:ring-sky-100"
+                >
+                  {companies.map(c => (
+                    <option key={c._id} value={c._id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
               </div>
             </form>
           )}
