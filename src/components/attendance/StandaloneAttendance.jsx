@@ -11,6 +11,7 @@ export default function StandaloneAttendance() {
   const displayName = user?.fullName || user?.email || "Nhân viên";
   const avatarInitial = displayName.trim().charAt(0).toUpperCase();
   const isAdmin = user?.role === "admin";
+  const isUser = user?.role === "user";
 
   function handleLogout() {
     logout(false);
@@ -46,7 +47,7 @@ export default function StandaloneAttendance() {
           </div>
 
           {/* Nút vào Admin (nếu có quyền) */}
-          {isAdmin && (
+          {!isUser && (
             <button
               onClick={() => navigate("/admin")}
               title="Về trang quản trị"

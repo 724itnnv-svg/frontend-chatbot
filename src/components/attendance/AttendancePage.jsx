@@ -1452,6 +1452,11 @@ export default function AttendancePage() {
                                 <span className={`rounded-full border px-2.5 py-0.5 text-xs font-bold ${payrollMeta.className}`}>
                                   {payrollMeta.label}
                                 </span>
+                                {toNumber(payroll.dataTinhLuong?.luongDangApDung) > 0 && (
+                                  <span className="rounded-full border border-white/30 bg-white/15 px-2.5 py-0.5 text-xs font-semibold text-white">
+                                    Tổng lương: {money(payroll.dataTinhLuong.luongDangApDung)}
+                                  </span>
+                                )}
                               </div>
                               <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-emerald-100/80">
                                 <span className="font-mono">{payroll.maNhanVien || lookupCode || payrollEmployeeCode}</span>
@@ -1532,7 +1537,7 @@ export default function AttendancePage() {
                           <div className="flex items-center gap-3 px-4 py-3.5">
                             <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-emerald-600 text-xs font-black text-white">1</div>
                             <div className="min-w-0 flex-1">
-                              <div className="text-sm font-semibold text-slate-800">Đợt 1 — Đầu tháng</div>
+                              <div className="text-sm font-semibold text-slate-800">Đợt 1 — Cuối tháng</div>
                               <div className="text-xs text-slate-400">Lương + phụ cấp + các khoản cố định</div>
                             </div>
                             <div className="text-base font-black text-emerald-700 tabular-nums">{money(luongDot1)}</div>

@@ -451,17 +451,6 @@ export default function UsersPage() {
   const getQrFileBaseName = (user) =>
     sanitizeFileName(`${user?.code || "no-code"}_${user?.fullName || user?.email || user?._id}`);
 
-  const buildDeepLinkIntent = (loginUrl) => {
-    try {
-      const url = new URL(loginUrl);
-      const path = `${url.pathname}${url.search}`;
-      const fallback = encodeURIComponent(loginUrl);
-      return `intent:/${path}#Intent;scheme=nnvchamcong;package=com.nnv.chamcongvip;S.browser_fallback_url=${fallback};end`;
-    } catch {
-      return loginUrl;
-    }
-  };
-
   const createQrLoginToken = async (user) => {
     const res = await fetch(`/api/user/${user._id}/qr-login-token`, {
       method: "POST",
@@ -485,7 +474,7 @@ export default function UsersPage() {
 
       try {
         await navigator.clipboard.writeText(data.loginUrl);
-        alert("Đã copy link đăng nhập vào clipboard.\n(Gửi qua Zalo/SMS/... - tự mở app nếu đã cài, fallback web nếu chưa cài)");
+        alert("Đã copy link đăng nhập vào clipboard.\nGửi link này cho nhân viên qua Zalo/SMS để họ đăng nhập.");
       } catch {
         window.prompt("Copy link đăng nhập:", data.loginUrl);
       }
