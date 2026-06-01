@@ -56,15 +56,15 @@ const dayWorkIncomeKeys = [
 ];
 
 const incomeRows = [
-  ["Lương theo ngày công", dayWorkIncomeKeys],
-  ["Lương lễ tết", "thuNhapTheoNgayCong.luongLeTet"],
-  ["Lương phép năm", "thuNhapTheoNgayCong.luongPhepNam"],
-  ["Lương tăng ca thường", "thuNhapTheoNgayCong.luongTangCaThuong"],
-  ["Lương tăng ca chủ nhật", "thuNhapTheoNgayCong.luongTangCaChuNhat"],
-  ["Lương tăng ca lễ tết", "thuNhapTheoNgayCong.luongTangCaLeTet"],
+  ["Lương theo ngày công", dayWorkIncomeKeys, { detailPath: "thuNhapTheoNgayCong.ngayCong", unit: "ngày" }],
+  ["Lương lễ tết", "thuNhapTheoNgayCong.luongLeTet", { detailPath: "thuNhapTheoNgayCong.leTet", unit: "ngày" }],
+  ["Lương phép năm", "thuNhapTheoNgayCong.luongPhepNam", { detailPath: "thuNhapTheoNgayCong.phepNam", unit: "ngày" }],
+  ["Lương tăng ca thường", "thuNhapTheoNgayCong.luongTangCaThuong", { detailPath: "thuNhapTheoNgayCong.tangCaThuong", unit: "giờ" }],
+  ["Lương tăng ca chủ nhật", "thuNhapTheoNgayCong.luongTangCaChuNhat", { detailPath: "thuNhapTheoNgayCong.tangCaChuNhat", unit: "giờ" }],
+  ["Lương tăng ca lễ tết", "thuNhapTheoNgayCong.luongTangCaLeTet", { detailPath: "thuNhapTheoNgayCong.tangCaLeTet", unit: "giờ" }],
   ["Cơm tăng ca", "thuNhapTheoNgayCong.comTangCa"],
   ["Trả giam lương", "thuNhapTheoNgayCong.traGiamLuong"],
-  ["Thưởng KPI", "thuNhapTheoNgayCong.thuongKPI"],
+  ["Thưởng KPI", "thuNhapTheoNgayCong.thuongKPI", { detailPath: "thuNhapTheoNgayCong.diemKPI", unit: "điểm" }],
   ["Hoa hồng", "thuNhapTheoNgayCong.hoaHong"],
   ["Cộng khác", "thuNhapTheoNgayCong.congKhac"],
 ];
@@ -368,17 +368,25 @@ function PayrollDetailList({ title, rows, payroll, totalLabel, totalValue, tone 
         </div>
       </div>
       <div className="divide-y divide-slate-100">
-        {rows.map(([label, path]) => {
+        {rows.map(([label, path, detail]) => {
           const value = Array.isArray(path)
             ? path.reduce((sum, item) => sum + toNumber(valueAt(payroll, item)), 0)
             : toNumber(valueAt(payroll, path));
           if (!value) return null;
           const rowKey = Array.isArray(path) ? path.join("|") : path;
           const pct = totalNum > 0 ? Math.round((value / totalNum) * 100) : 0;
+          const detailValue = detail ? toNumber(valueAt(payroll, detail.detailPath)) : null;
           return (
             <div key={rowKey} className="px-4 py-3">
               <div className="mb-1.5 flex items-center justify-between gap-4 text-sm">
-                <span className="text-slate-600">{label}</span>
+                <span className="flex items-center gap-1.5 text-slate-600">
+                  {label}
+                  {detailValue ? (
+                    <span className="rounded-full border border-slate-200 bg-slate-100 px-1.5 py-0.5 text-[11px] font-semibold tabular-nums text-slate-500">
+                      {detailValue} {detail.unit}
+                    </span>
+                  ) : null}
+                </span>
                 <span className="shrink-0 font-semibold tabular-nums text-slate-800">{money(value)}</span>
               </div>
               <div className="h-1 overflow-hidden rounded-full bg-slate-100">
