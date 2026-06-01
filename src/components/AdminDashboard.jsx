@@ -408,20 +408,112 @@ export default function AdminDashboard() {
             <div className="pointer-events-none absolute -top-24 left-1/2 -translate-x-1/2 w-[800px] h-[300px] rounded-full blur-3xl opacity-30 bg-gradient-to-r from-amber-200 via-rose-200 to-amber-200" />
 
             <div className="relative z-10 max-w-7xl mx-auto px-4 md:px-6 py-6 space-y-6">
+
                 {/* HEADER */}
                 <div className="flex items-center gap-3">
                     <button onClick={() => navigate(-1)} className="p-2 rounded-xl bg-white/50 hover:bg-white border border-slate-200 text-slate-500 transition">
                         <ArrowLeft size={20} />
                     </button>
                     <div>
-                        <h1 className="text-2xl font-bold tracking-tight text-slate-800 flex items-center gap-2">Quản Trị Cấp Cao <span className="text-lg">👑</span></h1>
+                        <h1 className="text-2xl font-bold tracking-tight text-slate-800 flex items-center gap-2">
+                            Quản Trị Cấp Cao <span className="text-lg">👑</span>
+                        </h1>
                         <p className="text-xs text-slate-500">Dashboard điều hành hệ thống & Giám sát vận hành</p>
                     </div>
                 </div>
 
-                {/* SECTION: EXPORT ĐƠN HÀNG */}
+                {/* DAILY STATS */}
                 <div className={`rounded-3xl border ${cardBg} backdrop-blur-xl shadow-[0_8px_30px_rgba(0,0,0,0.04)] p-5`}>
-                    <div className="flex items-center gap-2 mb-5 pb-4 border-b border-slate-100">
+                    <div className="mb-5 flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-slate-100">
+                        <div className="flex items-center gap-2">
+                            <div className="p-2 rounded-lg bg-sky-50 text-sky-600 border border-sky-100">
+                                <BarChart2 size={20} />
+                            </div>
+                            <div>
+                                <h3 className="font-semibold text-sm text-slate-800">Thống kê chốt đơn trong ngày</h3>
+                                <p className="text-[10px] text-slate-500">Hội thoại phát sinh · Đơn hàng active · Tỉ lệ chuyển đổi</p>
+                            </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <input
+                                type="date"
+                                className={inputCls}
+                                style={{ width: "auto" }}
+                                value={statsDate}
+                                onChange={(e) => setStatsDate(e.target.value)}
+                            />
+                            <button
+                                type="button"
+                                onClick={fetchDailyStats}
+                                disabled={isLoadingStats}
+                                className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
+                            >
+                                <RefreshCw size={14} className={isLoadingStats ? "animate-spin" : ""} />
+                                Làm mới
+                            </button>
+                        </div>
+                    </div>
+
+                    {statsError && (
+                        <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                            {statsError}
+                        </div>
+                    )}
+
+                    <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+                        <div className="rounded-2xl border border-sky-100 bg-sky-50/70 p-4">
+                            <div className="flex items-start justify-between gap-2">
+                                <div>
+                                    <p className="text-[10px] font-bold uppercase tracking-wide text-sky-500">Hội thoại</p>
+                                    <p className="mt-2 text-3xl font-black text-slate-900">
+                                        {isLoadingStats ? <Loader2 size={22} className="animate-spin text-sky-400" /> : formatNumber(dailyStats?.conversationCount)}
+                                    </p>
+                                </div>
+                                <MessageSquare className="h-8 w-8 shrink-0 text-sky-300" />
+                            </div>
+                        </div>
+                        <div className="rounded-2xl border border-emerald-100 bg-emerald-50/70 p-4">
+                            <div className="flex items-start justify-between gap-2">
+                                <div>
+                                    <p className="text-[10px] font-bold uppercase tracking-wide text-emerald-500">Đơn hàng</p>
+                                    <p className="mt-2 text-3xl font-black text-slate-900">
+                                        {isLoadingStats ? <Loader2 size={22} className="animate-spin text-emerald-400" /> : formatNumber(dailyStats?.orderCount)}
+                                    </p>
+                                    {Number(dailyStats?.cancelledOrderCount || 0) > 0 && (
+                                        <p className="mt-1 text-[11px] text-slate-500">Hủy: {formatNumber(dailyStats.cancelledOrderCount)}</p>
+                                    )}
+                                </div>
+                                <ShoppingCart className="h-8 w-8 shrink-0 text-emerald-300" />
+                            </div>
+                        </div>
+                        <div className="rounded-2xl border border-violet-100 bg-violet-50/70 p-4">
+                            <div className="flex items-start justify-between gap-2">
+                                <div>
+                                    <p className="text-[10px] font-bold uppercase tracking-wide text-violet-500">Tổng tiền đơn</p>
+                                    <p className="mt-2 text-xl font-black text-slate-900">
+                                        {isLoadingStats ? <Loader2 size={22} className="animate-spin text-violet-400" /> : formatCurrency(dailyStats?.totalOrderAmount)}
+                                    </p>
+                                </div>
+                                <CircleDollarSign className="h-8 w-8 shrink-0 text-violet-300" />
+                            </div>
+                        </div>
+                        <div className="rounded-2xl border border-amber-100 bg-amber-50/70 p-4">
+                            <div className="flex items-start justify-between gap-2">
+                                <div>
+                                    <p className="text-[10px] font-bold uppercase tracking-wide text-amber-500">Tỉ lệ chốt</p>
+                                    <p className="mt-2 text-3xl font-black text-slate-900">
+                                        {isLoadingStats ? <Loader2 size={22} className="animate-spin text-amber-400" /> : `${Number(dailyStats?.conversionRate || 0).toFixed(1)}%`}
+                                    </p>
+                                </div>
+                                <TrendingUp className="h-8 w-8 shrink-0 text-amber-300" />
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                {/* EXPORT ĐƠN HÀNG */}
+                <form onSubmit={handleExportOrders} className={`rounded-3xl border ${cardBg} backdrop-blur-xl shadow-[0_8px_30px_rgba(0,0,0,0.04)] p-5 space-y-5`}>
+                    <div className="flex items-center gap-2 pb-4 border-b border-slate-100">
                         <div className="p-2 rounded-lg bg-emerald-50 text-emerald-600 border border-emerald-100">
                             <FileSpreadsheet size={20} />
                         </div>
@@ -431,291 +523,158 @@ export default function AdminDashboard() {
                         </div>
                     </div>
 
-                    <form onSubmit={handleExportOrders} className="space-y-5">
-                        {/* Ngày */}
-                        <div className="grid grid-cols-2 gap-3">
-                        </div>
-                {/* DAILY STATS */}
-                <section className={`rounded-2xl border ${cardBg} backdrop-blur-xl shadow-[0_8px_30px_rgba(0,0,0,0.04)] p-5`}>
-                    <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                    {/* Khoảng ngày */}
+                    <div className="grid grid-cols-2 gap-3">
                         <div>
-                            <h2 className="text-base font-bold text-slate-800">Thống kê chốt đơn trong ngày</h2>
-                            <p className="text-xs text-slate-500">Tính theo số hội thoại có phát sinh, đơn hàng active và tỉ lệ chuyển đổi.</p>
+                            <label className="mb-1.5 flex items-center gap-1 text-xs font-semibold text-slate-600">
+                                <Calendar size={11} /> Từ ngày
+                            </label>
+                            <input type="date" className={inputCls}
+                                value={exportConfig.startDate}
+                                onChange={e => setExportConfig(c => ({ ...c, startDate: e.target.value }))} />
                         </div>
-                        <div className="flex flex-wrap items-center gap-2">
-                            <input
-                                type="date"
-                                className={`rounded-xl border px-3 py-2 text-sm outline-none focus:ring-2 ${inputBg}`}
-                                value={statsDate}
-                                onChange={(e) => setStatsDate(e.target.value)}
-                            />
-                            <button
-                                type="button"
-                                onClick={fetchDailyStats}
-                                disabled={isLoadingStats}
-                                className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
-                            >
-                                <RefreshCw size={15} className={isLoadingStats ? "animate-spin" : ""} />
-                                Làm mới
+                        <div>
+                            <label className="mb-1.5 flex items-center gap-1 text-xs font-semibold text-slate-600">
+                                <Calendar size={11} /> Đến ngày
+                            </label>
+                            <input type="date" className={inputCls}
+                                value={exportConfig.endDate}
+                                onChange={e => setExportConfig(c => ({ ...c, endDate: e.target.value }))} />
+                        </div>
+                    </div>
+
+                    {/* Lọc Team */}
+                    <div>
+                        <div className="mb-2 flex items-center justify-between">
+                            <label className="flex items-center gap-1 text-xs font-semibold text-slate-600">
+                                <Users size={12} /> Lọc theo Team
+                            </label>
+                            {pagesLoading && <Loader2 size={12} className="animate-spin text-slate-400" />}
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                            <button type="button" onClick={toggleAllTeams}
+                                className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition ${isAllTeams ? "border-emerald-400 bg-emerald-50 text-emerald-700" : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"}`}>
+                                {isAllTeams ? <CheckSquare size={12} /> : <Square size={12} />} Tất cả
+                            </button>
+                            {allTeamIds.map(teamId => {
+                                const active = !isAllTeams && selectedTeams.has(teamId);
+                                return (
+                                    <button key={teamId} type="button" onClick={() => toggleTeam(teamId)}
+                                        className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition ${active ? "border-sky-400 bg-sky-50 text-sky-700" : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"}`}>
+                                        {active ? <CheckSquare size={12} /> : <Square size={12} />} {teamId}
+                                    </button>
+                                );
+                            })}
+                            {allTeamIds.length === 0 && !pagesLoading && (
+                                <span className="text-xs italic text-slate-400">Không có dữ liệu team</span>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* Chọn cột */}
+                    <div>
+                        <div className="mb-2 flex items-center justify-between">
+                            <label className="flex items-center gap-1 text-xs font-semibold text-slate-600">
+                                <Columns3 size={12} /> Cột xuất ra Excel
+                            </label>
+                            <button type="button" onClick={toggleAllFields}
+                                className="text-[10px] font-semibold text-sky-600 hover:underline">
+                                {allFieldsSelected ? "Bỏ chọn tất cả" : "Chọn tất cả"}
                             </button>
                         </div>
-                    </div>
-
-                    {statsError && (
-                        <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
-                            {statsError}
-                        </div>
-                    )}
-
-                    <div className="mt-5 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
-                        <div className="rounded-xl border border-sky-100 bg-sky-50/70 p-4">
-                            <div className="flex items-center justify-between gap-3">
-                                <div className="min-w-0">
-                                    <p className="text-xs font-semibold uppercase text-sky-600">Hội thoại</p>
-                                    <p className="mt-2 text-3xl font-bold text-slate-900">{isLoadingStats ? "..." : formatNumber(dailyStats?.conversationCount)}</p>
-                                </div>
-                                <MessageSquare className="h-9 w-9 text-sky-500" />
-                            </div>
-                        </div>
-
-                        <div className="rounded-xl border border-emerald-100 bg-emerald-50/70 p-4">
-                            <div className="flex items-center justify-between gap-3">
-                                <div className="min-w-0">
-                                    <p className="text-xs font-semibold uppercase text-emerald-600">Đơn hàng</p>
-                                    <p className="mt-2 text-3xl font-bold text-slate-900">{isLoadingStats ? "..." : formatNumber(dailyStats?.orderCount)}</p>
-                                    {Number(dailyStats?.cancelledOrderCount || 0) > 0 && (
-                                        <p className="mt-1 text-xs text-slate-500">Hủy: {formatNumber(dailyStats.cancelledOrderCount)}</p>
-                                    )}
-                                </div>
-                                <ShoppingCart className="h-9 w-9 text-emerald-500" />
-                            </div>
-                        </div>
-
-                        <div className="rounded-xl border border-violet-100 bg-violet-50/70 p-4">
-                            <div className="flex items-center justify-between gap-3">
-                                <div className="min-w-0">
-                                    <p className="text-xs font-semibold uppercase text-violet-600">Tổng tiền đơn</p>
-                                    <p className="mt-2 text-2xl font-bold text-slate-900">{isLoadingStats ? "..." : formatCurrency(dailyStats?.totalOrderAmount)}</p>
-                                </div>
-                                <CircleDollarSign className="h-9 w-9 text-violet-500" />
-                            </div>
-                        </div>
-
-                        <div className="rounded-xl border border-amber-100 bg-amber-50/70 p-4">
-                            <div className="flex items-center justify-between gap-3">
-                                <div className="min-w-0">
-                                    <p className="text-xs font-semibold uppercase text-amber-600">Tỉ lệ chốt</p>
-                                    <p className="mt-2 text-3xl font-bold text-slate-900">{isLoadingStats ? "..." : `${Number(dailyStats?.conversionRate || 0).toFixed(2)}%`}</p>
-                                </div>
-                                <TrendingUp className="h-9 w-9 text-amber-500" />
-                            </div>
+                        <div className="flex flex-wrap gap-2">
+                            {EXPORT_FIELDS.map(field => {
+                                const isSensitive = SENSITIVE_FIELDS.has(field.key);
+                                const locked = isSensitive && !isAdmin;
+                                const active = !locked && selectedFields.has(field.key);
+                                return (
+                                    <button key={field.key} type="button" onClick={() => toggleField(field.key)}
+                                        disabled={locked}
+                                        title={locked ? "Chỉ Admin mới được xuất trường này" : undefined}
+                                        className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition ${locked
+                                            ? "cursor-not-allowed border-slate-200 bg-slate-50 text-slate-300"
+                                            : active
+                                                ? "border-violet-400 bg-violet-50 text-violet-700"
+                                                : "border-slate-200 bg-white text-slate-400 hover:bg-slate-50"}`}>
+                                        {locked
+                                            ? <Lock size={11} className="text-slate-300" />
+                                            : active ? <CheckSquare size={12} /> : <Square size={12} />}
+                                        {field.label}
+                                        {locked && <span className="ml-0.5 text-[9px] font-bold uppercase tracking-wide text-slate-300">Admin</span>}
+                                    </button>
+                                );
+                            })}
                         </div>
                     </div>
-                </section>
 
-                {/* SECTION 1: EXPORT & LOGS */}
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                    {/* Card Export */}
-                    <div className={`lg:col-span-1 rounded-3xl border ${cardBg} backdrop-blur-xl shadow-[0_8px_30px_rgba(0,0,0,0.04)] p-5 flex flex-col h-fit`}>
-                        <div className="flex items-center gap-2 mb-4 pb-3 border-b border-slate-100">
-                            <div className="p-2 rounded-lg bg-emerald-50 text-emerald-600 border border-emerald-100"><FileSpreadsheet size={20} /></div>
-                            <div>
-                                <label className="mb-1.5 flex items-center gap-1 text-xs font-medium text-slate-600">
-                                    <Calendar size={11} /> Từ ngày
-                                </label>
-                                <input type="date" className={inputCls}
-                                    value={exportConfig.startDate}
-                                    onChange={e => setExportConfig(c => ({ ...c, startDate: e.target.value }))} />
-                            </div>
-                            <div>
-                                <label className="mb-1.5 flex items-center gap-1 text-xs font-medium text-slate-600">
-                                    <Calendar size={11} /> Đến ngày
-                                </label>
-                                <input type="date" className={inputCls}
-                                    value={exportConfig.endDate}
-                                    onChange={e => setExportConfig(c => ({ ...c, endDate: e.target.value }))} />
-                            </div>
-                        </div>
-
-                        {/* Chọn Team */}
-                        <div>
-                            <div className="mb-2 flex items-center justify-between">
-                                <label className="flex items-center gap-1 text-xs font-semibold text-slate-600">
-                                    <Users size={12} /> Lọc theo Team
-                                </label>
-                                {pagesLoading && <Loader2 size={12} className="animate-spin text-slate-400" />}
-                            </div>
-                            <div className="flex flex-wrap gap-2">
-                                {/* Tất cả */}
-                                <button
-                                    type="button"
-                                    onClick={toggleAllTeams}
-                                    className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition ${isAllTeams ? "border-emerald-400 bg-emerald-50 text-emerald-700" : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"}`}
-                                >
-                                    {isAllTeams ? <CheckSquare size={12} /> : <Square size={12} />}
-                                    Tất cả
-                                </button>
-                                {allTeamIds.map(teamId => {
-                                    const active = !isAllTeams && selectedTeams.has(teamId);
-                                    return (
-                                        <button
-                                            key={teamId}
-                                            type="button"
-                                            onClick={() => toggleTeam(teamId)}
-                                            className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition ${active ? "border-sky-400 bg-sky-50 text-sky-700" : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"}`}
-                                        >
-                                            {active ? <CheckSquare size={12} /> : <Square size={12} />}
-                                            {teamId}
-                                        </button>
-                                    );
-                                })}
-                                {allTeamIds.length === 0 && !pagesLoading && (
-                                    <span className="text-xs text-slate-400 italic">Không có dữ liệu team</span>
-                                )}
-                            </div>
-                        </div>
-
-                        {/* Chọn cột xuất */}
-                        <div>
-                            <div className="mb-2 flex items-center justify-between">
-                                <label className="flex items-center gap-1 text-xs font-semibold text-slate-600">
-                                    <Columns3 size={12} /> Cột xuất ra Excel
-                                </label>
-                                <button
-                                    type="button"
-                                    onClick={toggleAllFields}
-                                    className="text-[10px] font-semibold text-sky-600 hover:underline"
-                                >
-                                    {allFieldsSelected ? "Bỏ chọn tất cả" : "Chọn tất cả"}
-                                </button>
-                            </div>
-                            <div className="flex flex-wrap gap-2">
-                                {EXPORT_FIELDS.map(field => {
-                                    const isSensitive = SENSITIVE_FIELDS.has(field.key);
-                                    const locked = isSensitive && !isAdmin;
-                                    const active = !locked && selectedFields.has(field.key);
-                                    return (
-                                        <button
-                                            key={field.key}
-                                            type="button"
-                                            onClick={() => toggleField(field.key)}
-                                            disabled={locked}
-                                            title={locked ? "Chỉ Admin mới được xuất trường này" : undefined}
-                                            className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition
-                                                ${locked
-                                                    ? "cursor-not-allowed border-slate-200 bg-slate-50 text-slate-300"
-                                                    : active
-                                                        ? "border-violet-400 bg-violet-50 text-violet-700"
-                                                        : "border-slate-200 bg-white text-slate-400 hover:bg-slate-50"
-                                                }`}
-                                        >
-                                            {locked
-                                                ? <Lock size={11} className="text-slate-300" />
-                                                : active ? <CheckSquare size={12} /> : <Square size={12} />
-                                            }
-                                            {field.label}
-                                            {locked && <span className="ml-0.5 text-[9px] font-bold uppercase tracking-wide text-slate-300">Admin</span>}
-                                        </button>
-                                    );
-                                })}
-                            </div>
-                        </div>
-
-                        {/* Nút xuất */}
-                        <div className="flex items-center justify-between gap-3 pt-1">
-                            <p className="text-[11px] text-slate-400">
-                                Đã chọn <span className="font-semibold text-slate-600">{selectedFields.size}</span>/<span className="font-semibold text-slate-600">{selectableFieldCount}</span> cột
-                                {!isAllTeams && <> · <span className="font-semibold text-slate-600">{selectedTeams.size}</span> team</>}
-                                {!isAdmin && <span className="ml-1 text-amber-500">(Số ĐT &amp; Địa chỉ chỉ Admin xuất được)</span>}
-                            </p>
-                            <button
-                                type="submit"
-                                disabled={isExporting || selectedFields.size === 0}
-                                className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-400 px-5 py-2.5 text-sm font-semibold text-white shadow-md shadow-emerald-200 hover:from-emerald-400 hover:to-emerald-300 transition disabled:opacity-60 disabled:cursor-not-allowed"
-                            >
-                                {isExporting ? <><Loader2 size={15} className="animate-spin" /> Đang xuất...</> : <><Download size={15} /> Xuất Excel</>}
-                            </button>
-                        </div>
-                    </div>
-                </div>
-                    </form>
-                </div>
-
-                {/* SECTION: THỐNG KÊ SẢN PHẨM */}
-                <div className={`rounded-3xl border ${cardBg} backdrop-blur-xl shadow-[0_8px_30px_rgba(0,0,0,0.04)] p-5`}>
-                    <div className="flex flex-wrap items-center justify-between gap-4">
-                        <div className="flex items-center gap-3">
-                            <div className="p-2 rounded-lg bg-amber-50 text-amber-600 border border-amber-100">
-                                <BarChart2 size={20} />
-                            </div>
-                            <div>
-                                <h3 className="font-semibold text-sm text-slate-800">Thống kê sản phẩm bán được</h3>
-                                <p className="text-[10px] text-slate-500">
-                                    Gom số lượng theo SKU · Dùng chung bộ lọc ngày &amp; team phía trên
-                                </p>
-                            </div>
-                        </div>
-                        <button
-                            type="button"
-                            onClick={handleExportProducts}
-                            disabled={isExportingProducts || !exportConfig.startDate || !exportConfig.endDate}
-                            className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-amber-500 to-amber-400 px-5 py-2.5 text-sm font-semibold text-white shadow-md shadow-amber-200 hover:from-amber-400 hover:to-amber-300 transition disabled:opacity-60 disabled:cursor-not-allowed"
-                        >
-                            {isExportingProducts
-                                ? <><Loader2 size={15} className="animate-spin" /> Đang xuất...</>
-                                : <><Download size={15} /> Xuất thống kê SKU</>}
-                        </button>
-                    </div>
-                    <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-400">
-                        <span>Cột xuất: <span className="font-semibold text-slate-500">SKU · Tên sản phẩm · Số lượng · Team · Page</span></span>
-                        <span>Sắp xếp: <span className="font-semibold text-slate-500">Số lượng giảm dần</span></span>
-                    </div>
-                </div>
-
-                {/* SECTION: LOGS */}
-                <div className={`rounded-3xl border ${cardBg} backdrop-blur-xl shadow-[0_8px_30px_rgba(0,0,0,0.04)] flex flex-col overflow-hidden h-[360px]`}>
-                    <div className="px-5 py-4 border-b border-slate-100 bg-slate-50/50 flex flex-wrap items-center justify-between gap-3">
+                    {/* Actions */}
+                    <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-100">
+                        <p className="text-[11px] text-slate-400">
+                            Đã chọn <span className="font-semibold text-slate-600">{selectedFields.size}</span>/<span className="font-semibold text-slate-600">{selectableFieldCount}</span> cột
+                            {!isAllTeams && <> · <span className="font-semibold text-slate-600">{selectedTeams.size}</span> team</>}
+                            {!isAdmin && <span className="ml-1 text-amber-500">(Số ĐT &amp; Địa chỉ chỉ Admin xuất được)</span>}
+                        </p>
                         <div className="flex items-center gap-2">
-                            <div className="p-2 rounded-lg bg-blue-50 text-blue-600 border border-blue-100"><Activity size={20} /></div>
-                            <h3 className="font-semibold text-sm">System Logs</h3>
+                            <button type="button" onClick={handleExportProducts}
+                                disabled={isExportingProducts || !exportConfig.startDate || !exportConfig.endDate}
+                                className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-amber-500 to-amber-400 px-4 py-2.5 text-sm font-semibold text-white shadow-sm shadow-amber-200 hover:from-amber-400 hover:to-amber-300 transition disabled:opacity-60 disabled:cursor-not-allowed">
+                                {isExportingProducts
+                                    ? <><Loader2 size={14} className="animate-spin" /> Đang xuất...</>
+                                    : <><Download size={14} /> Xuất SKU</>}
+                            </button>
+                            <button type="submit"
+                                disabled={isExporting || selectedFields.size === 0}
+                                className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-400 px-5 py-2.5 text-sm font-semibold text-white shadow-sm shadow-emerald-200 hover:from-emerald-400 hover:to-emerald-300 transition disabled:opacity-60 disabled:cursor-not-allowed">
+                                {isExporting
+                                    ? <><Loader2 size={14} className="animate-spin" /> Đang xuất...</>
+                                    : <><Download size={14} /> Xuất Excel đơn hàng</>}
+                            </button>
+                        </div>
+                    </div>
+                </form>
+
+                {/* SYSTEM LOGS */}
+                <div className={`rounded-3xl border ${cardBg} backdrop-blur-xl shadow-[0_8px_30px_rgba(0,0,0,0.04)] flex flex-col overflow-hidden`} style={{ height: 360 }}>
+                    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 bg-slate-50/50 px-5 py-4">
+                        <div className="flex items-center gap-2">
+                            <div className="p-2 rounded-lg bg-blue-50 text-blue-600 border border-blue-100">
+                                <Activity size={20} />
+                            </div>
+                            <h3 className="font-semibold text-sm text-slate-800">System Logs</h3>
                         </div>
                         <select
-                            className="px-2 py-1.5 rounded-lg border border-slate-200 text-xs bg-white outline-none"
+                            className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs outline-none"
                             value={filterLevel}
-                            onChange={e => setFilterLevel(e.target.value)}
-                        >
+                            onChange={e => setFilterLevel(e.target.value)}>
                             <option value="all">All Levels</option>
                             <option value="error">Error</option>
                             <option value="warning">Warning</option>
                         </select>
                     </div>
                     <div className="flex-1 overflow-auto">
-                        <table className="w-full text-left border-collapse">
-                            <thead className="bg-slate-50 text-slate-500 text-[11px] uppercase tracking-wider sticky top-0 z-10">
+                        <table className="w-full border-collapse text-left">
+                            <thead className="sticky top-0 z-10 bg-slate-50 text-[11px] uppercase tracking-wider text-slate-500">
                                 <tr>
-                                    <th className="px-5 py-3 border-b">Lv</th>
-                                    <th className="px-5 py-3 border-b">Time</th>
-                                    <th className="px-5 py-3 border-b">Msg</th>
+                                    <th className="border-b px-5 py-3 w-20">Lv</th>
+                                    <th className="border-b px-5 py-3 w-28">Time</th>
+                                    <th className="border-b px-5 py-3">Message</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100 text-sm">
                                 {isLoadingLogs
-                                    ? <tr><td colSpan="3" className="px-5 py-8 text-center text-slate-400">Loading...</td></tr>
+                                    ? <tr><td colSpan="3" className="px-5 py-8 text-center text-slate-400">
+                                        <Loader2 size={18} className="inline animate-spin mr-2" />Loading...
+                                    </td></tr>
                                     : logs.filter(l => filterLevel === "all" || l.level === filterLevel).map(log => (
                                         <tr key={log.id} className="hover:bg-slate-50/80">
-                                            <td className="px-5 py-2">{getLevelBadge(log.level)}</td>
-                                            <td className="px-5 py-2 text-slate-500 text-xs">{new Date(log.timestamp).toLocaleTimeString()}</td>
-                                            <td className="px-5 py-2">{log.message}</td>
+                                            <td className="px-5 py-2.5">{getLevelBadge(log.level)}</td>
+                                            <td className="px-5 py-2.5 text-xs text-slate-500">{new Date(log.timestamp).toLocaleTimeString()}</td>
+                                            <td className="px-5 py-2.5 text-slate-700">{log.message}</td>
                                         </tr>
                                     ))}
                             </tbody>
                         </table>
                     </div>
-                </div>
-
-                {/* SECTION: EXCEL COMPARER (disabled) */}
-                <div className={`rounded-3xl border ${cardBg} backdrop-blur-xl shadow-[0_8px_30px_rgba(0,0,0,0.04)] overflow-hidden`}>
-                    {/* <ExcelComparer /> */}
                 </div>
 
                 <div className="pb-6 text-center text-[11px] text-slate-400">
