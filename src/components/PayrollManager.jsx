@@ -1566,6 +1566,9 @@ export default function PayrollManager() {
 
   const deleteRow = async (row) => {
     if (!canDelete) return;
+    const deleteLabel = row.tenNhanVien || row.maNhanVien || "dòng này";
+    if (!window.confirm(`Xóa bảng lương của ${deleteLabel}?`)) return;
+
     if (!row._id) {
       setRows((current) => current.filter((item) => item.__clientId !== row.__clientId));
       setDirtyIds((current) => {
@@ -1575,7 +1578,6 @@ export default function PayrollManager() {
       });
       return;
     }
-    if (!window.confirm(`Xóa bảng lương của ${row.tenNhanVien || row.maNhanVien}?`)) return;
 
     markSaving(row.__clientId, true);
     try {
