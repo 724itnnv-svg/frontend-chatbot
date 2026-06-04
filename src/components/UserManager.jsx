@@ -45,6 +45,7 @@ export default function UsersPage() {
   const [editingUser, setEditingUser] = useState(null);
 
   const [actionLoadingId, setActionLoadingId] = useState(null);
+  const [revokeLoadingId, setRevokeLoadingId] = useState(null);
 
   const [pages, setPages] = useState([]);
   const [loadingPages, setLoadingPages] = useState(false);
@@ -183,6 +184,36 @@ export default function UsersPage() {
       alert("Không kết nối được server");
     } finally {
       setActionLoadingId(null);
+    }
+  };
+
+  const handleRevokeQrToken = async (user) => {
+    const ok = window.confirm(
+      `Thu hồi link đăng nhập của "${user.fullName}"? Link cũ sẽ không còn dùng được.`
+    );
+    if (!ok) return;
+
+    try {
+      setRevokeLoadingId(user._id);
+
+      const res = await fetch(`/api/user/${user._id}/qr-login-token`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.message || "Thu hồi token thất bại");
+        return;
+      }
+
+      alert("Đã thu hồi link đăng nhập");
+      await fetchUsers();
+    } catch (err) {
+      console.error("Lỗi thu hồi token:", err);
+      alert("Không kết nối được server");
+    } finally {
+      setRevokeLoadingId(null);
     }
   };
 
@@ -862,6 +893,7 @@ export default function UsersPage() {
                   {filteredUsers.map((u) => {
                     const isProcessing = actionLoadingId === u._id;
                     const isLinkLoading = linkLoadingId === u._id;
+                    const isRevokeLoading = revokeLoadingId === u._id;
                     const approved = u.approveStatus === 1;
                     const pageNames = getUserPageNames(u);
                     const isMaster = u.email?.toLowerCase() === MASTER_EMAIL;
@@ -989,6 +1021,15 @@ export default function UsersPage() {
                               <LinkIcon size={13} />
                               {isLinkLoading ? "..." : "Link"}
                             </button>
+
+                            {/* <button
+                              disabled={isRevokeLoading}
+                              onClick={() => requireMasterPassword(u, () => handleRevokeQrToken(u))}
+                              className="px-2 py-1.5 text-xs rounded-xl border font-semibold transition disabled:opacity-60 border-orange-200 bg-orange-50 text-orange-700 hover:bg-orange-100"
+                              title="Thu hồi link đăng nhập"
+                            >
+                              {isRevokeLoading ? "..." : "Thu hồi"}
+                            </button> */}
 
                             <button
                               onClick={() => requireMasterPassword(u, () => handleEdit(u))}

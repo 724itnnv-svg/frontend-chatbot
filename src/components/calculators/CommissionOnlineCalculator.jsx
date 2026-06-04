@@ -1269,7 +1269,9 @@ export default function CommissionOnlineCalculator() {
                   stats.Retail_Normal -= deductValue;
                   log.adCostDeduction += deductValue;
                 } else {
-                  stats.Retail_NoCommission += Math.max(0, revenue);
+                  deductValue = Math.max(0, revenue);
+                  stats.Retail_Normal -= deductValue;
+                  log.adCostDeduction += deductValue;
                 }
                 status = isTcpAd
                   ? "2 < ROAS < 8 + TCP: Trừ 50% chênh lệch doanh thu - chi phí"

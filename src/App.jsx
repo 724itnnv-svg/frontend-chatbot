@@ -1,5 +1,5 @@
 // src/App.jsx
-import { lazy, Suspense, useEffect } from "react";
+import { lazy, Suspense, useEffect, Component } from "react";
 import { Capacitor } from "@capacitor/core";
 import { App as CapacitorApp } from "@capacitor/app";
 import { Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom";
@@ -60,6 +60,39 @@ const ChatV4FunctionCallsManager = lazy(() => import("./components/chatV4/ChatV4
 const ChatV4ContextManager = lazy(() => import("./components/chatV4/ChatV4ContextManager"));
 const ChatV4SettingsManager = lazy(() => import("./components/chatV4/ChatV4SettingsManager"));
 const ChatV4EventSimulator = lazy(() => import("./components/chatV4/ChatV4EventSimulator"));
+
+class ErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+  componentDidCatch(error, info) {
+    console.error("App ErrorBoundary caught:", error, info);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#f0fdf4", padding: "16px" }}>
+          <div style={{ background: "#fff", borderRadius: "16px", padding: "32px", maxWidth: "360px", width: "100%", textAlign: "center", boxShadow: "0 4px 20px rgba(0,0,0,0.08)" }}>
+            <p style={{ fontSize: "32px", marginBottom: "12px" }}>⚠️</p>
+            <p style={{ color: "#374151", fontSize: "15px", fontWeight: 600, marginBottom: "8px" }}>Đã xảy ra lỗi</p>
+            <p style={{ color: "#6b7280", fontSize: "13px", marginBottom: "20px" }}>Vui lòng tải lại trang hoặc thử lại sau.</p>
+            <button
+              onClick={() => window.location.reload()}
+              style={{ background: "#059669", color: "#fff", border: "none", borderRadius: "10px", padding: "10px 24px", fontSize: "14px", cursor: "pointer" }}
+            >
+              Tải lại trang
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 const ADMIN_ROUTE_BY_SCREEN = {
   pages: "/admin/pages",
@@ -237,6 +270,7 @@ export default function App() {
   }, [navigate]);
 
   return (
+    <ErrorBoundary>
     <Suspense fallback={<AppLoader />}>
       <Routes>
         <Route path="/" element={<HomeRoute />} />
@@ -296,5 +330,6 @@ export default function App() {
         <Route path="*" element={<NotFoundPage />} />
       </Routes>
     </Suspense>
+    </ErrorBoundary>
   );
 }

@@ -1,8 +1,35 @@
-import { useState, useEffect } from "react";
+﻿import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { Search, MapPin, Leaf, ChevronRight, TreePine, AlertCircle, Loader2 } from "lucide-react";
 import { apiUrl } from "../../api/baseUrl";
+
+function TreeThumb({ url, maCay }) {
+  const [err, setErr] = useState(false);
+  if (!url || err) {
+    return (
+      <div className="w-full h-full flex items-center justify-center bg-emerald-50">
+        <svg viewBox="0 0 80 110" className="w-14 h-20 opacity-25" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect x="36" y="48" width="8" height="56" rx="4" fill="#a16207" />
+          <ellipse cx="40" cy="36" rx="26" ry="12" fill="#16a34a" opacity="0.6" transform="rotate(-20 40 36)" />
+          <ellipse cx="40" cy="32" rx="26" ry="12" fill="#15803d" opacity="0.7" transform="rotate(15 40 32)" />
+          <ellipse cx="40" cy="30" rx="24" ry="11" fill="#22c55e" opacity="0.9" transform="rotate(-5 40 30)" />
+          <circle cx="36" cy="47" r="5" fill="#ca8a04" />
+          <circle cx="45" cy="44" r="4.5" fill="#b45309" />
+          <circle cx="30" cy="44" r="4" fill="#ca8a04" />
+        </svg>
+      </div>
+    );
+  }
+  return (
+    <img
+      src={url}
+      alt={`Cây ${maCay}`}
+      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+      onError={() => setErr(true)}
+    />
+  );
+}
 
 const TRANG_THAI_LABEL = {
   dang_theo_doi: { label: "Đang theo dõi", cls: "bg-emerald-100 text-emerald-700" },
@@ -17,14 +44,6 @@ const GIONG_LABEL = {
   khac: "Khác",
 };
 
-const MAU_TRAI_LABEL = {
-  vang: "Vàng",
-  tim_hong: "Tím hồng",
-  do: "Đỏ",
-  xanh: "Xanh",
-  khac: "Khác",
-};
-
 export default function DuaSapPublicPage() {
   const navigate = useNavigate();
   const [trees, setTrees] = useState([]);
@@ -34,21 +53,21 @@ export default function DuaSapPublicPage() {
   const [searchInput, setSearchInput] = useState("");
 
   useEffect(() => {
-    const controller = new AbortController();
+    const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
     setLoading(true);
     setError(null);
     axios
       .get(apiUrl("/api/public/dua-sap"), {
         params: search ? { search } : {},
-        signal: controller.signal,
+        ...(controller ? { signal: controller.signal } : {}),
       })
-      .then((r) => setTrees(r.data.data || []))
+      .then((r) => setTrees(Array.isArray(r?.data?.data) ? r.data.data : []))
       .catch((e) => {
         if (axios.isCancel(e)) return;
         setError("Không thể tải dữ liệu. Vui lòng thử lại.");
       })
       .finally(() => setLoading(false));
-    return () => controller.abort();
+    return () => controller?.abort();
   }, [search]);
 
   function handleSearch(e) {
@@ -160,36 +179,47 @@ export default function DuaSapPublicPage() {
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
               {list.map((tree) => {
                 const ts = TRANG_THAI_LABEL[tree.trangThai] || TRANG_THAI_LABEL.dang_theo_doi;
+                const thumb = tree.anhUrl?.[0] || null;
                 return (
                   <button
                     key={tree.maCay}
                     onClick={() => navigate(`/dua-sap/${tree.maCay}`)}
-                    className="group bg-white rounded-2xl shadow-sm border border-gray-100 p-4 text-left hover:shadow-md hover:border-emerald-200 transition-all"
+                    className="group bg-white rounded-2xl shadow-sm border border-gray-100 text-left hover:shadow-md hover:border-emerald-200 transition-all overflow-hidden"
                   >
-                    <div className="flex items-start justify-between mb-2">
-                      <span className="text-lg font-bold text-emerald-700 tracking-wide">
-                        {tree.maCay}
-                      </span>
-                      <ChevronRight
-                        size={16}
-                        className="text-gray-300 group-hover:text-emerald-500 transition mt-0.5"
-                      />
-                    </div>
-
-                    <div className="space-y-1">
-                      <p className="text-xs text-gray-500">
-                        {GIONG_LABEL[tree.giong] || "Dừa sáp"}
-                      </p>
-                      {tree.mauTrai && (
-                        <p className="text-xs text-gray-400">
-                          Màu: {MAU_TRAI_LABEL[tree.mauTrai] || tree.mauTrai}
-                        </p>
+                    {/* Ảnh thumbnail */}
+                    <div className="relative w-full overflow-hidden bg-emerald-50" style={{ paddingBottom: "75%" }}>
+                      <div className="absolute inset-0">
+                        <TreeThumb url={thumb} maCay={tree.maCay} />
+                      </div>
+                      {tree.anhUrl?.length > 1 && (
+                        <span className="absolute bottom-1.5 right-1.5 bg-black/50 text-white text-[10px] px-1.5 py-0.5 rounded-full leading-none">
+                          +{tree.anhUrl.length - 1}
+                        </span>
                       )}
                     </div>
 
-                    <span className={`mt-3 inline-block text-[10px] font-medium px-2 py-0.5 rounded-full ${ts.cls}`}>
-                      {ts.label}
-                    </span>
+                    {/* Thông tin */}
+                    <div className="p-3">
+                      <div className="flex items-start justify-between mb-1.5">
+                        <span className="text-base font-bold text-emerald-700 tracking-wide">
+                          {tree.maCay}
+                        </span>
+                        <ChevronRight
+                          size={15}
+                          className="text-gray-300 group-hover:text-emerald-500 transition mt-0.5 shrink-0"
+                        />
+                      </div>
+
+                      <div className="space-y-0.5">
+                        <p className="text-xs text-gray-500">
+                          {GIONG_LABEL[tree.giong] || "Dừa sáp"}
+                        </p>
+                      </div>
+
+                      <span className={`mt-2 inline-block text-[10px] font-medium px-2 py-0.5 rounded-full ${ts.cls}`}>
+                        {ts.label}
+                      </span>
+                    </div>
                   </button>
                 );
               })}
