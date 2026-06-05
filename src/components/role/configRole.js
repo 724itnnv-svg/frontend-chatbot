@@ -16,6 +16,7 @@ const APP_PERMISSIONS = {
     { id: "admin_vectorstore_tool", name: "Quản Trị Vector DB" },
     { id: "admin_agent", name: "Quản Trị Agent" },
     { id: "admin_agent_promo", name: "Quản Lý Khuyến Mãi" },
+    { id: "admin_agent_response_templates", name: "Mẫu câu trả lời theo intent" },
     { id: "admin_chatbot_config", name: "Cấu Hình ChatBot" },
     { id: "admin_chat_v3_faq", name: "Bộ câu hỏi dùng chung" },
     { id: "admin_faq", name: "FAQ Theo Page" },

@@ -11,6 +11,7 @@ import {
   RefreshCw,
   Save,
   Search,
+  Send,
   Settings2,
   ShieldCheck,
   SlidersHorizontal,
@@ -37,6 +38,7 @@ const DEFAULT_SETTINGS = {
   humanHandoffZnsEnabled: true,
   humanHandoffZnsDefaultPhone: "",
   humanHandoffZnsSendAllToDefault: false,
+  humanHandoffZnsTemplateId: "",
   fileSearchEnabled: true,
   fileSearchDefaultMaxNumResults: 4,
   fileSearchInstruction: "",
@@ -169,6 +171,23 @@ export default function ChatV4SettingsManager() {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
+  const [testingZns, setTestingZns] = useState(false);
+  const [znsTestResult, setZnsTestResult] = useState(null);
+  const [znsTestForm, setZnsTestForm] = useState({
+    phone: "",
+    templateId: "",
+    templateDataText: JSON.stringify(
+      {
+        name: "name",
+        pageName: "pageName",
+        customerName: "customerName",
+        customer_phone: "0901234567",
+        note: "Test ZNS tu man hinh cai dat",
+      },
+      null,
+      2,
+    ),
+  });
 
   const emojiList = useMemo(
     () => emojiText.split(/[\s,]+/).map((item) => item.trim()).filter(Boolean),
@@ -253,6 +272,7 @@ export default function ChatV4SettingsManager() {
             humanHandoffZnsEnabled: settings.humanHandoffZnsEnabled !== false,
             humanHandoffZnsDefaultPhone: settings.humanHandoffZnsDefaultPhone || "",
             humanHandoffZnsSendAllToDefault: settings.humanHandoffZnsSendAllToDefault === true,
+            humanHandoffZnsTemplateId: settings.humanHandoffZnsTemplateId || "",
             fileSearchEnabled: settings.fileSearchEnabled,
             fileSearchDefaultMaxNumResults: settings.fileSearchDefaultMaxNumResults,
             fileSearchInstruction: settings.fileSearchInstruction,
@@ -269,6 +289,40 @@ export default function ChatV4SettingsManager() {
       setMessage(error.message || "Không thể lưu cấu hình Chat V4.");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleTestZns = async () => {
+    if (!token || testingZns) return;
+    setTestingZns(true);
+    setZnsTestResult(null);
+    setMessage("");
+    try {
+      let templateData = {};
+      try {
+        templateData = JSON.parse(znsTestForm.templateDataText || "{}");
+      } catch {
+        throw new Error("Params ZNS phai la JSON hop le.");
+      }
+
+      const response = await fetch("/api/zalo-v3/send-zns", {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({
+          phone: znsTestForm.phone,
+          templateId: znsTestForm.templateId,
+          templateData,
+        }),
+      });
+      const json = await response.json();
+      if (!response.ok || !json.ok) throw new Error(json.error || json.message || "Gui test ZNS that bai.");
+      setZnsTestResult(json);
+      setMessage("Da gui test ZNS.");
+    } catch (error) {
+      setZnsTestResult({ ok: false, error: error.message || "Gui test ZNS that bai." });
+      setMessage(error.message || "Gui test ZNS that bai.");
+    } finally {
+      setTestingZns(false);
     }
   };
 
@@ -404,7 +458,7 @@ export default function ChatV4SettingsManager() {
                   icon={Clock3}
                   activeSection={activeSection}
                 >
-                  <div className="grid gap-3 lg:grid-cols-3">
+                  <div className="grid gap-3 lg:grid-cols-4">
                     <NumberField
                       label="Delay gom tin khách"
                       value={Number(settings.replyDebounceMs || 0) / 1000}
@@ -610,6 +664,94 @@ export default function ChatV4SettingsManager() {
                         }))
                       }
                     />
+                    <TextField
+                      label="Template ID call_human"
+                      value={settings.humanHandoffZnsTemplateId || ""}
+                      placeholder="Vi du: 588192"
+                      description="Template ZNS mac dinh cho tool call_human cua Chat V4."
+                      onChange={(event) =>
+                        setSettings((prev) => ({
+                          ...prev,
+                          humanHandoffZnsTemplateId: event.target.value,
+                        }))
+                      }
+                    />
+                  </div>
+
+                  <div className="mt-3 rounded-md border border-cyan-200 bg-cyan-50/60 p-3">
+                    <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <h3 className="text-xs font-bold text-slate-950">Test gui ZNS</h3>
+                        <p className="mt-0.5 text-[11px] leading-4 text-slate-500">
+                          Goi truc tiep API ZNS v3 voi so dien thoai, template ID va params JSON ben duoi.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleTestZns}
+                        disabled={testingZns || !znsTestForm.phone || !znsTestForm.templateId}
+                        className="inline-flex items-center justify-center gap-1.5 rounded-md bg-cyan-600 px-3 py-1.5 text-xs font-bold text-white shadow-sm transition hover:bg-cyan-700 disabled:opacity-60"
+                      >
+                        {testingZns ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+                        Gui test
+                      </button>
+                    </div>
+
+                    <div className="grid gap-3 lg:grid-cols-[220px_180px_minmax(0,1fr)]">
+                      <TextField
+                        label="SDT nhan ZNS"
+                        value={znsTestForm.phone}
+                        placeholder="Vi du: 0901234567"
+                        description="So dien thoai nguoi nhan test ZNS."
+                        onChange={(event) =>
+                          setZnsTestForm((prev) => ({
+                            ...prev,
+                            phone: event.target.value,
+                          }))
+                        }
+                      />
+                      <TextField
+                        label="Template ID"
+                        value={znsTestForm.templateId}
+                        placeholder="Vi du: 567011"
+                        description="ID template Zalo da duyet."
+                        onChange={(event) =>
+                          setZnsTestForm((prev) => ({
+                            ...prev,
+                            templateId: event.target.value,
+                          }))
+                        }
+                      />
+                      <label className="block rounded-md border border-slate-200 bg-white p-3 shadow-sm transition focus-within:border-cyan-300 focus-within:ring-2 focus-within:ring-cyan-50">
+                        <span className="text-xs font-bold text-slate-900">Params ZNS</span>
+                        <textarea
+                          value={znsTestForm.templateDataText}
+                          onChange={(event) =>
+                            setZnsTestForm((prev) => ({
+                              ...prev,
+                              templateDataText: event.target.value,
+                            }))
+                          }
+                          rows={8}
+                          className="mt-2 w-full resize-y rounded-md border border-slate-200 bg-slate-50 px-2.5 py-2 font-mono text-xs leading-5 text-slate-950 outline-none transition focus:border-cyan-300 focus:ring-2 focus:ring-cyan-50"
+                          placeholder='{"customerName":"customerName","pageName":"pageName","name":"name"}'
+                        />
+                        <span className="mt-1.5 block text-[11px] leading-4 text-slate-500">
+                          JSON object gui vao truong template_data cua Zalo.
+                        </span>
+                      </label>
+                    </div>
+
+                    {znsTestResult && (
+                      <div className="mt-3 rounded-md border border-slate-200 bg-slate-950 p-3 text-slate-50">
+                        <div className="mb-2 text-xs font-bold">
+                          Ket qua test: {znsTestResult.ok === false ? "Loi" : "Thanh cong"}
+                        </div>
+                        <pre className="max-h-[240px] overflow-auto text-[11px] leading-4 text-slate-200">
+                          {JSON.stringify(znsTestResult, null, 2)}
+                        </pre>
+                      </div>
+                    )}
                   </div>
                 </SectionCard>
 

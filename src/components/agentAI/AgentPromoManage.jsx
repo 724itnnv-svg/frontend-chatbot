@@ -66,7 +66,7 @@ export default function AgentPromoManage() {
             const results = await Promise.all(
                 TEAMS.map(async (team) => {
                     try {
-                        const response = await fetch(`/api/instructions/${team.id}`, {
+                        const response = await fetch(`/api/instructions/${team.id}?type=promo`, {
                             headers: { Authorization: `Bearer ${token}` },
                         });
                         if (!response.ok) return [];

@@ -14,6 +14,7 @@ import {
   MessageSquare,
   Phone,
   RefreshCw,
+  Search,
   ShoppingCart,
   TrendingUp,
   X,
@@ -731,6 +732,11 @@ export default function BusinessStats() {
     const today = formatDateInput();
     return { from: today, to: today };
   });
+  const [statsPages, setStatsPages] = useState([]);
+  const [pageSelectionMode, setPageSelectionMode] = useState("all");
+  const [selectedPageIds, setSelectedPageIds] = useState([]);
+  const [pageSearch, setPageSearch] = useState("");
+  const [statsPagesError, setStatsPagesError] = useState("");
   const [dailyStats, setDailyStats] = useState(null);
   const [isLoadingStats, setIsLoadingStats] = useState(false);
   const [statsError, setStatsError] = useState("");
@@ -769,6 +775,32 @@ export default function BusinessStats() {
   });
   const [hoveredOrderHour, setHoveredOrderHour] = useState(null);
 
+  useEffect(() => {
+    if (!token) return;
+
+    let cancelled = false;
+    const loadStatsPages = async () => {
+      setStatsPagesError("");
+      try {
+        const res = await fetch("/api/chat/stats/pages", {
+          method: "GET",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.message || "Khong the tai danh sach page");
+        if (!cancelled) setStatsPages(Array.isArray(data.pages) ? data.pages : []);
+      } catch (err) {
+        console.error(err);
+        if (!cancelled) setStatsPagesError(err.message || "Khong the tai danh sach page");
+      }
+    };
+
+    loadStatsPages();
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
+
   const buildStatsQuery = () => {
     const timezoneOffset = -new Date().getTimezoneOffset();
     const queryParams = new URLSearchParams({ timezoneOffset: String(timezoneOffset) });
@@ -778,6 +810,12 @@ export default function BusinessStats() {
       queryParams.set("to", statsRange.to);
     } else {
       queryParams.set("date", statsDate);
+    }
+
+    if (pageSelectionMode === "custom" && selectedPageIds.length === 0) {
+      queryParams.set("pageScope", "none");
+    } else if (selectedPageIds.length > 0) {
+      queryParams.set("pages", selectedPageIds.join(","));
     }
 
     return queryParams;
@@ -1112,7 +1150,7 @@ export default function BusinessStats() {
   useEffect(() => {
     fetchDailyStats();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, statsMode, statsDate, statsRange.from, statsRange.to]);
+  }, [token, statsMode, statsDate, statsRange.from, statsRange.to, pageSelectionMode, selectedPageIds]);
 
   const statsLabel = dailyStats?.fromDate && dailyStats?.toDate
     ? dailyStats.fromDate === dailyStats.toDate
@@ -1192,6 +1230,33 @@ export default function BusinessStats() {
     ...customer,
     statuses: Array.from(customer.statuses),
   }));
+  const allStatsPagesSelected = pageSelectionMode === "all";
+  const normalizedPageSearch = pageSearch.trim().toLowerCase();
+  const filteredStatsPages = normalizedPageSearch
+    ? statsPages.filter((page) => {
+        const searchableText = [page.name, page.facebookId, page.teamId]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+        return searchableText.includes(normalizedPageSearch);
+      })
+    : statsPages;
+  const selectedPageLabel = allStatsPagesSelected
+    ? `Tất cả Page (${formatNumber(statsPages.length)})`
+    : selectedPageIds.length === 0
+      ? "Chưa chọn Page"
+    : selectedPageIds.length === 1
+      ? statsPages.find((page) => String(page.facebookId) === selectedPageIds[0])?.name || "1 Page đã chọn"
+      : `${formatNumber(selectedPageIds.length)} Page đã chọn`;
+  const toggleStatsPage = (pageId) => {
+    const normalizedPageId = String(pageId);
+    setPageSelectionMode("custom");
+    setSelectedPageIds((current) => {
+      return current.includes(normalizedPageId)
+        ? current.filter((item) => item !== normalizedPageId)
+        : [...current, normalizedPageId];
+    });
+  };
   const quickRanges = [
     ["today", "Hôm nay"],
     ["yesterday", "Hôm qua"],
@@ -1217,6 +1282,76 @@ export default function BusinessStats() {
               </div>
 
               <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-slate-50/80 p-3 shadow-inner">
+              <details className="relative w-full sm:self-end">
+                <summary className="flex h-10 cursor-pointer list-none items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 sm:min-w-[280px]">
+                  <span className="min-w-0 truncate">Page: {selectedPageLabel}</span>
+                  <span className="text-xs font-bold text-slate-400">Chọn</span>
+                </summary>
+                <div className="absolute right-0 z-30 mt-2 w-full min-w-[300px] rounded-xl border border-slate-200 bg-white p-2 shadow-xl">
+                  <div className="flex items-center gap-2 px-1 pb-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPageSelectionMode("all");
+                        setSelectedPageIds([]);
+                      }}
+                      className={`flex-1 rounded-lg px-3 py-2 text-xs font-bold transition ${
+                        allStatsPagesSelected
+                          ? "bg-slate-900 text-white"
+                          : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                      }`}
+                    >
+                      Tất cả Page
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPageSelectionMode("custom");
+                        setSelectedPageIds([]);
+                      }}
+                      className="flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-700"
+                    >
+                      Bỏ chọn tất cả
+                    </button>
+                  </div>
+                  <label className="mx-1 mb-2 flex h-9 items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm text-slate-600 focus-within:border-cyan-300 focus-within:bg-white">
+                    <Search size={15} className="shrink-0 text-slate-400" />
+                    <input
+                      type="search"
+                      value={pageSearch}
+                      onChange={(event) => setPageSearch(event.target.value)}
+                      placeholder="Tìm theo tên hoặc ID Page"
+                      className="min-w-0 flex-1 bg-transparent outline-none placeholder:text-slate-400"
+                    />
+                  </label>
+                  <div className="max-h-64 overflow-auto border-t border-slate-100 pt-1">
+                  {statsPages.length === 0 ? (
+                    <div className="px-3 py-2 text-sm text-slate-500">Không có Page đang bật AutoReply.</div>
+                  ) : filteredStatsPages.length === 0 ? (
+                    <div className="px-3 py-2 text-sm text-slate-500">Không tìm thấy Page phù hợp.</div>
+                  ) : (
+                    filteredStatsPages.map((page) => {
+                      const pageId = String(page.facebookId);
+                      return (
+                        <label key={pageId} className="flex cursor-pointer items-start gap-3 rounded-lg px-3 py-2 text-sm text-slate-700 hover:bg-slate-50">
+                          <input
+                            type="checkbox"
+                            checked={allStatsPagesSelected || selectedPageIds.includes(pageId)}
+                            onChange={() => toggleStatsPage(pageId)}
+                            className="mt-0.5 h-4 w-4 accent-slate-900"
+                          />
+                          <span className="min-w-0">
+                            <span className="block truncate font-semibold text-slate-800">{page.name || pageId}</span>
+                            <span className="block truncate text-xs text-slate-400">{page.teamId || "N/A"} • {pageId}</span>
+                          </span>
+                        </label>
+                      );
+                    })
+                  )}
+                  </div>
+                </div>
+              </details>
+
               <div className="inline-flex w-full rounded-xl border border-slate-200 bg-white p-1 sm:w-fit sm:self-end">
               <button
                 type="button"
@@ -1301,6 +1436,8 @@ export default function BusinessStats() {
               <Calendar size={16} className="text-slate-400" />
               <span>Mốc thống kê:</span>
               <span className="font-bold text-slate-900">{statsLabel}</span>
+              <span className="text-slate-300">•</span>
+              <span className="font-bold text-slate-900">{selectedPageLabel}</span>
             </div>
           </div>
         </section>
@@ -1309,6 +1446,13 @@ export default function BusinessStats() {
           <div className="flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
             <AlertTriangle size={16} />
             {statsError}
+          </div>
+        )}
+
+        {statsPagesError && (
+          <div className="flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+            <AlertTriangle size={16} />
+            {statsPagesError}
           </div>
         )}
 

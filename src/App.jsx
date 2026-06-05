@@ -39,6 +39,7 @@ const PromoManager = lazy(() => import("./components/event_promo/PromoManager"))
 const VectorStoreManage = lazy(() => import("./components/vectorstores/VectorStore"));
 const AgentManage = lazy(() => import("./components/agentAI/AgentManage"));
 const AgentPromoManage = lazy(() => import("./components/agentAI/AgentPromoManage"));
+const AgentResponseTemplatesManager = lazy(() => import("./components/agentAI/AgentResponseTemplatesManager"));
 const ChatbotConfigManager = lazy(() => import("./components/chatbotConfig/ChatbotConfigManager"));
 const FAQManager = lazy(() => import("./components/FAQManager"));
 const ChatV3FAQManager = lazy(() => import("./components/ChatV3FAQManager"));
@@ -79,11 +80,11 @@ const ADMIN_ROUTE_BY_SCREEN = {
   admin_vectorstore_tool: "/admin/vector-stores",
   admin_agent: "/admin/agents",
   admin_agent_promo: "/admin/agent-promotions",
+  admin_agent_response_templates: "/admin/intent-response-templates",
   admin_chatbot_config: "/admin/chatbot-config",
   admin_faq: "/admin/faqs",
   admin_chat_v3_faq: "/admin/chat-v3-faqs",
-  admin_test_chatbot_v2: "/admin/test-chatbot-v2", // New route for TestChatBotV2
-  admin_testcase: "/admin/test-chat",
+  admin_testcase: "/admin/test-chatbot-v3",
   admin_chat_v4_rules: "/admin/chat-v4-rules",
   admin_chat_v4_function_calls: "/admin/chat-v4-function-calls",
   admin_chat_v4_contexts: "/admin/chat-v4-contexts",
@@ -117,10 +118,14 @@ const adminRoutes = [
   { path: "vector-stores", screenId: "admin_vectorstore_tool", element: <VectorStoreManage /> },
   { path: "agents", screenId: "admin_agent", element: <AgentManage /> },// New route
   { path: "agent-promotions", screenId: "admin_agent_promo", element: <AgentPromoManage /> },
+  { path: "intent-response-templates", screenId: "admin_agent_response_templates", element: <AgentResponseTemplatesManager /> },
+  { path: "agent-response-templates", screenId: "admin_agent_response_templates", element: <Navigate to="/admin/intent-response-templates" replace /> },
   { path: "chatbot-config", screenId: "admin_chatbot_config", element: <ChatbotConfigManager /> },
   { path: "faqs", screenId: "admin_faq", element: <FAQManager /> },
   { path: "chat-v3-faqs", screenId: "admin_chat_v3_faq", element: <ChatV3FAQManager /> },
-  { path: "test-cases", screenId: "admin_testcase", element: <TestCaseChatBotManager /> },
+  { path: "test-chatbot-v3", screenId: "admin_testcase", element: <TestCaseChatBotManager /> },
+  { path: "test-cases", screenId: "admin_testcase", element: <Navigate to="/admin/test-chatbot-v3" replace /> },
+  { path: "test-chat", screenId: "admin_testcase", element: <Navigate to="/admin/test-chatbot-v3" replace /> },
   { path: "chat-v4-rules", screenId: "admin_chat_v4_rules", element: <ChatV4RulesManager /> },
   { path: "chat-v4-function-calls", screenId: "admin_chat_v4_function_calls", element: <ChatV4FunctionCallsManager /> },
   { path: "chat-v4-contexts", screenId: "admin_chat_v4_contexts", element: <ChatV4ContextManager /> },

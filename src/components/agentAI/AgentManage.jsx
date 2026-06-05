@@ -50,7 +50,7 @@ export default function AgentManage() {
             const results = await Promise.all(
                 TEAMS.map(async t => {
                     try {
-                        const res = await fetch(`/api/instructions/${t.id}`, {
+                        const res = await fetch(`/api/instructions/${t.id}?type=instruction`, {
                             headers: { Authorization: `Bearer ${token}` },
                         });
                         if (!res.ok) return [];
