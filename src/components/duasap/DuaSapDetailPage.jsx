@@ -6,6 +6,7 @@ import {
   TrendingUp, TrendingDown, Minus, AlertCircle, Loader2,
   TreePine, CheckCircle2, ClipboardList, StickyNote,
   ImageOff, X, ChevronLeft, ChevronRight, ZoomIn, Pencil,
+  Plus, Trash2,
 } from "lucide-react";
 import { apiUrl } from "../../api/baseUrl";
 import { useAuth } from "../../context/AuthContext";
@@ -365,12 +366,23 @@ const TINH_TRANG_BTN = [
   { v: "III", cls: "border-orange-400  text-orange-700  bg-orange-50", active: "bg-orange-500  text-white border-orange-500" },
   { v: "IV", cls: "border-red-400     text-red-700     bg-red-50", active: "bg-red-500     text-white border-red-500" },
 ];
+const TINH_TRANG_ONG_NGHIEM_OPTIONS = [
+  { value: "vo_mau", label: "Vô mẫu" },
+  { value: "tach_choi", label: "Tách chồi" },
+  { value: "cay_truyen_1", label: "Cấy truyền lần 1" },
+  { value: "cay_truyen_2", label: "Cấy truyền lần 2" },
+  { value: "ra_cay", label: "Ra cây" },
+  { value: "bi_nhiem", label: "Bị nhiễm" },
+  { value: "xu_ly_nhiem", label: "Xử lý nhiễm" },
+  { value: "mau_huy", label: "Mẫu huỷ" },
+];
 
 function EditModal({ treeData, onClose, onSaved }) {
   const { api } = useAuth();
   const now = new Date();
   const curMonth = now.getMonth() + 1;
   const curYear = now.getFullYear();
+  const isOngNghiem = treeData.loai === "ong_nghiem";
 
   /* ── Tree form ── */
   const [tf, setTf] = useState({
@@ -393,8 +405,24 @@ function EditModal({ treeData, onClose, onSaved }) {
     soTau: "",
     soHoa: "",
     ghiChu: "",
+    ngayRaCayDuKien: "",
+    ngayRaCayThucTe: "",
+    yeuCauDeXuat: "",
+    lichPhunThuoc: [],
+    lichBonPhan: [],
   });
   const setR = (k, v) => setRf((p) => ({ ...p, [k]: v }));
+
+  const addChamSoc = (key) =>
+    setRf((p) => ({ ...p, [key]: [...p[key], { ngay: "", sanPham: "", lieuLuong: "", ghiChu: "" }] }));
+  const updateChamSoc = (key, idx, field, val) =>
+    setRf((p) => {
+      const arr = [...p[key]];
+      arr[idx] = { ...arr[idx], [field]: val };
+      return { ...p, [key]: arr };
+    });
+  const removeChamSoc = (key, idx) =>
+    setRf((p) => ({ ...p, [key]: p[key].filter((_, i) => i !== idx) }));
 
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState(null);
@@ -418,6 +446,19 @@ function EditModal({ treeData, onClose, onSaved }) {
             soTau: rec.soTau ?? "",
             soHoa: rec.soHoa ?? "",
             ghiChu: rec.ghiChu || "",
+            ngayRaCayDuKien: rec.ngayRaCayDuKien
+              ? new Date(rec.ngayRaCayDuKien).toISOString().slice(0, 10) : "",
+            ngayRaCayThucTe: rec.ngayRaCayThucTe
+              ? new Date(rec.ngayRaCayThucTe).toISOString().slice(0, 10) : "",
+            yeuCauDeXuat: rec.yeuCauDeXuat || "",
+            lichPhunThuoc: (rec.lichPhunThuoc || []).map((ev) => ({
+              ...ev,
+              ngay: ev.ngay ? new Date(ev.ngay).toISOString().slice(0, 10) : "",
+            })),
+            lichBonPhan: (rec.lichBonPhan || []).map((ev) => ({
+              ...ev,
+              ngay: ev.ngay ? new Date(ev.ngay).toISOString().slice(0, 10) : "",
+            })),
           });
         }
       })
@@ -455,13 +496,16 @@ function EditModal({ treeData, onClose, onSaved }) {
         nam: base.nam ?? curYear,
         kyTheoDoiNhan: base.kyTheoDoiNhan || `T${curMonth}/${curYear}`,
         tinhTrangCay: rf.tinhTrangCay || null,
-        soTau: rf.soTau !== "" ? Number(rf.soTau) : null,
-        soHoa: rf.soHoa !== "" ? Number(rf.soHoa) : null,
+        soTau: !isOngNghiem && rf.soTau !== "" ? Number(rf.soTau) : (base.soTau ?? null),
+        soHoa: !isOngNghiem && rf.soHoa !== "" ? Number(rf.soHoa) : (base.soHoa ?? null),
         sanLuongDuKien,
         sanLuongThucTe,
-        lichPhunThuoc: base.lichPhunThuoc || [],
-        lichBonPhan: base.lichBonPhan || [],
+        lichPhunThuoc: rf.lichPhunThuoc,
+        lichBonPhan: rf.lichBonPhan,
         ghiChu: rf.ghiChu,
+        ngayRaCayDuKien: isOngNghiem ? (rf.ngayRaCayDuKien || null) : (base.ngayRaCayDuKien || null),
+        ngayRaCayThucTe: isOngNghiem ? (rf.ngayRaCayThucTe || null) : (base.ngayRaCayThucTe || null),
+        yeuCauDeXuat: isOngNghiem ? rf.yeuCauDeXuat : (base.yeuCauDeXuat || ""),
       };
 
       if (currentRecord?._id) {
@@ -555,66 +599,139 @@ function EditModal({ treeData, onClose, onSaved }) {
               </div>
             ) : (
               <div className="space-y-3">
-                {/* Tình trạng cây */}
-                <div>
-                  <label className={lbl}>Tình trạng cây</label>
-                  <div className="flex gap-2">
-                    {TINH_TRANG_BTN.map(({ v, cls, active }) => (
-                      <button
-                        key={v} type="button"
-                        onClick={() => setR("tinhTrangCay", rf.tinhTrangCay === v ? "" : v)}
-                        className={`flex-1 py-1.5 text-xs font-semibold rounded-lg border transition ${rf.tinhTrangCay === v ? active : cls}`}
-                      >
-                        Cấp {v}
-                      </button>
-                    ))}
-                  </div>
-                </div>
+                {isOngNghiem ? (
+                  /* ── Ống nghiệm fields ── */
+                  <>
+                    <div>
+                      <label className={lbl}>Tình trạng</label>
+                      <select className={inp} value={rf.tinhTrangCay} onChange={(e) => setR("tinhTrangCay", e.target.value)}>
+                        <option value="">— Chọn —</option>
+                        {TINH_TRANG_ONG_NGHIEM_OPTIONS.map((t) => (
+                          <option key={t.value} value={t.value}>{t.label}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className={lbl}>Dự kiến ngày ra cây</label>
+                        <input type="date" className={inp} value={rf.ngayRaCayDuKien} onChange={(e) => setR("ngayRaCayDuKien", e.target.value)} />
+                      </div>
+                      <div>
+                        <label className={lbl}>Thực tế ngày ra cây</label>
+                        <input type="date" className={inp} value={rf.ngayRaCayThucTe} onChange={(e) => setR("ngayRaCayThucTe", e.target.value)} />
+                      </div>
+                    </div>
+                    <div>
+                      <label className={lbl}>Yêu cầu đề xuất</label>
+                      <textarea className={inp + " resize-none"} rows={2} value={rf.yeuCauDeXuat} onChange={(e) => setR("yeuCauDeXuat", e.target.value)} placeholder="Ghi yêu cầu hoặc đề xuất xử lý trong kỳ này..." />
+                    </div>
+                  </>
+                ) : (
+                  /* ── Cây giống fields ── */
+                  <>
+                    <div>
+                      <label className={lbl}>Tình trạng cây</label>
+                      <div className="flex gap-2">
+                        {TINH_TRANG_BTN.map(({ v, cls, active }) => (
+                          <button
+                            key={v} type="button"
+                            onClick={() => setR("tinhTrangCay", rf.tinhTrangCay === v ? "" : v)}
+                            className={`flex-1 py-1.5 text-xs font-semibold rounded-lg border transition ${rf.tinhTrangCay === v ? active : cls}`}
+                          >
+                            Cấp {v}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className={lbl}>SL dự kiến (trái)</label>
+                        <input type="number" min="0" className={inp} value={rf.slDuKien} onChange={(e) => setR("slDuKien", e.target.value)} placeholder="0" />
+                      </div>
+                      <div>
+                        <label className={lbl}>SL thực tế (trái)</label>
+                        <input type="number" min="0" className={inp} value={rf.slThucTe} onChange={(e) => setR("slThucTe", e.target.value)} placeholder="0" />
+                      </div>
+                      <div>
+                        <label className={lbl}>Số tàu</label>
+                        <input type="number" min="0" className={inp} value={rf.soTau} onChange={(e) => setR("soTau", e.target.value)} placeholder="—" />
+                      </div>
+                      <div>
+                        <label className={lbl}>Số hoa</label>
+                        <input type="number" min="0" className={inp} value={rf.soHoa} onChange={(e) => setR("soHoa", e.target.value)} placeholder="—" />
+                      </div>
+                    </div>
+                  </>
+                )}
 
-                {/* Sản lượng + Số tàu/hoa */}
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className={lbl}>SL dự kiến (trái)</label>
-                    <input
-                      type="number" min="0" className={inp}
-                      value={rf.slDuKien}
-                      onChange={(e) => setR("slDuKien", e.target.value)}
-                      placeholder="0"
-                    />
-                  </div>
-                  <div>
-                    <label className={lbl}>SL thực tế (trái)</label>
-                    <input
-                      type="number" min="0" className={inp}
-                      value={rf.slThucTe}
-                      onChange={(e) => setR("slThucTe", e.target.value)}
-                      placeholder="0"
-                    />
-                  </div>
-                  <div>
-                    <label className={lbl}>Số tàu</label>
-                    <input
-                      type="number" min="0" className={inp}
-                      value={rf.soTau}
-                      onChange={(e) => setR("soTau", e.target.value)}
-                      placeholder="—"
-                    />
-                  </div>
-                  <div>
-                    <label className={lbl}>Số hoa</label>
-                    <input
-                      type="number" min="0" className={inp}
-                      value={rf.soHoa}
-                      onChange={(e) => setR("soHoa", e.target.value)}
-                      placeholder="—"
-                    />
-                  </div>
-                </div>
-
-                {/* Ghi chú kỳ */}
+                {/* Ghi chú kỳ — chung */}
                 <div>
                   <label className={lbl}>Ghi chú kỳ theo dõi</label>
                   <textarea className={inp + " resize-none"} rows={2} value={rf.ghiChu} onChange={(e) => setR("ghiChu", e.target.value)} placeholder="Ghi chú..." />
+                </div>
+
+                {/* ── Lịch phun thuốc ── */}
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className={lbl + " mb-0 flex items-center gap-1"}>
+                      <Droplets size={12} className="text-blue-400" /> Lịch phun thuốc
+                    </label>
+                    <button type="button" onClick={() => addChamSoc("lichPhunThuoc")}
+                      className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1 transition">
+                      <Plus size={12} /> Thêm
+                    </button>
+                  </div>
+                  {rf.lichPhunThuoc.map((ev, i) => (
+                    <div key={i} className="grid grid-cols-12 gap-1.5 mb-1.5 bg-blue-50 rounded-lg p-2">
+                      <div className="col-span-3">
+                        <input type="date" className={inp + " text-xs py-1.5"} value={ev.ngay} onChange={(e) => updateChamSoc("lichPhunThuoc", i, "ngay", e.target.value)} />
+                      </div>
+                      <div className="col-span-3">
+                        <input className={inp + " text-xs py-1.5"} placeholder="Sản phẩm" value={ev.sanPham} onChange={(e) => updateChamSoc("lichPhunThuoc", i, "sanPham", e.target.value)} />
+                      </div>
+                      <div className="col-span-2">
+                        <input className={inp + " text-xs py-1.5"} placeholder="Liều lượng" value={ev.lieuLuong} onChange={(e) => updateChamSoc("lichPhunThuoc", i, "lieuLuong", e.target.value)} />
+                      </div>
+                      <div className="col-span-3">
+                        <input className={inp + " text-xs py-1.5"} placeholder="Ghi chú" value={ev.ghiChu} onChange={(e) => updateChamSoc("lichPhunThuoc", i, "ghiChu", e.target.value)} />
+                      </div>
+                      <div className="col-span-1 flex items-center justify-center">
+                        <button type="button" onClick={() => removeChamSoc("lichPhunThuoc", i)} className="text-red-400 hover:text-red-600"><Trash2 size={13} /></button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* ── Lịch bón phân ── */}
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className={lbl + " mb-0 flex items-center gap-1"}>
+                      <Sprout size={12} className="text-amber-500" /> Lịch bón phân
+                    </label>
+                    <button type="button" onClick={() => addChamSoc("lichBonPhan")}
+                      className="text-xs text-amber-600 hover:text-amber-800 flex items-center gap-1 transition">
+                      <Plus size={12} /> Thêm
+                    </button>
+                  </div>
+                  {rf.lichBonPhan.map((ev, i) => (
+                    <div key={i} className="grid grid-cols-12 gap-1.5 mb-1.5 bg-amber-50 rounded-lg p-2">
+                      <div className="col-span-3">
+                        <input type="date" className={inp + " text-xs py-1.5"} value={ev.ngay} onChange={(e) => updateChamSoc("lichBonPhan", i, "ngay", e.target.value)} />
+                      </div>
+                      <div className="col-span-3">
+                        <input className={inp + " text-xs py-1.5"} placeholder="Sản phẩm" value={ev.sanPham} onChange={(e) => updateChamSoc("lichBonPhan", i, "sanPham", e.target.value)} />
+                      </div>
+                      <div className="col-span-2">
+                        <input className={inp + " text-xs py-1.5"} placeholder="Liều lượng" value={ev.lieuLuong} onChange={(e) => updateChamSoc("lichBonPhan", i, "lieuLuong", e.target.value)} />
+                      </div>
+                      <div className="col-span-3">
+                        <input className={inp + " text-xs py-1.5"} placeholder="Ghi chú" value={ev.ghiChu} onChange={(e) => updateChamSoc("lichBonPhan", i, "ghiChu", e.target.value)} />
+                      </div>
+                      <div className="col-span-1 flex items-center justify-center">
+                        <button type="button" onClick={() => removeChamSoc("lichBonPhan", i)} className="text-red-400 hover:text-red-600"><Trash2 size={13} /></button>
+                      </div>
+                    </div>
+                  ))}
                 </div>
 
                 {!currentRecord && (

@@ -150,6 +150,16 @@ const GIONG_OPTIONS = [
   { value: "khac", label: "Khác" },
 ];
 const TINH_TRANG_OPTIONS = ["I", "II", "III", "IV"];
+const TINH_TRANG_ONG_NGHIEM_OPTIONS = [
+  { value: "vo_mau", label: "Vô mẫu" },
+  { value: "tach_choi", label: "Tách chồi" },
+  { value: "cay_truyen_1", label: "Cấy truyền lần 1" },
+  { value: "cay_truyen_2", label: "Cấy truyền lần 2" },
+  { value: "ra_cay", label: "Ra cây" },
+  { value: "bi_nhiem", label: "Bị nhiễm" },
+  { value: "xu_ly_nhiem", label: "Xử lý nhiễm" },
+  { value: "mau_huy", label: "Mẫu huỷ" },
+];
 const THANG_OPTIONS = Array.from({ length: 12 }, (_, i) => i + 1);
 
 const TRANG_THAI_CLS = {
@@ -163,7 +173,21 @@ const TINH_TRANG_CLS = {
   II: "bg-yellow-100 text-yellow-700",
   III: "bg-orange-100 text-orange-700",
   IV: "bg-red-100 text-red-700",
+  vo_mau: "bg-violet-100 text-violet-700",
+  tach_choi: "bg-cyan-100 text-cyan-700",
+  cay_truyen_1: "bg-sky-100 text-sky-700",
+  cay_truyen_2: "bg-blue-100 text-blue-700",
+  ra_cay: "bg-emerald-100 text-emerald-700",
+  bi_nhiem: "bg-red-100 text-red-700",
+  xu_ly_nhiem: "bg-orange-100 text-orange-700",
+  mau_huy: "bg-gray-100 text-gray-500",
 };
+
+function getTinhTrangLabel(value) {
+  if (!value) return null;
+  const opt = TINH_TRANG_ONG_NGHIEM_OPTIONS.find((o) => o.value === value);
+  return opt ? opt.label : `Cấp ${value}`;
+}
 
 // ─── Excel helpers ────────────────────────────────────────────────────────────
 function parsePeriod(val) {
@@ -525,7 +549,7 @@ function LogModal({ onClose, api }) {
                 <tr className="border-b border-gray-100">
                   <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500 w-44">Thời gian</th>
                   <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500 w-32">Hành động</th>
-                  <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500 w-20">Mã cây</th>
+                  <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500 w-20">Mã cây/ống nghiệm</th>
                   <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500 w-32">Người thực hiện</th>
                   <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500">Chi tiết</th>
                 </tr>
@@ -619,7 +643,7 @@ function ImportModal({ onClose, onImport, importing, result }) {
 
   function downloadTemplate() {
     const headers = [
-      ["Mã cây", "Vị trí", "Tháng", "Tình trạng cây\n(I, II, III, IV)",
+      ["Mã cây/ống nghiệm", "Vị trí", "Tháng", "Tình trạng cây\n(I, II, III, IV)",
         "Màu trái\n(vàng, tím hồng, đỏ, khác)",
         "SL dự kiến T1", "SL dự kiến T2", "SL dự kiến T3",
         "SL thực tế T1", "SL thực tế T2", "SL thực tế T3",
@@ -681,7 +705,7 @@ function ImportModal({ onClose, onImport, importing, result }) {
               <table className="w-full text-xs">
                 <thead className="bg-gray-50">
                   <tr>
-                    {["Mã cây", "Vị trí", "Kỳ theo dõi", "Tình trạng", "Giống", "SL DK", "SL TT", "Ghi chú"].map((h) => (
+                    {["Mã cây/ống nghiệm", "Vị trí", "Kỳ theo dõi", "Tình trạng", "Giống", "SL DK", "SL TT", "Ghi chú"].map((h) => (
                       <th key={h} className="px-3 py-2 text-left text-gray-500 font-medium whitespace-nowrap">{h}</th>
                     ))}
                   </tr>
@@ -806,7 +830,7 @@ function Textarea({ ...props }) {
 // ─── Modal wrapper ────────────────────────────────────────────────────────────
 function Modal({ title, onClose, children, wide }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
       <div
         className={`bg-white rounded-2xl shadow-2xl w-full ${wide ? "max-w-2xl" : "max-w-lg"} max-h-[90vh] overflow-y-auto`}
         onClick={(e) => e.stopPropagation()}
@@ -828,6 +852,7 @@ function TreeForm({ initial, onSave, onClose, saving }) {
   const [form, setForm] = useState(() => ({
     maCay: "", viTri: "", khuVuc: "",
     giong: "", tenGiong: "",
+    loai: "cay_giong",
     trangThai: "dang_theo_doi", ghiChu: "",
     anhUrl: [],
     ...(initial || {}),
@@ -861,7 +886,7 @@ function TreeForm({ initial, onSave, onClose, saving }) {
     <form onSubmit={(e) => { e.preventDefault(); onSave(form); }} className="space-y-4">
       <div className="grid grid-cols-2 gap-4">
         <div>
-          <Label required>Mã cây</Label>
+          <Label required>Mã cây/ống nghiệm</Label>
           <Input
             value={form.maCay} onChange={(e) => set("maCay", e.target.value)}
             placeholder="VD: X01" required disabled={!!initial}
@@ -890,6 +915,13 @@ function TreeForm({ initial, onSave, onClose, saving }) {
         <div>
           <Label>Tên giống chi tiết</Label>
           <Input value={form.tenGiong} onChange={(e) => set("tenGiong", e.target.value)} placeholder="VD: Dừa sáp Trà Vinh..." />
+        </div>
+        <div>
+          <Label>Loại</Label>
+          <Select value={form.loai} onChange={(e) => set("loai", e.target.value)}>
+            <option value="cay_giong">Cây giống</option>
+            <option value="ong_nghiem">Trong ống nghiệm</option>
+          </Select>
         </div>
         <div>
           <Label>Trạng thái</Label>
@@ -975,25 +1007,384 @@ function TreeForm({ initial, onSave, onClose, saving }) {
   );
 }
 
+// ─── Thêm hàng loạt ──────────────────────────────────────────────────────────
+function BatchAddModal({ existingTrees, onClose, onDone }) {
+  const { api } = useAuth();
+
+  const [prefix, setPrefix] = useState("T");
+  const [count, setCount] = useState(5);
+  const [startNum, setStartNum] = useState(1);
+  const [padLen, setPadLen] = useState(3);
+  const [template, setTemplate] = useState({
+    loai: "cay_giong",
+    viTri: "", khuVuc: "",
+    giong: "", tenGiong: "",
+    trangThai: "dang_theo_doi",
+    ngayTrong: "", ghiChu: "",
+  });
+  const set = (k, v) => setTemplate((p) => ({ ...p, [k]: v }));
+
+  const [adding, setAdding] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [result, setResult] = useState(null);
+
+  // Tự phát hiện số tiếp theo từ danh sách hiện có
+  useEffect(() => {
+    const p = prefix.trim().toUpperCase();
+    if (!p) { setStartNum(1); return; }
+    const nums = existingTrees
+      .filter((t) => t.maCay.toUpperCase().startsWith(p))
+      .map((t) => parseInt(t.maCay.slice(p.length), 10))
+      .filter((n) => !isNaN(n) && n > 0);
+    setStartNum(nums.length ? Math.max(...nums) + 1 : 1);
+  }, [prefix, existingTrees]);
+
+  const safeCount = Math.max(1, Math.min(200, Number(count) || 1));
+  const safeStart = Math.max(1, Number(startNum) || 1);
+  const safePad = Math.max(1, Math.min(6, Number(padLen) || 3));
+  const p = prefix.trim().toUpperCase();
+
+  const previewCodes = Array.from({ length: Math.min(safeCount, 8) }, (_, i) =>
+    `${p}${String(safeStart + i).padStart(safePad, "0")}`
+  );
+  const hasMore = safeCount > 8;
+
+  async function handleAdd() {
+    setAdding(true);
+    setProgress(0);
+    try {
+      const items = Array.from({ length: safeCount }, (_, i) => ({
+        ...template,
+        maCay: `${p}${String(safeStart + i).padStart(safePad, "0")}`,
+      }));
+      const r = await api.post("/dua-sap/bulk", { items });
+      const { results = [] } = r.data;
+      const success = results.filter((x) => x.status === "created").map((x) => x.maCay);
+      const failed = results.filter((x) => x.status === "error").map((x) => ({ maCay: x.maCay, reason: x.reason }));
+      setProgress(safeCount);
+      setResult({ success, failed });
+      if (success.length > 0) onDone();
+    } catch (e) {
+      setResult({ success: [], failed: [{ maCay: "—", reason: e.response?.data?.message || "Lỗi kết nối" }] });
+    } finally {
+      setAdding(false);
+    }
+  }
+
+  if (result) {
+    return (
+      <div className="space-y-4">
+        <div className={`flex items-center gap-2 text-sm font-medium ${result.success.length ? "text-emerald-700" : "text-red-600"}`}>
+          <CheckCircle2 size={16} className="text-emerald-500" />
+          Đã tạo thành công {result.success.length}/{safeCount} mục
+        </div>
+        {result.failed.length > 0 && (
+          <div className="bg-red-50 rounded-xl p-3 space-y-1 max-h-40 overflow-y-auto">
+            {result.failed.map((f) => (
+              <p key={f.maCay} className="text-xs text-red-600">
+                <span className="font-medium">{f.maCay}</span>: {f.reason}
+              </p>
+            ))}
+          </div>
+        )}
+        <div className="flex gap-3 justify-end pt-1">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-500 hover:text-gray-700 transition">Đóng</button>
+          <button
+            onClick={() => { setResult(null); setStartNum(safeStart + result.success.length); }}
+            className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl text-sm font-medium transition"
+          >
+            <Plus size={14} /> Thêm tiếp
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-5">
+      {/* ── Cài đặt mã tự động ── */}
+      <div>
+        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Cài đặt mã tự động</p>
+        <div className="grid grid-cols-4 gap-3">
+          <div>
+            <Label required>Tiền tố</Label>
+            <Input value={prefix} onChange={(e) => setPrefix(e.target.value)} placeholder="T, CG, ON..." />
+          </div>
+          <div>
+            <Label required>Số lượng</Label>
+            <Input type="number" min={1} max={200} value={count} onChange={(e) => setCount(e.target.value)} />
+          </div>
+          <div>
+            <Label required>Bắt đầu từ</Label>
+            <Input type="number" min={1} value={startNum} onChange={(e) => setStartNum(e.target.value)} />
+          </div>
+          <div>
+            <Label>Số chữ số</Label>
+            <Input type="number" min={1} max={6} value={padLen} onChange={(e) => setPadLen(e.target.value)} />
+          </div>
+        </div>
+        {p && (
+          <div className="mt-2 flex flex-wrap gap-1.5 items-center">
+            <span className="text-xs text-gray-400">Preview:</span>
+            {previewCodes.map((c) => (
+              <span key={c} className="text-xs bg-emerald-50 text-emerald-700 border border-emerald-200 rounded px-1.5 py-0.5 font-mono">{c}</span>
+            ))}
+            {hasMore && <span className="text-xs text-gray-400">...+{safeCount - 8} nữa</span>}
+          </div>
+        )}
+      </div>
+
+      {/* ── Dữ liệu mẫu ── */}
+      <div>
+        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Dữ liệu mẫu (áp dụng cho tất cả)</p>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <Label>Loại</Label>
+            <Select value={template.loai} onChange={(e) => set("loai", e.target.value)}>
+              <option value="cay_giong">Cây giống</option>
+              <option value="ong_nghiem">Trong ống nghiệm</option>
+            </Select>
+          </div>
+          <div>
+            <Label>Trạng thái</Label>
+            <Select value={template.trangThai} onChange={(e) => set("trangThai", e.target.value)}>
+              {TRANG_THAI_OPTIONS.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+            </Select>
+          </div>
+          <div>
+            <Label>Vị trí</Label>
+            <Input value={template.viTri} onChange={(e) => set("viTri", e.target.value)} placeholder="Xưởng, Vườn A..." />
+          </div>
+          <div>
+            <Label>Khu vực / Lô</Label>
+            <Input value={template.khuVuc} onChange={(e) => set("khuVuc", e.target.value)} placeholder="Lô B, hàng 3..." />
+          </div>
+          <div>
+            <Label>Giống cây</Label>
+            <Input value={template.giong} onChange={(e) => set("giong", e.target.value)} placeholder="Dừa sáp, Dừa thường..." />
+          </div>
+          <div>
+            <Label>Ngày trồng</Label>
+            <Input type="date" value={template.ngayTrong} onChange={(e) => set("ngayTrong", e.target.value)} />
+          </div>
+          <div className="col-span-2">
+            <Label>Ghi chú</Label>
+            <Textarea value={template.ghiChu} onChange={(e) => set("ghiChu", e.target.value)} placeholder="Ghi chú dùng chung..." />
+          </div>
+        </div>
+      </div>
+
+      {/* ── Footer ── */}
+      {adding && (
+        <div className="flex items-center gap-3 text-sm text-gray-500">
+          <Loader2 size={14} className="animate-spin text-emerald-500" />
+          Đang tạo {progress}/{safeCount}...
+          <div className="flex-1 bg-gray-100 rounded-full h-1.5">
+            <div className="bg-emerald-500 h-1.5 rounded-full transition-all" style={{ width: `${(progress / safeCount) * 100}%` }} />
+          </div>
+        </div>
+      )}
+      <div className="flex gap-3 justify-end pt-1">
+        <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-gray-500 hover:text-gray-700 transition">Hủy</button>
+        <button
+          type="button" disabled={adding || !p}
+          onClick={handleAdd}
+          className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2 rounded-xl text-sm font-medium transition disabled:opacity-60"
+        >
+          {adding ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
+          Tạo {safeCount} {template.loai === "ong_nghiem" ? "ống nghiệm" : "cây"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Cập nhật hàng loạt ──────────────────────────────────────────────────────
+const BULK_UPDATE_FIELDS = [
+  { key: "viTri",     label: "Vị trí",            type: "text",     placeholder: "Xưởng, Vườn A..." },
+  { key: "khuVuc",    label: "Khu vực / Lô",       type: "text",     placeholder: "Lô B, hàng 3..." },
+  { key: "giong",     label: "Giống cây",           type: "text",     placeholder: "Dừa sáp, Dừa thường..." },
+  { key: "tenGiong",  label: "Tên giống chi tiết",  type: "text",     placeholder: "Dừa sáp Trà Vinh..." },
+  { key: "loai",      label: "Loại",                type: "select",   options: [{ value: "cay_giong", label: "Cây giống" }, { value: "ong_nghiem", label: "Ống nghiệm" }] },
+  { key: "trangThai", label: "Trạng thái",          type: "select",   options: TRANG_THAI_OPTIONS },
+  { key: "ngayTrong", label: "Ngày trồng",          type: "date" },
+  { key: "ghiChu",    label: "Ghi chú",             type: "textarea", placeholder: "Ghi chú chung..." },
+];
+
+function BulkUpdateModal({ macays, onClose, onDone }) {
+  const { api } = useAuth();
+
+  const [enabled, setEnabled] = useState(new Set());
+  const [values, setValues] = useState({
+    viTri: "", khuVuc: "", giong: "", tenGiong: "",
+    loai: "cay_giong", trangThai: "dang_theo_doi",
+    ngayTrong: "", ghiChu: "",
+  });
+  const [updating, setUpdating] = useState(false);
+  const [result, setResult] = useState(null);
+
+  const toggleField = (key) =>
+    setEnabled((prev) => { const next = new Set(prev); next.has(key) ? next.delete(key) : next.add(key); return next; });
+  const setValue = (key, val) => setValues((p) => ({ ...p, [key]: val }));
+
+  const enabledCount = enabled.size;
+
+  async function handleUpdate() {
+    if (!enabledCount) return;
+    setUpdating(true);
+    try {
+      const payload = {};
+      for (const key of enabled) payload[key] = values[key];
+      const r = await api.put("/dua-sap/bulk", { macays, payload });
+      const { updated = 0, failed = 0, results = [] } = r.data;
+      setResult({ updated, failed, results });
+      if (updated > 0) onDone();
+    } catch (e) {
+      setResult({ updated: 0, failed: macays.length, results: [{ maCay: "—", status: "error", reason: e.response?.data?.message || "Lỗi kết nối" }] });
+    } finally {
+      setUpdating(false);
+    }
+  }
+
+  if (result) {
+    const errors = result.results.filter((r) => r.status === "error");
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center gap-2 text-sm font-medium text-emerald-700">
+          <CheckCircle2 size={16} className="text-emerald-500" />
+          Đã cập nhật thành công {result.updated}/{macays.length} cây
+        </div>
+        {errors.length > 0 && (
+          <div className="bg-red-50 rounded-xl p-3 space-y-1 max-h-40 overflow-y-auto">
+            {errors.map((e) => (
+              <p key={e.maCay} className="text-xs text-red-600">
+                <span className="font-medium">{e.maCay}</span>: {e.reason}
+              </p>
+            ))}
+          </div>
+        )}
+        <div className="flex justify-end pt-1">
+          <button onClick={onClose} className="px-4 py-2 text-sm bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl transition">Đóng</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <p className="text-xs text-gray-500">
+        Áp dụng cho <span className="font-semibold text-gray-700">{macays.length} cây</span>:
+        <span className="ml-1 text-emerald-600 font-mono text-[11px]">{macays.slice(0, 6).join(", ")}{macays.length > 6 ? ` ...+${macays.length - 6}` : ""}</span>
+      </p>
+      <p className="text-xs text-amber-600 bg-amber-50 rounded-lg px-3 py-2">
+        Chỉ những trường được <span className="font-semibold">tích chọn</span> mới được cập nhật. Trường không tích sẽ giữ nguyên giá trị cũ.
+      </p>
+
+      <div className="space-y-2">
+        {BULK_UPDATE_FIELDS.map((f) => (
+          <div key={f.key} className={`flex items-start gap-3 rounded-xl px-3 py-2.5 transition ${enabled.has(f.key) ? "bg-emerald-50 border border-emerald-200" : "bg-gray-50 border border-transparent"}`}>
+            <input
+              type="checkbox" id={`bulk-${f.key}`}
+              checked={enabled.has(f.key)}
+              onChange={() => toggleField(f.key)}
+              className="mt-0.5 w-4 h-4 rounded accent-emerald-600 cursor-pointer shrink-0"
+            />
+            <label htmlFor={`bulk-${f.key}`} className="w-32 text-xs font-medium text-gray-600 pt-1 cursor-pointer shrink-0">{f.label}</label>
+            <div className="flex-1">
+              {f.type === "select" ? (
+                <Select
+                  value={values[f.key]}
+                  onChange={(e) => setValue(f.key, e.target.value)}
+                  disabled={!enabled.has(f.key)}
+                  className={!enabled.has(f.key) ? "opacity-40" : ""}
+                >
+                  {f.options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </Select>
+              ) : f.type === "textarea" ? (
+                <Textarea
+                  value={values[f.key]}
+                  onChange={(e) => setValue(f.key, e.target.value)}
+                  disabled={!enabled.has(f.key)}
+                  placeholder={f.placeholder}
+                  className={!enabled.has(f.key) ? "opacity-40" : ""}
+                />
+              ) : (
+                <Input
+                  type={f.type}
+                  value={values[f.key]}
+                  onChange={(e) => setValue(f.key, e.target.value)}
+                  disabled={!enabled.has(f.key)}
+                  placeholder={f.placeholder}
+                  className={!enabled.has(f.key) ? "opacity-40" : ""}
+                />
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {updating && (
+        <div className="flex items-center gap-2 text-sm text-gray-500">
+          <Loader2 size={14} className="animate-spin text-emerald-500" />
+          Đang cập nhật {macays.length} cây...
+        </div>
+      )}
+      <div className="flex gap-3 justify-end pt-1">
+        <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-gray-500 hover:text-gray-700 transition">Hủy</button>
+        <button
+          type="button"
+          disabled={updating || enabledCount === 0}
+          onClick={handleUpdate}
+          className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-xl text-sm font-medium transition disabled:opacity-60"
+          title={enabledCount === 0 ? "Vui lòng tích chọn ít nhất 1 trường" : ""}
+        >
+          {updating ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+          Cập nhật {macays.length} cây {enabledCount > 0 ? `(${enabledCount} trường)` : ""}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ChamSocRows({ rows, bg, onUpdate, onRemove }) {
+  return (rows || []).map((ev, i) => (
+    <div key={i} className={`grid grid-cols-12 gap-2 mb-2 ${bg} rounded-lg p-2`}>
+      <div className="col-span-3">
+        <Input type="date" value={ev.ngay?.slice(0, 10) || ""} onChange={(e) => onUpdate(i, "ngay", e.target.value)} />
+      </div>
+      <div className="col-span-3"><Input placeholder="Sản phẩm" value={ev.sanPham} onChange={(e) => onUpdate(i, "sanPham", e.target.value)} /></div>
+      <div className="col-span-2"><Input placeholder="Liều lượng" value={ev.lieuLuong} onChange={(e) => onUpdate(i, "lieuLuong", e.target.value)} /></div>
+      <div className="col-span-3"><Input placeholder="Ghi chú" value={ev.ghiChu} onChange={(e) => onUpdate(i, "ghiChu", e.target.value)} /></div>
+      <div className="col-span-1 flex items-center justify-center">
+        <button type="button" onClick={() => onRemove(i)} className="text-red-400 hover:text-red-600"><X size={14} /></button>
+      </div>
+    </div>
+  ));
+}
+
 // ─── Form bản ghi theo dõi ────────────────────────────────────────────────────
-function RecordForm({ maCay, initial, onSave, onClose, saving }) {
+function RecordForm({ maCay, loai = "cay_giong", initial, onSave, onClose, saving }) {
   const currentYear = new Date().getFullYear();
-  const [form, setForm] = useState({
+  const isOngNghiem = loai === "ong_nghiem";
+
+  const [form, setForm] = useState(() => ({
     maCay,
     thangBatDau: 1, thangKetThuc: 3, nam: currentYear,
     kyTheoDoiNhan: "", tinhTrangCay: "",
     soTau: "", soHoa: "",
     nguoiGhiNhan: "", ghiChu: "",
-    sanLuongDuKien: [],
-    sanLuongThucTe: [],
-    lichPhunThuoc: [],
-    lichBonPhan: [],
+    sanLuongDuKien: [], sanLuongThucTe: [],
+    yeuCauDeXuat: "",
+    lichPhunThuoc: [], lichBonPhan: [],
     ...(initial || {}),
-  });
+    ngayRaCayDuKien: initial?.ngayRaCayDuKien
+      ? new Date(initial.ngayRaCayDuKien).toISOString().slice(0, 10) : "",
+    ngayRaCayThucTe: initial?.ngayRaCayThucTe
+      ? new Date(initial.ngayRaCayThucTe).toISOString().slice(0, 10) : "",
+  }));
 
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
-  // Tháng trong kỳ
   const months = [];
   for (let m = Number(form.thangBatDau); m <= Number(form.thangKetThuc); m++) months.push(m);
 
@@ -1022,6 +1413,7 @@ function RecordForm({ maCay, initial, onSave, onClose, saving }) {
 
   return (
     <form onSubmit={(e) => { e.preventDefault(); onSave(form); }} className="space-y-5">
+
       {/* Kỳ theo dõi */}
       <div>
         <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Kỳ theo dõi</p>
@@ -1053,37 +1445,33 @@ function RecordForm({ maCay, initial, onSave, onClose, saving }) {
         </div>
       </div>
 
-      {/* Tình trạng, số tàu, số hoa */}
-      <div className="grid grid-cols-3 gap-3">
-        <div>
-          <Label>Tình trạng cây</Label>
-          <Select value={form.tinhTrangCay} onChange={(e) => set("tinhTrangCay", e.target.value)}>
-            <option value="">— Chọn —</option>
-            {TINH_TRANG_OPTIONS.map((t) => <option key={t} value={t}>Cấp {t}</option>)}
-          </Select>
+      {/* ── Cây giống: tình trạng + số tàu/hoa ── */}
+      {!isOngNghiem && (
+        <div className="grid grid-cols-3 gap-3">
+          <div>
+            <Label>Tình trạng cây</Label>
+            <Select value={form.tinhTrangCay} onChange={(e) => set("tinhTrangCay", e.target.value)}>
+              <option value="">— Chọn —</option>
+              {TINH_TRANG_OPTIONS.map((t) => <option key={t} value={t}>Cấp {t}</option>)}
+            </Select>
+          </div>
+          <div>
+            <Label>Số tàu</Label>
+            <Input type="number" min={0} value={form.soTau ?? ""}
+              onChange={(e) => set("soTau", e.target.value === "" ? null : Number(e.target.value))}
+              placeholder="—" />
+          </div>
+          <div>
+            <Label>Số hoa</Label>
+            <Input type="number" min={0} value={form.soHoa ?? ""}
+              onChange={(e) => set("soHoa", e.target.value === "" ? null : Number(e.target.value))}
+              placeholder="—" />
+          </div>
         </div>
-        <div>
-          <Label>Số tàu</Label>
-          <Input
-            type="number" min={0}
-            value={form.soTau ?? ""}
-            onChange={(e) => set("soTau", e.target.value === "" ? null : Number(e.target.value))}
-            placeholder="—"
-          />
-        </div>
-        <div>
-          <Label>Số hoa</Label>
-          <Input
-            type="number" min={0}
-            value={form.soHoa ?? ""}
-            onChange={(e) => set("soHoa", e.target.value === "" ? null : Number(e.target.value))}
-            placeholder="—"
-          />
-        </div>
-      </div>
+      )}
 
-      {/* Sản lượng */}
-      {months.length > 0 && (
+      {/* ── Cây giống: sản lượng ── */}
+      {!isOngNghiem && months.length > 0 && (
         <div>
           <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
             <BarChart2 size={12} className="inline mr-1 text-emerald-500" />
@@ -1102,12 +1490,10 @@ function RecordForm({ maCay, initial, onSave, onClose, saving }) {
                   <td className="px-3 py-2 text-xs text-blue-600 font-medium">Dự kiến</td>
                   {months.map((m) => (
                     <td key={m} className="px-2 py-1">
-                      <Input
-                        type="number" min={0}
+                      <Input type="number" min={0}
                         value={getSL(form.sanLuongDuKien, m)}
                         onChange={(e) => setSL("sanLuongDuKien", m, e.target.value === "" ? "" : e.target.value)}
-                        placeholder="—"
-                      />
+                        placeholder="—" />
                     </td>
                   ))}
                 </tr>
@@ -1115,12 +1501,10 @@ function RecordForm({ maCay, initial, onSave, onClose, saving }) {
                   <td className="px-3 py-2 text-xs text-emerald-600 font-medium">Thực tế</td>
                   {months.map((m) => (
                     <td key={m} className="px-2 py-1">
-                      <Input
-                        type="number" min={0}
+                      <Input type="number" min={0}
                         value={getSL(form.sanLuongThucTe, m)}
                         onChange={(e) => setSL("sanLuongThucTe", m, e.target.value === "" ? "" : e.target.value)}
-                        placeholder="—"
-                      />
+                        placeholder="—" />
                     </td>
                   ))}
                 </tr>
@@ -1130,7 +1514,37 @@ function RecordForm({ maCay, initial, onSave, onClose, saving }) {
         </div>
       )}
 
-      {/* Phun thuốc */}
+      {/* ── Ống nghiệm: tình trạng + ngày ra cây ── */}
+      {isOngNghiem && (
+        <div className="space-y-3">
+          <div>
+            <Label>Tình trạng</Label>
+            <Select value={form.tinhTrangCay} onChange={(e) => set("tinhTrangCay", e.target.value)}>
+              <option value="">— Chọn —</option>
+              {TINH_TRANG_ONG_NGHIEM_OPTIONS.map((t) => (
+                <option key={t.value} value={t.value}>{t.label}</option>
+              ))}
+            </Select>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label>Dự kiến ngày ra cây</Label>
+              <Input type="date" value={form.ngayRaCayDuKien} onChange={(e) => set("ngayRaCayDuKien", e.target.value)} />
+            </div>
+            <div>
+              <Label>Thực tế ngày ra cây</Label>
+              <Input type="date" value={form.ngayRaCayThucTe} onChange={(e) => set("ngayRaCayThucTe", e.target.value)} />
+            </div>
+          </div>
+          <div>
+            <Label>Yêu cầu đề xuất</Label>
+            <Textarea value={form.yeuCauDeXuat} onChange={(e) => set("yeuCauDeXuat", e.target.value)}
+              placeholder="Ghi yêu cầu hoặc đề xuất xử lý trong kỳ này..." />
+          </div>
+        </div>
+      )}
+
+      {/* ── Lịch phun thuốc (dùng chung) ── */}
       <div>
         <div className="flex items-center justify-between mb-2">
           <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-1">
@@ -1141,22 +1555,10 @@ function RecordForm({ maCay, initial, onSave, onClose, saving }) {
             <Plus size={12} /> Thêm
           </button>
         </div>
-        {(form.lichPhunThuoc || []).map((ev, i) => (
-          <div key={i} className="grid grid-cols-12 gap-2 mb-2 bg-blue-50 rounded-lg p-2">
-            <div className="col-span-3">
-              <Input type="date" value={ev.ngay?.slice(0, 10) || ""} onChange={(e) => updateChamSoc("lichPhunThuoc", i, "ngay", e.target.value)} />
-            </div>
-            <div className="col-span-3"><Input placeholder="Sản phẩm" value={ev.sanPham} onChange={(e) => updateChamSoc("lichPhunThuoc", i, "sanPham", e.target.value)} /></div>
-            <div className="col-span-2"><Input placeholder="Liều lượng" value={ev.lieuLuong} onChange={(e) => updateChamSoc("lichPhunThuoc", i, "lieuLuong", e.target.value)} /></div>
-            <div className="col-span-3"><Input placeholder="Ghi chú" value={ev.ghiChu} onChange={(e) => updateChamSoc("lichPhunThuoc", i, "ghiChu", e.target.value)} /></div>
-            <div className="col-span-1 flex items-center justify-center">
-              <button type="button" onClick={() => removeChamSoc("lichPhunThuoc", i)} className="text-red-400 hover:text-red-600"><X size={14} /></button>
-            </div>
-          </div>
-        ))}
+        <ChamSocRows rows={form.lichPhunThuoc} bg="bg-blue-50" onUpdate={(i, f, v) => updateChamSoc("lichPhunThuoc", i, f, v)} onRemove={(i) => removeChamSoc("lichPhunThuoc", i)} />
       </div>
 
-      {/* Bón phân */}
+      {/* ── Lịch bón phân (dùng chung) ── */}
       <div>
         <div className="flex items-center justify-between mb-2">
           <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-1">
@@ -1167,21 +1569,10 @@ function RecordForm({ maCay, initial, onSave, onClose, saving }) {
             <Plus size={12} /> Thêm
           </button>
         </div>
-        {(form.lichBonPhan || []).map((ev, i) => (
-          <div key={i} className="grid grid-cols-12 gap-2 mb-2 bg-amber-50 rounded-lg p-2">
-            <div className="col-span-3">
-              <Input type="date" value={ev.ngay?.slice(0, 10) || ""} onChange={(e) => updateChamSoc("lichBonPhan", i, "ngay", e.target.value)} />
-            </div>
-            <div className="col-span-3"><Input placeholder="Sản phẩm" value={ev.sanPham} onChange={(e) => updateChamSoc("lichBonPhan", i, "sanPham", e.target.value)} /></div>
-            <div className="col-span-2"><Input placeholder="Liều lượng" value={ev.lieuLuong} onChange={(e) => updateChamSoc("lichBonPhan", i, "lieuLuong", e.target.value)} /></div>
-            <div className="col-span-3"><Input placeholder="Ghi chú" value={ev.ghiChu} onChange={(e) => updateChamSoc("lichBonPhan", i, "ghiChu", e.target.value)} /></div>
-            <div className="col-span-1 flex items-center justify-center">
-              <button type="button" onClick={() => removeChamSoc("lichBonPhan", i)} className="text-red-400 hover:text-red-600"><X size={14} /></button>
-            </div>
-          </div>
-        ))}
+        <ChamSocRows rows={form.lichBonPhan} bg="bg-amber-50" onUpdate={(i, f, v) => updateChamSoc("lichBonPhan", i, f, v)} onRemove={(i) => removeChamSoc("lichBonPhan", i)} />
       </div>
 
+      {/* ── Người ghi nhận + ghi chú ── */}
       <div className="grid grid-cols-2 gap-3">
         <div>
           <Label>Người ghi nhận</Label>
@@ -1270,6 +1661,86 @@ export default function DuaSapManager() {
   const [showImport, setShowImport] = useState(false);
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState(null);
+
+  // Batch add
+  const [showBatchAdd, setShowBatchAdd] = useState(false);
+
+  // Bulk update
+  const [showBulkUpdate, setShowBulkUpdate] = useState(false);
+
+  // Selection
+  const [selectedTrees, setSelectedTrees] = useState(new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+  const selectAllRef = useRef(null);
+
+  const allSelected = trees.length > 0 && trees.every((t) => selectedTrees.has(t.maCay));
+  const someSelected = selectedTrees.size > 0;
+
+  // Dọn selection khi danh sách cây thay đổi (filter/trang)
+  useEffect(() => {
+    setSelectedTrees((prev) => {
+      const valid = new Set(trees.map((t) => t.maCay));
+      const next = new Set([...prev].filter((m) => valid.has(m)));
+      return next.size !== prev.size ? next : prev;
+    });
+  }, [trees]);
+
+  // Cập nhật trạng thái indeterminate của checkbox select-all
+  useEffect(() => {
+    if (selectAllRef.current) {
+      selectAllRef.current.indeterminate = someSelected && !allSelected;
+    }
+  }, [someSelected, allSelected]);
+
+  function toggleSelectTree(maCay, e) {
+    e.stopPropagation();
+    setSelectedTrees((prev) => {
+      const next = new Set(prev);
+      next.has(maCay) ? next.delete(maCay) : next.add(maCay);
+      return next;
+    });
+  }
+
+  function toggleSelectAll(e) {
+    e.stopPropagation();
+    setSelectedTrees(allSelected ? new Set() : new Set(trees.map((t) => t.maCay)));
+  }
+
+  async function deleteBulk() {
+    if (!window.confirm(`Xóa ${selectedTrees.size} cây đã chọn? Hành động này không thể hoàn tác.`)) return;
+    setBulkDeleting(true);
+    try {
+      const r = await api.delete("/dua-sap/bulk", { data: { macays: [...selectedTrees] } });
+      const { deleted = 0, failed = 0, results = [] } = r.data;
+      setSelectedTrees(new Set());
+      const nextPage = trees.length - deleted <= 0 && currentPage > 1 ? currentPage - 1 : currentPage;
+      setCurrentPage(nextPage);
+      fetchTrees(nextPage);
+      if (failed > 0) {
+        const errList = results.filter((r) => r.status === "error").map((r) => `${r.maCay}: ${r.reason}`).join("\n");
+        alert(`Đã xóa ${deleted} cây.\nKhông thể xóa ${failed} cây:\n${errList}`);
+      }
+    } catch (e) {
+      alert(e.response?.data?.message || "Lỗi khi xóa hàng loạt.");
+    } finally {
+      setBulkDeleting(false);
+    }
+  }
+
+  async function exportSelectedQR() {
+    const selected = trees.filter((t) => selectedTrees.has(t.maCay));
+    if (!selected.length) return;
+    setExportingPDF(true);
+    setExportProgress({ done: 0, total: selected.length });
+    try {
+      await exportAllQRtoPDF(selected, (done, total) => setExportProgress({ done, total }));
+    } catch (e) {
+      alert("Lỗi khi xuất PDF: " + e.message);
+    } finally {
+      setExportingPDF(false);
+      setExportProgress({ done: 0, total: 0 });
+    }
+  }
 
   // fetchTrees nhận page (không lưu vào deps để tránh re-create khi đổi trang)
   const fetchTrees = useCallback(async (page = 1) => {
@@ -1455,6 +1926,12 @@ export default function DuaSapManager() {
             <Upload size={15} /> Import Excel
           </button>
           <button
+            onClick={() => setShowBatchAdd(true)}
+            className="flex items-center gap-2 bg-teal-600 hover:bg-teal-700 text-white px-4 py-2 rounded-xl text-sm font-medium transition shadow-sm"
+          >
+            <Plus size={16} /> Thêm hàng loạt
+          </button>
+          <button
             onClick={() => { setEditingTree(null); setShowTreeForm(true); }}
             className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl text-sm font-medium transition shadow-sm"
           >
@@ -1487,6 +1964,45 @@ export default function DuaSapManager() {
         </button>
       </div>
 
+      {/* Bulk action bar */}
+      {someSelected && (
+        <div className="flex items-center gap-3 bg-emerald-700 text-white px-4 py-2.5 rounded-xl mb-4 text-sm flex-wrap">
+          <span className="font-medium">{selectedTrees.size} mục đã chọn</span>
+          <div className="flex-1" />
+          <button
+            onClick={() => setShowBulkUpdate(true)}
+            className="flex items-center gap-1.5 bg-blue-500 hover:bg-blue-600 px-3 py-1.5 rounded-lg transition"
+          >
+            <Edit2 size={13} /> Cập nhật hàng loạt
+          </button>
+          <button
+            onClick={exportSelectedQR}
+            disabled={exportingPDF}
+            className="flex items-center gap-1.5 bg-white/15 hover:bg-white/25 px-3 py-1.5 rounded-lg transition disabled:opacity-50"
+          >
+            {exportingPDF
+              ? <><Loader2 size={13} className="animate-spin" /> {exportProgress.done}/{exportProgress.total}</>
+              : <><QrCode size={13} /> Xuất QR PDF</>}
+          </button>
+          <button
+            onClick={deleteBulk}
+            disabled={bulkDeleting}
+            className="flex items-center gap-1.5 bg-red-500 hover:bg-red-600 px-3 py-1.5 rounded-lg transition disabled:opacity-50"
+          >
+            {bulkDeleting
+              ? <Loader2 size={13} className="animate-spin" />
+              : <Trash2 size={13} />}
+            Xóa {selectedTrees.size} cây
+          </button>
+          <button
+            onClick={() => setSelectedTrees(new Set())}
+            className="flex items-center gap-1 bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-lg transition"
+          >
+            <X size={13} /> Bỏ chọn
+          </button>
+        </div>
+      )}
+
       {/* Error */}
       {error && (
         <div className="flex items-center gap-2 bg-red-50 border border-red-200 text-red-700 rounded-xl p-4 mb-4 text-sm">
@@ -1510,7 +2026,17 @@ export default function DuaSapManager() {
           <table className="w-full">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-100">
-                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500">Mã cây</th>
+                <th className="w-10 px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                  <input
+                    ref={selectAllRef}
+                    type="checkbox"
+                    checked={allSelected}
+                    onChange={toggleSelectAll}
+                    className="w-4 h-4 rounded accent-emerald-600 cursor-pointer"
+                    title="Chọn tất cả"
+                  />
+                </th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500">Mã cây/ống nghiệm</th>
                 <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500">Vị trí</th>
                 <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 hidden sm:table-cell">Giống</th>
                 <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500">Trạng thái</th>
@@ -1521,9 +2047,17 @@ export default function DuaSapManager() {
               {trees.map((tree) => (
                 <React.Fragment key={tree.maCay}>
                   <tr
-                    className={`border-b border-gray-50 hover:bg-emerald-50/40 transition cursor-pointer ${expandedMaCay === tree.maCay ? "bg-emerald-50/60" : ""}`}
+                    className={`border-b border-gray-50 hover:bg-emerald-50/40 transition cursor-pointer ${expandedMaCay === tree.maCay ? "bg-emerald-50/60" : ""} ${selectedTrees.has(tree.maCay) ? "bg-emerald-50" : ""}`}
                     onClick={() => toggleExpand(tree.maCay)}
                   >
+                    <td className="w-10 px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        checked={selectedTrees.has(tree.maCay)}
+                        onChange={(e) => toggleSelectTree(tree.maCay, e)}
+                        className="w-4 h-4 rounded accent-emerald-600 cursor-pointer"
+                      />
+                    </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
                         {expandedMaCay === tree.maCay
@@ -1577,7 +2111,7 @@ export default function DuaSapManager() {
                   {/* Expanded: Records panel */}
                   {expandedMaCay === tree.maCay && (
                     <tr>
-                      <td colSpan={5} className="bg-emerald-50/40 px-4 py-4 border-b border-emerald-100">
+                      <td colSpan={6} className="bg-emerald-50/40 px-4 py-4 border-b border-emerald-100">
                         <div className="max-w-3xl">
                           <div className="flex items-center justify-between mb-3">
                             <h4 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
@@ -1610,36 +2144,56 @@ export default function DuaSapManager() {
                                           {rec.kyTheoDoiNhan || `T${rec.thangBatDau}–T${rec.thangKetThuc}/${rec.nam}`}
                                         </span>
                                         {rec.tinhTrangCay && (
-                                          <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${TINH_TRANG_CLS[rec.tinhTrangCay] || ""}`}>
-                                            Cấp {rec.tinhTrangCay}
+                                          <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${TINH_TRANG_CLS[rec.tinhTrangCay] || "bg-gray-100 text-gray-500"}`}>
+                                            {getTinhTrangLabel(rec.tinhTrangCay)}
                                           </span>
                                         )}
                                       </div>
                                       <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1.5 text-xs text-gray-400">
-                                        {rec.sanLuongDuKien?.length > 0 && (
+                                        {/* cây giống */}
+                                        {tree.loai !== "ong_nghiem" && rec.sanLuongDuKien?.length > 0 && (
                                           <span className="flex items-center gap-1">
                                             <Leaf size={11} className="text-blue-400" />
                                             DK: {rec.sanLuongDuKien.map((x) => `T${x.thang}: ${x.soLuong}`).join(", ")}
                                           </span>
                                         )}
-                                        {rec.sanLuongThucTe?.length > 0 && (
+                                        {tree.loai !== "ong_nghiem" && rec.sanLuongThucTe?.length > 0 && (
                                           <span className="flex items-center gap-1">
                                             <Leaf size={11} className="text-emerald-400" />
                                             TT: {rec.sanLuongThucTe.map((x) => `T${x.thang}: ${x.soLuong}`).join(", ")}
                                           </span>
                                         )}
-                                        {rec.soTau != null && (
+                                        {tree.loai !== "ong_nghiem" && rec.soTau != null && (
                                           <span className="flex items-center gap-1">
                                             <TreePine size={11} className="text-emerald-500" />
                                             {rec.soTau} tàu
                                           </span>
                                         )}
-                                        {rec.soHoa != null && (
+                                        {tree.loai !== "ong_nghiem" && rec.soHoa != null && (
                                           <span className="flex items-center gap-1">
                                             <Leaf size={11} className="text-pink-400" />
                                             {rec.soHoa} hoa
                                           </span>
                                         )}
+                                        {/* ống nghiệm */}
+                                        {tree.loai === "ong_nghiem" && rec.ngayRaCayDuKien && (
+                                          <span className="flex items-center gap-1">
+                                            <Sprout size={11} className="text-blue-400" />
+                                            DK ra cây: {fmt(rec.ngayRaCayDuKien)}
+                                          </span>
+                                        )}
+                                        {tree.loai === "ong_nghiem" && rec.ngayRaCayThucTe && (
+                                          <span className="flex items-center gap-1">
+                                            <Sprout size={11} className="text-emerald-500" />
+                                            TT ra cây: {fmt(rec.ngayRaCayThucTe)}
+                                          </span>
+                                        )}
+                                        {tree.loai === "ong_nghiem" && rec.yeuCauDeXuat && (
+                                          <span className="flex items-center gap-1 max-w-xs truncate text-violet-500">
+                                            <StickyNote size={11} /> {rec.yeuCauDeXuat}
+                                          </span>
+                                        )}
+                                        {/* dùng chung */}
                                         {rec.lichPhunThuoc?.length > 0 && (
                                           <span className="flex items-center gap-1">
                                             <Droplets size={11} className="text-blue-300" />
@@ -1739,6 +2293,32 @@ export default function DuaSapManager() {
       {/* Log Modal */}
       {showLog && <LogModal api={api} onClose={() => setShowLog(false)} />}
 
+      {/* Modal: Cập nhật hàng loạt */}
+      {showBulkUpdate && someSelected && (
+        <Modal
+          title={`Cập nhật hàng loạt — ${selectedTrees.size} cây đã chọn`}
+          onClose={() => setShowBulkUpdate(false)}
+          wide
+        >
+          <BulkUpdateModal
+            macays={[...selectedTrees]}
+            onClose={() => setShowBulkUpdate(false)}
+            onDone={() => { fetchTrees(currentPage); }}
+          />
+        </Modal>
+      )}
+
+      {/* Modal: Thêm hàng loạt */}
+      {showBatchAdd && (
+        <Modal title="Thêm hàng loạt" onClose={() => setShowBatchAdd(false)} wide>
+          <BatchAddModal
+            existingTrees={trees}
+            onClose={() => setShowBatchAdd(false)}
+            onDone={() => { fetchTrees(currentPage); }}
+          />
+        </Modal>
+      )}
+
       {/* Modal: Thêm/Sửa cây */}
       {showTreeForm && (
         <Modal
@@ -1763,6 +2343,7 @@ export default function DuaSapManager() {
         >
           <RecordForm
             maCay={expandedMaCay}
+            loai={trees.find((t) => t.maCay === expandedMaCay)?.loai || "cay_giong"}
             initial={editingRecord}
             onSave={saveRecord}
             onClose={() => { setShowRecordForm(false); setEditingRecord(null); }}
