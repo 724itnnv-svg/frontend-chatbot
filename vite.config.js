@@ -12,8 +12,10 @@ export default defineConfig({
   plugins: [tailwindcss(), react()],
   base: '/',
   build: {
-    outDir: 'dist', 
-    chunkSizeWarningLimit: 1000, 
+    outDir: 'dist',
+    target: ['es2015', 'safari13'],
+    cssTarget: ['safari12'],
+    chunkSizeWarningLimit: 1000,
     rollupOptions: {
       output: {
         manualChunks(id) {

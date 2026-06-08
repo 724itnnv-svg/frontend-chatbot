@@ -1,44 +1,46 @@
-import { useState, useEffect } from "react";
+﻿import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import axios from "axios";
 import {
   ArrowLeft, MapPin, Leaf, Calendar, Droplets, Sprout,
   TrendingUp, TrendingDown, Minus, AlertCircle, Loader2,
   TreePine, CheckCircle2, ClipboardList, StickyNote,
-  ImageOff, X, ChevronLeft, ChevronRight, ZoomIn,
+  ImageOff, X, ChevronLeft, ChevronRight, ZoomIn, Pencil,
+  Plus, Trash2,
 } from "lucide-react";
 import { apiUrl } from "../../api/baseUrl";
+import { useAuth } from "../../context/AuthContext";
+import { canAccessScreen } from "../../utils/screenAccess";
 
 
 const TINH_TRANG_CONFIG = {
-  I: { label: "Cấp I — Tốt", cls: "bg-emerald-100 text-emerald-700 border-emerald-200" },
-  II: { label: "Cấp II — Trung bình", cls: "bg-yellow-100 text-yellow-700 border-yellow-200" },
-  III: { label: "Cấp III — Kém", cls: "bg-orange-100 text-orange-700 border-orange-200" },
-  IV: { label: "Cấp IV — Rất kém", cls: "bg-red-100 text-red-700 border-red-200" },
+  I: { label: "Cấp I", cls: "bg-emerald-100 text-emerald-700 border-emerald-200" },
+  II: { label: "Cấp II", cls: "bg-yellow-100 text-yellow-700 border-yellow-200" },
+  III: { label: "Cấp III", cls: "bg-orange-100 text-orange-700 border-orange-200" },
+  IV: { label: "Cấp IV", cls: "bg-red-100 text-red-700 border-red-200" },
 };
 
-const MAU_TRAI = { vang: "Vàng", tim_hong: "Tím hồng", do: "Đỏ", xanh: "Xanh", khac: "Khác" };
 const GIONG = { dua_sap: "Dừa sáp", dua_thuong: "Dừa thường", khac: "Khác" };
 
 function fmt(dateStr) {
   if (!dateStr) return "—";
   try {
     return new Date(dateStr).toLocaleDateString("vi-VN", { day: "2-digit", month: "2-digit", year: "numeric" });
-  } catch { return dateStr; }
+  } catch (_e) { return dateStr; }
 }
 
 function fmtShort(dateStr) {
   if (!dateStr) return "—";
   try {
     return new Date(dateStr).toLocaleDateString("vi-VN", { day: "2-digit", month: "2-digit" });
-  } catch { return dateStr; }
+  } catch (_e) { return dateStr; }
 }
 
-// ─── Image Gallery ────────────────────────────────────────────────────────────
+// ─── Image Gallery ──────────────────────────────────────────────────────────
 function ImageGallery({ images, maCay }) {
   const [lightbox, setLightbox] = useState(null); // index đang xem
   const [imgErrors, setImgErrors] = useState({});
-  const validImages = (images || []).filter((_, i) => !imgErrors[i]);
+  const validImages = (images || []).filter((img, i) => img && !imgErrors[i]);
   const hasImages = validImages.length > 0;
 
   function prev() { setLightbox((i) => (i > 0 ? i - 1 : validImages.length - 1)); }
@@ -113,9 +115,8 @@ function ImageGallery({ images, maCay }) {
                 <button
                   key={i}
                   onClick={() => setLightbox(i)}
-                  className={`shrink-0 w-16 h-16 rounded-lg overflow-hidden border-2 transition ${
-                    lightbox === i ? "border-emerald-500" : "border-transparent hover:border-emerald-200"
-                  }`}
+                  className={`shrink-0 w-16 h-16 rounded-lg overflow-hidden border-2 transition ${lightbox === i ? "border-emerald-500" : "border-transparent hover:border-emerald-200"
+                    }`}
                 >
                   <img
                     src={url}
@@ -138,6 +139,7 @@ function ImageGallery({ images, maCay }) {
           onKeyDown={handleKeyDown}
           tabIndex={0}
           role="dialog"
+          autoFocus
         >
           <button
             onClick={() => setLightbox(null)}
@@ -253,11 +255,21 @@ function RecordCard({ record }) {
       </div>
 
       <div className="p-5 space-y-5">
-        {/* Màu trái */}
-        {record.mauTrai && (
-          <div className="flex items-center gap-2 text-sm text-gray-600">
-            <Leaf size={14} className="text-emerald-500" />
-            <span>Màu trái: <span className="font-medium text-gray-800">{MAU_TRAI[record.mauTrai] || record.mauTrai}</span></span>
+        {/* Số tàu + Số hoa */}
+        {(record.soTau != null || record.soHoa != null) && (
+          <div className="flex flex-wrap gap-4 text-sm text-gray-600">
+            {record.soTau != null && (
+              <span className="flex items-center gap-1.5">
+                <TreePine size={14} className="text-emerald-600" />
+                Số tàu: <span className="font-medium text-gray-800">{record.soTau}</span>
+              </span>
+            )}
+            {record.soHoa != null && (
+              <span className="flex items-center gap-1.5">
+                <Sprout size={14} className="text-pink-500" />
+                Số hoa: <span className="font-medium text-gray-800">{record.soHoa}</span>
+              </span>
+            )}
           </div>
         )}
 
@@ -341,23 +353,472 @@ function RecordCard({ record }) {
   );
 }
 
+// ─── Edit Modal (chỉnh sửa cây + bản ghi tháng hiện tại) ──────────────────
+const TRANG_THAI_OPTIONS = [
+  { value: "dang_theo_doi", label: "Đang theo dõi" },
+  { value: "da_thu_hoach", label: "Đã thu hoạch" },
+  { value: "chet", label: "Đã chết" },
+  { value: "ngung_theo_doi", label: "Ngừng theo dõi" },
+];
+const TINH_TRANG_BTN = [
+  { v: "I", cls: "border-emerald-400 text-emerald-700 bg-emerald-50", active: "bg-emerald-500 text-white border-emerald-500" },
+  { v: "II", cls: "border-yellow-400  text-yellow-700  bg-yellow-50", active: "bg-yellow-500  text-white border-yellow-500" },
+  { v: "III", cls: "border-orange-400  text-orange-700  bg-orange-50", active: "bg-orange-500  text-white border-orange-500" },
+  { v: "IV", cls: "border-red-400     text-red-700     bg-red-50", active: "bg-red-500     text-white border-red-500" },
+];
+const TINH_TRANG_ONG_NGHIEM_OPTIONS = [
+  { value: "vo_mau", label: "Vô mẫu" },
+  { value: "tach_choi", label: "Tách chồi" },
+  { value: "cay_truyen_1", label: "Cấy truyền lần 1" },
+  { value: "cay_truyen_2", label: "Cấy truyền lần 2" },
+  { value: "ra_cay", label: "Ra cây" },
+  { value: "bi_nhiem", label: "Bị nhiễm" },
+  { value: "xu_ly_nhiem", label: "Xử lý nhiễm" },
+  { value: "mau_huy", label: "Mẫu huỷ" },
+];
+
+function EditModal({ treeData, onClose, onSaved }) {
+  const { api } = useAuth();
+  const now = new Date();
+  const curMonth = now.getMonth() + 1;
+  const curYear = now.getFullYear();
+  const isOngNghiem = treeData.loai === "ong_nghiem";
+
+  /* ── Tree form ── */
+  const [tf, setTf] = useState({
+    viTri: treeData.viTri || "",
+    khuVuc: treeData.khuVuc || "",
+    giong: treeData.giong || "",
+    tenGiong: treeData.tenGiong || "",
+    trangThai: treeData.trangThai || "dang_theo_doi",
+    ghiChu: treeData.ghiChu || "",
+  });
+  const setT = (k, v) => setTf((p) => ({ ...p, [k]: v }));
+
+  /* ── Record form (tháng hiện tại) ── */
+  const [currentRecord, setCurrentRecord] = useState(null);
+  const [loadingRecord, setLoadingRecord] = useState(true);
+  const [rf, setRf] = useState({
+    tinhTrangCay: "",
+    slDuKien: "",
+    slThucTe: "",
+    soTau: "",
+    soHoa: "",
+    ghiChu: "",
+    ngayRaCayDuKien: "",
+    ngayRaCayThucTe: "",
+    yeuCauDeXuat: "",
+    lichPhunThuoc: [],
+    lichBonPhan: [],
+  });
+  const setR = (k, v) => setRf((p) => ({ ...p, [k]: v }));
+
+  const addChamSoc = (key) =>
+    setRf((p) => ({ ...p, [key]: [...p[key], { ngay: "", sanPham: "", lieuLuong: "", ghiChu: "" }] }));
+  const updateChamSoc = (key, idx, field, val) =>
+    setRf((p) => {
+      const arr = [...p[key]];
+      arr[idx] = { ...arr[idx], [field]: val };
+      return { ...p, [key]: arr };
+    });
+  const removeChamSoc = (key, idx) =>
+    setRf((p) => ({ ...p, [key]: p[key].filter((_, i) => i !== idx) }));
+
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState(null);
+
+  /* Tải bản ghi tháng hiện tại */
+  useEffect(() => {
+    setLoadingRecord(true);
+    api.get("/dua-sap-record", { params: { maCay: treeData.maCay } })
+      .then((r) => {
+        const rec = (r.data.data || []).find(
+          (x) => x.nam === curYear && x.thangBatDau <= curMonth && x.thangKetThuc >= curMonth
+        );
+        setCurrentRecord(rec || null);
+        if (rec) {
+          const dk = rec.sanLuongDuKien?.find((x) => x.thang === curMonth);
+          const tt = rec.sanLuongThucTe?.find((x) => x.thang === curMonth);
+          setRf({
+            tinhTrangCay: rec.tinhTrangCay || "",
+            slDuKien: dk?.soLuong ?? "",
+            slThucTe: tt?.soLuong ?? "",
+            soTau: rec.soTau ?? "",
+            soHoa: rec.soHoa ?? "",
+            ghiChu: rec.ghiChu || "",
+            ngayRaCayDuKien: rec.ngayRaCayDuKien
+              ? new Date(rec.ngayRaCayDuKien).toISOString().slice(0, 10) : "",
+            ngayRaCayThucTe: rec.ngayRaCayThucTe
+              ? new Date(rec.ngayRaCayThucTe).toISOString().slice(0, 10) : "",
+            yeuCauDeXuat: rec.yeuCauDeXuat || "",
+            lichPhunThuoc: (rec.lichPhunThuoc || []).map((ev) => ({
+              ...ev,
+              ngay: ev.ngay ? new Date(ev.ngay).toISOString().slice(0, 10) : "",
+            })),
+            lichBonPhan: (rec.lichBonPhan || []).map((ev) => ({
+              ...ev,
+              ngay: ev.ngay ? new Date(ev.ngay).toISOString().slice(0, 10) : "",
+            })),
+          });
+        }
+      })
+      .catch(() => { })
+      .finally(() => setLoadingRecord(false));
+  }, [treeData.maCay]);
+
+  async function handleSave() {
+    setSaving(true);
+    setSaveError(null);
+    try {
+      /* 1. Lưu thông tin cây */
+      await api.put(`/dua-sap/${treeData.maCay}`, tf);
+
+      /* 2. Lưu/tạo bản ghi tháng hiện tại */
+      const base = currentRecord || {};
+      let sanLuongDuKien = [...(base.sanLuongDuKien || [])];
+      let sanLuongThucTe = [...(base.sanLuongThucTe || [])];
+
+      const updSlot = (arr, soLuong) => {
+        if (soLuong === "" || soLuong === null) return arr;
+        const val = Number(soLuong);
+        if (isNaN(val)) return arr;
+        const idx = arr.findIndex((x) => x.thang === curMonth);
+        const entry = { thang: curMonth, nam: curYear, soLuong: val };
+        return idx >= 0 ? arr.map((x, i) => (i === idx ? entry : x)) : [...arr, entry];
+      };
+      sanLuongDuKien = updSlot(sanLuongDuKien, rf.slDuKien);
+      sanLuongThucTe = updSlot(sanLuongThucTe, rf.slThucTe);
+
+      const recPayload = {
+        maCay: treeData.maCay,
+        thangBatDau: base.thangBatDau ?? curMonth,
+        thangKetThuc: base.thangKetThuc ?? curMonth,
+        nam: base.nam ?? curYear,
+        kyTheoDoiNhan: base.kyTheoDoiNhan || `T${curMonth}/${curYear}`,
+        tinhTrangCay: rf.tinhTrangCay || null,
+        soTau: !isOngNghiem && rf.soTau !== "" ? Number(rf.soTau) : (base.soTau ?? null),
+        soHoa: !isOngNghiem && rf.soHoa !== "" ? Number(rf.soHoa) : (base.soHoa ?? null),
+        sanLuongDuKien,
+        sanLuongThucTe,
+        lichPhunThuoc: rf.lichPhunThuoc,
+        lichBonPhan: rf.lichBonPhan,
+        ghiChu: rf.ghiChu,
+        ngayRaCayDuKien: isOngNghiem ? (rf.ngayRaCayDuKien || null) : (base.ngayRaCayDuKien || null),
+        ngayRaCayThucTe: isOngNghiem ? (rf.ngayRaCayThucTe || null) : (base.ngayRaCayThucTe || null),
+        yeuCauDeXuat: isOngNghiem ? rf.yeuCauDeXuat : (base.yeuCauDeXuat || ""),
+      };
+
+      if (currentRecord?._id) {
+        await api.put(`/dua-sap-record/${currentRecord._id}`, recPayload);
+      } else {
+        await api.post("/dua-sap-record", recPayload);
+      }
+
+      onSaved();
+    } catch (e) {
+      setSaveError(e.response?.data?.message || "Lỗi khi lưu dữ liệu.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const inp = "w-full px-3 py-2 text-sm border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-400";
+  const lbl = "block text-xs font-medium text-gray-500 mb-1";
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/50 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={onClose}>
+      <div
+        className="bg-white w-full sm:max-w-lg rounded-t-2xl sm:rounded-2xl shadow-2xl max-h-[92vh] flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="bg-gradient-to-r from-emerald-700 to-green-600 px-5 py-4 rounded-t-2xl sm:rounded-t-2xl flex items-center justify-between shrink-0">
+          <div>
+            <p className="text-white font-bold text-base">{treeData.maCay}</p>
+            <p className="text-emerald-100 text-xs mt-0.5">Chỉnh sửa thông tin cây & bản ghi tháng {curMonth}/{curYear}</p>
+          </div>
+          <button onClick={onClose} className="text-white/70 hover:text-white transition p-1">
+            <X size={20} />
+          </button>
+        </div>
+
+        {/* Body — scrollable */}
+        <div className="overflow-y-auto flex-1 px-5 py-4 space-y-5">
+
+          {/* ── Section 1: Thông tin cây ── */}
+          <section>
+            <p className="text-xs font-semibold text-emerald-700 uppercase tracking-wide mb-3 flex items-center gap-1.5">
+              <TreePine size={13} /> Thông tin cây
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className={lbl}>Vị trí</label>
+                <input className={inp} value={tf.viTri} onChange={(e) => setT("viTri", e.target.value)} placeholder="Xưởng, Vườn A..." />
+              </div>
+              <div>
+                <label className={lbl}>Khu vực / Lô</label>
+                <input className={inp} value={tf.khuVuc} onChange={(e) => setT("khuVuc", e.target.value)} placeholder="Lô B, hàng 3..." />
+              </div>
+              <div className="col-span-2">
+                <label className={lbl}>Giống cây</label>
+                <input
+                  className={inp}
+                  value={tf.giong}
+                  onChange={(e) => setT("giong", e.target.value)}
+                  placeholder="VD: Dừa sáp, Dừa thường..."
+                />
+              </div>
+              <div className="col-span-2">
+                <label className={lbl}>Trạng thái</label>
+                <select className={inp} value={tf.trangThai} onChange={(e) => setT("trangThai", e.target.value)}>
+                  {TRANG_THAI_OPTIONS.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+                </select>
+              </div>
+              <div className="col-span-2">
+                <label className={lbl}>Ghi chú cây</label>
+                <textarea className={inp + " resize-none"} rows={2} value={tf.ghiChu} onChange={(e) => setT("ghiChu", e.target.value)} placeholder="Ghi chú..." />
+              </div>
+            </div>
+          </section>
+
+          {/* Divider */}
+          <div className="border-t border-dashed border-gray-200" />
+
+          {/* ── Section 2: Bản ghi tháng hiện tại ── */}
+          <section>
+            <p className="text-xs font-semibold text-emerald-700 uppercase tracking-wide mb-3 flex items-center gap-1.5">
+              <ClipboardList size={13} />
+              Bản ghi tháng {curMonth}/{curYear}
+              {currentRecord && <span className="ml-1 text-[10px] font-normal text-gray-400 normal-case">(kỳ: {currentRecord.kyTheoDoiNhan})</span>}
+            </p>
+
+            {loadingRecord ? (
+              <div className="flex items-center gap-2 text-gray-400 text-sm py-3">
+                <Loader2 size={14} className="animate-spin text-emerald-400" />
+                Đang tải bản ghi...
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {isOngNghiem ? (
+                  /* ── Ống nghiệm fields ── */
+                  <>
+                    <div>
+                      <label className={lbl}>Tình trạng</label>
+                      <select className={inp} value={rf.tinhTrangCay} onChange={(e) => setR("tinhTrangCay", e.target.value)}>
+                        <option value="">— Chọn —</option>
+                        {TINH_TRANG_ONG_NGHIEM_OPTIONS.map((t) => (
+                          <option key={t.value} value={t.value}>{t.label}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className={lbl}>Dự kiến ngày ra cây</label>
+                        <input type="date" className={inp} value={rf.ngayRaCayDuKien} onChange={(e) => setR("ngayRaCayDuKien", e.target.value)} />
+                      </div>
+                      <div>
+                        <label className={lbl}>Thực tế ngày ra cây</label>
+                        <input type="date" className={inp} value={rf.ngayRaCayThucTe} onChange={(e) => setR("ngayRaCayThucTe", e.target.value)} />
+                      </div>
+                    </div>
+                    <div>
+                      <label className={lbl}>Yêu cầu đề xuất</label>
+                      <textarea className={inp + " resize-none"} rows={2} value={rf.yeuCauDeXuat} onChange={(e) => setR("yeuCauDeXuat", e.target.value)} placeholder="Ghi yêu cầu hoặc đề xuất xử lý trong kỳ này..." />
+                    </div>
+                  </>
+                ) : (
+                  /* ── Cây giống fields ── */
+                  <>
+                    <div>
+                      <label className={lbl}>Tình trạng cây</label>
+                      <div className="flex gap-2">
+                        {TINH_TRANG_BTN.map(({ v, cls, active }) => (
+                          <button
+                            key={v} type="button"
+                            onClick={() => setR("tinhTrangCay", rf.tinhTrangCay === v ? "" : v)}
+                            className={`flex-1 py-1.5 text-xs font-semibold rounded-lg border transition ${rf.tinhTrangCay === v ? active : cls}`}
+                          >
+                            Cấp {v}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className={lbl}>SL dự kiến (trái)</label>
+                        <input type="number" min="0" className={inp} value={rf.slDuKien} onChange={(e) => setR("slDuKien", e.target.value)} placeholder="0" />
+                      </div>
+                      <div>
+                        <label className={lbl}>SL thực tế (trái)</label>
+                        <input type="number" min="0" className={inp} value={rf.slThucTe} onChange={(e) => setR("slThucTe", e.target.value)} placeholder="0" />
+                      </div>
+                      <div>
+                        <label className={lbl}>Số tàu</label>
+                        <input type="number" min="0" className={inp} value={rf.soTau} onChange={(e) => setR("soTau", e.target.value)} placeholder="—" />
+                      </div>
+                      <div>
+                        <label className={lbl}>Số hoa</label>
+                        <input type="number" min="0" className={inp} value={rf.soHoa} onChange={(e) => setR("soHoa", e.target.value)} placeholder="—" />
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {/* Ghi chú kỳ — chung */}
+                <div>
+                  <label className={lbl}>Ghi chú kỳ theo dõi</label>
+                  <textarea className={inp + " resize-none"} rows={2} value={rf.ghiChu} onChange={(e) => setR("ghiChu", e.target.value)} placeholder="Ghi chú..." />
+                </div>
+
+                {/* ── Lịch phun thuốc ── */}
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className={lbl + " mb-0 flex items-center gap-1"}>
+                      <Droplets size={12} className="text-blue-400" /> Lịch phun thuốc
+                    </label>
+                    <button type="button" onClick={() => addChamSoc("lichPhunThuoc")}
+                      className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1 transition">
+                      <Plus size={12} /> Thêm
+                    </button>
+                  </div>
+                  {rf.lichPhunThuoc.map((ev, i) => (
+                    <div key={i} className="grid grid-cols-12 gap-1.5 mb-1.5 bg-blue-50 rounded-lg p-2">
+                      <div className="col-span-3">
+                        <input type="date" className={inp + " text-xs py-1.5"} value={ev.ngay} onChange={(e) => updateChamSoc("lichPhunThuoc", i, "ngay", e.target.value)} />
+                      </div>
+                      <div className="col-span-3">
+                        <input className={inp + " text-xs py-1.5"} placeholder="Sản phẩm" value={ev.sanPham} onChange={(e) => updateChamSoc("lichPhunThuoc", i, "sanPham", e.target.value)} />
+                      </div>
+                      <div className="col-span-2">
+                        <input className={inp + " text-xs py-1.5"} placeholder="Liều lượng" value={ev.lieuLuong} onChange={(e) => updateChamSoc("lichPhunThuoc", i, "lieuLuong", e.target.value)} />
+                      </div>
+                      <div className="col-span-3">
+                        <input className={inp + " text-xs py-1.5"} placeholder="Ghi chú" value={ev.ghiChu} onChange={(e) => updateChamSoc("lichPhunThuoc", i, "ghiChu", e.target.value)} />
+                      </div>
+                      <div className="col-span-1 flex items-center justify-center">
+                        <button type="button" onClick={() => removeChamSoc("lichPhunThuoc", i)} className="text-red-400 hover:text-red-600"><Trash2 size={13} /></button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* ── Lịch bón phân ── */}
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className={lbl + " mb-0 flex items-center gap-1"}>
+                      <Sprout size={12} className="text-amber-500" /> Lịch bón phân
+                    </label>
+                    <button type="button" onClick={() => addChamSoc("lichBonPhan")}
+                      className="text-xs text-amber-600 hover:text-amber-800 flex items-center gap-1 transition">
+                      <Plus size={12} /> Thêm
+                    </button>
+                  </div>
+                  {rf.lichBonPhan.map((ev, i) => (
+                    <div key={i} className="grid grid-cols-12 gap-1.5 mb-1.5 bg-amber-50 rounded-lg p-2">
+                      <div className="col-span-3">
+                        <input type="date" className={inp + " text-xs py-1.5"} value={ev.ngay} onChange={(e) => updateChamSoc("lichBonPhan", i, "ngay", e.target.value)} />
+                      </div>
+                      <div className="col-span-3">
+                        <input className={inp + " text-xs py-1.5"} placeholder="Sản phẩm" value={ev.sanPham} onChange={(e) => updateChamSoc("lichBonPhan", i, "sanPham", e.target.value)} />
+                      </div>
+                      <div className="col-span-2">
+                        <input className={inp + " text-xs py-1.5"} placeholder="Liều lượng" value={ev.lieuLuong} onChange={(e) => updateChamSoc("lichBonPhan", i, "lieuLuong", e.target.value)} />
+                      </div>
+                      <div className="col-span-3">
+                        <input className={inp + " text-xs py-1.5"} placeholder="Ghi chú" value={ev.ghiChu} onChange={(e) => updateChamSoc("lichBonPhan", i, "ghiChu", e.target.value)} />
+                      </div>
+                      <div className="col-span-1 flex items-center justify-center">
+                        <button type="button" onClick={() => removeChamSoc("lichBonPhan", i)} className="text-red-400 hover:text-red-600"><Trash2 size={13} /></button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {!currentRecord && (
+                  <p className="text-xs text-amber-600 bg-amber-50 rounded-lg px-3 py-2">
+                    Chưa có bản ghi tháng này — lưu sẽ tạo mới bản ghi tháng {curMonth}/{curYear}.
+                  </p>
+                )}
+              </div>
+            )}
+          </section>
+        </div>
+
+        {/* Footer */}
+        <div className="px-5 py-4 border-t border-gray-100 shrink-0 space-y-2">
+          {saveError && (
+            <p className="text-xs text-red-500 text-center">{saveError}</p>
+          )}
+          <div className="flex gap-2">
+            <button type="button" onClick={onClose} className="flex-1 py-2.5 text-sm text-gray-500 border border-gray-200 rounded-xl hover:bg-gray-50 transition">
+              Hủy
+            </button>
+            <button
+              type="button" onClick={handleSave} disabled={saving}
+              className="flex-1 flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white py-2.5 rounded-xl text-sm font-medium transition disabled:opacity-60"
+            >
+              {saving ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
+              Lưu thay đổi
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function DuaSapDetailPage() {
   const { maCay } = useParams();
   const navigate = useNavigate();
+  const auth = useAuth() || {};
+  const user = auth.user || null;
+  const canManage = Boolean(user && canAccessScreen(user, "dua_sap"));
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [showEdit, setShowEdit] = useState(false);
+
+  function fetchData() {
+    // Đảm bảo maCay có giá trị trước khi fetch
+    if (!maCay || typeof maCay !== "string") {
+      setLoading(false);
+      setError("Mã cây không hợp lệ.");
+      return;
+    }
+
+    try {
+      setLoading(true);
+      setError(null);
+      const normalizedMaCay = String(maCay).trim().toUpperCase();
+
+      axios
+        .get(apiUrl(`/api/public/dua-sap/${normalizedMaCay}`))
+        .then((r) => {
+          const payload = r?.data?.data;
+          if (!payload) {
+            setData(null);
+            setError("Không tìm thấy cây hoặc dữ liệu không hợp lệ.");
+            return;
+          }
+          setData({ ...payload, records: Array.isArray(payload.records) ? payload.records : [] });
+          setError(null);
+        })
+        .catch((err) => {
+          console.error("Error fetching tree data:", err);
+          setError("Không tìm thấy cây hoặc lỗi kết nối.");
+          setData(null);
+        })
+        .finally(() => setLoading(false));
+    } catch (e) {
+      console.error("Error in fetchData:", e);
+      setLoading(false);
+      setError("Lỗi khi xử lý dữ liệu.");
+    }
+  }
 
   useEffect(() => {
-    if (!maCay) return;
-    setLoading(true);
-    setError(null);
-    axios
-      .get(apiUrl(`/api/public/dua-sap/${maCay.toUpperCase()}`))
-      .then((r) => setData(r.data.data))
-      .catch(() => setError("Không tìm thấy cây hoặc lỗi kết nối."))
-      .finally(() => setLoading(false));
-  }, [maCay]);
+    fetchData();
+  }, [maCay]); // eslint-disable-line
 
   if (loading) {
     return (
@@ -370,12 +831,12 @@ export default function DuaSapDetailPage() {
     );
   }
 
-  if (error || !data) {
+  if (error) {
     return (
       <div className="min-h-screen bg-emerald-50 flex items-center justify-center p-4">
         <div className="bg-white rounded-2xl shadow p-8 max-w-sm w-full text-center">
           <AlertCircle size={40} className="text-red-400 mx-auto mb-3" />
-          <p className="text-gray-600 text-sm mb-4">{error || "Không tìm thấy cây."}</p>
+          <p className="text-gray-600 text-sm mb-4">{error}</p>
           <button
             onClick={() => navigate("/dua-sap")}
             className="text-emerald-600 hover:underline text-sm font-medium"
@@ -387,14 +848,35 @@ export default function DuaSapDetailPage() {
     );
   }
 
-  const records = data.records || [];
-  const tinh = TINH_TRANG_CONFIG[records[0]?.tinhTrangCay] || null;
+  if (!data) {
+    return (
+      <div className="min-h-screen bg-emerald-50 flex items-center justify-center p-4">
+        <div className="bg-white rounded-2xl shadow p-8 max-w-sm w-full text-center">
+          <AlertCircle size={40} className="text-red-400 mx-auto mb-3" />
+          <p className="text-gray-600 text-sm mb-4">Không tìm thấy cây.</p>
+          <button
+            onClick={() => navigate("/dua-sap")}
+            className="text-emerald-600 hover:underline text-sm font-medium"
+          >
+            ← Quay lại danh sách
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const records = data?.records || [];
+  const tinh = records.length > 0 ? TINH_TRANG_CONFIG[records[0]?.tinhTrangCay] : null;
 
   // Tổng sản lượng
-  const totalDK = records.flatMap((r) => r.sanLuongDuKien || []).reduce((s, x) => s + (x.soLuong || 0), 0);
-  const totalTT = records.flatMap((r) => r.sanLuongThucTe || []).reduce((s, x) => s + (x.soLuong || 0), 0);
-  const totalPhun = records.flatMap((r) => r.lichPhunThuoc || []).length;
-  const totalBon = records.flatMap((r) => r.lichBonPhan || []).length;
+  const sanLuongDuKien = records.reduce((items, r) => items.concat(Array.isArray(r?.sanLuongDuKien) ? r.sanLuongDuKien : []), []);
+  const totalDK = sanLuongDuKien.reduce((s, x) => s + (x?.soLuong || 0), 0);
+  const sanLuongThucTe = records.reduce((items, r) => items.concat(Array.isArray(r?.sanLuongThucTe) ? r.sanLuongThucTe : []), []);
+  const totalTT = sanLuongThucTe.reduce((s, x) => s + (x?.soLuong || 0), 0);
+  const lichPhunThuoc = records.reduce((items, r) => items.concat(Array.isArray(r?.lichPhunThuoc) ? r.lichPhunThuoc : []), []);
+  const totalPhun = lichPhunThuoc.length;
+  const lichBonPhan = records.reduce((items, r) => items.concat(Array.isArray(r?.lichBonPhan) ? r.lichBonPhan : []), []);
+  const totalBon = lichBonPhan.length;
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-emerald-50 via-white to-green-50">
@@ -438,12 +920,6 @@ export default function DuaSapDetailPage() {
               </div>
             </div>
 
-            {data.mauTrai && (
-              <div className="text-right">
-                <p className="text-emerald-200 text-xs">Màu trái</p>
-                <p className="text-white font-semibold">{MAU_TRAI[data.mauTrai]}</p>
-              </div>
-            )}
           </div>
         </div>
       </header>
@@ -496,19 +972,18 @@ export default function DuaSapDetailPage() {
                 .sort((a, b) => new Date(b.ngay) - new Date(a.ngay))
                 .map((ev, i) => (
                   <div key={i} className="flex items-start gap-3 px-5 py-3">
-                    <div className={`mt-0.5 w-2 h-2 rounded-full shrink-0 ${
-                      ev.loai === "phun_thuoc" ? "bg-blue-400" :
+                    <div className={`mt-0.5 w-2 h-2 rounded-full shrink-0 ${ev.loai === "phun_thuoc" ? "bg-blue-400" :
                       ev.loai === "bon_phan" ? "bg-amber-400" :
-                      "bg-gray-300"
-                    }`} />
+                        "bg-gray-300"
+                      }`} />
                     <div className="flex-1 text-sm">
                       <div className="flex items-baseline gap-2 flex-wrap">
                         <span className="font-medium text-gray-700">{fmt(ev.ngay)}</span>
                         <span className="text-xs text-gray-400">
                           {ev.loai === "phun_thuoc" ? "Phun thuốc" :
-                           ev.loai === "bon_phan" ? "Bón phân" :
-                           ev.loai === "tuoi_nuoc" ? "Tưới nước" :
-                           ev.loai === "xu_ly_sau_benh" ? "Xử lý sâu bệnh" : "Khác"}
+                            ev.loai === "bon_phan" ? "Bón phân" :
+                              ev.loai === "tuoi_nuoc" ? "Tưới nước" :
+                                ev.loai === "xu_ly_sau_benh" ? "Xử lý sâu bệnh" : "Khác"}
                         </span>
                       </div>
                       {ev.sanPham && (
@@ -550,6 +1025,27 @@ export default function DuaSapDetailPage() {
       <footer className="text-center py-6 text-xs text-gray-400 border-t border-gray-100 mt-8">
         © {new Date().getFullYear()} Hệ thống quản lý vườn dừa sáp
       </footer>
+
+      {/* Nút chỉnh sửa nổi — chỉ hiện với người có quyền dua_sap */}
+      {canManage && (
+        <button
+          onClick={() => setShowEdit(true)}
+          className="fixed bottom-6 right-6 z-40 flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-3 rounded-2xl shadow-lg text-sm font-medium transition active:scale-95"
+          title="Chỉnh sửa dữ liệu cây (quyền quản lý)"
+        >
+          <Pencil size={15} />
+          Chỉnh sửa
+        </button>
+      )}
+
+      {/* Edit Modal */}
+      {showEdit && data && (
+        <EditModal
+          treeData={data}
+          onClose={() => setShowEdit(false)}
+          onSaved={() => { setShowEdit(false); fetchData(); }}
+        />
+      )}
     </div>
   );
 }

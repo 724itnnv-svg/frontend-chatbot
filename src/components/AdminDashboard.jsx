@@ -83,7 +83,9 @@ export default function AdminDashboard() {
     // ===== States: Pages & TeamId =====
     const [pageTeamMap, setPageTeamMap] = useState({});   // facebookId → teamId
     const [allTeamIds, setAllTeamIds] = useState([]);
+    const [allPages, setAllPages] = useState([]);          // [{ facebookId, name, teamId }]
     const [selectedTeams, setSelectedTeams] = useState(new Set(["ALL"]));
+    const [selectedPages, setSelectedPages] = useState(new Set(["ALL"]));
     const [pagesLoading, setPagesLoading] = useState(false);
 
     // ===== States: Logs =====
@@ -115,6 +117,11 @@ export default function AdminDashboard() {
 
                 const teams = [...new Set(pageList.map(p => p.teamId).filter(Boolean))].sort();
                 setAllTeamIds(teams);
+
+                setAllPages(pageList
+                    .filter(p => p.facebookId)
+                    .map(p => ({ facebookId: p.facebookId, name: p.name || p.pageName || p.facebookId, teamId: p.teamId || "" }))
+                    .sort((a, b) => a.name.localeCompare(b.name, "vi")));
             } catch (err) {
                 console.error("Lỗi tải pages:", err);
             } finally {
@@ -150,11 +157,34 @@ export default function AdminDashboard() {
             if (next.size === 0) next.add("ALL");
             return next;
         });
+        setSelectedPages(new Set(["ALL"]));
     };
 
     const toggleAllTeams = () => {
         setSelectedTeams(new Set(["ALL"]));
+        setSelectedPages(new Set(["ALL"]));
     };
+
+    // ===== Helpers chọn page =====
+    const togglePage = (facebookId) => {
+        setSelectedPages(prev => {
+            const next = new Set(prev);
+            next.delete("ALL");
+            if (next.has(facebookId)) next.delete(facebookId);
+            else next.add(facebookId);
+            if (next.size === 0) next.add("ALL");
+            return next;
+        });
+    };
+
+    const toggleAllPages = () => {
+        setSelectedPages(new Set(["ALL"]));
+    };
+
+    // Pages hiển thị theo team đang chọn
+    const visiblePages = allPages.filter(p =>
+        selectedTeams.has("ALL") || selectedTeams.has(p.teamId)
+    );
 
     // ===== Helpers chọn field =====
     const toggleField = (key) => {
@@ -210,6 +240,11 @@ export default function AdminDashboard() {
                 orders = orders.filter(o => selectedTeams.has(o.teamId));
             }
 
+            // Lọc theo page
+            if (!selectedPages.has("ALL")) {
+                orders = orders.filter(o => selectedPages.has(o.pageId));
+            }
+
             if (orders.length === 0) {
                 alert("Không có đơn hàng phù hợp!");
                 return;
@@ -262,6 +297,10 @@ export default function AdminDashboard() {
 
             if (!selectedTeams.has("ALL")) {
                 orders = orders.filter(o => selectedTeams.has(o.teamId));
+            }
+
+            if (!selectedPages.has("ALL")) {
+                orders = orders.filter(o => selectedPages.has(o.pageId));
             }
 
             if (orders.length === 0) { alert("Không có đơn hàng phù hợp!"); return; }
@@ -402,6 +441,7 @@ export default function AdminDashboard() {
         .filter(f => isAdmin || !SENSITIVE_FIELDS.has(f.key))
         .every(f => selectedFields.has(f.key));
     const isAllTeams = selectedTeams.has("ALL");
+    const isAllPages = selectedPages.has("ALL");
 
     return (
         <div className={`relative min-h-screen w-full overflow-hidden ${pageBg}`}>
@@ -571,6 +611,49 @@ export default function AdminDashboard() {
                         </div>
                     </div>
 
+                    {/* Lọc Page */}
+                    <div>
+                        <div className="mb-2 flex items-center justify-between">
+                            <label className="flex items-center gap-1 text-xs font-semibold text-slate-600">
+                                <Users size={12} /> Lọc theo Page
+                                {!isAllPages && (
+                                    <span className="ml-1 rounded-full bg-sky-100 px-1.5 py-0.5 text-[10px] font-bold text-sky-600">
+                                        {selectedPages.size} page
+                                    </span>
+                                )}
+                            </label>
+                            {!isAllPages && (
+                                <button type="button" onClick={toggleAllPages}
+                                    className="text-[10px] font-semibold text-slate-400 hover:text-sky-600 hover:underline">
+                                    Bỏ lọc
+                                </button>
+                            )}
+                        </div>
+                        {visiblePages.length === 0 ? (
+                            <span className="text-xs italic text-slate-400">
+                                {pagesLoading ? "Đang tải..." : "Không có page nào"}
+                            </span>
+                        ) : (
+                            <div className="flex max-h-32 flex-wrap gap-1.5 overflow-y-auto rounded-xl border border-slate-100 bg-slate-50/50 p-2">
+                                <button type="button" onClick={toggleAllPages}
+                                    className={`inline-flex items-center gap-1 rounded-lg border px-2.5 py-1 text-xs font-semibold transition ${isAllPages ? "border-emerald-400 bg-emerald-50 text-emerald-700" : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"}`}>
+                                    {isAllPages ? <CheckSquare size={11} /> : <Square size={11} />} Tất cả
+                                </button>
+                                {visiblePages.map(page => {
+                                    const active = !isAllPages && selectedPages.has(page.facebookId);
+                                    return (
+                                        <button key={page.facebookId} type="button" onClick={() => togglePage(page.facebookId)}
+                                            className={`inline-flex items-center gap-1 rounded-lg border px-2.5 py-1 text-xs font-semibold transition ${active ? "border-sky-400 bg-sky-50 text-sky-700" : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"}`}>
+                                            {active ? <CheckSquare size={11} /> : <Square size={11} />}
+                                            <span className="max-w-[140px] truncate">{page.name}</span>
+                                            {page.teamId && <span className="text-[10px] opacity-50">{page.teamId}</span>}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        )}
+                    </div>
+
                     {/* Chọn cột */}
                     <div>
                         <div className="mb-2 flex items-center justify-between">
@@ -612,6 +695,7 @@ export default function AdminDashboard() {
                         <p className="text-[11px] text-slate-400">
                             Đã chọn <span className="font-semibold text-slate-600">{selectedFields.size}</span>/<span className="font-semibold text-slate-600">{selectableFieldCount}</span> cột
                             {!isAllTeams && <> · <span className="font-semibold text-slate-600">{selectedTeams.size}</span> team</>}
+                            {!isAllPages && <> · <span className="font-semibold text-sky-600">{selectedPages.size}</span> page</>}
                             {!isAdmin && <span className="ml-1 text-amber-500">(Số ĐT &amp; Địa chỉ chỉ Admin xuất được)</span>}
                         </p>
                         <div className="flex items-center gap-2">

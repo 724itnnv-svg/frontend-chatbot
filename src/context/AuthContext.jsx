@@ -4,18 +4,29 @@ import { setupServerPushNotifications } from "../utils/serverPushNotifications";
 
 const AuthContext = createContext();
 
+/** Helper: truy cập localStorage an toàn — tránh SecurityError trong Zalo/WeChat WebView */
+function lsGet(key) {
+  try { return localStorage.getItem(key); } catch { return null; }
+}
+function lsSet(key, value) {
+  try { localStorage.setItem(key, value); } catch {}
+}
+function lsRemove(key) {
+  try { localStorage.removeItem(key); } catch {}
+}
+
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(() => {
     try {
-      const saved = localStorage.getItem("authUser");
+      const saved = lsGet("authUser");
       return saved ? JSON.parse(saved) : null;
     } catch {
-      localStorage.removeItem("authUser");
+      lsRemove("authUser");
       return null;
     }
   });
 
-  const [token, setToken] = useState(() => localStorage.getItem("token") || null);
+  const [token, setToken] = useState(() => lsGet("token") || null);
 
   const isLoggedIn = !!token;
 
@@ -24,16 +35,16 @@ export function AuthProvider({ children }) {
     setUser(userData);
     setToken(tokenData);
 
-    localStorage.setItem("authUser", JSON.stringify(userData));
-    localStorage.setItem("token", tokenData);
+    lsSet("authUser", JSON.stringify(userData));
+    lsSet("token", tokenData);
   }
 
   function logout(redirect = true) {
     setUser(null);
     setToken(null);
 
-    localStorage.removeItem("authUser");
-    localStorage.removeItem("token");
+    lsRemove("authUser");
+    lsRemove("token");
 
     if (redirect) window.location.href = "/login";
     //navigate("/login");
@@ -77,8 +88,8 @@ export function AuthProvider({ children }) {
   // - Không decode token nữa
   useEffect(() => {
     const syncFromStorage = () => {
-      const storedToken = localStorage.getItem("token");
-      const storedUserRaw = localStorage.getItem("authUser");
+      const storedToken = lsGet("token");
+      const storedUserRaw = lsGet("authUser");
 
       // Thiếu 1 trong 2 => auth invalid => logout
       if (!storedToken || !storedUserRaw) {
@@ -123,7 +134,7 @@ export function AuthProvider({ children }) {
   // ✅ Tạo api instance: bắt lỗi 401 từ server => logout về login
   const api = useMemo(() => {
     return createApi({
-      getToken: () => localStorage.getItem("token"),
+      getToken: () => lsGet("token"),
       onAuthFail: () => safeLogout(true), // server trả 401 -> gọi cái này
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -144,7 +155,7 @@ export function AuthProvider({ children }) {
         if (!cancelled && data?.ok && data?.user) {
           // optional: đồng bộ user từ server cho chắc
           setUser(data.user);
-          localStorage.setItem("authUser", JSON.stringify(data.user));
+          lsSet("authUser", JSON.stringify(data.user));
         }
       } catch (err) {
         // 401 sẽ được createApi tự xử lý bằng onAuthFail => safeLogout(true)

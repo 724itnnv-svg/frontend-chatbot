@@ -70,8 +70,8 @@ const incomeRows = [
 ];
 
 const deductionRows = [
-  ["BHXH", "khauTru.bhxh"],
-  ["Công đoàn", "khauTru.congDoan"],
+  ["BHXH", "khauTru.bhxh", { detailPath: "dataTinhLuong.luongCoBan", unit: "đ" }],
+  ["Công đoàn", "khauTru.congDoan", { detailPath: "dataTinhLuong.luongCoBan", unit: "đ" }],
   ["Giam lương", "khauTru.giamLuong"],
   ["Tạm ứng", "khauTru.tamUng"],
   ["Phí điện thoại", "khauTru.phiDienThoai"],
@@ -293,6 +293,18 @@ function describeShiftRange(shift) {
   return `${shift.scheduledStart || "?"} - ${shift.scheduledEnd || "?"}`;
 }
 
+function calcDistance(gps, location) {
+  if (!gps || !location?.latitude || !location?.longitude) return null;
+  const R = 6371000;
+  const toRad = (d) => (d * Math.PI) / 180;
+  const dLat = toRad(location.latitude - gps.lat);
+  const dLon = toRad(location.longitude - gps.lng);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(gps.lat)) * Math.cos(toRad(location.latitude)) * Math.sin(dLon / 2) ** 2;
+  return Math.round(R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
+}
+
 function minutesFromTime(value) {
   if (!value || !/^\d{2}:\d{2}/.test(value)) return null;
   const [hour, minute] = value.split(":").map(Number);
@@ -383,7 +395,7 @@ function PayrollDetailList({ title, rows, payroll, totalLabel, totalValue, tone 
                   {label}
                   {detailValue ? (
                     <span className="rounded-full border border-slate-200 bg-slate-100 px-1.5 py-0.5 text-[11px] font-semibold tabular-nums text-slate-500">
-                      {detailValue} {detail.unit}
+                      {detailValue.toLocaleString("vi-VN")} {detail.unit}
                     </span>
                   ) : null}
                 </span>
@@ -410,7 +422,9 @@ export default function AttendancePage() {
   const [locations, setLocations] = useState([]);
   const [locationLoading, setLocationLoading] = useState(false);
   const [locationMsg, setLocationMsg] = useState("");
-  const [selectedLocationId, setSelectedLocationId] = useState("");
+  const [selectedLocationId, setSelectedLocationId] = useState(
+    () => localStorage.getItem("attendance_selectedLocationId") || ""
+  );
   const [assignedShifts, setAssignedShifts] = useState([]);
   const [shiftSetupMsg, setShiftSetupMsg] = useState("");
   const [shiftLoading, setShiftLoading] = useState(false);
@@ -589,7 +603,9 @@ export default function AttendancePage() {
         : null;
       setSelectedLocationId((current) => {
         if (list.some((location) => location._id === current)) return current;
-        return preferred?._id || list[0]?._id || "";
+        const next = preferred?._id || list[0]?._id || "";
+        if (next) localStorage.setItem("attendance_selectedLocationId", next);
+        return next;
       });
       if (list.length === 0) {
         setLocationMsg("Chưa có vị trí chấm công đang bật.");
@@ -687,6 +703,31 @@ export default function AttendancePage() {
     if (activeTab === "payroll") loadPayroll();
   }, [activeTab, loadPayroll]);
 
+  // Làm mới GPS mỗi 60 giây để phát hiện khi user di chuyển sang vị trí mới
+  useEffect(() => {
+    const timer = setInterval(() => getGPS(), 60000);
+    return () => clearInterval(timer);
+  }, [getGPS]);
+
+  // Tự động chọn vị trí phù hợp khi GPS cập nhật
+  useEffect(() => {
+    if (!gps || locations.length === 0) return;
+    const inRange = locations
+      .map((location) => ({ location, distance: calcDistance(gps, location) }))
+      .filter(({ distance, location }) => distance != null && distance <= location.radius)
+      .sort((a, b) => a.distance - b.distance);
+    if (inRange.length === 0) return;
+    // Ưu tiên vị trí khớp teamId của user, sau đó gần nhất
+    const best = inRange.find(({ location }) =>
+      locationMatchesUserTeam(location.teamId, user?.teamId)
+    ) || inRange[0];
+    setSelectedLocationId((current) => {
+      if (current === best.location._id) return current;
+      localStorage.setItem("attendance_selectedLocationId", best.location._id);
+      return best.location._id;
+    });
+  }, [gps, locations, user?.teamId]);
+
   useEffect(() => {
     const tabFromUrl = getValidAttendanceTab(searchParams.get("tab"));
     if (tabFromUrl !== activeTab) setActiveTab(tabFromUrl);
@@ -714,17 +755,10 @@ export default function AttendancePage() {
     [locations, selectedLocationId]
   );
 
-  const distanceToSelected = useMemo(() => {
-    if (!gps || !selectedLocation) return null;
-    const R = 6371000;
-    const toRad = (d) => (d * Math.PI) / 180;
-    const dLat = toRad(selectedLocation.latitude - gps.lat);
-    const dLon = toRad(selectedLocation.longitude - gps.lng);
-    const a =
-      Math.sin(dLat / 2) ** 2 +
-      Math.cos(toRad(gps.lat)) * Math.cos(toRad(selectedLocation.latitude)) * Math.sin(dLon / 2) ** 2;
-    return Math.round(R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
-  }, [gps, selectedLocation]);
+  const distanceToSelected = useMemo(
+    () => calcDistance(gps, selectedLocation),
+    [gps, selectedLocation]
+  );
 
   const inRange = distanceToSelected != null && selectedLocation
     ? distanceToSelected <= selectedLocation.radius
@@ -1088,7 +1122,10 @@ export default function AttendancePage() {
                     ) : (
                       <select
                         value={selectedLocationId}
-                        onChange={(e) => setSelectedLocationId(e.target.value)}
+                        onChange={(e) => {
+                          setSelectedLocationId(e.target.value);
+                          localStorage.setItem("attendance_selectedLocationId", e.target.value);
+                        }}
                         className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800 outline-none focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
                       >
                         {locations.map((location) => (

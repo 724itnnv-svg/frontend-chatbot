@@ -2467,14 +2467,12 @@ export default function CommissionABCCalculator() {
                     deductValue = Math.max(0, revenue - cost) * 0.5;
                     if (deductValue) applyDelta(stats, cls, -deductValue);
                   } else {
-                    const nonCommissionValue = Math.max(0, revenue);
-                    if (nonCommissionValue > 0) {
-                      applyNoCommission(stats, cls, nonCommissionValue);
-                    }
+                    deductValue = Math.max(0, revenue);
+                    if (deductValue) applyDelta(stats, cls, -deductValue);
                   }
                   status = isTcpAd
                     ? "2 < ROAS < 8 + TCP: Trừ 50% chênh lệch doanh thu - chi phí"
-                    : "2 < ROAS < 8: Ghi nhận doanh thu không hưởng hoa hồng";
+                    : "2 < ROAS < 8: Trừ doanh thu";
                 } else {
                   deductValue = Math.abs(revenue - cost);
                   if (deductValue) applyDelta(stats, cls, -deductValue);
