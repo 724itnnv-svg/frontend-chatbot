@@ -14,13 +14,13 @@ import { canAccessScreen } from "../../utils/screenAccess";
 
 
 const TINH_TRANG_CONFIG = {
-  I: { label: "Cấp I — Tốt", cls: "bg-emerald-100 text-emerald-700 border-emerald-200" },
-  II: { label: "Cấp II — Trung bình", cls: "bg-yellow-100 text-yellow-700 border-yellow-200" },
-  III: { label: "Cấp III — Kém", cls: "bg-orange-100 text-orange-700 border-orange-200" },
-  IV: { label: "Cấp IV — Rất kém", cls: "bg-red-100 text-red-700 border-red-200" },
+  I: { label: "Cấp I", cls: "bg-emerald-100 text-emerald-700 border-emerald-200" },
+  II: { label: "Cấp II", cls: "bg-yellow-100 text-yellow-700 border-yellow-200" },
+  III: { label: "Cấp III", cls: "bg-orange-100 text-orange-700 border-orange-200" },
+  IV: { label: "Cấp IV", cls: "bg-red-100 text-red-700 border-red-200" },
 };
 
-const GIONG ={ dua_sap: "Dừa sáp", dua_thuong: "Dừa thường", khac: "Khác" };
+const GIONG = { dua_sap: "Dừa sáp", dua_thuong: "Dừa thường", khac: "Khác" };
 
 function fmt(dateStr) {
   if (!dateStr) return "—";

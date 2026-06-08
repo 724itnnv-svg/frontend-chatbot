@@ -61,77 +61,104 @@ async function generateQRAssets(tree, url) {
   return { qrPng, textPng: tc.toDataURL("image/png") };
 }
 
-/** Tạo PDF A4 tối ưu: layout 3×4 (12/trang), render QR song song theo lô 10 */
-async function exportAllQRtoPDF(trees, onProgress) {
-  const { jsPDF } = await import("jspdf");
+// ── Layout constants ──────────────────────────────────────────────────────────
+const PAGE_W = 210, PAGE_H = 297;
 
-  const PAGE_W = 210, PAGE_H = 297;
-  const MARGIN = 10;
-  const COLS = 3, ROWS = 4;
-  const CELL_W = (PAGE_W - MARGIN * 2) / COLS;  // ~63.3 mm
-  const CELL_H = (PAGE_H - MARGIN * 2) / ROWS;  // ~69.3 mm
-  const PAD = 2;                                 // mm padding trong ô
-
-  // Kích thước nội dung trong ô
+// Cây giống: 3 cột × 4 hàng = 12/trang
+const CG = (() => {
+  const MARGIN = 10, COLS = 3, ROWS = 4, PAD = 2;
+  const CELL_W = (PAGE_W - MARGIN * 2) / COLS;   // ~63.3 mm
+  const CELL_H = (PAGE_H - MARGIN * 2) / ROWS;   // ~69.3 mm
   const INN_W = CELL_W - PAD * 2;
   const INN_H = CELL_H - PAD * 2;
-  const QR_MM = INN_W - 6;           // QR width (mm), có margin 3mm mỗi bên
-  const QR_X_OFF = (INN_W - QR_MM) / 2;
-  const TEXT_H = 14;                   // text canvas height (mm)
-  const QR_Y_OFF = (INN_H - QR_MM - TEXT_H) / 2; // căn giữa theo chiều dọc
+  const QR   = INN_W - 6;
+  const TEXT_H = 14;
+  return {
+    MARGIN, COLS, ROWS, PAD, CELL_W, CELL_H, INN_W, INN_H, QR, TEXT_H,
+    QR_X: (INN_W - QR) / 2,
+    QR_Y: (INN_H - QR - TEXT_H) / 2,
+    PER_PAGE: COLS * ROWS,
+    BORDER: [210, 210, 210],
+  };
+})();
 
+// Ống nghiệm: QR 25mm, cell 31×39mm, ~6 cột × 7 hàng = 42/trang
+const ON = (() => {
+  const MARGIN = 8, PAD = 2;
+  const QR = 25, TEXT_H = 7;
+  const CELL_W = 31, CELL_H = 39;
+  const INN_W = CELL_W - PAD * 2;
+  const INN_H = CELL_H - PAD * 2;
+  const COLS = Math.floor((PAGE_W - MARGIN * 2) / CELL_W);  // 6
+  const ROWS = Math.floor((PAGE_H - MARGIN * 2) / CELL_H);  // 7
+  return {
+    MARGIN, COLS, ROWS, PAD, CELL_W, CELL_H, INN_W, INN_H, QR, TEXT_H,
+    QR_X: (INN_W - QR) / 2,
+    QR_Y: (INN_H - QR - TEXT_H) / 2,
+    PER_PAGE: COLS * ROWS,
+    BORDER: [180, 180, 220],  // viền xanh tím nhạt để phân biệt
+  };
+})();
+
+/** Vẽ 1 nhãn QR lên jsPDF tại vị trí (cx, cy) theo layout L */
+function drawQRLabel(doc, layout, cx, cy, assets, tree) {
+  const { INN_W, INN_H, QR, TEXT_H, QR_X, QR_Y, BORDER } = layout;
+  doc.setFillColor(255, 255, 255);
+  doc.setDrawColor(...BORDER);
+  doc.setLineWidth(0.2);
+  doc.roundedRect(cx, cy, INN_W, INN_H, 1.5, 1.5, "FD");
+  doc.addImage(assets.qrPng,  "PNG", cx + QR_X, cy + QR_Y,          QR,    QR,    `qr_${tree.maCay}`,  "FAST");
+  doc.addImage(assets.textPng,"PNG", cx,        cy + QR_Y + QR + 1, INN_W, TEXT_H,`txt_${tree.maCay}`, "FAST");
+}
+
+/**
+ * Tạo PDF A4:
+ *  - Cây giống: layout 3×4 (size gốc)
+ *  - Ống nghiệm: layout 7×8, QR 20mm (2cm) — trang riêng
+ */
+async function exportAllQRtoPDF(trees, onProgress) {
+  const { jsPDF } = await import("jspdf");
   const doc = new jsPDF({ orientation: "p", unit: "mm", format: "a4" });
   const baseUrl = window.location.origin;
-  const BATCH = 10; // render song song 10 QR một lúc
+  const BATCH = 10;
 
-  for (let b = 0; b < trees.length; b += BATCH) {
-    const chunk = trees.slice(b, Math.min(b + BATCH, trees.length));
+  const cayGiong  = trees.filter((t) => t.loai !== "ong_nghiem");
+  const ongNghiem = trees.filter((t) => t.loai === "ong_nghiem");
+  let totalDone = 0;
 
-    // Render song song cả lô
-    const assets = await Promise.all(
-      chunk.map((t) => generateQRAssets(t, `${baseUrl}/dua-sap/${t.maCay}`))
-    );
-
-    for (let j = 0; j < chunk.length; j++) {
-      const i = b + j;
-      const posInPage = i % (COLS * ROWS);
-      if (i > 0 && posInPage === 0) doc.addPage();
-
-      const col = posInPage % COLS;
-      const row = Math.floor(posInPage / COLS);
-      const cx = MARGIN + col * CELL_W + PAD;  // ô X
-      const cy = MARGIN + row * CELL_H + PAD;  // ô Y
-
-      // ── jsPDF vẽ layout (không tốn ảnh) ──
-      doc.setFillColor(255, 255, 255);
-      doc.setDrawColor(210, 210, 210);
-      doc.setLineWidth(0.2);
-      doc.roundedRect(cx, cy, INN_W, INN_H, 2, 2, "FD");
-
-      // ── QR nhỏ ──
-      doc.addImage(
-        assets[j].qrPng, "PNG",
-        cx + QR_X_OFF, cy + QR_Y_OFF,
-        QR_MM, QR_MM,
-        `qr_${trees[i].maCay}`,   // alias — jsPDF bỏ qua nếu đã nhúng
-        "FAST"
+  async function renderGroup(group, layout, startOnNewPage) {
+    for (let b = 0; b < group.length; b += BATCH) {
+      const chunk = group.slice(b, Math.min(b + BATCH, group.length));
+      const assets = await Promise.all(
+        chunk.map((t) => generateQRAssets(t, `${baseUrl}/dua-sap/${t.maCay}`))
       );
 
-      // ── Text canvas ──
-      doc.addImage(
-        assets[j].textPng, "PNG",
-        cx, cy + QR_Y_OFF + QR_MM + 1,
-        INN_W, TEXT_H,
-        `txt_${trees[i].maCay}`,
-        "FAST"
-      );
+      for (let j = 0; j < chunk.length; j++) {
+        const i = b + j;
+        const posInPage = i % layout.PER_PAGE;
 
-      onProgress?.(i + 1, trees.length);
+        if (i === 0 && startOnNewPage) {
+          doc.addPage();
+        } else if (i > 0 && posInPage === 0) {
+          doc.addPage();
+        }
+
+        const col = posInPage % layout.COLS;
+        const row = Math.floor(posInPage / layout.COLS);
+        const cx  = layout.MARGIN + col * layout.CELL_W + layout.PAD;
+        const cy  = layout.MARGIN + row * layout.CELL_H + layout.PAD;
+
+        drawQRLabel(doc, layout, cx, cy, assets[j], group[i]);
+        totalDone++;
+        onProgress?.(totalDone, trees.length);
+      }
+
+      await new Promise((r) => setTimeout(r, 0));
     }
-
-    // Nhường thread để UI không đứng
-    await new Promise((r) => setTimeout(r, 0));
   }
+
+  await renderGroup(cayGiong,  CG, false);
+  await renderGroup(ongNghiem, ON, cayGiong.length > 0);
 
   const date = new Date().toISOString().slice(0, 10);
   doc.save(`QR_DuaSap_${date}.pdf`);
@@ -1200,20 +1227,80 @@ function BatchAddModal({ existingTrees, onClose, onDone }) {
 }
 
 // ─── Cập nhật hàng loạt ──────────────────────────────────────────────────────
+
+// Helpers quản lý dòng lịch chăm sóc — khai báo ở module-level để tránh re-create mỗi render
+function scheduleAddRow(setter) {
+  setter((p) => [...p, { ngay: "", sanPham: "", lieuLuong: "", ghiChu: "" }]);
+}
+function scheduleUpdateRow(setter, i, field, val) {
+  setter((p) => { const a = [...p]; a[i] = { ...a[i], [field]: val }; return a; });
+}
+function scheduleRemoveRow(setter, i) {
+  setter((p) => p.filter((_, idx) => idx !== i));
+}
+
+// Phải khai báo ngoài BulkUpdateModal để React không tạo component type mới mỗi render
+function ScheduleSection({ id, label, icon, color, enabled: on, setEnabled: setOn, mode, setMode, rows, setRows, modeName, hideMode }) {
+  const borderCls = on ? `border ${color.border} ${color.bg}` : "border border-transparent bg-gray-50";
+  return (
+    <div className={`rounded-xl px-3 py-2.5 transition ${borderCls}`}>
+      <div className="flex items-center gap-3 flex-wrap">
+        <input
+          type="checkbox" id={id}
+          checked={on}
+          onChange={() => { setOn((p) => !p); if (!rows.length) scheduleAddRow(setRows); }}
+          className="w-4 h-4 rounded accent-emerald-600 cursor-pointer shrink-0"
+        />
+        <label htmlFor={id} className="flex items-center gap-1.5 text-xs font-medium text-gray-600 cursor-pointer shrink-0">
+          {icon} {label}
+        </label>
+        {on && !hideMode && (
+          <div className="ml-auto flex items-center gap-4">
+            <label className="flex items-center gap-1 text-xs text-gray-500 cursor-pointer">
+              <input type="radio" name={modeName} checked={mode === "append"}
+                onChange={() => setMode("append")} className="accent-emerald-600" />
+              Thêm vào
+            </label>
+            <label className="flex items-center gap-1 text-xs cursor-pointer text-red-500">
+              <input type="radio" name={modeName} checked={mode === "replace"}
+                onChange={() => setMode("replace")} className="accent-red-500" />
+              Thay thế
+            </label>
+          </div>
+        )}
+      </div>
+      {on && (
+        <div className="mt-3 pl-1">
+          {rows.length === 0 && <p className="text-xs text-gray-400 mb-2">Chưa có dòng nào.</p>}
+          <ChamSocRows
+            rows={rows}
+            bg={color.rowBg}
+            onUpdate={(i, f, v) => scheduleUpdateRow(setRows, i, f, v)}
+            onRemove={(i) => scheduleRemoveRow(setRows, i)}
+          />
+          <button type="button" onClick={() => scheduleAddRow(setRows)}
+            className={`flex items-center gap-1 text-xs ${color.addBtn} transition mt-1`}>
+            <Plus size={12} /> Thêm dòng
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 const BULK_UPDATE_FIELDS = [
-  { key: "viTri",     label: "Vị trí",            type: "text",     placeholder: "Xưởng, Vườn A..." },
-  { key: "khuVuc",    label: "Khu vực / Lô",       type: "text",     placeholder: "Lô B, hàng 3..." },
-  { key: "giong",     label: "Giống cây",           type: "text",     placeholder: "Dừa sáp, Dừa thường..." },
-  { key: "tenGiong",  label: "Tên giống chi tiết",  type: "text",     placeholder: "Dừa sáp Trà Vinh..." },
-  { key: "loai",      label: "Loại",                type: "select",   options: [{ value: "cay_giong", label: "Cây giống" }, { value: "ong_nghiem", label: "Ống nghiệm" }] },
-  { key: "trangThai", label: "Trạng thái",          type: "select",   options: TRANG_THAI_OPTIONS },
-  { key: "ngayTrong", label: "Ngày trồng",          type: "date" },
-  { key: "ghiChu",    label: "Ghi chú",             type: "textarea", placeholder: "Ghi chú chung..." },
+  { key: "viTri", label: "Vị trí", type: "text", placeholder: "Xưởng, Vườn A..." },
+  { key: "khuVuc", label: "Khu vực / Lô", type: "text", placeholder: "Lô B, hàng 3..." },
+  { key: "giong", label: "Giống cây", type: "text", placeholder: "Dừa sáp, Dừa thường..." },
+  { key: "tenGiong", label: "Tên giống chi tiết", type: "text", placeholder: "Dừa sáp Trà Vinh..." },
+  { key: "loai", label: "Loại", type: "select", options: [{ value: "cay_giong", label: "Cây giống" }, { value: "ong_nghiem", label: "Ống nghiệm" }] },
+  { key: "trangThai", label: "Trạng thái", type: "select", options: TRANG_THAI_OPTIONS },
+  { key: "ngayTrong", label: "Ngày trồng", type: "date" },
+  { key: "ghiChu", label: "Ghi chú", type: "textarea", placeholder: "Ghi chú chung..." },
 ];
 
 function BulkUpdateModal({ macays, onClose, onDone }) {
   const { api } = useAuth();
-
   const [enabled, setEnabled] = useState(new Set());
   const [values, setValues] = useState({
     viTri: "", khuVuc: "", giong: "", tenGiong: "",
@@ -1226,7 +1313,6 @@ function BulkUpdateModal({ macays, onClose, onDone }) {
   const toggleField = (key) =>
     setEnabled((prev) => { const next = new Set(prev); next.has(key) ? next.delete(key) : next.add(key); return next; });
   const setValue = (key, val) => setValues((p) => ({ ...p, [key]: val }));
-
   const enabledCount = enabled.size;
 
   async function handleUpdate() {
@@ -1279,49 +1365,207 @@ function BulkUpdateModal({ macays, onClose, onDone }) {
       <p className="text-xs text-amber-600 bg-amber-50 rounded-lg px-3 py-2">
         Chỉ những trường được <span className="font-semibold">tích chọn</span> mới được cập nhật. Trường không tích sẽ giữ nguyên giá trị cũ.
       </p>
-
       <div className="space-y-2">
         {BULK_UPDATE_FIELDS.map((f) => (
           <div key={f.key} className={`flex items-start gap-3 rounded-xl px-3 py-2.5 transition ${enabled.has(f.key) ? "bg-emerald-50 border border-emerald-200" : "bg-gray-50 border border-transparent"}`}>
-            <input
-              type="checkbox" id={`bulk-${f.key}`}
-              checked={enabled.has(f.key)}
+            <input type="checkbox" id={`bulk-${f.key}`} checked={enabled.has(f.key)}
               onChange={() => toggleField(f.key)}
-              className="mt-0.5 w-4 h-4 rounded accent-emerald-600 cursor-pointer shrink-0"
-            />
+              className="mt-0.5 w-4 h-4 rounded accent-emerald-600 cursor-pointer shrink-0" />
             <label htmlFor={`bulk-${f.key}`} className="w-32 text-xs font-medium text-gray-600 pt-1 cursor-pointer shrink-0">{f.label}</label>
             <div className="flex-1">
               {f.type === "select" ? (
-                <Select
-                  value={values[f.key]}
-                  onChange={(e) => setValue(f.key, e.target.value)}
-                  disabled={!enabled.has(f.key)}
-                  className={!enabled.has(f.key) ? "opacity-40" : ""}
-                >
+                <Select value={values[f.key]} onChange={(e) => setValue(f.key, e.target.value)}
+                  disabled={!enabled.has(f.key)} className={!enabled.has(f.key) ? "opacity-40" : ""}>
                   {f.options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                 </Select>
               ) : f.type === "textarea" ? (
-                <Textarea
-                  value={values[f.key]}
-                  onChange={(e) => setValue(f.key, e.target.value)}
-                  disabled={!enabled.has(f.key)}
-                  placeholder={f.placeholder}
-                  className={!enabled.has(f.key) ? "opacity-40" : ""}
-                />
+                <Textarea value={values[f.key]} onChange={(e) => setValue(f.key, e.target.value)}
+                  disabled={!enabled.has(f.key)} placeholder={f.placeholder}
+                  className={!enabled.has(f.key) ? "opacity-40" : ""} />
               ) : (
-                <Input
-                  type={f.type}
-                  value={values[f.key]}
-                  onChange={(e) => setValue(f.key, e.target.value)}
-                  disabled={!enabled.has(f.key)}
-                  placeholder={f.placeholder}
-                  className={!enabled.has(f.key) ? "opacity-40" : ""}
-                />
+                <Input type={f.type} value={values[f.key]} onChange={(e) => setValue(f.key, e.target.value)}
+                  disabled={!enabled.has(f.key)} placeholder={f.placeholder}
+                  className={!enabled.has(f.key) ? "opacity-40" : ""} />
               )}
             </div>
           </div>
         ))}
       </div>
+      {updating && (
+        <div className="flex items-center gap-2 text-sm text-gray-500">
+          <Loader2 size={14} className="animate-spin text-emerald-500" />
+          Đang cập nhật {macays.length} cây...
+        </div>
+      )}
+      <div className="flex gap-3 justify-end pt-1">
+        <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-gray-500 hover:text-gray-700 transition">Hủy</button>
+        <button type="button" disabled={updating || enabledCount === 0} onClick={handleUpdate}
+          className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-xl text-sm font-medium transition disabled:opacity-60"
+          title={enabledCount === 0 ? "Vui lòng tích chọn ít nhất 1 trường" : ""}>
+          {updating ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+          Cập nhật {macays.length} cây {enabledCount > 0 ? `(${enabledCount} trường)` : ""}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Cập nhật lịch chăm sóc hàng loạt theo kỳ ───────────────────────────────
+function BulkScheduleModal({ macays, onClose }) {
+  const { api } = useAuth();
+  const currentYear = new Date().getFullYear();
+
+  const [thangBatDau, setThangBatDau] = useState(1);
+  const [thangKetThuc, setThangKetThuc] = useState(3);
+  const [nam, setNam] = useState(currentYear);
+  const [mode, setMode] = useState("append"); // "append" | "replace"
+
+  const [lichPhunThuoc, setLichPhunThuoc] = useState([]);
+  const [lichBonPhan, setLichBonPhan] = useState([]);
+
+  const [updating, setUpdating] = useState(false);
+  const [result, setResult] = useState(null);
+
+  async function handleUpdate() {
+    if (!lichPhunThuoc.length && !lichBonPhan.length) return;
+    setUpdating(true);
+    try {
+      const r = await api.put("/dua-sap-record/bulk-schedule", {
+        macays,
+        period: { thangBatDau: Number(thangBatDau), thangKetThuc: Number(thangKetThuc), nam: Number(nam) },
+        lichPhunThuoc: lichPhunThuoc.length ? lichPhunThuoc : undefined,
+        lichBonPhan:   lichBonPhan.length   ? lichBonPhan   : undefined,
+        mode,
+      });
+      setResult(r.data);
+    } catch (e) {
+      setResult({ updated: 0, notFound: 0, failed: macays.length,
+        results: [{ maCay: "—", status: "error", reason: e.response?.data?.message || "Lỗi kết nối" }] });
+    } finally {
+      setUpdating(false);
+    }
+  }
+
+  const hasRows = lichPhunThuoc.length > 0 || lichBonPhan.length > 0;
+
+  if (result) {
+    const errors   = (result.results || []).filter((r) => r.status === "error");
+    const notFounds = (result.results || []).filter((r) => r.status === "not_found");
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center gap-2 text-sm font-medium text-emerald-700">
+          <CheckCircle2 size={16} className="text-emerald-500" />
+          Hoàn tất — cập nhật <strong>{result.updated}</strong> / {macays.length} cây
+        </div>
+        {notFounds.length > 0 && (
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
+            <p className="text-xs font-semibold text-amber-700 mb-1">
+              {notFounds.length} cây không có bản ghi kỳ T{thangBatDau}–{thangKetThuc}/{nam}:
+            </p>
+            <p className="text-xs text-amber-600 font-mono">{notFounds.map((r) => r.maCay).join(", ")}</p>
+          </div>
+        )}
+        {errors.length > 0 && (
+          <div className="bg-red-50 border border-red-200 rounded-xl p-3 space-y-1 max-h-32 overflow-y-auto">
+            {errors.map((e) => (
+              <p key={e.maCay} className="text-xs text-red-600">
+                <span className="font-medium">{e.maCay}</span>: {e.reason}
+              </p>
+            ))}
+          </div>
+        )}
+        <div className="flex justify-end pt-1">
+          <button onClick={onClose} className="px-4 py-2 text-sm bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl transition">Đóng</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-5">
+      {/* Áp dụng cho */}
+      <p className="text-xs text-gray-500">
+        Áp dụng cho <span className="font-semibold text-gray-700">{macays.length} cây</span>:
+        <span className="ml-1 text-emerald-600 font-mono text-[11px]">{macays.slice(0, 6).join(", ")}{macays.length > 6 ? ` ...+${macays.length - 6}` : ""}</span>
+      </p>
+
+      {/* Chọn kỳ */}
+      <div>
+        <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-2">Kỳ theo dõi cần cập nhật</p>
+        <div className="grid grid-cols-3 gap-3">
+          <div>
+            <Label required>Tháng bắt đầu</Label>
+            <Select value={thangBatDau} onChange={(e) => setThangBatDau(Number(e.target.value))}>
+              {THANG_OPTIONS.map((m) => <option key={m} value={m}>Tháng {m}</option>)}
+            </Select>
+          </div>
+          <div>
+            <Label required>Tháng kết thúc</Label>
+            <Select value={thangKetThuc} onChange={(e) => setThangKetThuc(Number(e.target.value))}>
+              {THANG_OPTIONS.filter((m) => m >= thangBatDau).map((m) => <option key={m} value={m}>Tháng {m}</option>)}
+            </Select>
+          </div>
+          <div>
+            <Label required>Năm</Label>
+            <Input type="number" min={2020} max={2099} value={nam}
+              onChange={(e) => setNam(Number(e.target.value))} />
+          </div>
+        </div>
+        <p className="text-xs text-gray-400 mt-1.5">
+          Hệ thống sẽ tìm bản ghi kỳ <strong>T{thangBatDau}–{thangKetThuc}/{nam}</strong> của từng cây để cập nhật.
+          Cây nào chưa có bản ghi kỳ này sẽ được báo lại sau khi lưu.
+        </p>
+      </div>
+
+      {/* Chế độ */}
+      <div className="flex items-center gap-6">
+        <p className="text-xs font-semibold text-gray-600 shrink-0">Chế độ:</p>
+        <label className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer">
+          <input type="radio" name="bsMode" checked={mode === "append"}
+            onChange={() => setMode("append")} className="accent-emerald-600" />
+          <span><strong>Thêm vào</strong> — giữ lịch cũ, nối thêm dòng mới</span>
+        </label>
+        <label className="flex items-center gap-1.5 text-xs text-red-500 cursor-pointer">
+          <input type="radio" name="bsMode" checked={mode === "replace"}
+            onChange={() => setMode("replace")} className="accent-red-500" />
+          <span><strong>Thay thế</strong> — xóa lịch cũ, ghi đè bằng danh sách mới</span>
+        </label>
+      </div>
+      {mode === "replace" && (
+        <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+          ⚠ Toàn bộ lịch phun thuốc / bón phân trong kỳ T{thangBatDau}–{thangKetThuc}/{nam} của {macays.length} cây sẽ bị xóa và thay bằng danh sách bên dưới.
+        </p>
+      )}
+
+      {/* Lịch phun thuốc */}
+      <ScheduleSection
+        id="bs-lichPhunThuoc"
+        label="Lịch phun thuốc"
+        icon={<Droplets size={13} className="text-blue-400" />}
+        color={{ border: "border-blue-200", bg: "bg-blue-50", rowBg: "bg-blue-100/50", addBtn: "text-blue-600 hover:text-blue-800" }}
+        enabled={lichPhunThuoc.length > 0}
+        setEnabled={(getNext) => { const next = getNext(lichPhunThuoc.length > 0); if (next && !lichPhunThuoc.length) scheduleAddRow(setLichPhunThuoc); else if (!next) setLichPhunThuoc([]); }}
+        mode={mode} setMode={setMode}
+        rows={lichPhunThuoc} setRows={setLichPhunThuoc}
+        modeName="bsMode2" hideMode
+      />
+
+      {/* Lịch bón phân */}
+      <ScheduleSection
+        id="bs-lichBonPhan"
+        label="Lịch bón phân"
+        icon={<Sprout size={13} className="text-amber-500" />}
+        color={{ border: "border-amber-200", bg: "bg-amber-50", rowBg: "bg-amber-100/50", addBtn: "text-amber-600 hover:text-amber-800" }}
+        enabled={lichBonPhan.length > 0}
+        setEnabled={(getNext) => { const next = getNext(lichBonPhan.length > 0); if (next && !lichBonPhan.length) scheduleAddRow(setLichBonPhan); else if (!next) setLichBonPhan([]); }}
+        mode={mode} setMode={setMode}
+        rows={lichBonPhan} setRows={setLichBonPhan}
+        modeName="bsMode3" hideMode
+      />
+
+      {!hasRows && (
+        <p className="text-xs text-gray-400 text-center py-1">Tích chọn ít nhất 1 mục lịch phun thuốc hoặc bón phân để bắt đầu nhập.</p>
+      )}
 
       {updating && (
         <div className="flex items-center gap-2 text-sm text-gray-500">
@@ -1331,15 +1575,10 @@ function BulkUpdateModal({ macays, onClose, onDone }) {
       )}
       <div className="flex gap-3 justify-end pt-1">
         <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-gray-500 hover:text-gray-700 transition">Hủy</button>
-        <button
-          type="button"
-          disabled={updating || enabledCount === 0}
-          onClick={handleUpdate}
-          className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-xl text-sm font-medium transition disabled:opacity-60"
-          title={enabledCount === 0 ? "Vui lòng tích chọn ít nhất 1 trường" : ""}
-        >
+        <button type="button" disabled={updating || !hasRows} onClick={handleUpdate}
+          className="flex items-center gap-2 bg-teal-600 hover:bg-teal-700 text-white px-5 py-2 rounded-xl text-sm font-medium transition disabled:opacity-60">
           {updating ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-          Cập nhật {macays.length} cây {enabledCount > 0 ? `(${enabledCount} trường)` : ""}
+          Lưu lịch cho {macays.length} cây
         </button>
       </div>
     </div>
@@ -1598,6 +1837,343 @@ function RecordForm({ maCay, loai = "cay_giong", initial, onSave, onClose, savin
   );
 }
 
+// ─── Tạo bản ghi hàng loạt ───────────────────────────────────────────────────
+function BulkCreateRecordModal({ macays, trees, onClose, onDone }) {
+  const { api } = useAuth();
+  const currentYear = new Date().getFullYear();
+
+  const selectedTreeObjs = trees.filter((t) => macays.includes(t.maCay));
+  const hasON = selectedTreeObjs.some((t) => t.loai === "ong_nghiem");
+  const hasCG = selectedTreeObjs.some((t) => t.loai !== "ong_nghiem");
+
+  const [thangBatDau, setThangBatDau] = useState(1);
+  const [thangKetThuc, setThangKetThuc] = useState(3);
+  const [nam, setNam] = useState(currentYear);
+  const [kyTheoDoiNhan, setKyTheoDoiNhan] = useState("");
+
+  // Cây giống
+  const [tinhTrangCG, setTinhTrangCG] = useState("");
+  const [soTau, setSoTau] = useState("");
+  const [soHoa, setSoHoa] = useState("");
+  const [sanLuongDuKien, setSanLuongDuKien] = useState([]);
+  const [sanLuongThucTe, setSanLuongThucTe] = useState([]);
+
+  // Ống nghiệm
+  const [tinhTrangON, setTinhTrangON] = useState("");
+  const [ngayRaCayDuKien, setNgayRaCayDuKien] = useState("");
+  const [ngayRaCayThucTe, setNgayRaCayThucTe] = useState("");
+  const [yeuCauDeXuat, setYeuCauDeXuat] = useState("");
+
+  // Dùng chung
+  const [nguoiGhiNhan, setNguoiGhiNhan] = useState("");
+  const [ghiChu, setGhiChu] = useState("");
+  const [lichPhunThuoc, setLichPhunThuoc] = useState([]);
+  const [lichBonPhan, setLichBonPhan] = useState([]);
+
+  const [creating, setCreating] = useState(false);
+  const [progress, setProgress] = useState({ done: 0, total: 0 });
+  const [result, setResult] = useState(null);
+
+  const months = [];
+  for (let m = Number(thangBatDau); m <= Number(thangKetThuc); m++) months.push(m);
+
+  const getSL = (arr, thang) => arr?.find((x) => x.thang === thang)?.soLuong ?? "";
+  const updateSL = (setter, thang, val) => {
+    setter((prev) => {
+      const arr = prev.filter((x) => x.thang !== thang);
+      if (val !== "" && val !== null) arr.push({ thang, nam: Number(nam), soLuong: Number(val) });
+      return arr;
+    });
+  };
+
+  async function handleCreate() {
+    setCreating(true);
+    setProgress({ done: 0, total: macays.length });
+    const results = [];
+
+    for (let i = 0; i < macays.length; i++) {
+      const maCay = macays[i];
+      const tree = selectedTreeObjs.find((t) => t.maCay === maCay);
+      const isON = tree?.loai === "ong_nghiem";
+
+      const payload = {
+        maCay,
+        thangBatDau: Number(thangBatDau),
+        thangKetThuc: Number(thangKetThuc),
+        nam: Number(nam),
+        kyTheoDoiNhan,
+        tinhTrangCay: isON ? tinhTrangON : tinhTrangCG,
+        nguoiGhiNhan,
+        ghiChu,
+        lichPhunThuoc,
+        lichBonPhan,
+        ...(isON
+          ? {
+              ngayRaCayDuKien: ngayRaCayDuKien || undefined,
+              ngayRaCayThucTe: ngayRaCayThucTe || undefined,
+              yeuCauDeXuat,
+            }
+          : {
+              soTau: soTau !== "" ? Number(soTau) : null,
+              soHoa: soHoa !== "" ? Number(soHoa) : null,
+              sanLuongDuKien,
+              sanLuongThucTe,
+            }),
+      };
+
+      try {
+        await api.post("/dua-sap-record", payload);
+        results.push({ maCay, status: "created" });
+      } catch (e) {
+        results.push({ maCay, status: "error", reason: e.response?.data?.message || "Lỗi" });
+      }
+      setProgress({ done: i + 1, total: macays.length });
+    }
+
+    setResult({ results });
+    if (results.some((r) => r.status === "created")) onDone?.();
+    setCreating(false);
+  }
+
+  if (result) {
+    const created = result.results.filter((r) => r.status === "created");
+    const errors  = result.results.filter((r) => r.status === "error");
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center gap-2 text-sm font-medium text-emerald-700">
+          <CheckCircle2 size={16} className="text-emerald-500" />
+          Đã tạo <strong>{created.length}</strong>/{macays.length} bản ghi
+        </div>
+        {errors.length > 0 && (
+          <div className="bg-red-50 border border-red-200 rounded-xl p-3 space-y-1 max-h-40 overflow-y-auto">
+            {errors.map((e) => (
+              <p key={e.maCay} className="text-xs text-red-600">
+                <span className="font-medium">{e.maCay}</span>: {e.reason}
+              </p>
+            ))}
+          </div>
+        )}
+        <div className="flex justify-end pt-1">
+          <button onClick={onClose} className="px-4 py-2 text-sm bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl transition">Đóng</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-5">
+      {/* Áp dụng cho */}
+      <p className="text-xs text-gray-500">
+        Tạo bản ghi mới cho{" "}
+        <span className="font-semibold text-gray-700">{macays.length} cây</span>:
+        <span className="ml-1 text-emerald-600 font-mono text-[11px]">
+          {macays.slice(0, 6).join(", ")}{macays.length > 6 ? ` ...+${macays.length - 6}` : ""}
+        </span>
+      </p>
+      {hasCG && hasON && (
+        <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+          Đang chọn cả <strong>cây giống</strong> và <strong>ống nghiệm</strong>. Mỗi loại sẽ nhận các trường tương ứng bên dưới.
+        </p>
+      )}
+
+      {/* Kỳ theo dõi */}
+      <div>
+        <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-2">Kỳ theo dõi</p>
+        <div className="grid grid-cols-3 gap-3">
+          <div>
+            <Label required>Tháng bắt đầu</Label>
+            <Select value={thangBatDau} onChange={(e) => setThangBatDau(Number(e.target.value))}>
+              {THANG_OPTIONS.map((m) => <option key={m} value={m}>Tháng {m}</option>)}
+            </Select>
+          </div>
+          <div>
+            <Label required>Tháng kết thúc</Label>
+            <Select value={thangKetThuc} onChange={(e) => setThangKetThuc(Number(e.target.value))}>
+              {THANG_OPTIONS.filter((m) => m >= thangBatDau).map((m) => <option key={m} value={m}>Tháng {m}</option>)}
+            </Select>
+          </div>
+          <div>
+            <Label required>Năm</Label>
+            <Input type="number" min={2020} max={2099} value={nam} onChange={(e) => setNam(Number(e.target.value))} />
+          </div>
+        </div>
+        <div className="mt-3">
+          <Label>Nhãn hiển thị kỳ</Label>
+          <Input
+            value={kyTheoDoiNhan}
+            onChange={(e) => setKyTheoDoiNhan(e.target.value)}
+            placeholder={`VD: 0${thangBatDau}-0${thangKetThuc}/${nam}`}
+          />
+        </div>
+      </div>
+
+      {/* ── Phần cây giống ── */}
+      {hasCG && (
+        <div className="space-y-3">
+          {hasON && (
+            <p className="text-[10px] font-semibold text-emerald-600 uppercase tracking-wide flex items-center gap-1">
+              <TreePine size={11} /> Cây giống
+            </p>
+          )}
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <Label>Tình trạng cây</Label>
+              <Select value={tinhTrangCG} onChange={(e) => setTinhTrangCG(e.target.value)}>
+                <option value="">— Chọn —</option>
+                {TINH_TRANG_OPTIONS.map((t) => <option key={t} value={t}>Cấp {t}</option>)}
+              </Select>
+            </div>
+            <div>
+              <Label>Số tàu</Label>
+              <Input type="number" min={0} value={soTau} onChange={(e) => setSoTau(e.target.value)} placeholder="—" />
+            </div>
+            <div>
+              <Label>Số hoa</Label>
+              <Input type="number" min={0} value={soHoa} onChange={(e) => setSoHoa(e.target.value)} placeholder="—" />
+            </div>
+          </div>
+          {months.length > 0 && (
+            <div>
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2 flex items-center gap-1">
+                <BarChart2 size={12} className="text-emerald-500" /> Sản lượng (số trái)
+              </p>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm border-collapse">
+                  <thead>
+                    <tr className="bg-gray-50">
+                      <th className="text-left px-3 py-2 text-xs text-gray-500 font-medium rounded-l-lg">Tháng</th>
+                      {months.map((m) => <th key={m} className="px-3 py-2 text-xs text-gray-500 font-medium text-center">T{m}</th>)}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td className="px-3 py-2 text-xs text-blue-600 font-medium">Dự kiến</td>
+                      {months.map((m) => (
+                        <td key={m} className="px-2 py-1">
+                          <Input type="number" min={0}
+                            value={getSL(sanLuongDuKien, m)}
+                            onChange={(e) => updateSL(setSanLuongDuKien, m, e.target.value === "" ? "" : e.target.value)}
+                            placeholder="—" />
+                        </td>
+                      ))}
+                    </tr>
+                    <tr>
+                      <td className="px-3 py-2 text-xs text-emerald-600 font-medium">Thực tế</td>
+                      {months.map((m) => (
+                        <td key={m} className="px-2 py-1">
+                          <Input type="number" min={0}
+                            value={getSL(sanLuongThucTe, m)}
+                            onChange={(e) => updateSL(setSanLuongThucTe, m, e.target.value === "" ? "" : e.target.value)}
+                            placeholder="—" />
+                        </td>
+                      ))}
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Phần ống nghiệm ── */}
+      {hasON && (
+        <div className="space-y-3">
+          {hasCG && (
+            <p className="text-[10px] font-semibold text-violet-600 uppercase tracking-wide flex items-center gap-1">
+              <Leaf size={11} /> Ống nghiệm
+            </p>
+          )}
+          <div>
+            <Label>Tình trạng</Label>
+            <Select value={tinhTrangON} onChange={(e) => setTinhTrangON(e.target.value)}>
+              <option value="">— Chọn —</option>
+              {TINH_TRANG_ONG_NGHIEM_OPTIONS.map((t) => (
+                <option key={t.value} value={t.value}>{t.label}</option>
+              ))}
+            </Select>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label>Dự kiến ngày ra cây</Label>
+              <Input type="date" value={ngayRaCayDuKien} onChange={(e) => setNgayRaCayDuKien(e.target.value)} />
+            </div>
+            <div>
+              <Label>Thực tế ngày ra cây</Label>
+              <Input type="date" value={ngayRaCayThucTe} onChange={(e) => setNgayRaCayThucTe(e.target.value)} />
+            </div>
+          </div>
+          <div>
+            <Label>Yêu cầu đề xuất</Label>
+            <Textarea value={yeuCauDeXuat} onChange={(e) => setYeuCauDeXuat(e.target.value)}
+              placeholder="Ghi yêu cầu hoặc đề xuất xử lý trong kỳ này..." />
+          </div>
+        </div>
+      )}
+
+      {/* Lịch phun thuốc */}
+      <ScheduleSection
+        id="bcr-lichPhunThuoc"
+        label="Lịch phun thuốc"
+        icon={<Droplets size={13} className="text-blue-400" />}
+        color={{ border: "border-blue-200", bg: "bg-blue-50", rowBg: "bg-blue-100/50", addBtn: "text-blue-600 hover:text-blue-800" }}
+        enabled={lichPhunThuoc.length > 0}
+        setEnabled={(getNext) => { const next = getNext(lichPhunThuoc.length > 0); if (next && !lichPhunThuoc.length) scheduleAddRow(setLichPhunThuoc); else if (!next) setLichPhunThuoc([]); }}
+        mode="append" setMode={() => {}}
+        rows={lichPhunThuoc} setRows={setLichPhunThuoc}
+        modeName="bcrMode1" hideMode
+      />
+
+      {/* Lịch bón phân */}
+      <ScheduleSection
+        id="bcr-lichBonPhan"
+        label="Lịch bón phân"
+        icon={<Sprout size={13} className="text-amber-500" />}
+        color={{ border: "border-amber-200", bg: "bg-amber-50", rowBg: "bg-amber-100/50", addBtn: "text-amber-600 hover:text-amber-800" }}
+        enabled={lichBonPhan.length > 0}
+        setEnabled={(getNext) => { const next = getNext(lichBonPhan.length > 0); if (next && !lichBonPhan.length) scheduleAddRow(setLichBonPhan); else if (!next) setLichBonPhan([]); }}
+        mode="append" setMode={() => {}}
+        rows={lichBonPhan} setRows={setLichBonPhan}
+        modeName="bcrMode2" hideMode
+      />
+
+      {/* Người ghi nhận + ghi chú */}
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <Label>Người ghi nhận</Label>
+          <Input value={nguoiGhiNhan} onChange={(e) => setNguoiGhiNhan(e.target.value)} placeholder="Họ tên..." />
+        </div>
+        <div>
+          <Label>Ghi chú kỳ</Label>
+          <Input value={ghiChu} onChange={(e) => setGhiChu(e.target.value)} placeholder="Ghi chú chung..." />
+        </div>
+      </div>
+
+      {creating && (
+        <div className="space-y-1.5">
+          <div className="flex items-center gap-2 text-sm text-gray-500">
+            <Loader2 size={14} className="animate-spin text-emerald-500" />
+            Đang tạo bản ghi {progress.done}/{progress.total}...
+          </div>
+          <div className="w-full bg-gray-100 rounded-full h-1.5">
+            <div className="bg-emerald-500 h-1.5 rounded-full transition-all"
+              style={{ width: `${progress.total ? (progress.done / progress.total) * 100 : 0}%` }} />
+          </div>
+        </div>
+      )}
+
+      <div className="flex gap-3 justify-end pt-1">
+        <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-gray-500 hover:text-gray-700 transition">Hủy</button>
+        <button type="button" disabled={creating} onClick={handleCreate}
+          className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2 rounded-xl text-sm font-medium transition disabled:opacity-60">
+          {creating ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
+          Tạo {macays.length} bản ghi
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main component ───────────────────────────────────────────────────────────
 export default function DuaSapManager() {
   const { api } = useAuth();
@@ -1611,6 +2187,14 @@ export default function DuaSapManager() {
   const [error, setError] = useState(null);
   const [search, setSearch] = useState("");
   const [filterTrangThai, setFilterTrangThai] = useState("");
+  const [filterLoai, setFilterLoai] = useState("");
+  const [filterViTri, setFilterViTri] = useState("");
+  const [filterKhuVuc, setFilterKhuVuc] = useState("");
+  const [filterGiong, setFilterGiong] = useState("");
+  const [distinctViTri, setDistinctViTri] = useState([]);
+  const [distinctKhuVuc, setDistinctKhuVuc] = useState([]);
+  const [distinctGiong, setDistinctGiong] = useState([]);
+  const optionsAccRef = useRef({ viTri: new Set(), khuVuc: new Set(), giong: new Set() });
 
   // Modal states
   const [showTreeForm, setShowTreeForm] = useState(false);
@@ -1667,11 +2251,15 @@ export default function DuaSapManager() {
 
   // Bulk update
   const [showBulkUpdate, setShowBulkUpdate] = useState(false);
+  const [showBulkSchedule, setShowBulkSchedule] = useState(false);
+  const [showBulkCreateRecord, setShowBulkCreateRecord] = useState(false);
 
   // Selection
   const [selectedTrees, setSelectedTrees] = useState(new Set());
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const selectAllRef = useRef(null);
+  const rowRefs = useRef({});
+  const [pendingScrollMaCay, setPendingScrollMaCay] = useState(null);
 
   const allSelected = trees.length > 0 && trees.every((t) => selectedTrees.has(t.maCay));
   const someSelected = selectedTrees.size > 0;
@@ -1750,10 +2338,24 @@ export default function DuaSapManager() {
       const params = { page, limit: PAGE_LIMIT };
       if (search) params.search = search;
       if (filterTrangThai) params.trangThai = filterTrangThai;
+      if (filterLoai) params.loai = filterLoai;
+      if (filterViTri) params.viTri = filterViTri;
+      if (filterKhuVuc) params.khuVuc = filterKhuVuc;
+      if (filterGiong) params.giong = filterGiong;
       const r = await api.get("/dua-sap", { params });
       const list = r.data.data || [];
       setTrees(list);
       setTotalTrees(r.data.total || 0);
+
+      // Tích lũy distinct options cho filter dropdowns
+      list.forEach((t) => {
+        if (t.viTri) optionsAccRef.current.viTri.add(t.viTri);
+        if (t.khuVuc) optionsAccRef.current.khuVuc.add(t.khuVuc);
+        if (t.giong) optionsAccRef.current.giong.add(t.giong);
+      });
+      setDistinctViTri([...optionsAccRef.current.viTri].sort());
+      setDistinctKhuVuc([...optionsAccRef.current.khuVuc].sort());
+      setDistinctGiong([...optionsAccRef.current.giong].sort());
 
       // Tự mở form sửa nếu điều hướng đến với editMaCay (từ trang chi tiết / QR)
       if (pendingEditRef.current) {
@@ -1772,13 +2374,26 @@ export default function DuaSapManager() {
     } finally {
       setLoading(false);
     }
-  }, [search, filterTrangThai]); // eslint-disable-line
+  }, [search, filterTrangThai, filterLoai, filterViTri, filterKhuVuc, filterGiong]); // eslint-disable-line
 
   // Khi filter/search thay đổi → về trang 1
   useEffect(() => {
     setCurrentPage(1);
     fetchTrees(1);
   }, [fetchTrees]);
+
+  // Scroll đến hàng vừa thêm/sửa — chỉ khi loading xong và DOM đã render
+  useEffect(() => {
+    if (!pendingScrollMaCay || loading) return;
+    const timer = setTimeout(() => {
+      const el = rowRefs.current[pendingScrollMaCay];
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+      setPendingScrollMaCay(null);
+    }, 50);
+    return () => clearTimeout(timer);
+  }, [trees, pendingScrollMaCay, loading]);
 
   const fetchRecords = useCallback(async (maCay) => {
     setLoadingRecords(true);
@@ -1806,14 +2421,23 @@ export default function DuaSapManager() {
   async function saveTree(form) {
     setSavingTree(true);
     try {
-      if (editingTree) {
-        await api.put(`/dua-sap/${editingTree.maCay}`, form);
-      } else {
+      const isNew = !editingTree;
+      const targetMaCay = isNew ? form.maCay.trim().toUpperCase() : editingTree.maCay;
+      if (isNew) {
         await api.post("/dua-sap", form);
+      } else {
+        await api.put(`/dua-sap/${editingTree.maCay}`, form);
       }
       setShowTreeForm(false);
       setEditingTree(null);
-      fetchTrees(currentPage);
+      setExpandedMaCay(targetMaCay);
+      setPendingScrollMaCay(targetMaCay);
+      // Thêm mới: về trang 1 (cây mới xuất hiện theo thứ tự sắp xếp)
+      // Sửa: giữ nguyên trang hiện tại
+      const targetPage = isNew ? 1 : currentPage;
+      if (isNew) setCurrentPage(1);
+      fetchTrees(targetPage);
+      fetchRecords(targetMaCay);
     } catch (e) {
       alert(e.response?.data?.message || "Lỗi khi lưu cây.");
     } finally {
@@ -1941,28 +2565,108 @@ export default function DuaSapManager() {
       </div>
 
       {/* Filters */}
-      <div className="flex flex-col sm:flex-row gap-3 mb-5">
-        <div className="relative flex-1 max-w-sm">
-          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Tìm mã cây, vị trí..."
-            className="w-full pl-9 pr-4 py-2 text-sm border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-300"
-          />
-        </div>
-        <select
-          value={filterTrangThai}
-          onChange={(e) => setFilterTrangThai(e.target.value)}
-          className="text-sm border border-gray-200 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-300 bg-white"
-        >
-          <option value="">Tất cả trạng thái</option>
-          {TRANG_THAI_OPTIONS.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
-        </select>
-        <button onClick={() => fetchTrees(currentPage)} className="text-gray-400 hover:text-gray-600 p-2 rounded-xl border border-gray-200 hover:border-gray-300 transition">
-          <RefreshCw size={15} />
-        </button>
-      </div>
+      {(() => {
+        const hasActiveFilter = filterTrangThai || filterLoai || filterViTri || filterKhuVuc || filterGiong;
+        const clearAllFilters = () => {
+          setFilterTrangThai(""); setFilterLoai(""); setFilterViTri(""); setFilterKhuVuc(""); setFilterGiong("");
+        };
+        const selectCls = "text-sm border border-gray-200 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-300 bg-white";
+        const activeCls = "border-emerald-400 ring-1 ring-emerald-200";
+        return (
+          <div className="mb-5 space-y-2">
+            {/* Hàng 1: tìm kiếm + nút làm mới */}
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                <input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Tìm mã cây, vị trí..."
+                  className="w-full pl-9 pr-4 py-2 text-sm border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-300"
+                />
+              </div>
+              <button
+                onClick={() => fetchTrees(currentPage)}
+                className="text-gray-400 hover:text-gray-600 p-2 rounded-xl border border-gray-200 hover:border-gray-300 transition"
+                title="Làm mới"
+              >
+                <RefreshCw size={15} />
+              </button>
+            </div>
+
+            {/* Hàng 2: dropdown lọc */}
+            <div className="flex flex-wrap gap-2 items-center">
+              {/* Trạng thái */}
+              <select
+                value={filterTrangThai}
+                onChange={(e) => setFilterTrangThai(e.target.value)}
+                className={`${selectCls} ${filterTrangThai ? activeCls : ""}`}
+              >
+                <option value="">Tất cả trạng thái</option>
+                {TRANG_THAI_OPTIONS.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+              </select>
+
+              {/* Loại */}
+              <select
+                value={filterLoai}
+                onChange={(e) => setFilterLoai(e.target.value)}
+                className={`${selectCls} ${filterLoai ? activeCls : ""}`}
+              >
+                <option value="">Tất cả loại</option>
+                <option value="cay_giong">Cây giống</option>
+                <option value="ong_nghiem">Trong ống nghiệm</option>
+              </select>
+
+              {/* Vị trí */}
+              <select
+                value={filterViTri}
+                onChange={(e) => setFilterViTri(e.target.value)}
+                className={`${selectCls} ${filterViTri ? activeCls : ""}`}
+              >
+                <option value="">Tất cả vị trí</option>
+                {distinctViTri.map((v) => <option key={v} value={v}>{v}</option>)}
+              </select>
+
+              {/* Khu vực / Lô */}
+              <select
+                value={filterKhuVuc}
+                onChange={(e) => setFilterKhuVuc(e.target.value)}
+                className={`${selectCls} ${filterKhuVuc ? activeCls : ""}`}
+              >
+                <option value="">Tất cả khu / lô</option>
+                {distinctKhuVuc.map((v) => <option key={v} value={v}>{v}</option>)}
+              </select>
+
+              {/* Giống cây */}
+              <select
+                value={filterGiong}
+                onChange={(e) => setFilterGiong(e.target.value)}
+                className={`${selectCls} ${filterGiong ? activeCls : ""}`}
+              >
+                <option value="">Tất cả giống</option>
+                {distinctGiong.map((v) => <option key={v} value={v}>{v}</option>)}
+              </select>
+
+              {/* Nút xóa lọc — chỉ hiện khi có filter đang bật */}
+              {hasActiveFilter && (
+                <button
+                  onClick={clearAllFilters}
+                  className="flex items-center gap-1 text-xs text-red-500 hover:text-red-700 px-3 py-2 rounded-xl border border-red-200 hover:border-red-300 bg-red-50 hover:bg-red-100 transition"
+                >
+                  <X size={12} /> Xóa lọc
+                </button>
+              )}
+
+              {/* Đếm số filter đang bật */}
+              {hasActiveFilter && (
+                <span className="text-xs text-emerald-600 bg-emerald-50 border border-emerald-200 px-2 py-1 rounded-lg font-medium">
+                  {[filterTrangThai, filterLoai, filterViTri, filterKhuVuc, filterGiong].filter(Boolean).length} bộ lọc đang bật
+                </span>
+              )}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Bulk action bar */}
       {someSelected && (
@@ -1974,6 +2678,18 @@ export default function DuaSapManager() {
             className="flex items-center gap-1.5 bg-blue-500 hover:bg-blue-600 px-3 py-1.5 rounded-lg transition"
           >
             <Edit2 size={13} /> Cập nhật hàng loạt
+          </button>
+          <button
+            onClick={() => setShowBulkSchedule(true)}
+            className="flex items-center gap-1.5 bg-teal-500 hover:bg-teal-600 px-3 py-1.5 rounded-lg transition"
+          >
+            <Droplets size={13} /> Cập nhật lịch theo kỳ
+          </button>
+          <button
+            onClick={() => setShowBulkCreateRecord(true)}
+            className="flex items-center gap-1.5 bg-emerald-500 hover:bg-emerald-600 px-3 py-1.5 rounded-lg transition"
+          >
+            <ClipboardList size={13} /> Thêm kỳ theo dõi
           </button>
           <button
             onClick={exportSelectedQR}
@@ -2047,6 +2763,7 @@ export default function DuaSapManager() {
               {trees.map((tree) => (
                 <React.Fragment key={tree.maCay}>
                   <tr
+                    ref={(el) => { if (el) rowRefs.current[tree.maCay] = el; }}
                     className={`border-b border-gray-50 hover:bg-emerald-50/40 transition cursor-pointer ${expandedMaCay === tree.maCay ? "bg-emerald-50/60" : ""} ${selectedTrees.has(tree.maCay) ? "bg-emerald-50" : ""}`}
                     onClick={() => toggleExpand(tree.maCay)}
                   >
@@ -2293,7 +3010,7 @@ export default function DuaSapManager() {
       {/* Log Modal */}
       {showLog && <LogModal api={api} onClose={() => setShowLog(false)} />}
 
-      {/* Modal: Cập nhật hàng loạt */}
+      {/* Modal: Cập nhật hàng loạt (thông tin cây) */}
       {showBulkUpdate && someSelected && (
         <Modal
           title={`Cập nhật hàng loạt — ${selectedTrees.size} cây đã chọn`}
@@ -2304,6 +3021,36 @@ export default function DuaSapManager() {
             macays={[...selectedTrees]}
             onClose={() => setShowBulkUpdate(false)}
             onDone={() => { fetchTrees(currentPage); }}
+          />
+        </Modal>
+      )}
+
+      {/* Modal: Cập nhật lịch chăm sóc theo kỳ hàng loạt */}
+      {showBulkSchedule && someSelected && (
+        <Modal
+          title={`Cập nhật lịch chăm sóc theo kỳ — ${selectedTrees.size} cây`}
+          onClose={() => setShowBulkSchedule(false)}
+          wide
+        >
+          <BulkScheduleModal
+            macays={[...selectedTrees]}
+            onClose={() => setShowBulkSchedule(false)}
+          />
+        </Modal>
+      )}
+
+      {/* Modal: Tạo bản ghi hàng loạt */}
+      {showBulkCreateRecord && someSelected && (
+        <Modal
+          title={`Thêm kỳ theo dõi hàng loạt — ${selectedTrees.size} cây`}
+          onClose={() => setShowBulkCreateRecord(false)}
+          wide
+        >
+          <BulkCreateRecordModal
+            macays={[...selectedTrees]}
+            trees={trees}
+            onClose={() => setShowBulkCreateRecord(false)}
+            onDone={() => { if (expandedMaCay) fetchRecords(expandedMaCay); }}
           />
         </Modal>
       )}
