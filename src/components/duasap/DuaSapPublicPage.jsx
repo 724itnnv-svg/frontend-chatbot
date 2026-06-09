@@ -4,9 +4,17 @@ import axios from "axios";
 import { Search, MapPin, Leaf, ChevronRight, TreePine, AlertCircle, Loader2 } from "lucide-react";
 import { apiUrl } from "../../api/baseUrl";
 
+function toDirectImageUrl(url) {
+  if (!url) return url;
+  const m = url.match(/drive\.google\.com\/file\/d\/([^/?]+)/);
+  if (m) return `https://lh3.googleusercontent.com/d/${m[1]}`;
+  return url;
+}
+
 function TreeThumb({ url, maCay }) {
   const [err, setErr] = useState(false);
-  if (!url || err) {
+  const src = toDirectImageUrl(url);
+  if (!src || err) {
     return (
       <div className="w-full h-full flex items-center justify-center bg-emerald-50">
         <svg viewBox="0 0 80 110" className="w-14 h-20 opacity-25" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -23,7 +31,7 @@ function TreeThumb({ url, maCay }) {
   }
   return (
     <img
-      src={url}
+      src={src}
       alt={`Cây ${maCay}`}
       className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
       onError={() => setErr(true)}
