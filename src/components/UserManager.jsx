@@ -990,7 +990,7 @@ export default function UsersPage() {
                             </div>
                           ) : (
                             <span className="text-slate-400">
-                              {u.role === "user" ? "Chưa gán Page" : "All Pages"}
+                              {u.role === "user" ? "Chưa có Page" : "Chưa có Page"}
                             </span>
                           )}
                         </td>
