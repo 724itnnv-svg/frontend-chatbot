@@ -15,6 +15,7 @@ import {
   Smile,
   ToggleLeft,
   ToggleRight,
+  Users,
 } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 
@@ -32,11 +33,12 @@ const DEFAULT_SETTINGS = {
   humanPauseTtlMs: 60000,
   recentEventLimit: 8,
   eventRetentionDays: 60,
-  humanHandoffZnsEnabled: true,
-  humanHandoffZnsDefaultPhone: "",
-  humanHandoffZnsSendAllToDefault: false,
-  humanHandoffZnsTemplateId: "",
+  humanHandoffOaEnabled: true,
+  humanHandoffOaRecipientId: "",
+  oaTestRecipientId: "",
+  oaTestMessage: "Khach dang can tu van vien goi lai.",
   zaloAppId: "",
+  zaloSecretKey: "",
   zaloRedirectBaseUrl: "",
   zaloRedirectUri: "",
 };
@@ -44,7 +46,8 @@ const DEFAULT_SETTINGS = {
 const SECTIONS = [
   { id: "response", label: "Phản hồi", icon: Clock3 },
   { id: "content", label: "Nội dung", icon: MessageSquareText },
-  { id: "zns", label: "ZNS", icon: PhoneCall },
+  { id: "zalo", label: "Zalo OA", icon: PhoneCall },
+  { id: "zaloUsers", label: "Người dùng Zalo OA", icon: Users },
   { id: "faq", label: "FAQ ChatV3", icon: Globe2 },
 ];
 
@@ -78,11 +81,12 @@ function NumberField({ label, value, unit, min, max, step, onChange, description
   );
 }
 
-function TextField({ label, value, onChange, placeholder, description }) {
+function TextField({ label, value, onChange, placeholder, description, type = "text" }) {
   return (
     <label className="block rounded-md border border-slate-200 bg-white p-3 shadow-sm transition focus-within:border-cyan-300 focus-within:ring-2 focus-within:ring-cyan-50">
       <span className="text-xs font-bold text-slate-900">{label}</span>
       <input
+        type={type}
         value={value || ""}
         onChange={onChange}
         className="mt-2 h-9 w-full rounded-md border border-slate-200 bg-slate-50 px-2.5 text-xs font-bold text-slate-950 outline-none transition focus:border-cyan-300 focus:ring-2 focus:ring-cyan-50"
@@ -122,6 +126,32 @@ function ToggleSetting({ title, description, enabled, onToggle, tone = "cyan" })
   );
 }
 
+function ZaloAuthRequiredNotice({ result, onOpen }) {
+  if (!result?.authUrl) return null;
+
+  return (
+    <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-amber-950">
+      <div className="text-xs font-bold">Zalo OA cần cấp quyền lại</div>
+      <p className="mt-1 text-[11px] leading-4">
+        Mở link cấp quyền một lần để backend nhận callback và lưu refresh token vào MongoDB.
+      </p>
+      {result.redirectUri && (
+        <div className="mt-2 break-all rounded-md border border-amber-100 bg-white px-2 py-1.5 font-mono text-[10px] leading-4 text-amber-900">
+          {result.redirectUri}
+        </div>
+      )}
+      <button
+        type="button"
+        onClick={() => onOpen(result.authUrl)}
+        className="mt-3 inline-flex items-center justify-center gap-1.5 rounded-md bg-amber-600 px-3 py-1.5 text-xs font-bold text-white transition hover:bg-amber-700"
+      >
+        <ExternalLink size={14} />
+        Mở cấp quyền Zalo OA
+      </button>
+    </div>
+  );
+}
+
 function SectionCard({ id, title, description, icon: Icon, activeSection, children }) {
   if (activeSection !== id) return null;
 
@@ -152,27 +182,19 @@ export default function ChatbotConfigManager() {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
-  const [testingZns, setTestingZns] = useState(false);
-  const [znsTestResult, setZnsTestResult] = useState(null);
+  const [testingOa, setTestingOa] = useState(false);
+  const [oaTestResult, setOaTestResult] = useState(null);
+  const [zaloUsers, setZaloUsers] = useState([]);
+  const [zaloUsersTotal, setZaloUsersTotal] = useState(null);
+  const [zaloUsersAuthResult, setZaloUsersAuthResult] = useState(null);
+  const [loadingZaloUsers, setLoadingZaloUsers] = useState(false);
+  const [savingZaloAdmin, setSavingZaloAdmin] = useState(false);
+  const [editingZaloAdminId, setEditingZaloAdminId] = useState("");
+  const [zaloUsersQuery, setZaloUsersQuery] = useState("");
+  const [zaloAdminForm, setZaloAdminForm] = useState({ phone: "", username: "", userId: "", note: "" });
   const [exchangingZaloCode, setExchangingZaloCode] = useState(false);
   const [zaloAuthResult, setZaloAuthResult] = useState(null);
   const [zaloAuthCode, setZaloAuthCode] = useState("");
-  const [znsTestForm, setZnsTestForm] = useState({
-    phone: "",
-    templateId: "",
-    templateDataText: JSON.stringify(
-      {
-        name: "name",
-        pageName: "pageName",
-        customerName: "customerName",
-        customer_phone: "0901234567",
-        note: "Test ZNS tu man hinh cai dat Chat V3",
-      },
-      null,
-      2,
-    ),
-  });
-
   const emojiList = useMemo(
     () => emojiText.split(/[\s,]+/).map((item) => item.trim()).filter(Boolean),
     [emojiText],
@@ -183,6 +205,20 @@ export default function ChatbotConfigManager() {
   const aggregateWindowSeconds = Number(settings.aggregateWindowMs || 0) / 1000;
   const humanPauseMinutes = Number(settings.humanPauseTtlMs || 60000) / 60000;
   const chatV3FaqPageIds = Array.isArray(settings.chatV3FaqPageIds) ? settings.chatV3FaqPageIds.map(String) : [];
+  const getZaloUserId = (user = {}) => String(user.userId || user.user_id || user.id || "").trim();
+  const filteredZaloUsers = useMemo(() => {
+    const query = zaloUsersQuery.trim().toLowerCase();
+    if (!query) return zaloUsers;
+    return zaloUsers.filter((user) => {
+      const haystack = [
+        getZaloUserId(user),
+        user.phone,
+        user.username,
+        user.note,
+      ].filter(Boolean).join(" ").toLowerCase();
+      return haystack.includes(query);
+    });
+  }, [zaloUsers, zaloUsersQuery]);
   const normalizeCallbackUrl = (value) => {
     const text = String(value || "").trim();
     if (!text) return "";
@@ -202,16 +238,41 @@ export default function ChatbotConfigManager() {
     Authorization: `Bearer ${token}`,
   });
 
+  const parseApiJson = async (response) => {
+    try {
+      return await response.json();
+    } catch {
+      return {};
+    }
+  };
+
+  const createApiError = (json, fallbackMessage) => {
+    const error = new Error(json?.error || json?.message || fallbackMessage);
+    error.payload = json || {};
+    return error;
+  };
+
+  const openZaloAuthUrl = (authUrl) => {
+    const url = String(authUrl || zaloPermissionUrl || "").trim();
+    if (!url) {
+      setMessage("Vui lòng cấu hình Zalo App ID trước khi mở link cấp quyền.");
+      return;
+    }
+    window.open(url, "_blank", "noopener,noreferrer");
+  };
+
   const applyConfig = (config) => {
     const nextSettings = {
       ...DEFAULT_SETTINGS,
       ...(config?.settings || {}),
+      humanHandoffOaEnabled: true,
     };
     setSettings(nextSettings);
     setChatV3FaqApplyAllPages(
       !Array.isArray(nextSettings.chatV3FaqPageIds) || nextSettings.chatV3FaqPageIds.length === 0,
     );
     setEmojiText((nextSettings.stripEmojiList || DEFAULT_SETTINGS.stripEmojiList).join(" "));
+    setOaTestResult(null);
     setUpdatedAt(config?.updatedAt || config?.createdAt || null);
   };
 
@@ -248,6 +309,106 @@ export default function ChatbotConfigManager() {
     }
   };
 
+  const fetchZaloUsers = async () => {
+    if (!token || loadingZaloUsers) return;
+    setLoadingZaloUsers(true);
+    setZaloUsersAuthResult(null);
+    setMessage("");
+    try {
+      const query = zaloUsersQuery.trim();
+      const response = await fetch(`/api/chatbot-config/zalo-oa-admins${query ? `?q=${encodeURIComponent(query)}` : ""}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const json = await parseApiJson(response);
+      if (!response.ok || !json.ok) throw createApiError(json, "Không thể tải danh sách quản trị viên Zalo OA.");
+      const admins = Array.isArray(json.admins) ? json.admins : [];
+      setZaloUsers(admins);
+      setZaloUsersTotal(admins.length);
+      setMessage("Đã tải danh sách quản trị viên Zalo OA.");
+    } catch (error) {
+      const payload = error.payload || {};
+      const errorMessage = error.message || "Không thể tải danh sách quản trị viên Zalo OA.";
+      if (payload.authUrl) setZaloUsersAuthResult({ ok: false, error: errorMessage, ...payload });
+      setMessage(errorMessage);
+      setZaloUsers([]);
+      setZaloUsersTotal(null);
+    } finally {
+      setLoadingZaloUsers(false);
+    }
+  };
+
+  const resetZaloAdminForm = () => {
+    setEditingZaloAdminId("");
+    setZaloAdminForm({ phone: "", username: "", userId: "", note: "" });
+  };
+
+  const handleSaveZaloAdmin = async () => {
+    if (!token || savingZaloAdmin) return;
+    const payload = {
+      phone: String(zaloAdminForm.phone || "").trim(),
+      username: String(zaloAdminForm.username || "").trim(),
+      userId: String(zaloAdminForm.userId || "").trim(),
+      note: String(zaloAdminForm.note || "").trim(),
+    };
+    if (!payload.phone || !payload.userId) {
+      setMessage("Vui lòng nhập SĐT và userID quản trị viên Zalo OA.");
+      return;
+    }
+
+    setSavingZaloAdmin(true);
+    setMessage("");
+    try {
+      const response = await fetch(
+        editingZaloAdminId
+          ? `/api/chatbot-config/zalo-oa-admins/${editingZaloAdminId}`
+          : "/api/chatbot-config/zalo-oa-admins",
+        {
+          method: editingZaloAdminId ? "PUT" : "POST",
+          headers: authHeaders(),
+          body: JSON.stringify(payload),
+        },
+      );
+      const json = await parseApiJson(response);
+      if (!response.ok || !json.ok) throw createApiError(json, "Không thể lưu quản trị viên Zalo OA.");
+      resetZaloAdminForm();
+      await fetchZaloUsers();
+      setMessage("Đã lưu quản trị viên Zalo OA.");
+    } catch (error) {
+      setMessage(error.message || "Không thể lưu quản trị viên Zalo OA.");
+    } finally {
+      setSavingZaloAdmin(false);
+    }
+  };
+
+  const handleEditZaloAdmin = (admin) => {
+    setEditingZaloAdminId(String(admin?._id || ""));
+    setZaloAdminForm({
+      phone: admin?.phone || "",
+      username: admin?.username || "",
+      userId: getZaloUserId(admin),
+      note: admin?.note || "",
+    });
+    setMessage("Đang sửa thông tin quản trị viên Zalo OA.");
+  };
+
+  const handleDeleteZaloAdmin = async (admin) => {
+    const id = String(admin?._id || "");
+    if (!token || !id) return;
+    try {
+      const response = await fetch(`/api/chatbot-config/zalo-oa-admins/${id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const json = await parseApiJson(response);
+      if (!response.ok || !json.ok) throw createApiError(json, "Không thể xóa quản trị viên Zalo OA.");
+      if (editingZaloAdminId === id) resetZaloAdminForm();
+      await fetchZaloUsers();
+      setMessage("Đã xóa quản trị viên Zalo OA.");
+    } catch (error) {
+      setMessage(error.message || "Không thể xóa quản trị viên Zalo OA.");
+    }
+  };
+
   useEffect(() => {
     fetchConfig();
     fetchPages();
@@ -255,11 +416,18 @@ export default function ChatbotConfigManager() {
   }, [token]);
 
   useEffect(() => {
+    if (activeSection === "zaloUsers" && zaloUsers.length === 0) {
+      fetchZaloUsers();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSection, token]);
+
+  useEffect(() => {
     const params = new URLSearchParams(window.location.search || "");
     const code = params.get("code");
     if (code) {
       setZaloAuthCode(code);
-      setActiveSection("zns");
+      setActiveSection("zalo");
       setMessage("Đã lấy authorization_code từ URL Zalo redirect. Bấm Cấp token cho hệ thống để lưu token.");
     }
   }, []);
@@ -351,7 +519,11 @@ export default function ChatbotConfigManager() {
       const response = await fetch("/api/zalo-v3/exchange-token", {
         method: "POST",
         headers: authHeaders(),
-        body: JSON.stringify({ code }),
+        body: JSON.stringify({
+          code,
+          appId: settings.zaloAppId || "",
+          secretKey: settings.zaloSecretKey || "",
+        }),
       });
       const json = await response.json();
       if (!response.ok || !json.ok) throw new Error(json.error || json.message || "Không thể cấp token Zalo.");
@@ -370,38 +542,31 @@ export default function ChatbotConfigManager() {
     }
   };
 
-  const handleTestZns = async () => {
-    if (!token || testingZns) return;
-    setTestingZns(true);
-    setZnsTestResult(null);
+  const handleTestOaMessage = async () => {
+    if (!token || testingOa) return;
+    setTestingOa(true);
+    setOaTestResult(null);
     setMessage("");
     try {
-      let templateData = {};
-      try {
-        templateData = JSON.parse(znsTestForm.templateDataText || "{}");
-      } catch {
-        throw new Error("Params ZNS phải là JSON hợp lệ.");
-      }
-
-      const response = await fetch("/api/zalo-v3/send-zns", {
+      const response = await fetch("/api/zalo-v3/send-oa-message", {
         method: "POST",
         headers: authHeaders(),
         body: JSON.stringify({
-          phone: znsTestForm.phone,
-          templateId: znsTestForm.templateId,
-          templateData,
+          recipientId: settings.oaTestRecipientId || settings.humanHandoffOaRecipientId || "",
+          text: settings.oaTestMessage || DEFAULT_SETTINGS.oaTestMessage,
         }),
       });
-      const json = await response.json();
-      if (!response.ok || !json.ok) throw new Error(json.error || json.message || "Gửi test ZNS thất bại.");
-      setZnsTestResult(json);
-      setMessage("Đã gửi test ZNS.");
+      const json = await parseApiJson(response);
+      if (!response.ok || !json.ok) throw createApiError(json, "Gửi test OA thất bại.");
+      setOaTestResult(json);
+      setMessage("Đã gửi test tin nhắn OA.");
     } catch (error) {
-      const errorMessage = error.message || "Gửi test ZNS thất bại.";
-      setZnsTestResult({ ok: false, error: errorMessage });
-      setMessage(errorMessage);
+      const payload = error.payload || {};
+      const errorMessage = error.message || "Gửi test OA thất bại.";
+      setOaTestResult({ ok: false, error: errorMessage, ...payload });
+      setMessage(payload.authUrl ? "Zalo OA chưa đăng nhập. Bấm Mở cấp quyền Zalo OA để lưu refresh token vào MongoDB." : errorMessage);
     } finally {
-      setTestingZns(false);
+      setTestingOa(false);
     }
   };
 
@@ -432,11 +597,12 @@ export default function ChatbotConfigManager() {
             humanPauseTtlMs: settings.humanPauseTtlMs,
             recentEventLimit: settings.recentEventLimit,
             eventRetentionDays: settings.eventRetentionDays,
-            humanHandoffZnsEnabled: settings.humanHandoffZnsEnabled !== false,
-            humanHandoffZnsDefaultPhone: settings.humanHandoffZnsDefaultPhone || "",
-            humanHandoffZnsSendAllToDefault: settings.humanHandoffZnsSendAllToDefault === true,
-            humanHandoffZnsTemplateId: settings.humanHandoffZnsTemplateId || "",
+            humanHandoffOaEnabled: true,
+            humanHandoffOaRecipientId: settings.humanHandoffOaRecipientId || "",
+            oaTestRecipientId: settings.oaTestRecipientId || "",
+            oaTestMessage: settings.oaTestMessage || DEFAULT_SETTINGS.oaTestMessage,
             zaloAppId: settings.zaloAppId || "",
+            zaloSecretKey: settings.zaloSecretKey || "",
             zaloRedirectBaseUrl: settings.zaloRedirectBaseUrl || "",
             zaloRedirectUri: settings.zaloRedirectUri || "",
           },
@@ -466,7 +632,7 @@ export default function ChatbotConfigManager() {
               <div className="min-w-0">
                 <h1 className="truncate text-xl font-bold text-slate-950">Cài đặt Chat V3</h1>
                 <p className="mt-0.5 text-xs text-slate-500">
-                  Điều chỉnh nhịp phản hồi, nội dung, ZNS và FAQ dùng chung cho Chat V3.
+                  Điều chỉnh nhịp phản hồi, nội dung, Zalo OA và FAQ dùng chung cho Chat V3.
                 </p>
               </div>
             </div>
@@ -707,9 +873,9 @@ export default function ChatbotConfigManager() {
               </SectionCard>
 
               <SectionCard
-                id="zns"
-                title="Zalo OA và ZNS"
-                description="Kết nối Zalo OA, cấp token cho hệ thống và gửi thử ZNS bằng endpoint Chat V3."
+                id="zalo"
+                title="Zalo OA"
+                description="Kết nối Zalo OA, cấp token cho hệ thống và gửi tin nhắn OA cho luồng call human Chat V3."
                 icon={PhoneCall}
                 activeSection={activeSection}
               >
@@ -747,6 +913,14 @@ export default function ChatbotConfigManager() {
                           placeholder="App ID Chat V3"
                           description="Dùng để tạo link cấp quyền OA cho Chat V3."
                           onChange={(event) => setSettings((prev) => ({ ...prev, zaloAppId: event.target.value }))}
+                        />
+                        <TextField
+                          label="Zalo Secret Key"
+                          value={settings.zaloSecretKey || ""}
+                          type="password"
+                          placeholder="Secret Key Chat V3"
+                          description="Dùng khi cấp token OA. Lưu trong Cấu hình ChatBot, không đọc từ env."
+                          onChange={(event) => setSettings((prev) => ({ ...prev, zaloSecretKey: event.target.value }))}
                         />
                         <TextField
                           label="Redirect base URL"
@@ -820,121 +994,455 @@ export default function ChatbotConfigManager() {
                   <div className="rounded-md border border-cyan-200 bg-cyan-50/60 p-3">
                     <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                       <div>
-                        <h3 className="text-xs font-bold text-slate-950">Test gửi ZNS</h3>
+                        <h3 className="text-xs font-bold text-slate-950">Luồng call human OA</h3>
                         <p className="mt-0.5 text-[11px] leading-4 text-slate-500">
-                          Gọi trực tiếp API ZNS v3 với số điện thoại, template ID và params JSON bên dưới.
+                          Khi khách cần gặp nhân viên, Chat V3 gửi tin nhắn OA tới danh sách quản trị viên Zalo OA đã lưu.
                         </p>
+                      </div>
+                    </div>
+
+                    <div className="mb-3 grid gap-3">
+                      <div className="rounded-md border border-emerald-200 bg-white p-3 shadow-sm">
+                        <div className="flex items-center gap-2 text-xs font-bold text-emerald-700">
+                          <ToggleRight size={16} />
+                          Gửi OA khi call human
+                        </div>
+                        <p className="mt-1.5 text-[11px] leading-4 text-slate-500">
+                          Luồng call_person luôn dùng tin nhắn OA nội bộ.
+                        </p>
+                      </div>
+                      <div className="rounded-md border border-cyan-100 bg-white p-3 shadow-sm">
+                        <p className="text-xs font-bold text-slate-900">Chọn người nhận theo SĐT</p>
+                        <p className="mt-1.5 text-[11px] leading-4 text-slate-500">
+                          Server lấy hotline trong bài quảng cáo, đối chiếu với cột SĐT ở tab Quản trị viên Zalo OA,
+                          rồi dùng userID của dòng khớp để gửi OA.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="mb-3 rounded-md border border-emerald-200 bg-emerald-50/70 p-3">
+                      <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                          <h3 className="text-xs font-bold text-slate-950">Test tin nhắn OA</h3>
+                          <p className="mt-0.5 text-[11px] leading-4 text-slate-500">
+                            Gửi thử tin nhắn OA tới user_id đã cấu hình, dùng chung token Zalo OA.
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={handleTestOaMessage}
+                          disabled={testingOa || !(settings.oaTestRecipientId || settings.humanHandoffOaRecipientId)}
+                          className="inline-flex items-center justify-center gap-1.5 rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white shadow-sm transition hover:bg-emerald-700 disabled:opacity-60"
+                        >
+                          {testingOa ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+                          Gửi test OA
+                        </button>
+                      </div>
+                      <div className="grid gap-3 lg:grid-cols-2">
+                        <TextField
+                          label="User ID test OA"
+                          value={settings.oaTestRecipientId || ""}
+                          placeholder="Để trống sẽ dùng OA recipient user_id"
+                          description="Zalo user_id nhận tin test OA."
+                          onChange={(event) =>
+                            setSettings((prev) => ({ ...prev, oaTestRecipientId: event.target.value }))
+                          }
+                        />
+                        <label className="block rounded-md border border-slate-200 bg-white p-3 shadow-sm transition focus-within:border-emerald-300 focus-within:ring-2 focus-within:ring-emerald-50">
+                          <span className="text-xs font-bold text-slate-900">Nội dung test OA</span>
+                          <textarea
+                            value={settings.oaTestMessage || ""}
+                            onChange={(event) =>
+                              setSettings((prev) => ({ ...prev, oaTestMessage: event.target.value }))
+                            }
+                            rows={3}
+                            className="mt-2 w-full resize-y rounded-md border border-slate-200 bg-slate-50 px-2.5 py-2 text-xs leading-5 text-slate-950 outline-none transition focus:border-emerald-300 focus:ring-2 focus:ring-emerald-50"
+                            placeholder={DEFAULT_SETTINGS.oaTestMessage}
+                          />
+                        </label>
+                      </div>
+                      {oaTestResult && (
+                        <div className="mt-3 rounded-md border border-slate-200 bg-slate-950 p-3 text-slate-50">
+                          <div className="mb-2 text-xs font-bold">
+                            Kết quả test OA: {oaTestResult.ok === false ? "Lỗi" : "Thành công"}
+                          </div>
+                          <pre className="max-h-[160px] overflow-auto text-[11px] leading-4 text-slate-200">
+                            {JSON.stringify(oaTestResult, null, 2)}
+                          </pre>
+                          <ZaloAuthRequiredNotice result={oaTestResult} onOpen={openZaloAuthUrl} />
+                        </div>
+                      )}
+                    </div>
+
+                  </div>
+                </div>
+              </SectionCard>
+
+              <SectionCard
+                id="zaloUsers"
+                title="Quản trị viên Zalo OA"
+                description="Quản lý SĐT, userID và note của quản trị viên Zalo OA. Dữ liệu được lưu vào MongoDB nội bộ."
+                icon={Users}
+                activeSection={activeSection}
+              >
+                <div className="grid gap-3 lg:grid-cols-[320px_minmax(0,1fr)]">
+                  <div className="space-y-3">
+                    <div className="rounded-md border border-cyan-100 bg-cyan-50/70 p-3">
+                      <div className="text-xs font-bold text-slate-950">
+                        {editingZaloAdminId ? "Sửa quản trị viên" : "Thêm quản trị viên"}
+                      </div>
+                      <div className="mt-1 text-[11px] leading-4 text-slate-500">
+                        Nhập SĐT, userID Zalo OA và note để lưu vào DB.
+                      </div>
+                      <div className="mt-3 space-y-2">
+                        <input
+                          type="text"
+                          value={zaloAdminForm.phone}
+                          onChange={(event) => setZaloAdminForm((prev) => ({ ...prev, phone: event.target.value }))}
+                          className="h-9 w-full rounded-md border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-950 outline-none transition focus:border-cyan-300 focus:ring-2 focus:ring-cyan-50"
+                          placeholder="SĐT quản trị viên"
+                        />
+                        <input
+                          type="text"
+                          value={zaloAdminForm.username}
+                          onChange={(event) => setZaloAdminForm((prev) => ({ ...prev, username: event.target.value }))}
+                          className="h-9 w-full rounded-md border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-950 outline-none transition focus:border-cyan-300 focus:ring-2 focus:ring-cyan-50"
+                          placeholder="Username"
+                        />
+                        <input
+                          type="text"
+                          value={zaloAdminForm.userId}
+                          onChange={(event) => setZaloAdminForm((prev) => ({ ...prev, userId: event.target.value }))}
+                          className="h-9 w-full rounded-md border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-950 outline-none transition focus:border-cyan-300 focus:ring-2 focus:ring-cyan-50"
+                          placeholder="userID Zalo OA"
+                        />
+                        <textarea
+                          value={zaloAdminForm.note}
+                          onChange={(event) => setZaloAdminForm((prev) => ({ ...prev, note: event.target.value }))}
+                          rows={4}
+                          className="w-full resize-y rounded-md border border-slate-200 bg-white px-2.5 py-2 text-xs leading-5 text-slate-950 outline-none transition focus:border-cyan-300 focus:ring-2 focus:ring-cyan-50"
+                          placeholder="Note: tên, vai trò, khu vực phụ trách..."
+                        />
+                      </div>
+                      <div className="mt-3 grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={handleSaveZaloAdmin}
+                          disabled={savingZaloAdmin}
+                          className="inline-flex items-center justify-center gap-1.5 rounded-md bg-cyan-600 px-3 py-1.5 text-xs font-bold text-white shadow-sm transition hover:bg-cyan-700 disabled:opacity-60"
+                        >
+                          {savingZaloAdmin ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+                          {editingZaloAdminId ? "Cập nhật" : "Lưu"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={resetZaloAdminForm}
+                          className="inline-flex items-center justify-center rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 transition hover:bg-slate-50"
+                        >
+                          Làm mới
+                        </button>
+                      </div>
+                    </div>
+
+                    <TextField
+                      label="Tìm quản trị viên"
+                      value={zaloUsersQuery}
+                      placeholder="Nhập SĐT, username, userID hoặc note"
+                      description="Lọc nhanh danh sách quản trị viên đã lưu."
+                      onChange={(event) => setZaloUsersQuery(event.target.value)}
+                    />
+
+                    <button
+                      type="button"
+                      onClick={fetchZaloUsers}
+                      disabled={loadingZaloUsers}
+                      className="inline-flex w-full items-center justify-center gap-1.5 rounded-md bg-slate-900 px-3 py-1.5 text-xs font-bold text-white transition hover:bg-slate-800 disabled:opacity-60"
+                    >
+                      {loadingZaloUsers ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                      Tải lại danh sách
+                    </button>
+
+                    <div className="rounded-md border border-slate-200 bg-white p-3 text-xs text-slate-600 shadow-sm">
+                      Tổng quản trị viên: <span className="font-bold text-slate-950">{zaloUsersTotal ?? zaloUsers.length}</span>
+                      <br />
+                      Đang hiển thị: <span className="font-bold text-slate-950">{filteredZaloUsers.length}</span>
+                    </div>
+                  </div>
+
+                  <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+                    <div className="grid max-h-[560px] gap-2 overflow-y-auto">
+                      {loadingZaloUsers ? (
+                        <div className="flex items-center justify-center gap-2 px-3 py-10 text-xs font-semibold text-slate-500">
+                          <Loader2 size={15} className="animate-spin" />
+                          Đang tải quản trị viên Zalo OA...
+                        </div>
+                      ) : filteredZaloUsers.length === 0 ? (
+                        <div className="px-3 py-10 text-center text-xs text-slate-500">
+                          Chưa có quản trị viên Zalo OA. Nhập SĐT, userID và note ở form bên trái để lưu vào DB.
+                        </div>
+                      ) : (
+                        filteredZaloUsers.map((user, index) => {
+                          const userId = getZaloUserId(user);
+                          return (
+                            <div
+                              key={`${user._id || userId || "zalo-admin"}-${index}`}
+                              className="grid gap-2 rounded-md border border-slate-200 bg-white p-3 text-xs shadow-sm xl:grid-cols-[minmax(0,1fr)_auto]"
+                            >
+                              <div className="grid min-w-0 gap-1 md:grid-cols-[130px_160px_minmax(0,1fr)]">
+                                <div>
+                                  <div className="text-[10px] font-bold uppercase text-slate-400">SĐT</div>
+                                  <div className="font-bold text-slate-950">{user.phone || "Chưa nhập"}</div>
+                                </div>
+                                <div className="min-w-0">
+                                  <div className="text-[10px] font-bold uppercase text-slate-400">Username</div>
+                                  <div className="truncate font-semibold text-slate-800">{user.username || "Chưa nhập"}</div>
+                                </div>
+                                <div className="min-w-0">
+                                  <div className="text-[10px] font-bold uppercase text-slate-400">userID</div>
+                                  <div className="break-all font-mono text-[11px] font-semibold text-slate-700">{userId || "Chưa nhập"}</div>
+                                </div>
+                                <div className="min-w-0 md:col-span-3">
+                                  <div className="text-[10px] font-bold uppercase text-slate-400">Note</div>
+                                  <div className="whitespace-pre-wrap text-[11px] leading-4 text-slate-600">{user.note || "Không có note"}</div>
+                                </div>
+                              </div>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <button
+                                  type="button"
+                                  disabled={!userId}
+                                  onClick={() => {
+                                    setSettings((prev) => ({
+                                      ...prev,
+                                      humanHandoffOaRecipientId: userId,
+                                      oaTestRecipientId: userId,
+                                    }));
+                                    setActiveSection("zalo");
+                                    setMessage("Đã chọn userID nhận tin nhắn OA.");
+                                  }}
+                                  className="inline-flex items-center justify-center rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white transition hover:bg-emerald-700 disabled:opacity-50"
+                                >
+                                  Dùng nhận OA
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleEditZaloAdmin(user)}
+                                  className="inline-flex items-center justify-center rounded-md border border-cyan-200 bg-white px-3 py-1.5 text-xs font-bold text-cyan-700 transition hover:bg-cyan-50"
+                                >
+                                  Sửa
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={!userId}
+                                  onClick={() => {
+                                    navigator.clipboard?.writeText(userId);
+                                    setMessage("Đã copy userID Zalo OA.");
+                                  }}
+                                  className="inline-flex items-center justify-center rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
+                                >
+                                  Copy
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteZaloAdmin(user)}
+                                  className="inline-flex items-center justify-center rounded-md border border-rose-200 bg-white px-3 py-1.5 text-xs font-bold text-rose-700 transition hover:bg-rose-50"
+                                >
+                                  Xóa
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </SectionCard>
+
+              <SectionCard
+                id="zaloUsersLegacy"
+                title="Người dùng Zalo OA"
+                description="Quản lý danh sách người quan tâm OA, lấy user_id để cấu hình nhận tin nhắn OA nội bộ."
+                icon={Users}
+                activeSection={activeSection}
+              >
+                <div className="grid gap-3 lg:grid-cols-[260px_minmax(0,1fr)]">
+                  <div className="space-y-3">
+                    <div className="rounded-md border border-cyan-100 bg-cyan-50/70 p-3">
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <div className="text-xs font-bold text-slate-950">Ket noi Zalo OA</div>
+                          <div className="mt-1 text-[11px] leading-4 text-slate-500">
+                            Cau hinh truc tiep tren giao dien, sau do cap quyen de luu refresh token vao MongoDB.
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={handleOpenZaloPermission}
+                          className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-md bg-cyan-600 px-2.5 py-1.5 text-[11px] font-bold text-white shadow-sm transition hover:bg-cyan-700"
+                        >
+                          <ExternalLink size={13} />
+                          Cap quyen
+                        </button>
+                      </div>
+
+                      <div className="mt-3 space-y-2">
+                        <input
+                          type="text"
+                          value={settings.zaloAppId || ""}
+                          onChange={(event) => setSettings((prev) => ({ ...prev, zaloAppId: event.target.value }))}
+                          className="h-8 w-full rounded-md border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-950 outline-none transition focus:border-cyan-300 focus:ring-2 focus:ring-cyan-50"
+                          placeholder="Zalo App ID"
+                        />
+                        <input
+                          type="password"
+                          value={settings.zaloSecretKey || ""}
+                          onChange={(event) => setSettings((prev) => ({ ...prev, zaloSecretKey: event.target.value }))}
+                          className="h-8 w-full rounded-md border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-950 outline-none transition focus:border-cyan-300 focus:ring-2 focus:ring-cyan-50"
+                          placeholder="Zalo Secret Key"
+                        />
+                        <input
+                          type="text"
+                          value={settings.zaloRedirectUri || ""}
+                          onChange={(event) => setSettings((prev) => ({ ...prev, zaloRedirectUri: event.target.value }))}
+                          className="h-8 w-full rounded-md border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-950 outline-none transition focus:border-cyan-300 focus:ring-2 focus:ring-cyan-50"
+                          placeholder="https://domain/api/zalo-v3-auth"
+                        />
+                        <div className="break-all rounded-md border border-cyan-100 bg-white px-2.5 py-2 font-mono text-[10px] leading-4 text-slate-500">
+                          {zaloAutoCallback}
+                        </div>
+                        <textarea
+                          value={zaloAuthCode}
+                          onChange={(event) => setZaloAuthCode(event.target.value)}
+                          rows={3}
+                          className="w-full resize-y rounded-md border border-slate-200 bg-white px-2.5 py-2 font-mono text-xs leading-5 text-slate-950 outline-none transition focus:border-cyan-300 focus:ring-2 focus:ring-cyan-50"
+                          placeholder="Dan authorization_code neu cap token thu cong"
+                        />
+                      </div>
+
+                      <div className="mt-3 grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={handleSave}
+                          disabled={saving}
+                          className="inline-flex items-center justify-center gap-1.5 rounded-md border border-cyan-200 bg-white px-2.5 py-1.5 text-[11px] font-bold text-cyan-700 transition hover:bg-cyan-50 disabled:opacity-60"
+                        >
+                          {saving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
+                          Luu config
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleExchangeZaloCode}
+                          disabled={exchangingZaloCode || !zaloAuthCode}
+                          className="inline-flex items-center justify-center gap-1.5 rounded-md bg-slate-900 px-2.5 py-1.5 text-[11px] font-bold text-white transition hover:bg-slate-800 disabled:opacity-60"
+                        >
+                          {exchangingZaloCode ? <Loader2 size={13} className="animate-spin" /> : <KeyRound size={13} />}
+                          Cap token
+                        </button>
+                      </div>
+
+                      {zaloAuthResult && activeSection === "zaloUsers" && (
+                        <div className="mt-3 rounded-md border border-slate-200 bg-slate-950 p-2 text-slate-50">
+                          <div className="mb-1 text-[11px] font-bold">
+                            Token: {zaloAuthResult.ok === false ? "Loi" : "Thanh cong"}
+                          </div>
+                          <pre className="max-h-[120px] overflow-auto text-[10px] leading-4 text-slate-200">
+                            {JSON.stringify(zaloAuthResult, null, 2)}
+                          </pre>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="rounded-md border border-cyan-100 bg-cyan-50/70 p-3">
+                      <div className="text-xs font-bold text-slate-950">Danh sách OA</div>
+                      <div className="mt-1 text-[11px] leading-4 text-slate-500">
+                        Dữ liệu lấy từ Zalo OA bằng token đã cấp trong tab Zalo OA.
                       </div>
                       <button
                         type="button"
-                        onClick={handleTestZns}
-                        disabled={testingZns || !znsTestForm.phone || !znsTestForm.templateId}
-                        className="inline-flex items-center justify-center gap-1.5 rounded-md bg-cyan-600 px-3 py-1.5 text-xs font-bold text-white shadow-sm transition hover:bg-cyan-700 disabled:opacity-60"
+                        onClick={fetchZaloUsers}
+                        disabled={loadingZaloUsers}
+                        className="mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-md bg-cyan-600 px-3 py-1.5 text-xs font-bold text-white shadow-sm transition hover:bg-cyan-700 disabled:opacity-60"
                       >
-                        {testingZns ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
-                        Gửi test
+                        {loadingZaloUsers ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                        Tải danh sách
                       </button>
+                      <ZaloAuthRequiredNotice result={zaloUsersAuthResult} onOpen={openZaloAuthUrl} />
                     </div>
 
-                    <div className="mb-3 grid gap-3 lg:grid-cols-2">
-                      <ToggleSetting
-                        title="Bật gửi ZNS"
-                        description="Khi tắt, intent call_person không gửi ZNS nội bộ."
-                        enabled={settings.humanHandoffZnsEnabled !== false}
-                        onToggle={() =>
-                          setSettings((prev) => ({
-                            ...prev,
-                            humanHandoffZnsEnabled: prev.humanHandoffZnsEnabled === false,
-                          }))
-                        }
-                      />
-                      <ToggleSetting
-                        title="Luôn gửi về số mặc định"
-                        description="Khi bật, bỏ qua hotline trong bài quảng cáo và gửi về số mặc định."
-                        enabled={settings.humanHandoffZnsSendAllToDefault === true}
-                        onToggle={() =>
-                          setSettings((prev) => ({
-                            ...prev,
-                            humanHandoffZnsSendAllToDefault: !prev.humanHandoffZnsSendAllToDefault,
-                          }))
-                        }
-                      />
-                      <TextField
-                        label="SĐT mặc định nhận ZNS"
-                        value={settings.humanHandoffZnsDefaultPhone || ""}
-                        placeholder="0901234567"
-                        description="Dùng khi bài quảng cáo không có hotline hoặc bật gửi tất cả về số mặc định."
-                        onChange={(event) =>
-                          setSettings((prev) => ({ ...prev, humanHandoffZnsDefaultPhone: event.target.value }))
-                        }
-                      />
-                      <TextField
-                        label="Template ID call_person"
-                        value={settings.humanHandoffZnsTemplateId || ""}
-                        placeholder="588192"
-                        description="Template ZNS mặc định cho intent call_person của Chat V3."
-                        onChange={(event) =>
-                          setSettings((prev) => ({ ...prev, humanHandoffZnsTemplateId: event.target.value }))
-                        }
-                      />
+                    <TextField
+                      label="Tìm user"
+                      value={zaloUsersQuery}
+                      placeholder="Nhập user_id hoặc tên"
+                      description="Lọc nhanh danh sách đang tải về."
+                      onChange={(event) => setZaloUsersQuery(event.target.value)}
+                    />
+
+                    <div className="rounded-md border border-slate-200 bg-white p-3 text-xs text-slate-600 shadow-sm">
+                      Tổng từ OA:{" "}
+                      <span className="font-bold text-slate-950">{zaloUsersTotal ?? zaloUsers.length}</span>
+                      <br />
+                      Đang hiển thị: <span className="font-bold text-slate-950">{filteredZaloUsers.length}</span>
                     </div>
+                  </div>
 
-                    <div className="grid gap-3 lg:grid-cols-2">
-                      <TextField
-                        label="SĐT nhận ZNS"
-                        value={znsTestForm.phone}
-                        placeholder="Ví dụ: 0901234567"
-                        description="Số điện thoại người nhận test ZNS."
-                        onChange={(event) =>
-                          setZnsTestForm((prev) => ({
-                            ...prev,
-                            phone: event.target.value,
-                          }))
-                        }
-                      />
-                      <TextField
-                        label="Template ID"
-                        value={znsTestForm.templateId}
-                        placeholder="Ví dụ: 567011"
-                        description="ID template Zalo đã duyệt."
-                        onChange={(event) =>
-                          setZnsTestForm((prev) => ({
-                            ...prev,
-                            templateId: event.target.value,
-                          }))
-                        }
-                      />
-                    </div>
-
-                    <label className="mt-3 block rounded-md border border-slate-200 bg-white p-3 shadow-sm transition focus-within:border-cyan-300 focus-within:ring-2 focus-within:ring-cyan-50">
-                      <span className="text-xs font-bold text-slate-900">Params ZNS</span>
-                      <textarea
-                        value={znsTestForm.templateDataText}
-                        onChange={(event) =>
-                          setZnsTestForm((prev) => ({
-                            ...prev,
-                            templateDataText: event.target.value,
-                          }))
-                        }
-                        rows={8}
-                        className="mt-2 w-full resize-y rounded-md border border-slate-200 bg-slate-50 px-2.5 py-2 font-mono text-xs leading-5 text-slate-950 outline-none transition focus:border-cyan-300 focus:ring-2 focus:ring-cyan-50"
-                        placeholder='{"customerName":"customerName","pageName":"pageName","name":"name"}'
-                      />
-                      <span className="mt-1.5 block text-[11px] leading-4 text-slate-500">
-                        JSON object gửi vào template_data. Mặc định có name, pageName và customerName.
-                      </span>
-                    </label>
-
-                    {znsTestResult && (
-                      <div className="mt-3 rounded-md border border-slate-200 bg-slate-950 p-3 text-slate-50">
-                        <div className="mb-2 text-xs font-bold">
-                          Kết quả test: {znsTestResult.ok === false ? "Lỗi" : "Thành công"}
+                  <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+                    <div className="grid max-h-[560px] gap-2 overflow-y-auto">
+                      {loadingZaloUsers ? (
+                        <div className="flex items-center justify-center gap-2 px-3 py-10 text-xs font-semibold text-slate-500">
+                          <Loader2 size={15} className="animate-spin" />
+                          Đang tải người dùng Zalo OA...
                         </div>
-                        <pre className="max-h-[200px] overflow-auto text-[11px] leading-4 text-slate-200">
-                          {JSON.stringify(znsTestResult, null, 2)}
-                        </pre>
-                      </div>
-                    )}
+                      ) : filteredZaloUsers.length === 0 ? (
+                        <div className="px-3 py-10 text-center text-xs text-slate-500">
+                          Chưa có dữ liệu. Bấm Tải danh sách để lấy từ OA.
+                        </div>
+                      ) : (
+                        filteredZaloUsers.map((user, index) => {
+                          const userId = getZaloUserId(user);
+                          const displayName = user.display_name || user.name || user.user_name || "Người dùng Zalo";
+                          return (
+                            <div
+                              key={`${userId || "zalo-user"}-${index}`}
+                              className="grid gap-2 rounded-md border border-slate-200 bg-white p-3 text-xs shadow-sm xl:grid-cols-[minmax(0,1fr)_auto]"
+                            >
+                              <div className="min-w-0">
+                                <div className="truncate font-bold text-slate-950">{displayName}</div>
+                                <div className="mt-1 break-all font-mono text-[11px] text-slate-500">{userId || "Không có user_id"}</div>
+                              </div>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <button
+                                  type="button"
+                                  disabled={!userId}
+                                  onClick={() => {
+                                    setSettings((prev) => ({
+                                      ...prev,
+                                      humanHandoffOaRecipientId: userId,
+                                      oaTestRecipientId: userId,
+                                    }));
+                                    setActiveSection("zalo");
+                                    setMessage("Đã chọn user_id nhận tin nhắn OA.");
+                                  }}
+                                  className="inline-flex items-center justify-center rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white transition hover:bg-emerald-700 disabled:opacity-50"
+                                >
+                                  Dùng nhận OA
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={!userId}
+                                  onClick={() => {
+                                    navigator.clipboard?.writeText(userId);
+                                    setMessage("Đã copy user_id Zalo OA.");
+                                  }}
+                                  className="inline-flex items-center justify-center rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
+                                >
+                                  Copy
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
                   </div>
                 </div>
               </SectionCard>
