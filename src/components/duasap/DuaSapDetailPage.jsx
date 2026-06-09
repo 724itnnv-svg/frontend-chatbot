@@ -36,11 +36,22 @@ function fmtShort(dateStr) {
   } catch (_e) { return dateStr; }
 }
 
+// ─── Google Drive URL normalizer ────────────────────────────────────────────
+// Chuyển link share "drive.google.com/file/d/ID/view" → link nhúng trực tiếp
+function toDirectImageUrl(url) {
+  if (!url) return url;
+  const m = url.match(/drive\.google\.com\/file\/d\/([^/?]+)/);
+  if (m) return `https://lh3.googleusercontent.com/d/${m[1]}`;
+  return url;
+}
+
 // ─── Image Gallery ──────────────────────────────────────────────────────────
-function ImageGallery({ images, maCay }) {
+function ImageGallery({ images, maCay, loai }) {
   const [lightbox, setLightbox] = useState(null); // index đang xem
   const [imgErrors, setImgErrors] = useState({});
-  const validImages = (images || []).filter((img, i) => img && !imgErrors[i]);
+  const isOngNghiem = loai === "ong_nghiem";
+  const normalizedImages = (images || []).map(toDirectImageUrl);
+  const validImages = normalizedImages.filter((img, i) => img && !imgErrors[i]);
   const hasImages = validImages.length > 0;
 
   function prev() { setLightbox((i) => (i > 0 ? i - 1 : validImages.length - 1)); }
@@ -63,22 +74,34 @@ function ImageGallery({ images, maCay }) {
         /* ── Placeholder khi chưa có ảnh ── */
         <div className="bg-white rounded-2xl border border-dashed border-gray-200 shadow-sm overflow-hidden">
           <div className="flex flex-col items-center justify-center py-14 gap-4">
-            {/* SVG minh hoạ cây dừa */}
-            <svg viewBox="0 0 120 160" className="w-24 h-32 opacity-30" fill="none" xmlns="http://www.w3.org/2000/svg">
-              {/* thân cây */}
-              <rect x="55" y="70" width="10" height="80" rx="5" fill="#a16207" />
-              {/* tán lá */}
-              <ellipse cx="60" cy="55" rx="38" ry="18" fill="#16a34a" opacity="0.6" transform="rotate(-20 60 55)" />
-              <ellipse cx="60" cy="50" rx="38" ry="18" fill="#15803d" opacity="0.7" transform="rotate(15 60 50)" />
-              <ellipse cx="60" cy="48" rx="35" ry="16" fill="#22c55e" opacity="0.8" transform="rotate(-5 60 48)" />
-              <ellipse cx="60" cy="45" rx="30" ry="14" fill="#4ade80" opacity="0.9" />
-              {/* trái dừa */}
-              <circle cx="55" cy="68" r="6" fill="#ca8a04" />
-              <circle cx="67" cy="65" r="5.5" fill="#b45309" />
-              <circle cx="48" cy="65" r="5" fill="#ca8a04" />
-            </svg>
+            {isOngNghiem ? (
+              /* SVG ống nghiệm */
+              <svg viewBox="0 0 80 130" className="w-20 h-28 opacity-30" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <rect x="26" y="6" width="28" height="10" rx="3" fill="#6ee7b7" stroke="#34d399" strokeWidth="1.5" />
+                <path d="M30 16 L30 86 Q30 102 40 102 Q50 102 50 86 L50 16 Z" fill="#d1fae5" stroke="#34d399" strokeWidth="2" />
+                <path d="M31 65 L31 86 Q31 100 40 100 Q49 100 49 86 L49 65 Z" fill="#6ee7b7" opacity="0.55" />
+                <circle cx="37" cy="72" r="2.5" fill="white" opacity="0.7" />
+                <circle cx="44" cy="78" r="2" fill="white" opacity="0.6" />
+                <circle cx="38" cy="84" r="1.5" fill="white" opacity="0.5" />
+                <line x1="33" y1="22" x2="33" y2="88" stroke="white" strokeWidth="2" strokeLinecap="round" opacity="0.5" />
+              </svg>
+            ) : (
+              /* SVG minh hoạ cây dừa */
+              <svg viewBox="0 0 120 160" className="w-24 h-32 opacity-30" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <rect x="55" y="70" width="10" height="80" rx="5" fill="#a16207" />
+                <ellipse cx="60" cy="55" rx="38" ry="18" fill="#16a34a" opacity="0.6" transform="rotate(-20 60 55)" />
+                <ellipse cx="60" cy="50" rx="38" ry="18" fill="#15803d" opacity="0.7" transform="rotate(15 60 50)" />
+                <ellipse cx="60" cy="48" rx="35" ry="16" fill="#22c55e" opacity="0.8" transform="rotate(-5 60 48)" />
+                <ellipse cx="60" cy="45" rx="30" ry="14" fill="#4ade80" opacity="0.9" />
+                <circle cx="55" cy="68" r="6" fill="#ca8a04" />
+                <circle cx="67" cy="65" r="5.5" fill="#b45309" />
+                <circle cx="48" cy="65" r="5" fill="#ca8a04" />
+              </svg>
+            )}
             <div className="text-center">
-              <p className="text-sm font-medium text-gray-400">Chưa có ảnh cây</p>
+              <p className="text-sm font-medium text-gray-400">
+                {isOngNghiem ? "Chưa có ảnh ống nghiệm" : "Chưa có ảnh cây"}
+              </p>
               <p className="text-xs text-gray-300 mt-1">Ảnh sẽ hiển thị ở đây khi được cập nhật</p>
             </div>
           </div>
@@ -226,7 +249,8 @@ function YieldBar({ label, duKien, thucTe, month }) {
   );
 }
 
-function RecordCard({ record }) {
+function RecordCard({ record, loai }) {
+  const isOngNghiem = loai === "ong_nghiem";
   const tinh = TINH_TRANG_CONFIG[record.tinhTrangCay] || null;
 
   // Map dữ liệu tháng
@@ -273,8 +297,8 @@ function RecordCard({ record }) {
           </div>
         )}
 
-        {/* Sản lượng */}
-        {months.length > 0 && (
+        {/* Sản lượng — chỉ hiển thị với cây giống, không hiển thị với ống nghiệm */}
+        {!isOngNghiem && months.length > 0 && (
           <div>
             <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
               Sản lượng
@@ -866,6 +890,7 @@ export default function DuaSapDetailPage() {
   }
 
   const records = data?.records || [];
+  const isOngNghiem = data.loai === "ong_nghiem";
   const tinh = records.length > 0 ? TINH_TRANG_CONFIG[records[0]?.tinhTrangCay] : null;
 
   // Tổng sản lượng
@@ -929,8 +954,10 @@ export default function DuaSapDetailPage() {
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {[
             { label: "Kỳ theo dõi", value: records.length, unit: "kỳ", icon: <ClipboardList size={18} />, color: "text-indigo-600 bg-indigo-50" },
-            { label: "Dự kiến tổng", value: totalDK, unit: "trái", icon: <TrendingUp size={18} />, color: "text-blue-600 bg-blue-50" },
-            { label: "Thực tế tổng", value: totalTT, unit: "trái", icon: <CheckCircle2 size={18} />, color: "text-emerald-600 bg-emerald-50" },
+            ...(!isOngNghiem ? [
+              { label: "Dự kiến tổng", value: totalDK, unit: "trái", icon: <TrendingUp size={18} />, color: "text-blue-600 bg-blue-50" },
+              { label: "Thực tế tổng", value: totalTT, unit: "trái", icon: <CheckCircle2 size={18} />, color: "text-emerald-600 bg-emerald-50" },
+            ] : []),
             { label: "Lần phun/bón", value: totalPhun + totalBon, unit: "lần", icon: <Droplets size={18} />, color: "text-amber-600 bg-amber-50" },
           ].map((s) => (
             <div key={s.label} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
@@ -946,7 +973,7 @@ export default function DuaSapDetailPage() {
         </div>
 
         {/* Hình ảnh cây */}
-        <ImageGallery images={data.anhUrl} maCay={data.maCay} />
+        <ImageGallery images={data.anhUrl} maCay={data.maCay} loai={data.loai} />
 
         {/* Ghi chú chung của cây */}
         {data.ghiChu && (
@@ -1016,7 +1043,7 @@ export default function DuaSapDetailPage() {
             </div>
           ) : (
             <div className="space-y-5">
-              {records.map((r) => <RecordCard key={r._id} record={r} />)}
+              {records.map((r) => <RecordCard key={r._id} record={r} loai={data.loai} />)}
             </div>
           )}
         </section>

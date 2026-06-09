@@ -11,6 +11,14 @@ import {
 import * as XLSX from "xlsx";
 import QRCode from "qrcode";
 
+// ─── Google Drive URL normalizer ─────────────────────────────────────────────
+function toDirectImageUrl(url) {
+  if (!url) return url;
+  const m = url.match(/drive\.google\.com\/file\/d\/([^/?]+)/);
+  if (m) return `https://lh3.googleusercontent.com/d/${m[1]}`;
+  return url;
+}
+
 // ─── QR PDF helpers ───────────────────────────────────────────────────────────
 const GIONG_LABEL_MAP = { dua_sap: "Dừa sáp", dua_thuong: "Dừa thường", khac: "Khác" };
 
@@ -53,10 +61,10 @@ async function generateQRAssets(tree, url) {
     ctx.fillText(loc, TW / 2, 28 * SC);
   }
 
-  // Giống
-  ctx.fillStyle = "#6b7280";
-  ctx.font = `${8 * SC}px -apple-system, BlinkMacSystemFont, sans-serif`;
-  ctx.fillText(GIONG_LABEL_MAP[tree.giong] || tree.giong || "Dừa sáp", TW / 2, 41 * SC);
+  // // Giống
+  // ctx.fillStyle = "#6b7280";
+  // ctx.font = `${8 * SC}px -apple-system, BlinkMacSystemFont, sans-serif`;
+  // ctx.fillText(GIONG_LABEL_MAP[tree.giong] || tree.giong || "Dừa sáp", TW / 2, 41 * SC);
 
   return { qrPng, textPng: tc.toDataURL("image/png") };
 }
@@ -71,7 +79,7 @@ const CG = (() => {
   const CELL_H = (PAGE_H - MARGIN * 2) / ROWS;   // ~69.3 mm
   const INN_W = CELL_W - PAD * 2;
   const INN_H = CELL_H - PAD * 2;
-  const QR   = INN_W - 6;
+  const QR = INN_W - 6;
   const TEXT_H = 14;
   return {
     MARGIN, COLS, ROWS, PAD, CELL_W, CELL_H, INN_W, INN_H, QR, TEXT_H,
@@ -82,10 +90,10 @@ const CG = (() => {
   };
 })();
 
-// Ống nghiệm: QR 25mm, cell 31×39mm, ~6 cột × 7 hàng = 42/trang
+// Ống nghiệm: QR 20mm, cell 31×39mm, ~6 cột × 7 hàng = 42/trang
 const ON = (() => {
   const MARGIN = 8, PAD = 2;
-  const QR = 25, TEXT_H = 7;
+  const QR = 20, TEXT_H = 7;
   const CELL_W = 31, CELL_H = 39;
   const INN_W = CELL_W - PAD * 2;
   const INN_H = CELL_H - PAD * 2;
@@ -107,8 +115,8 @@ function drawQRLabel(doc, layout, cx, cy, assets, tree) {
   doc.setDrawColor(...BORDER);
   doc.setLineWidth(0.2);
   doc.roundedRect(cx, cy, INN_W, INN_H, 1.5, 1.5, "FD");
-  doc.addImage(assets.qrPng,  "PNG", cx + QR_X, cy + QR_Y,          QR,    QR,    `qr_${tree.maCay}`,  "FAST");
-  doc.addImage(assets.textPng,"PNG", cx,        cy + QR_Y + QR + 1, INN_W, TEXT_H,`txt_${tree.maCay}`, "FAST");
+  doc.addImage(assets.qrPng, "PNG", cx + QR_X, cy + QR_Y, QR, QR, `qr_${tree.maCay}`, "FAST");
+  doc.addImage(assets.textPng, "PNG", cx, cy + QR_Y + QR + 1, INN_W, TEXT_H, `txt_${tree.maCay}`, "FAST");
 }
 
 /**
@@ -122,7 +130,7 @@ async function exportAllQRtoPDF(trees, onProgress) {
   const baseUrl = window.location.origin;
   const BATCH = 10;
 
-  const cayGiong  = trees.filter((t) => t.loai !== "ong_nghiem");
+  const cayGiong = trees.filter((t) => t.loai !== "ong_nghiem");
   const ongNghiem = trees.filter((t) => t.loai === "ong_nghiem");
   let totalDone = 0;
 
@@ -145,8 +153,8 @@ async function exportAllQRtoPDF(trees, onProgress) {
 
         const col = posInPage % layout.COLS;
         const row = Math.floor(posInPage / layout.COLS);
-        const cx  = layout.MARGIN + col * layout.CELL_W + layout.PAD;
-        const cy  = layout.MARGIN + row * layout.CELL_H + layout.PAD;
+        const cx = layout.MARGIN + col * layout.CELL_W + layout.PAD;
+        const cy = layout.MARGIN + row * layout.CELL_H + layout.PAD;
 
         drawQRLabel(doc, layout, cx, cy, assets[j], group[i]);
         totalDone++;
@@ -157,7 +165,7 @@ async function exportAllQRtoPDF(trees, onProgress) {
     }
   }
 
-  await renderGroup(cayGiong,  CG, false);
+  await renderGroup(cayGiong, CG, false);
   await renderGroup(ongNghiem, ON, cayGiong.length > 0);
 
   const date = new Date().toISOString().slice(0, 10);
@@ -999,7 +1007,7 @@ function TreeForm({ initial, onSave, onClose, saving }) {
                   </div>
                 ) : (
                   <img
-                    src={url} alt={`Ảnh ${idx + 1}`}
+                    src={toDirectImageUrl(url)} alt={`Ảnh ${idx + 1}`}
                     className="w-full h-full object-cover"
                     onError={() => setImgErrors((prev) => ({ ...prev, [idx]: true }))}
                   />
@@ -1434,13 +1442,15 @@ function BulkScheduleModal({ macays, onClose }) {
         macays,
         period: { thangBatDau: Number(thangBatDau), thangKetThuc: Number(thangKetThuc), nam: Number(nam) },
         lichPhunThuoc: lichPhunThuoc.length ? lichPhunThuoc : undefined,
-        lichBonPhan:   lichBonPhan.length   ? lichBonPhan   : undefined,
+        lichBonPhan: lichBonPhan.length ? lichBonPhan : undefined,
         mode,
       });
       setResult(r.data);
     } catch (e) {
-      setResult({ updated: 0, notFound: 0, failed: macays.length,
-        results: [{ maCay: "—", status: "error", reason: e.response?.data?.message || "Lỗi kết nối" }] });
+      setResult({
+        updated: 0, notFound: 0, failed: macays.length,
+        results: [{ maCay: "—", status: "error", reason: e.response?.data?.message || "Lỗi kết nối" }]
+      });
     } finally {
       setUpdating(false);
     }
@@ -1449,7 +1459,7 @@ function BulkScheduleModal({ macays, onClose }) {
   const hasRows = lichPhunThuoc.length > 0 || lichBonPhan.length > 0;
 
   if (result) {
-    const errors   = (result.results || []).filter((r) => r.status === "error");
+    const errors = (result.results || []).filter((r) => r.status === "error");
     const notFounds = (result.results || []).filter((r) => r.status === "not_found");
     return (
       <div className="space-y-4">
@@ -1909,16 +1919,16 @@ function BulkCreateRecordModal({ macays, trees, onClose, onDone }) {
         lichBonPhan,
         ...(isON
           ? {
-              ngayRaCayDuKien: ngayRaCayDuKien || undefined,
-              ngayRaCayThucTe: ngayRaCayThucTe || undefined,
-              yeuCauDeXuat,
-            }
+            ngayRaCayDuKien: ngayRaCayDuKien || undefined,
+            ngayRaCayThucTe: ngayRaCayThucTe || undefined,
+            yeuCauDeXuat,
+          }
           : {
-              soTau: soTau !== "" ? Number(soTau) : null,
-              soHoa: soHoa !== "" ? Number(soHoa) : null,
-              sanLuongDuKien,
-              sanLuongThucTe,
-            }),
+            soTau: soTau !== "" ? Number(soTau) : null,
+            soHoa: soHoa !== "" ? Number(soHoa) : null,
+            sanLuongDuKien,
+            sanLuongThucTe,
+          }),
       };
 
       try {
@@ -1937,7 +1947,7 @@ function BulkCreateRecordModal({ macays, trees, onClose, onDone }) {
 
   if (result) {
     const created = result.results.filter((r) => r.status === "created");
-    const errors  = result.results.filter((r) => r.status === "error");
+    const errors = result.results.filter((r) => r.status === "error");
     return (
       <div className="space-y-4">
         <div className="flex items-center gap-2 text-sm font-medium text-emerald-700">
@@ -2119,7 +2129,7 @@ function BulkCreateRecordModal({ macays, trees, onClose, onDone }) {
         color={{ border: "border-blue-200", bg: "bg-blue-50", rowBg: "bg-blue-100/50", addBtn: "text-blue-600 hover:text-blue-800" }}
         enabled={lichPhunThuoc.length > 0}
         setEnabled={(getNext) => { const next = getNext(lichPhunThuoc.length > 0); if (next && !lichPhunThuoc.length) scheduleAddRow(setLichPhunThuoc); else if (!next) setLichPhunThuoc([]); }}
-        mode="append" setMode={() => {}}
+        mode="append" setMode={() => { }}
         rows={lichPhunThuoc} setRows={setLichPhunThuoc}
         modeName="bcrMode1" hideMode
       />
@@ -2132,7 +2142,7 @@ function BulkCreateRecordModal({ macays, trees, onClose, onDone }) {
         color={{ border: "border-amber-200", bg: "bg-amber-50", rowBg: "bg-amber-100/50", addBtn: "text-amber-600 hover:text-amber-800" }}
         enabled={lichBonPhan.length > 0}
         setEnabled={(getNext) => { const next = getNext(lichBonPhan.length > 0); if (next && !lichBonPhan.length) scheduleAddRow(setLichBonPhan); else if (!next) setLichBonPhan([]); }}
-        mode="append" setMode={() => {}}
+        mode="append" setMode={() => { }}
         rows={lichBonPhan} setRows={setLichBonPhan}
         modeName="bcrMode2" hideMode
       />

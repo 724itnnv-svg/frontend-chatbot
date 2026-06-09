@@ -9,6 +9,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Clock,
+  Download,
   Loader2,
   LogIn,
   LogOut,
@@ -412,6 +413,151 @@ function PayrollDetailList({ title, rows, payroll, totalLabel, totalValue, tone 
   );
 }
 
+// ── Payroll print helpers ──────────────────────────────────────────────────────
+
+function buildPayslipHTML(payroll) {
+  const name = payroll.tenNhanVien || payroll.employeeName || "—";
+  const code = payroll.maNhanVien || "—";
+  const metaParts = [payroll.chucVu, payroll.khoiPhongBan].filter(Boolean).join(" · ");
+  const period = formatPeriod(payroll.period);
+  const sm = statusMeta(payroll.status);
+
+  const tongThucLinh = toNumber(payroll.luongThucLinh);
+  const tongThuNhap = toNumber(payroll.thuNhapTheoNgayCong?.tongThuNhap);
+  const tongKhauTruTotal =
+    toNumber(payroll.khauTru?.tongKhauTru) + toNumber(payroll.tinhThueTNCN?.thueTNCNTamTinh);
+  const ngayCong = toNumber(payroll.thuNhapTheoNgayCong?.ngayCong);
+  const thuongKPI = toNumber(payroll.thuNhapTheoNgayCong?.thuongKPI);
+  const hoaHong = toNumber(payroll.thuNhapTheoNgayCong?.hoaHong);
+  const luongDot2 = thuongKPI + hoaHong;
+  const luongDot1 = Math.max(0, tongThucLinh - luongDot2);
+  const hasBonus = luongDot2 > 0;
+
+  const incomeHTML = incomeRows
+    .map(([label, path]) => {
+      const value = Array.isArray(path)
+        ? path.reduce((sum, p) => sum + toNumber(valueAt(payroll, p)), 0)
+        : toNumber(valueAt(payroll, path));
+      return value
+        ? `<div class="drow"><span>${label}</span><span>${money(value)}</span></div>`
+        : "";
+    })
+    .join("");
+
+  const deductionHTML = deductionRows
+    .map(([label, path]) => {
+      const value = toNumber(valueAt(payroll, path));
+      return value
+        ? `<div class="drow"><span>${label}</span><span>${money(value)}</span></div>`
+        : "";
+    })
+    .join("");
+
+  const dot2Desc =
+    [thuongKPI > 0 ? `KPI ${money(thuongKPI)}` : "", hoaHong > 0 ? `Hoa hong ${money(hoaHong)}` : ""]
+      .filter(Boolean)
+      .join(" · ") || "Khong co thuong ky nay";
+
+  return `<div class="payslip">
+  <div class="hd">
+    <div class="hd-l">
+      <div class="emp-name">${name}</div>
+      <div class="emp-meta">${code}${metaParts ? " · " + metaParts : ""}</div>
+      <div class="emp-period">${period}</div>
+    </div>
+    <div class="hd-r">
+      <div class="net-lbl">THUC LINH</div>
+      <div class="net-amt">${money(tongThucLinh)}</div>
+      <div class="schip">${sm.label}</div>
+    </div>
+  </div>
+  <div class="stats">
+    <div class="stat"><div class="sv">${ngayCong}</div><div class="sl">Ngay cong</div></div>
+    <div class="stat"><div class="sv g">${money(tongThuNhap)}</div><div class="sl">Tong thu nhap</div></div>
+    <div class="stat"><div class="sv r">${money(tongKhauTruTotal)}</div><div class="sl">Tong khau tru</div></div>
+  </div>
+  <div class="formula">
+    <span class="g">${money(tongThuNhap)}</span><span class="op"> - </span><span class="r">${money(tongKhauTruTotal)}</span><span class="op"> = </span><b>${money(tongThucLinh)}</b>
+  </div>
+  <div class="dgrid">
+    <div class="dbox">
+      <div class="dbox-hd inc-hd">CHI TIET THU NHAP</div>
+      ${incomeHTML}
+      <div class="dtot"><span>Tong thu nhap</span><span>${money(tongThuNhap)}</span></div>
+    </div>
+    <div class="dbox">
+      <div class="dbox-hd ded-hd">KHAU TRU &amp; THUE</div>
+      ${deductionHTML}
+      <div class="dtot"><span>Tong khau tru</span><span>${money(tongKhauTruTotal)}</span></div>
+    </div>
+  </div>
+  <div class="payout">
+    <div class="pr">
+      <span class="badge g-bg">1</span>
+      <div class="pi"><div class="pt">Dot 1 — Cuoi thang</div><div class="pd">Luong + phu cap + cac khoan co dinh</div></div>
+      <span class="pa">${money(luongDot1)}</span>
+    </div>
+    <div class="pr">
+      <span class="badge ${hasBonus ? "v-bg" : "gr-bg"}">2</span>
+      <div class="pi"><div class="pt">Dot 2 — Giua thang</div><div class="pd">${dot2Desc}</div></div>
+      <span class="pa ${hasBonus ? "v" : "gray"}">${money(luongDot2)}</span>
+    </div>
+    <div class="ptot"><span>TONG THUC LINH</span><span>${money(tongThucLinh)}</span></div>
+  </div>
+</div>`;
+}
+
+function printPayrolls(payrolls) {
+  const css = `
+    @page{size:A4;margin:12mm 14mm 16mm 14mm}
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:Arial,Helvetica,sans-serif;font-size:10pt;color:#1e293b;background:#fff}
+    .payslip{page-break-after:always}
+    .payslip:last-child{page-break-after:auto}
+    .hd{background:#059669;color:#fff;padding:12px 14px;border-radius:8px 8px 0 0;display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+    .hd-l{flex:1;min-width:0}
+    .emp-name{font-size:14pt;font-weight:900;margin-bottom:2px}
+    .emp-meta{font-size:8pt;opacity:.85;margin-bottom:1px}
+    .emp-period{font-size:8pt;opacity:.7}
+    .hd-r{text-align:right;flex-shrink:0}
+    .net-lbl{font-size:7pt;text-transform:uppercase;letter-spacing:.07em;opacity:.8;margin-bottom:1px}
+    .net-amt{font-size:15pt;font-weight:900;margin-bottom:3px}
+    .schip{display:inline-block;background:rgba(255,255,255,.2);border:1px solid rgba(255,255,255,.4);border-radius:20px;padding:1px 8px;font-size:7.5pt;font-weight:700}
+    .stats{display:grid;grid-template-columns:repeat(3,1fr);border:1px solid #e2e8f0;border-top:none}
+    .stat{padding:7px;text-align:center;border-right:1px solid #e2e8f0}
+    .stat:last-child{border-right:none}
+    .sv{font-size:12pt;font-weight:900}
+    .sv.g{color:#059669}.sv.r{color:#e11d48}
+    .sl{font-size:7.5pt;color:#94a3b8;margin-top:1px}
+    .formula{background:#f8fafc;border:1px solid #e2e8f0;border-top:none;padding:5px 12px;font-size:8.5pt}
+    .formula .g{color:#059669;font-weight:600}.formula .r{color:#e11d48;font-weight:600}.formula .op{color:#cbd5e1;font-weight:700}
+    .dgrid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}
+    .dbox{border:1px solid #e2e8f0;border-radius:6px;overflow:hidden}
+    .dbox-hd{padding:5px 10px;font-size:7.5pt;font-weight:700;color:#fff;letter-spacing:.04em}
+    .inc-hd{background:#059669}.ded-hd{background:#e11d48}
+    .drow{display:flex;justify-content:space-between;padding:3.5px 10px;font-size:8pt;border-bottom:1px solid #f1f5f9}
+    .drow span:first-child{color:#475569}.drow span:last-child{font-weight:600}
+    .dtot{display:flex;justify-content:space-between;padding:5px 10px;font-size:8.5pt;font-weight:700;background:#f8fafc;border-top:1px solid #e2e8f0}
+    .payout{margin-top:8px;border:1px solid #e2e8f0;border-radius:6px;overflow:hidden}
+    .pr{display:flex;align-items:center;gap:9px;padding:6px 12px;border-bottom:1px solid #e2e8f0}
+    .badge{width:21px;height:21px;border-radius:5px;display:inline-flex;align-items:center;justify-content:center;font-size:8pt;font-weight:900;color:#fff;flex-shrink:0}
+    .g-bg{background:#059669}.v-bg{background:#7c3aed}.gr-bg{background:#94a3b8}
+    .pi{flex:1}.pt{font-size:8.5pt;font-weight:600}.pd{font-size:7.5pt;color:#94a3b8;margin-top:1px}
+    .pa{font-weight:700;font-size:9pt;flex-shrink:0}.pa.v{color:#7c3aed}.pa.gray{color:#94a3b8}
+    .ptot{display:flex;justify-content:space-between;align-items:center;padding:7px 12px;background:#f0fdf4;font-weight:900;font-size:10pt;color:#065f46}
+  `;
+  const title =
+    payrolls.length === 1
+      ? `Phieu luong - ${payrolls[0].maNhanVien || ""} - ${formatPeriod(payrolls[0].period)}`
+      : `Bang luong ${payrolls.length} nhan vien - ${formatPeriod(payrolls[0]?.period)}`;
+  const html = `<!DOCTYPE html><html lang="vi"><head><meta charset="UTF-8"><title>${title}</title><style>${css}</style></head><body>${payrolls.map(buildPayslipHTML).join("")}</body></html>`;
+  const win = window.open("", "_blank", "width=900,height=700");
+  if (!win) { alert("Trinh duyet chan popup. Vui long cho phep popup de xuat PDF."); return; }
+  win.document.write(html);
+  win.document.close();
+  win.addEventListener("load", () => { win.focus(); win.print(); });
+}
+
 export default function AttendancePage() {
   const { api, user } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -451,6 +597,7 @@ export default function AttendancePage() {
   const [payroll, setPayroll] = useState(null);
   const [payrollLoading, setPayrollLoading] = useState(false);
   const [payrollMessage, setPayrollMessage] = useState("");
+
   const [lookupCode, setLookupCode] = useState(() =>
     String(user?.code || user?.employeeCode || user?.maNhanVien || "").trim().toUpperCase()
   );
@@ -1442,7 +1589,7 @@ export default function AttendancePage() {
                       className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
                     />
                   </label>
-                  <div className="flex items-end">
+                  <div className="flex items-end gap-2">
                     <button
                       onClick={loadPayroll}
                       disabled={payrollLoading}
@@ -1450,6 +1597,15 @@ export default function AttendancePage() {
                     >
                       {payrollLoading ? <Loader2 size={16} className="animate-spin" /> : <Wallet size={16} />}
                       Xem lương
+                    </button>
+                    <button
+                      onClick={() => payroll && printPayrolls([payroll])}
+                      disabled={!payroll}
+                      title="Xuất phiếu lương PDF"
+                      className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-600 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      <Download size={16} />
+                      Xuất PDF
                     </button>
                   </div>
                 </div>
@@ -1460,6 +1616,7 @@ export default function AttendancePage() {
                     {payrollMessage}
                   </div>
                 )}
+
               </div>
 
               {payrollLoading && !payroll ? (
