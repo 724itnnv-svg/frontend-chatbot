@@ -898,6 +898,7 @@ function TreeForm({ initial, onSave, onClose, saving }) {
   const [imgErrors, setImgErrors] = useState({});
 
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+  const isON = form.loai === "ong_nghiem";
 
   const addUrl = () => {
     const url = urlInput.trim();
@@ -928,28 +929,28 @@ function TreeForm({ initial, onSave, onClose, saving }) {
           />
         </div>
         <div>
-          <Label>Giống cây</Label>
+          <Label>{isON ? "Giống" : "Giống cây"}</Label>
           <Input
             value={form.giong}
             onChange={(e) => set("giong", e.target.value)}
-            placeholder="VD: Dừa sáp, Dừa thường..."
+            placeholder={isON ? "VD: Dừa sáp, Chuối..." : "VD: Dừa sáp, Dừa thường..."}
           />
         </div>
         <div>
           <Label>Vị trí</Label>
-          <Input value={form.viTri} onChange={(e) => set("viTri", e.target.value)} placeholder="Xưởng, Vườn A..." />
+          <Input value={form.viTri} onChange={(e) => set("viTri", e.target.value)} placeholder={isON ? "Phòng lab, Tủ lạnh..." : "Xưởng, Vườn A..."} />
         </div>
         <div>
-          <Label>Khu vực / Lô</Label>
-          <Input value={form.khuVuc} onChange={(e) => set("khuVuc", e.target.value)} placeholder="Lô B, hàng 3..." />
+          <Label>{isON ? "Khu vực / Giá" : "Khu vực / Lô"}</Label>
+          <Input value={form.khuVuc} onChange={(e) => set("khuVuc", e.target.value)} placeholder={isON ? "Giá A, hàng 3..." : "Lô B, hàng 3..."} />
         </div>
         <div>
-          <Label>Ngày trồng</Label>
+          <Label>{isON ? "Ngày cấy" : "Ngày trồng"}</Label>
           <Input type="date" value={form.ngayTrong} onChange={(e) => set("ngayTrong", e.target.value)} />
         </div>
         <div>
-          <Label>Tên giống chi tiết</Label>
-          <Input value={form.tenGiong} onChange={(e) => set("tenGiong", e.target.value)} placeholder="VD: Dừa sáp Trà Vinh..." />
+          <Label>{isON ? "Tên giống / dòng" : "Tên giống chi tiết"}</Label>
+          <Input value={form.tenGiong} onChange={(e) => set("tenGiong", e.target.value)} placeholder={isON ? "VD: Dừa sáp Trà Vinh IN VITRO..." : "VD: Dừa sáp Trà Vinh..."} />
         </div>
         <div>
           <Label>Loại</Label>
@@ -967,12 +968,12 @@ function TreeForm({ initial, onSave, onClose, saving }) {
       </div>
       <div>
         <Label>Ghi chú</Label>
-        <Textarea value={form.ghiChu} onChange={(e) => set("ghiChu", e.target.value)} placeholder="Ghi chú về cây..." />
+        <Textarea value={form.ghiChu} onChange={(e) => set("ghiChu", e.target.value)} placeholder={isON ? "Ghi chú về ống nghiệm..." : "Ghi chú về cây..."} />
       </div>
 
       {/* Ảnh cây */}
       <div>
-        <Label>Ảnh cây (URL hoặc base64)</Label>
+        <Label>{isON ? "Ảnh ống nghiệm (URL hoặc base64)" : "Ảnh cây (URL hoặc base64)"}</Label>
         <div className="flex gap-2">
           <div className="flex-1 relative">
             <Link size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
@@ -1035,7 +1036,7 @@ function TreeForm({ initial, onSave, onClose, saving }) {
           className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2 rounded-xl text-sm font-medium transition disabled:opacity-60"
         >
           {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-          {initial ? "Lưu thay đổi" : "Thêm cây"}
+          {initial ? "Lưu thay đổi" : isON ? "Thêm ống nghiệm" : "Thêm cây"}
         </button>
       </div>
     </form>
@@ -1188,18 +1189,18 @@ function BatchAddModal({ existingTrees, onClose, onDone }) {
           </div>
           <div>
             <Label>Vị trí</Label>
-            <Input value={template.viTri} onChange={(e) => set("viTri", e.target.value)} placeholder="Xưởng, Vườn A..." />
+            <Input value={template.viTri} onChange={(e) => set("viTri", e.target.value)} placeholder={template.loai === "ong_nghiem" ? "Phòng lab, Tủ lạnh..." : "Xưởng, Vườn A..."} />
           </div>
           <div>
-            <Label>Khu vực / Lô</Label>
-            <Input value={template.khuVuc} onChange={(e) => set("khuVuc", e.target.value)} placeholder="Lô B, hàng 3..." />
+            <Label>{template.loai === "ong_nghiem" ? "Khu vực / Giá" : "Khu vực / Lô"}</Label>
+            <Input value={template.khuVuc} onChange={(e) => set("khuVuc", e.target.value)} placeholder={template.loai === "ong_nghiem" ? "Giá A, hàng 3..." : "Lô B, hàng 3..."} />
           </div>
           <div>
-            <Label>Giống cây</Label>
-            <Input value={template.giong} onChange={(e) => set("giong", e.target.value)} placeholder="Dừa sáp, Dừa thường..." />
+            <Label>{template.loai === "ong_nghiem" ? "Giống" : "Giống cây"}</Label>
+            <Input value={template.giong} onChange={(e) => set("giong", e.target.value)} placeholder={template.loai === "ong_nghiem" ? "VD: Dừa sáp, Chuối..." : "Dừa sáp, Dừa thường..."} />
           </div>
           <div>
-            <Label>Ngày trồng</Label>
+            <Label>{template.loai === "ong_nghiem" ? "Ngày cấy" : "Ngày trồng"}</Label>
             <Input type="date" value={template.ngayTrong} onChange={(e) => set("ngayTrong", e.target.value)} />
           </div>
           <div className="col-span-2">
