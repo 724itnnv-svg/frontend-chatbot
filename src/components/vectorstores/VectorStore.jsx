@@ -145,14 +145,19 @@ export default function VectorStoreManage() {
   const handleDeleteFile = async (fileId) => {
     if (!window.confirm("Xóa file này?")) return;
     try {
-      let result = await fetch(`/api/vector-stores/${selectedStore.id}/files/${fileId}`,{
+      const result = await fetch(`/api/vector-stores/${selectedStore.id}/files/${encodeURIComponent(fileId)}`,{
           method: "DELETE",
           headers: { Authorization: `Bearer ${token}` }
         }
       );
-      setFiles((prev) => prev.filter((f) => f.id !== fileId));
+      const data = await result.json().catch(() => ({}));
+      if (!result.ok || data.success === false) {
+        throw new Error(data.error || data.message || "Khong the xoa file");
+      }
+      setFiles((prev) => prev.filter((f) => f.id !== fileId && f.vectorStoreFileId !== fileId));
     } catch (err) {
       console.error(err);
+      alert(err.message || "Khong the xoa file");
     }
   };
 

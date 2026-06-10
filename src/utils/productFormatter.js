@@ -1,69 +1,84 @@
-///////////////////////
-// CLEAN FIELD
-///////////////////////
+const EMPTY_VALUE = "-";
+
 export const cleanField = (value) => {
-  if (!value) return "-";
+  if (value === null || value === undefined || value === "") return EMPTY_VALUE;
+  if (Array.isArray(value)) {
+    const items = value.map(cleanField).filter((item) => item && item !== EMPTY_VALUE);
+    return items.length ? items.join(" | ") : EMPTY_VALUE;
+  }
 
   return String(value)
     .split("### PRODUCT")[0]
     .split("--- END ---")[0]
-    .trim();
+    .trim() || EMPTY_VALUE;
 };
 
-///////////////////////
-// BUILD 1 PRODUCT
-///////////////////////
-export const buildProductTemplate = (p, options) => {
+const cleanList = (value) => {
+  if (Array.isArray(value)) return value.map(cleanField).filter((item) => item && item !== EMPTY_VALUE);
+  return String(value || "")
+    .split(/[,|;\n]+/)
+    .map(cleanField)
+    .filter((item) => item && item !== EMPTY_VALUE);
+};
+
+const formatListBlock = (value) => {
+  const items = cleanList(value);
+  if (!items.length) return EMPTY_VALUE;
+  return items.map((item) => `- ${item}`).join("\n");
+};
+
+const formatPrice = (product) => Number(product.PRICE ?? product.PRICE_VND ?? 0) || 0;
+
+export const buildProductTemplate = (product = {}) => {
+  const company = product.COMPANY || product.COMPANY_ID || "";
+
   return `
-### PRODUCT ${cleanField(p.PRODUCT_CODE)}
+### PRODUCT ${cleanField(product.PRODUCT_CODE)}
 
-PRODUCT_CODE: ${cleanField(p.PRODUCT_CODE)}
-PRODUCT_NAME: ${cleanField(p.PRODUCT_NAME)}
-FAMILY: ${cleanField(p.FAMILY)}
-VARIANT: ${cleanField(p.VARIANT)}
-PRICE_VND: ${p.PRICE_VND || 0}
-${options?.byMKTPromo ? `PROMO: ${cleanField(p.PROMO_MKT ?? "")}` : ""}${options?.byPromo ? `PROMO: ${cleanField(p.PROMO ?? "")}` : ""}
+PRODUCT_CODE: ${cleanField(product.PRODUCT_CODE)}
+PRODUCT_NAME: ${cleanField(product.PRODUCT_NAME)}
+TYPE: ${cleanField(product.TYPE || "fertilizer")}
+COMPANY: ${cleanField(company)}
+PRICE: ${formatPrice(product)}
+UNIT_NAME: ${cleanField(product.UNIT_NAME)}
+PACKING_QUANTITY: ${cleanField(product.PACKING_QUANTITY)}
+FORM_COLOR: ${cleanField(product.FORM_COLOR)}
 
-INGREDIENTS: ${cleanField(p.INGREDIENTS)}
+INGREDIENTS:
+${cleanField(product.INGREDIENTS)}
 
 BENEFITS:
-${cleanField(p.BENEFITS)}
-USAGE: ${cleanField(p.USAGE)}
-TARGET_CROPS: ${cleanField(p.TARGET_CROPS)}
-STAGES: ${cleanField(p.STAGES)}
-KEYWORDS: ${
-    p.KEYWORDS
-      .map(cleanField)
-      .filter(Boolean)
-      .join(" | ")
-  }
+${formatListBlock(product.BENEFITS)}
 
-IMAGE_URL: ${cleanField(p.IMAGE_URL)}
+USAGE:
+${cleanField(product.USAGE)}
+
+TARGET_CROPS: ${cleanField(product.TARGET_CROPS)}
+EXTENDED_CROPS: ${cleanField(product.EXTENDED_CROPS)}
+STAGES: ${cleanField(product.STAGES)}
+
+KEYWORDS:
+${formatListBlock(product.KEYWORDS)}
+
+IMAGE_URL:
+${formatListBlock(product.IMAGE_URL)}
 
 --- END ---
 `.trim();
 };
 
-///////////////////////
-// BUILD MULTI / SINGLE
-///////////////////////
 export const buildPreviewData = (products = [], options = {}) => {
-  const { byProduct = true } = options; 
-  
-  // 👉 Case 1: mỗi product 1 item
+  const { byProduct = true } = options;
+
   if (byProduct) {
-    return products.map((p, index) => ({
-      id: p._id || index,
-      content: buildProductTemplate(p,options),
-      raw: p,
+    return products.map((product, index) => ({
+      id: product._id || product.PRODUCT_CODE || index,
+      content: buildProductTemplate(product),
+      raw: product,
     }));
   }
 
-  // 👉 Case 2: gộp tất cả vào 1 file
-  const mergedContent = products
-    .map((p) => buildProductTemplate(p, options))
-    .join("\n\n");
- 
+  const mergedContent = products.map((product) => buildProductTemplate(product)).join("\n\n");
   return [
     {
       id: "all-products",
@@ -73,75 +88,64 @@ export const buildPreviewData = (products = [], options = {}) => {
   ];
 };
 
-///////////////////////
-// PARSE TEXT → JSON (BONUS 🔥)
-///////////////////////
-export const parseProductsFromText = (text = "", options) => {
+export const parseProductsFromText = (text = "") => {
   if (!text) return [];
 
   const blocks = text.split("--- END ---");
-
   return blocks
     .map((block) => block.trim())
     .filter(Boolean)
     .map((block) => {
       const lines = block.split("\n");
-
       const data = {};
       let currentKey = null;
 
       lines.forEach((line) => {
         const cleanLine = line.trim();
-
-        // bỏ dòng title ###
         if (cleanLine.startsWith("### PRODUCT")) return;
 
-        // detect key: value
         const match = cleanLine.match(/^([A-Z_]+):\s*(.*)$/);
-
         if (match) {
           currentKey = match[1];
           data[currentKey] = match[2];
-        } else if (currentKey) {
-          // append multiline (BENEFITS)
-          data[currentKey] += "\n" + cleanLine;
+          return;
         }
+
+        if (currentKey) data[currentKey] += `\n${cleanLine}`;
       });
 
       return {
         PRODUCT_CODE: data.PRODUCT_CODE || "",
         PRODUCT_NAME: data.PRODUCT_NAME || "",
-        FAMILY: data.FAMILY || "",
-        VARIANT: data.VARIANT || "",
-        PRICE_VND: Number(data.PRICE_VND) || 0,
-        PROMO: data.PROMO || "none",
-        ...(options.byMKTPromo && { PROMO_MKT: data.PROMO_MKT??'' }),       
+        TYPE: data.TYPE || "fertilizer",
+        COMPANY: data.COMPANY || "",
+        COMPANY_ID: data.COMPANY || "",
+        PRICE: Number(data.PRICE ?? data.PRICE_VND) || 0,
+        PRICE_VND: Number(data.PRICE ?? data.PRICE_VND) || 0,
+        UNIT_NAME: data.UNIT_NAME || "",
+        PACKING_QUANTITY: data.PACKING_QUANTITY || "",
+        FORM_COLOR: data.FORM_COLOR || "",
         INGREDIENTS: data.INGREDIENTS || "",
-        BENEFITS: data.BENEFITS || "",
+        BENEFITS: cleanList(data.BENEFITS),
         USAGE: data.USAGE || "",
         TARGET_CROPS: data.TARGET_CROPS || "",
+        EXTENDED_CROPS: data.EXTENDED_CROPS || "",
         STAGES: data.STAGES || "",
-        KEYWORDS: data.KEYWORDS || "",
-        IMAGE_URL: data.IMAGE_URL || "",
+        KEYWORDS: cleanList(data.KEYWORDS),
+        IMAGE_URL: cleanList(data.IMAGE_URL),
       };
     });
 };
 
-///////////////////////
-// CHUNK FOR VECTOR DB (OPTIONAL 🔥🔥)
-///////////////////////
-export const chunkProductsForVector = (products = []) => {
-  return products.map((p, index) => {
-    const content = buildProductTemplate(p);
-
-    return {
-      id: p._id || `product-${index}`,
-      content,
-      metadata: {
-        code: p.PRODUCT_CODE,
-        name: p.PRODUCT_NAME,
-        family: p.FAMILY,
-      },
-    };
-  });
-};
+export const chunkProductsForVector = (products = []) =>
+  products.map((product, index) => ({
+    id: product._id || product.PRODUCT_CODE || `product-${index}`,
+    content: buildProductTemplate(product),
+    metadata: {
+      code: product.PRODUCT_CODE,
+      name: product.PRODUCT_NAME,
+      type: product.TYPE,
+      company: product.COMPANY || product.COMPANY_ID,
+      price: Number(product.PRICE ?? product.PRICE_VND ?? 0) || 0,
+    },
+  }));
