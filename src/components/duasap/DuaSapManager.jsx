@@ -90,10 +90,10 @@ const CG = (() => {
   };
 })();
 
-// Ống nghiệm: QR 15mm, cell 31×39mm, ~6 cột × 7 hàng = 42/trang
+// Ống nghiệm: QR 20mm, cell 31×39mm, ~6 cột × 7 hàng = 42/trang
 const ON = (() => {
   const MARGIN = 8, PAD = 2;
-  const QR = 15, TEXT_H = 7;
+  const QR = 20, TEXT_H = 7;
   const CELL_W = 31, CELL_H = 39;
   const INN_W = CELL_W - PAD * 2;
   const INN_H = CELL_H - PAD * 2;
@@ -122,7 +122,7 @@ function drawQRLabel(doc, layout, cx, cy, assets, tree) {
 /**
  * Tạo PDF A4:
  *  - Cây giống: layout 3×4 (size gốc)
- *  - Ống nghiệm: layout 7×8, QR 15mm (1.5cm) — trang riêng
+ *  - Ống nghiệm: layout 7×8, QR 20mm (2cm) — trang riêng
  */
 async function exportAllQRtoPDF(trees, onProgress) {
   const { jsPDF } = await import("jspdf");
