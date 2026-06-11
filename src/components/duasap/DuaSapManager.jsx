@@ -2205,7 +2205,6 @@ export default function DuaSapManager() {
   const [distinctViTri, setDistinctViTri] = useState([]);
   const [distinctKhuVuc, setDistinctKhuVuc] = useState([]);
   const [distinctGiong, setDistinctGiong] = useState([]);
-  const optionsAccRef = useRef({ viTri: new Set(), khuVuc: new Set(), giong: new Set() });
 
   // Modal states
   const [showTreeForm, setShowTreeForm] = useState(false);
@@ -2358,16 +2357,6 @@ export default function DuaSapManager() {
       setTrees(list);
       setTotalTrees(r.data.total || 0);
 
-      // Tích lũy distinct options cho filter dropdowns
-      list.forEach((t) => {
-        if (t.viTri) optionsAccRef.current.viTri.add(t.viTri);
-        if (t.khuVuc) optionsAccRef.current.khuVuc.add(t.khuVuc);
-        if (t.giong) optionsAccRef.current.giong.add(t.giong);
-      });
-      setDistinctViTri([...optionsAccRef.current.viTri].sort());
-      setDistinctKhuVuc([...optionsAccRef.current.khuVuc].sort());
-      setDistinctGiong([...optionsAccRef.current.giong].sort());
-
       // Tự mở form sửa nếu điều hướng đến với editMaCay (từ trang chi tiết / QR)
       if (pendingEditRef.current) {
         const target = list.find(
@@ -2386,6 +2375,17 @@ export default function DuaSapManager() {
       setLoading(false);
     }
   }, [search, filterTrangThai, filterLoai, filterViTri, filterKhuVuc, filterGiong]); // eslint-disable-line
+
+  // Lấy distinct options cho dropdown filter — chỉ gọi 1 lần khi mount
+  useEffect(() => {
+    api.get("/dua-sap/options").then((r) => {
+      if (r.data?.ok) {
+        setDistinctViTri(r.data.viTri || []);
+        setDistinctKhuVuc(r.data.khuVuc || []);
+        setDistinctGiong(r.data.giong || []);
+      }
+    }).catch(() => {});
+  }, []); // eslint-disable-line
 
   // Khi filter/search thay đổi → về trang 1
   useEffect(() => {
