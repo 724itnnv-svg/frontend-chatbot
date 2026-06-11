@@ -1,4 +1,4 @@
-﻿import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { Search, MapPin, Leaf, ChevronRight, TreePine, AlertCircle, Loader2 } from "lucide-react";
@@ -52,35 +52,102 @@ const GIONG_LABEL = {
   khac: "Khác",
 };
 
+const PAGE_SIZE = 12;
+
 export default function DuaSapPublicPage() {
   const navigate = useNavigate();
   const [trees, setTrees] = useState([]);
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState(null);
   const [search, setSearch] = useState("");
   const [searchInput, setSearchInput] = useState("");
+  const [khuVuc, setKhuVuc] = useState("");
+  const [khuVucList, setKhuVucList] = useState([]);
+  const sentinelRef = useRef(null);
 
+  // Fetch danh sách khu vực cho dropdown (1 lần)
   useEffect(() => {
-    const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
-    setLoading(true);
-    setError(null);
+    axios
+      .get(apiUrl("/api/public/dua-sap/khu-vuc"))
+      .then((r) => setKhuVucList(Array.isArray(r?.data?.data) ? r.data.data : []))
+      .catch(() => {});
+  }, []);
+
+  // Fetch khi page, search hoặc khuVuc thay đổi
+  useEffect(() => {
+    const controller = new AbortController();
+    if (page === 1) {
+      setLoading(true);
+      setError(null);
+    } else {
+      setLoadingMore(true);
+    }
     axios
       .get(apiUrl("/api/public/dua-sap"), {
-        params: search ? { search } : {},
-        ...(controller ? { signal: controller.signal } : {}),
+        params: {
+          ...(search ? { search } : {}),
+          ...(khuVuc ? { khuVuc } : {}),
+          page,
+          limit: PAGE_SIZE,
+        },
+        signal: controller.signal,
       })
-      .then((r) => setTrees(Array.isArray(r?.data?.data) ? r.data.data : []))
+      .then((r) => {
+        const data = Array.isArray(r?.data?.data) ? r.data.data : [];
+        const serverTotal = r?.data?.total ?? 0;
+        setTotal(serverTotal);
+        setTrees((prev) => (page === 1 ? data : [...prev, ...data]));
+        setHasMore(page * PAGE_SIZE < serverTotal);
+      })
       .catch((e) => {
         if (axios.isCancel(e)) return;
         setError("Không thể tải dữ liệu. Vui lòng thử lại.");
       })
-      .finally(() => setLoading(false));
-    return () => controller?.abort();
-  }, [search]);
+      .finally(() => {
+        setLoading(false);
+        setLoadingMore(false);
+      });
+    return () => controller.abort();
+  }, [page, search, khuVuc]);
+
+  // IntersectionObserver: khi sentinel vào viewport thì tải trang tiếp
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el || !hasMore || loading || loadingMore) return;
+    const obs = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) setPage((p) => p + 1);
+      },
+      { rootMargin: "300px" }
+    );
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [hasMore, loading, loadingMore]);
 
   function handleSearch(e) {
     e.preventDefault();
-    setSearch(searchInput.trim());
+    const q = searchInput.trim();
+    if (q === search) return;
+    setPage(1);
+    setHasMore(true);
+    setSearch(q);
+  }
+
+  function handleClearSearch() {
+    setPage(1);
+    setHasMore(true);
+    setSearchInput("");
+    setSearch("");
+  }
+
+  function handleKhuVucChange(val) {
+    setPage(1);
+    setHasMore(true);
+    setKhuVuc(val);
   }
 
   const grouped = trees.reduce((acc, t) => {
@@ -127,26 +194,56 @@ export default function DuaSapPublicPage() {
               Tìm
             </button>
           </form>
+
+          {/* Dropdown lọc khu vực */}
+          {khuVucList.length > 0 && (
+            <div className="mt-3 flex justify-center">
+              <select
+                value={khuVuc}
+                onChange={(e) => handleKhuVucChange(e.target.value)}
+                className="bg-white/20 text-white text-sm rounded-xl px-4 py-2 border border-white/30 focus:outline-none focus:ring-2 focus:ring-white/50 cursor-pointer appearance-none pr-8"
+                style={{ backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.5'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E\")", backgroundRepeat: "no-repeat", backgroundPosition: "right 12px center" }}
+              >
+                <option value="" className="text-gray-800 bg-white">Tất cả khu vực</option>
+                {khuVucList.map((kv) => (
+                  <option key={kv} value={kv} className="text-gray-800 bg-white">{kv}</option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
       </header>
 
       <main className="max-w-5xl mx-auto px-4 py-8">
         {/* Stats bar */}
-        {!loading && !error && (
-          <div className="mb-6 flex items-center gap-2 text-sm text-gray-500">
+        {!loading && !error && total > 0 && (
+          <div className="mb-6 flex flex-wrap items-center gap-2 text-sm text-gray-500">
             <Leaf size={14} className="text-emerald-500" />
             <span>
               {search ? (
                 <>Kết quả cho "<span className="font-medium text-gray-700">{search}</span>": </>
               ) : "Tất cả cây: "}
-              <span className="font-semibold text-emerald-700">{trees.length}</span> cây
+              <span className="font-semibold text-emerald-700">{total}</span> cây
             </span>
+            {khuVuc && (
+              <span className="inline-flex items-center gap-1 bg-emerald-100 text-emerald-700 text-xs font-medium px-2.5 py-0.5 rounded-full">
+                <MapPin size={11} />
+                {khuVuc}
+                <button
+                  onClick={() => handleKhuVucChange("")}
+                  className="ml-0.5 hover:text-emerald-900 leading-none"
+                  aria-label="Bỏ lọc khu vực"
+                >
+                  ×
+                </button>
+              </span>
+            )}
             {search && (
               <button
-                onClick={() => { setSearch(""); setSearchInput(""); }}
-                className="ml-2 text-xs text-red-500 hover:underline"
+                onClick={handleClearSearch}
+                className="text-xs text-red-500 hover:underline"
               >
-                Xóa bộ lọc
+                Xóa tìm kiếm
               </button>
             )}
           </div>
@@ -166,7 +263,7 @@ export default function DuaSapPublicPage() {
           </div>
         )}
 
-        {!loading && !error && trees.length === 0 && (
+        {!loading && !error && trees.length === 0 && !hasMore && (
           <div className="text-center py-24 text-gray-400">
             <TreePine size={40} className="mx-auto mb-3 text-gray-300" />
             <p className="text-sm">Không tìm thấy cây nào.</p>
@@ -234,6 +331,23 @@ export default function DuaSapPublicPage() {
             </div>
           </section>
         ))}
+
+        {/* Sentinel để IntersectionObserver theo dõi */}
+        <div ref={sentinelRef} className="h-4" />
+
+        {/* Spinner khi đang tải thêm */}
+        {loadingMore && (
+          <div className="flex justify-center py-6">
+            <Loader2 size={24} className="animate-spin text-emerald-400" />
+          </div>
+        )}
+
+        {/* Thông báo đã hết */}
+        {!hasMore && trees.length > 0 && !loading && (
+          <p className="text-center text-xs text-gray-400 py-4">
+            Đã hiển thị tất cả {total} cây
+          </p>
+        )}
       </main>
 
       <footer className="text-center py-6 text-xs text-gray-400 border-t border-gray-100">

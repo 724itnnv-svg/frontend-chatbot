@@ -30,6 +30,7 @@ import {
 import { useAuth } from "../context/AuthContext";
 
 const STORAGE_HIDDEN_COLUMNS = "payroll_hidden_columns_v1";
+const STORAGE_COLUMN_ORDER = "payroll_column_order_v1";
 const STORAGE_PAYROLL_FORMULAS = "payroll_formula_settings_v1";
 const STORAGE_PAYROLL_PERIOD = "payroll_manager_period_v1";
 const STATUS_OPTIONS = ["DRAFT", "APPROVED", "PAID"];
@@ -1251,10 +1252,58 @@ export default function PayrollManager() {
     }
   });
 
-  const visibleColumns = useMemo(
-    () => PAYROLL_COLUMNS.filter((column) => column.frozen || !hiddenColumns.has(column.key)),
-    [hiddenColumns]
-  );
+  const [columnOrder, setColumnOrder] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(STORAGE_COLUMN_ORDER) || "null");
+      if (Array.isArray(saved) && saved.length) return saved;
+    } catch {}
+    return PAYROLL_COLUMNS.map((c) => c.key);
+  });
+
+  const [dragColKey, setDragColKey] = useState(null);
+  const [dragOverColKey, setDragOverColKey] = useState(null);
+
+  const visibleColumns = useMemo(() => {
+    const visible = PAYROLL_COLUMNS.filter((column) => column.frozen || !hiddenColumns.has(column.key));
+    return visible.sort((a, b) => {
+      const ai = columnOrder.indexOf(a.key);
+      const bi = columnOrder.indexOf(b.key);
+      return (ai === -1 ? 9999 : ai) - (bi === -1 ? 9999 : bi);
+    });
+  }, [hiddenColumns, columnOrder]);
+
+  const handleColDragStart = (e, key) => {
+    setDragColKey(key);
+    e.dataTransfer.effectAllowed = "move";
+  };
+
+  const handleColDragOver = (e, key) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    if (key !== dragColKey) setDragOverColKey(key);
+  };
+
+  const handleColDrop = (e, targetKey) => {
+    e.preventDefault();
+    if (!dragColKey || dragColKey === targetKey) { setDragColKey(null); setDragOverColKey(null); return; }
+    const targetCol = PAYROLL_COLUMNS.find((c) => c.key === targetKey);
+    if (targetCol?.frozen) { setDragColKey(null); setDragOverColKey(null); return; }
+    setColumnOrder((prev) => {
+      const order = [...prev];
+      const fromIdx = order.indexOf(dragColKey);
+      const toIdx = order.indexOf(targetKey);
+      if (fromIdx === -1 || toIdx === -1) return prev;
+      order.splice(fromIdx, 1);
+      order.splice(toIdx, 0, dragColKey);
+      return order;
+    });
+    setDragColKey(null);
+    setDragOverColKey(null);
+  };
+
+  const handleColDragEnd = () => { setDragColKey(null); setDragOverColKey(null); };
+
+  const resetColumnOrder = () => setColumnOrder(PAYROLL_COLUMNS.map((c) => c.key));
 
   const filtered = useMemo(() => {
     const query = q.trim().toLowerCase();
@@ -1463,6 +1512,10 @@ export default function PayrollManager() {
   useEffect(() => {
     localStorage.setItem(STORAGE_HIDDEN_COLUMNS, JSON.stringify(Array.from(hiddenColumns)));
   }, [hiddenColumns]);
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_COLUMN_ORDER, JSON.stringify(columnOrder));
+  }, [columnOrder]);
 
   useEffect(() => {
     const companies = Array.from(new Set(rows.map((row) => row.congTyDongBHXH).filter(Boolean))).slice(0, 4);
@@ -2122,11 +2175,26 @@ export default function PayrollManager() {
                   const isPinned = isPinnedPayrollColumn(column);
                   const isSorted = sortConfig.key === column.key;
                   const SortIcon = isSorted ? (sortConfig.direction === "asc" ? ArrowUp : ArrowDown) : ArrowUpDown;
+                  const isDragging = dragColKey === column.key;
+                  const isDragOver = dragOverColKey === column.key && !isDragging && !column.frozen;
                   return (
                     <th
                       key={column.key}
-                      style={{ minWidth: column.width, width: column.width, left: isPinned ? ROW_INDEX_COLUMN_WIDTH : undefined }}
-                      className={`border-b border-r px-2 py-2 text-left ${isPinned ? "sticky z-30 bg-slate-100 shadow-[1px_0_0_0_rgb(226,232,240)]" : ""}`}
+                      draggable={!column.frozen}
+                      onDragStart={!column.frozen ? (e) => handleColDragStart(e, column.key) : undefined}
+                      onDragOver={!column.frozen ? (e) => handleColDragOver(e, column.key) : undefined}
+                      onDrop={!column.frozen ? (e) => handleColDrop(e, column.key) : undefined}
+                      onDragEnd={handleColDragEnd}
+                      style={{
+                        minWidth: column.width, width: column.width,
+                        left: isPinned ? ROW_INDEX_COLUMN_WIDTH : undefined,
+                        opacity: isDragging ? 0.35 : 1,
+                      }}
+                      className={`border-b border-r px-2 py-2 text-left transition-colors select-none
+                        ${isPinned ? "sticky z-30 bg-slate-100 shadow-[1px_0_0_0_rgb(226,232,240)]" : ""}
+                        ${!column.frozen ? "cursor-grab active:cursor-grabbing" : ""}
+                        ${isDragOver ? "bg-sky-100 border-l-2 border-l-sky-500" : ""}
+                      `}
                     >
                       <button
                         type="button"
@@ -2623,7 +2691,12 @@ export default function PayrollManager() {
             <EyeOff className="h-4 w-4" />
             Chỉ cột chính
           </button>
+          <button onClick={resetColumnOrder} className="inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-sm font-semibold hover:bg-slate-50" title="Khôi phục thứ tự cột về mặc định">
+            <RefreshCw className="h-4 w-4" />
+            Đặt lại thứ tự cột
+          </button>
         </div>
+        <p className="mb-3 text-xs text-slate-400">Kéo thả tiêu đề cột trên bảng để thay đổi thứ tự. Cột có dấu <span className="font-bold text-rose-400">*</span> không thể di chuyển.</p>
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
           {PAYROLL_COLUMNS.map((column) => (
             <label key={column.key} className="flex items-center gap-2 rounded-xl border px-3 py-2 text-sm">

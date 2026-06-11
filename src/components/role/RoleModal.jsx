@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { ShieldCheck, Save, X, Home, ChevronRight, Zap } from "lucide-react";
+import { ShieldCheck, Save, X, Home, ChevronRight, Zap, Check } from "lucide-react";
 import APP_PERMISSIONS from "./configRole";
 import { useAuth } from "../../context/AuthContext";
 
@@ -57,9 +57,9 @@ export default function RoleModal({ isOpen, onClose, onSave, initialData }) {
     }
     setPermissions(prev => {
       const currentActions = prev[screenId] || {};
-      return { 
-        ...prev, 
-        [screenId]: { ...currentActions, [actionId]: !currentActions[actionId] } 
+      return {
+        ...prev,
+        [screenId]: { ...currentActions, [actionId]: !currentActions[actionId] }
       };
     });
   };
@@ -69,10 +69,10 @@ export default function RoleModal({ isOpen, onClose, onSave, initialData }) {
     if (!selectedScreens.includes(screenId)) {
       setSelectedScreens(prev => [...prev, screenId]);
     }
-    
+
     const allActionIds = APP_PERMISSIONS.actions.map(a => a.id);
     const current = permissions[screenId] || {};
-    
+
     // Kiểm tra xem hàng này đã được tích hết tất cả các cột chưa
     const isFullRow = allActionIds.every(id => current[id] === true);
 
@@ -85,16 +85,40 @@ export default function RoleModal({ isOpen, onClose, onSave, initialData }) {
     setPermissions(prev => ({ ...prev, [screenId]: updatedRow }));
   };
 
-  // 4. CHỨC NĂNG TOÀN QUYỀN (SUPER ADMIN): Active toàn bộ màn hình và mọi hành động
+  // 4. Toggle toàn bộ cột "Hiển thị"
+  const handleToggleAllVisible = () => {
+    const allScreens = APP_PERMISSIONS.screens.map(s => s.id);
+    const allVisible = allScreens.every(id => selectedScreens.includes(id));
+    if (allVisible) {
+      setSelectedScreens([]);
+      if (screenDefault) setScreenDefault("");
+    } else {
+      setSelectedScreens(allScreens);
+    }
+  };
+
+  // 5. Toggle toàn bộ 1 cột action (xem/thêm/sửa/...)
+  const handleSelectAllColumn = (actionId) => {
+    const allScreens = APP_PERMISSIONS.screens.map(s => s.id);
+    const allChecked = allScreens.every(id => permissions[id]?.[actionId] === true);
+    const newPermissions = { ...permissions };
+    allScreens.forEach(id => {
+      newPermissions[id] = { ...(newPermissions[id] || {}), [actionId]: !allChecked };
+    });
+    if (!allChecked) setSelectedScreens(allScreens);
+    setPermissions(newPermissions);
+  };
+
+  // 6. CHỨC NĂNG TOÀN QUYỀN (SUPER ADMIN): Active toàn bộ màn hình và mọi hành động
   const handleSelectAllGlobal = () => {
     const allScreens = APP_PERMISSIONS.screens.map(s => s.id);
     const allActionIds = APP_PERMISSIONS.actions.map(a => a.id);
     const fullPermissions = {};
-    
+
     APP_PERMISSIONS.screens.forEach(screen => {
       const rowActions = {};
-      allActionIds.forEach(actionId => { 
-        rowActions[actionId] = true; 
+      allActionIds.forEach(actionId => {
+        rowActions[actionId] = true;
       });
       fullPermissions[screen.id] = rowActions;
     });
@@ -123,7 +147,7 @@ export default function RoleModal({ isOpen, onClose, onSave, initialData }) {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
       {/* Container chính */}
       <div className="bg-white w-full max-w-7xl max-h-[95vh] rounded-lg shadow-2xl overflow-hidden flex flex-col border border-slate-200">
-        
+
         {/* Header */}
         <div className="px-8 py-5 flex justify-between items-center border-b-2 border-slate-900">
           <div className="flex items-center gap-4">
@@ -148,7 +172,7 @@ export default function RoleModal({ isOpen, onClose, onSave, initialData }) {
 
         {/* Body */}
         <div className="flex-1 overflow-y-auto p-0 flex">
-          
+
           {/* Cột trái: Sidebar điều khiển */}
           <div className="w-80 border-r border-slate-100 bg-slate-50/50 p-8 space-y-8">
             <section>
@@ -170,8 +194,8 @@ export default function RoleModal({ isOpen, onClose, onSave, initialData }) {
                 <Home size={12} /> Điều hướng chính
               </h3>
               <div className="relative">
-                <select 
-                  value={screenDefault} 
+                <select
+                  value={screenDefault}
                   onChange={(e) => {
                     const val = e.target.value;
                     setScreenDefault(val);
@@ -197,13 +221,11 @@ export default function RoleModal({ isOpen, onClose, onSave, initialData }) {
                 <button
                   type="button"
                   onClick={() => setAllPage(prev => prev === 1 ? 0 : 1)}
-                  className={`w-10 h-5 border relative transition-all flex-shrink-0 ${
-                    allPage === 1 ? "bg-indigo-600 border-indigo-600" : "bg-white border-slate-200"
-                  }`}
+                  className={`w-10 h-5 border relative transition-all flex-shrink-0 ${allPage === 1 ? "bg-indigo-600 border-indigo-600" : "bg-white border-slate-200"
+                    }`}
                 >
-                  <div className={`absolute top-0 w-4 h-full transition-all ${
-                    allPage === 1 ? "left-5 bg-white" : "left-0 bg-slate-200"
-                  }`} />
+                  <div className={`absolute top-0 w-4 h-full transition-all ${allPage === 1 ? "left-5 bg-white" : "left-0 bg-slate-200"
+                    }`} />
                 </button>
                 <div>
                   <p className={`text-xs font-bold transition-colors ${allPage === 1 ? "text-indigo-600" : "text-slate-400"}`}>
@@ -222,10 +244,10 @@ export default function RoleModal({ isOpen, onClose, onSave, initialData }) {
             <div className="sticky top-0 bg-white/90 backdrop-blur-md z-10 flex items-center justify-between px-10 py-4 border-b border-slate-100">
               <div className="flex items-center gap-4">
                 <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Ma trận quyền hạn chi tiết</span>
-                
+
                 {/* NÚT KÍCH HOẠT TOÀN QUYỀN */}
-                <button 
-                  type="button" 
+                <button
+                  type="button"
                   onClick={handleSelectAllGlobal}
                   className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 text-amber-600 border border-amber-200 text-[9px] font-black uppercase hover:bg-amber-500 hover:text-white transition-all rounded-sm shadow-sm active:scale-95"
                 >
@@ -244,10 +266,52 @@ export default function RoleModal({ isOpen, onClose, onSave, initialData }) {
                 <thead>
                   <tr className="bg-slate-50/50">
                     <th className="pl-10 pr-6 py-4 text-[10px] font-bold text-slate-500 uppercase text-left border-b border-slate-100">Tính năng</th>
-                    <th className="px-4 py-4 text-[10px] font-bold text-slate-500 uppercase text-center border-b border-slate-100">Hiển thị</th>
-                    {APP_PERMISSIONS.actions.map(action => (
-                      <th key={action.id} className="px-4 py-4 text-[10px] font-bold text-slate-500 uppercase text-center border-b border-slate-100">{action.name}</th>
-                    ))}
+                    <th className="px-4 py-4 text-center border-b border-slate-100">
+                      <div className="flex flex-col items-center gap-1.5">
+                        <span className="text-[10px] font-bold text-slate-500 uppercase">Hiển thị</span>
+                        {(() => {
+                          const total = APP_PERMISSIONS.screens.length;
+                          const count = selectedScreens.length;
+                          const allOn = count === total;
+                          return (
+                            <button
+                              type="button"
+                              onClick={handleToggleAllVisible}
+                              title={allOn ? "Tắt tất cả" : "Bật tất cả"}
+                              className={`flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-black uppercase border transition-all ${allOn
+                                ? 'bg-indigo-600 border-indigo-600 text-white hover:bg-indigo-700'
+                                : 'bg-white border-slate-300 text-slate-400 hover:border-indigo-400 hover:text-indigo-500'
+                              }`}
+                            >
+                              {count}/{total}
+                            </button>
+                          );
+                        })()}
+                      </div>
+                    </th>
+                    {APP_PERMISSIONS.actions.map(action => {
+                      const total = APP_PERMISSIONS.screens.length;
+                      const count = APP_PERMISSIONS.screens.filter(s => permissions[s.id]?.[action.id] === true).length;
+                      const allOn = count === total;
+                      return (
+                        <th key={action.id} className="px-4 py-4 text-center border-b border-slate-100">
+                          <div className="flex flex-col items-center gap-1.5">
+                            <span className="text-[10px] font-bold text-slate-500 uppercase">{action.name}</span>
+                            <button
+                              type="button"
+                              onClick={() => handleSelectAllColumn(action.id)}
+                              title={allOn ? `Bỏ tất cả ${action.name}` : `Bật tất cả ${action.name}`}
+                              className={`flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-black uppercase border transition-all ${allOn
+                                ? 'bg-emerald-500 border-emerald-600 text-white hover:bg-emerald-600'
+                                : 'bg-white border-slate-300 text-slate-400 hover:border-emerald-400 hover:text-emerald-500'
+                              }`}
+                            >
+                              {count}/{total}
+                            </button>
+                          </div>
+                        </th>
+                      );
+                    })}
                     <th className="pr-10 py-4 border-b border-slate-100"></th>
                   </tr>
                 </thead>
@@ -263,11 +327,11 @@ export default function RoleModal({ isOpen, onClose, onSave, initialData }) {
                           </div>
                         </td>
                         <td className="px-4 py-4 text-center">
-                          <button 
+                          <button
                             onClick={() => toggleScreen(screen.id)}
-                            className={`w-10 h-5 border mx-auto transition-all relative ${isVisible ? 'bg-slate-900 border-slate-900' : 'bg-white border-slate-200'}`}
+                            className={`w-10 h-5 border mx-auto transition-all relative ${isVisible ? 'bg-indigo-600 border-indigo-600' : 'bg-white border-slate-300'}`}
                           >
-                            <div className={`absolute top-0 w-4 h-full transition-all ${isVisible ? 'left-5 bg-white' : 'left-0 bg-slate-200'}`} />
+                            <div className={`absolute top-0 w-4 h-full transition-all ${isVisible ? 'left-5 bg-white' : 'left-0 bg-slate-300'}`} />
                           </button>
                         </td>
                         {APP_PERMISSIONS.actions.map(action => {
@@ -277,22 +341,23 @@ export default function RoleModal({ isOpen, onClose, onSave, initialData }) {
                               <button
                                 disabled={!isVisible}
                                 onClick={() => toggleAction(screen.id, action.id)}
-                                className={`w-6 h-6 border-2 mx-auto transition-all flex items-center justify-center ${
-                                  isVisible && isChecked 
-                                  ? 'bg-emerald-500 border-emerald-500' 
-                                  : 'bg-white border-slate-100'
-                                } ${!isVisible && 'opacity-10 cursor-not-allowed'}`}
+                                className={`w-6 h-6 rounded border-2 mx-auto transition-all flex items-center justify-center ${isVisible && isChecked
+                                  ? 'bg-emerald-500 border-emerald-600 shadow-sm shadow-emerald-200'
+                                  : isVisible
+                                    ? 'bg-white border-slate-300 hover:border-emerald-400'
+                                    : 'bg-slate-50 border-slate-200 cursor-not-allowed'
+                                  }`}
                               >
-                                {isVisible && isChecked && <div className="w-1.5 h-1.5 bg-white" />}
+                                {isVisible && isChecked && <Check size={13} className="text-white stroke-[3]" />}
                               </button>
                             </td>
                           );
                         })}
                         <td className="pr-10 py-4 text-right">
-                          <button 
-                            type="button" 
-                            disabled={!isVisible} 
-                            onClick={() => handleSelectAllRow(screen.id)} 
+                          <button
+                            type="button"
+                            disabled={!isVisible}
+                            onClick={() => handleSelectAllRow(screen.id)}
                             className={`text-[9px] font-bold uppercase border-b border-slate-200 hover:border-slate-900 ${isVisible ? 'text-slate-400 hover:text-slate-900' : 'text-slate-100'}`}
                           >
                             All
