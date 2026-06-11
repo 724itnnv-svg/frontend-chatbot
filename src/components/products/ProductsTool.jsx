@@ -260,10 +260,15 @@ export default function ProductManager() {
       .trim()
       .toUpperCase();
 
-  const normalizeType = (value = "") => {
+  const normalizeType = (value = "", fallback = "fertilizer") => {
+    const fallbackType = fallback === "seedling" ? "seedling" : "fertilizer";
     const raw = String(value || "").trim().toLowerCase();
-    if (raw === "seedling" || /cây\s*giống|cay\s*giong|giong/.test(raw)) return "seedling";
-    return "fertilizer";
+    if (!raw) return fallbackType;
+
+    const normalized = normalizeHeader(raw);
+    if (raw === "seedling" || /CAY\s*GIONG|GIONG|SEEDLING/.test(normalized)) return "seedling";
+    if (raw === "fertilizer" || /PHAN\s*BON|FERTILIZER/.test(normalized)) return "fertilizer";
+    return fallbackType;
   };
 
   const normalizeCompanyId = (value = "", fallback = "") => {
@@ -336,10 +341,12 @@ export default function ProductManager() {
     });
 
     const companyId = normalizeCompanyId(mapped.COMPANY_ID || mapped.COMPANY, selectedCompany);
+    const rawTypeValue = String(mapped.TYPE || "").trim();
     const product = {
       PRODUCT_CODE: String(mapped.PRODUCT_CODE || "").trim().toUpperCase(),
       PRODUCT_NAME: String(mapped.PRODUCT_NAME || "").trim(),
-      TYPE: normalizeType(mapped.TYPE || selectedImportType),
+      TYPE: normalizeType(rawTypeValue, selectedImportType),
+      _typeFromFile: Boolean(rawTypeValue),
       UNIT_NAME: String(mapped.UNIT_NAME || "").trim(),
       PACKING_QUANTITY: String(mapped.PACKING_QUANTITY || "").trim(),
       PRICE: parseMoney(mapped.PRICE ?? mapped.PRICE_VND ?? 0),
@@ -1157,6 +1164,10 @@ export default function ProductManager() {
 
   const handleImport = async () => {
     const validProducts = previewList.filter((product) => !product._invalid);
+    const productsToImport = validProducts.map(({ _invalid, _typeFromFile, ...product }) => ({
+      ...product,
+      TYPE: _typeFromFile ? product.TYPE : selectedImportType,
+    }));
     const nextErrors = {};
 
     if (!selectedImportFileName && !previewList.length) {
@@ -1192,7 +1203,7 @@ export default function ProductManager() {
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
-          products: validProducts,
+          products: productsToImport,
           companyId: selectedCompany,
           type: selectedImportType,
         }),
@@ -1201,7 +1212,7 @@ export default function ProductManager() {
       if (!res.ok) throw new Error("Import thất bại");
 
       const data = await res.json();
-      setImportMessage(`✅ Import thành công ${data.count || data.total || validProducts.length} sản phẩm`);
+      setImportMessage(`✅ Import thành công ${data.count || data.total || productsToImport.length} sản phẩm`);
 
       setPage(1);
       setHasMore(true);

@@ -13,6 +13,7 @@ export default function PageForm({ page, onClose, onSaved, mode = "admin" }) {
       name: "",
       accessToken: "",
       teamId: "",
+      consultingType: "fertilizer",
     }),
     []
   );
@@ -28,6 +29,7 @@ export default function PageForm({ page, onClose, onSaved, mode = "admin" }) {
         name: page.name || "",
         accessToken: page.accessToken || "",
         teamId: page.teamId || "",
+        consultingType: page.consultingType || "fertilizer",
       });
     } else {
       setForm(initialForm);
@@ -45,7 +47,11 @@ export default function PageForm({ page, onClose, onSaved, mode = "admin" }) {
     const url = page ? `/api/page/${page._id}` : "/api/page";
     const method = page ? "PUT" : "POST";
     const payload = isLimited
-      ? { name: (form.name || "").trim(), teamId: (form.teamId || "").trim() }
+      ? {
+          name: (form.name || "").trim(),
+          teamId: (form.teamId || "").trim(),
+          consultingType: form.consultingType,
+        }
       : form;
 
     if (isLimited && !page) {
@@ -188,6 +194,21 @@ export default function PageForm({ page, onClose, onSaved, mode = "admin" }) {
               <option value="ABC">ABC</option>
               <option value="KF">KingFarm</option>
               <option value="VN">Việt Nhật</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="mb-1.5 block text-xs font-semibold text-slate-600">
+              Tư vấn
+            </label>
+            <select
+              name="consultingType"
+              value={form.consultingType}
+              onChange={handleChange}
+              className={inputCls}
+            >
+              <option value="fertilizer">Phân bón</option>
+              <option value="seedling">Cây giống</option>
             </select>
           </div>
 

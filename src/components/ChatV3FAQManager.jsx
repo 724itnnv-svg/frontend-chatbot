@@ -19,7 +19,6 @@ const EMPTY_FORM = {
   answer: "",
   keywords: "",
   pageIds: [],
-  applyAllPages: true,
   priority: 100,
   active: true,
 };
@@ -97,13 +96,17 @@ export default function ChatV3FAQManager() {
   };
 
   const startEdit = (faq) => {
+    if (faq.canManage === false) {
+      setError("Tai khoan nay khong co quyen chinh sua FAQ ap dung tat ca Page.");
+      return;
+    }
     setEditingId(faq._id);
+    const pageIds = Array.isArray(faq.pageIds) ? faq.pageIds.map(String) : [];
     setForm({
       question: faq.question || "",
       answer: faq.answer || "",
       keywords: keywordString(faq.keywords),
-      pageIds: Array.isArray(faq.pageIds) ? faq.pageIds.map(String) : [],
-      applyAllPages: !Array.isArray(faq.pageIds) || faq.pageIds.length === 0,
+      pageIds,
       priority: faq.priority ?? 100,
       active: faq.active !== false,
     });
@@ -135,7 +138,7 @@ export default function ChatV3FAQManager() {
 
   function getFaqPageLabel(faq) {
     const pageIds = Array.isArray(faq?.pageIds) ? faq.pageIds.map(String).filter(Boolean) : [];
-    if (pageIds.length === 0) return "Tất cả Page";
+    if (pageIds.length === 0) return "Chua gan Page";
     const names = pageIds.map((pageId) => {
       const page = pages.find((item) => String(item.facebookId) === String(pageId));
       return page?.name || pageId;
@@ -150,8 +153,8 @@ export default function ChatV3FAQManager() {
       setError("Vui lòng nhập câu hỏi và câu trả lời.");
       return;
     }
-    if (!form.applyAllPages && (!Array.isArray(form.pageIds) || form.pageIds.length === 0)) {
-      setError("Vui lòng chọn ít nhất 1 Page hoặc bật áp dụng tất cả Page.");
+    if (!Array.isArray(form.pageIds) || form.pageIds.length === 0) {
+      setError("Vui long chon it nhat 1 Page.");
       return;
     }
 
@@ -163,7 +166,7 @@ export default function ChatV3FAQManager() {
         headers: authHeaders(),
         body: JSON.stringify({
           ...form,
-          pageIds: form.applyAllPages ? [] : form.pageIds,
+          pageIds: form.pageIds,
           priority: Number(form.priority) || 100,
         }),
       });
@@ -275,29 +278,7 @@ export default function ChatV3FAQManager() {
               </label>
 
               <div className="space-y-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
-                <label className="flex items-start gap-2 text-sm font-semibold text-slate-700">
-                  <input
-                    type="checkbox"
-                    checked={form.applyAllPages}
-                    onChange={(e) =>
-                      setForm((current) => ({
-                        ...current,
-                        applyAllPages: e.target.checked,
-                        pageIds: e.target.checked ? [] : current.pageIds,
-                      }))
-                    }
-                    className="mt-1 h-4 w-4 accent-cyan-600"
-                  />
-                  <span>
-                    Áp dụng tất cả Page
-                    <span className="block text-xs font-normal text-slate-500">
-                      Tắt lựa chọn này để gán FAQ cho từng Page cụ thể.
-                    </span>
-                  </span>
-                </label>
-
-                {!form.applyAllPages && (
-                  <div className="space-y-2">
+                <div className="space-y-2">
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-xs font-bold uppercase text-slate-500">
                         Page áp dụng ({form.pageIds.length}/{pages.length})
@@ -347,8 +328,7 @@ export default function ChatV3FAQManager() {
                       )}
                     </div>
                   </div>
-                )}
-              </div>
+                </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <label className="block space-y-1">
@@ -453,24 +433,26 @@ export default function ChatV3FAQManager() {
                           </div>
                         )}
                       </div>
-                      <div className="flex shrink-0 gap-2">
-                        <button
-                          type="button"
-                          onClick={() => startEdit(faq)}
-                          className="rounded-lg border border-slate-200 bg-white p-2 text-slate-600 hover:bg-cyan-50 hover:text-cyan-700"
-                          title="Sửa"
-                        >
-                          <Edit3 size={16} />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleDelete(faq)}
-                          className="rounded-lg border border-rose-100 bg-white p-2 text-rose-500 hover:bg-rose-50"
-                          title="Xóa"
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      </div>
+                      {faq.canManage !== false && (
+                        <div className="flex shrink-0 gap-2">
+                          <button
+                            type="button"
+                            onClick={() => startEdit(faq)}
+                            className="rounded-lg border border-slate-200 bg-white p-2 text-slate-600 hover:bg-cyan-50 hover:text-cyan-700"
+                            title="Sửa"
+                          >
+                            <Edit3 size={16} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDelete(faq)}
+                            className="rounded-lg border border-rose-100 bg-white p-2 text-rose-500 hover:bg-rose-50"
+                            title="Xóa"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </div>
                 ))

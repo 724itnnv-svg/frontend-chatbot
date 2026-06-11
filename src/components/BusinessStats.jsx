@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import JSZip from "jszip";
 import { saveAs } from "file-saver";
 import {
@@ -87,6 +87,18 @@ function formatDateTime(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return String(value);
   return date.toLocaleString("vi-VN");
+}
+
+const COMPANY_FILTERS = [
+  { id: "all", label: "Tất cả công ty" },
+  { id: "NNV", label: "NNV" },
+  { id: "ABC", label: "ABC" },
+  { id: "VN", label: "VN" },
+  { id: "KF", label: "KF" },
+];
+
+function normalizeTeamId(value) {
+  return String(value || "").trim().toUpperCase();
 }
 
 function formatWaitingTime(value) {
@@ -733,6 +745,7 @@ export default function BusinessStats() {
     return { from: today, to: today };
   });
   const [statsPages, setStatsPages] = useState([]);
+  const [companyFilter, setCompanyFilter] = useState("all");
   const [pageSelectionMode, setPageSelectionMode] = useState("all");
   const [selectedPageIds, setSelectedPageIds] = useState([]);
   const [pageSearch, setPageSearch] = useState("");
@@ -801,9 +814,27 @@ export default function BusinessStats() {
     };
   }, [token]);
 
+  const companyFilteredStatsPages = useMemo(() => {
+    const selectedCompany = normalizeTeamId(companyFilter);
+    if (!selectedCompany || selectedCompany === "ALL") return statsPages;
+    return statsPages.filter((page) => normalizeTeamId(page.teamId) === selectedCompany);
+  }, [statsPages, companyFilter]);
+
+  const companyPageIdSet = useMemo(() => {
+    return new Set(companyFilteredStatsPages.map((page) => String(page.facebookId)).filter(Boolean));
+  }, [companyFilteredStatsPages]);
+
+  function getEffectiveStatsPageIds() {
+    if (pageSelectionMode === "all") {
+      return companyFilteredStatsPages.map((page) => String(page.facebookId)).filter(Boolean);
+    }
+    return selectedPageIds.filter((pageId) => companyPageIdSet.has(String(pageId)));
+  }
+
   const buildStatsQuery = () => {
     const timezoneOffset = -new Date().getTimezoneOffset();
     const queryParams = new URLSearchParams({ timezoneOffset: String(timezoneOffset) });
+    const pageIds = getEffectiveStatsPageIds();
 
     if (statsMode === "range") {
       queryParams.set("from", statsRange.from);
@@ -812,10 +843,10 @@ export default function BusinessStats() {
       queryParams.set("date", statsDate);
     }
 
-    if (pageSelectionMode === "custom" && selectedPageIds.length === 0) {
+    if (pageIds.length === 0) {
       queryParams.set("pageScope", "none");
-    } else if (selectedPageIds.length > 0) {
-      queryParams.set("pages", selectedPageIds.join(","));
+    } else {
+      queryParams.set("pages", pageIds.join(","));
     }
 
     return queryParams;
@@ -1150,7 +1181,7 @@ export default function BusinessStats() {
   useEffect(() => {
     fetchDailyStats();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, statsMode, statsDate, statsRange.from, statsRange.to, pageSelectionMode, selectedPageIds]);
+  }, [token, statsMode, statsDate, statsRange.from, statsRange.to, pageSelectionMode, selectedPageIds, companyFilter, statsPages]);
 
   const statsLabel = dailyStats?.fromDate && dailyStats?.toDate
     ? dailyStats.fromDate === dailyStats.toDate
@@ -1231,23 +1262,25 @@ export default function BusinessStats() {
     statuses: Array.from(customer.statuses),
   }));
   const allStatsPagesSelected = pageSelectionMode === "all";
+  const effectiveSelectedPageIds = getEffectiveStatsPageIds();
   const normalizedPageSearch = pageSearch.trim().toLowerCase();
   const filteredStatsPages = normalizedPageSearch
-    ? statsPages.filter((page) => {
+    ? companyFilteredStatsPages.filter((page) => {
         const searchableText = [page.name, page.facebookId, page.teamId]
           .filter(Boolean)
           .join(" ")
           .toLowerCase();
         return searchableText.includes(normalizedPageSearch);
       })
-    : statsPages;
+    : companyFilteredStatsPages;
+  const selectedCompanyLabel = COMPANY_FILTERS.find((company) => company.id === companyFilter)?.label || "Tất cả công ty";
   const selectedPageLabel = allStatsPagesSelected
-    ? `Tất cả Page (${formatNumber(statsPages.length)})`
-    : selectedPageIds.length === 0
+    ? `${selectedCompanyLabel} - Tất cả Page (${formatNumber(companyFilteredStatsPages.length)})`
+    : effectiveSelectedPageIds.length === 0
       ? "Chưa chọn Page"
-    : selectedPageIds.length === 1
-      ? statsPages.find((page) => String(page.facebookId) === selectedPageIds[0])?.name || "1 Page đã chọn"
-      : `${formatNumber(selectedPageIds.length)} Page đã chọn`;
+    : effectiveSelectedPageIds.length === 1
+      ? statsPages.find((page) => String(page.facebookId) === effectiveSelectedPageIds[0])?.name || "1 Page đã chọn"
+      : `${selectedCompanyLabel} - ${formatNumber(effectiveSelectedPageIds.length)} Page đã chọn`;
   const toggleStatsPage = (pageId) => {
     const normalizedPageId = String(pageId);
     setPageSelectionMode("custom");
@@ -1282,6 +1315,20 @@ export default function BusinessStats() {
               </div>
 
               <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-slate-50/80 p-3 shadow-inner">
+                <label className="flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 shadow-sm">
+                  <span className="shrink-0 text-slate-500">Công ty:</span>
+                  <select
+                    value={companyFilter}
+                    onChange={(event) => setCompanyFilter(event.target.value)}
+                    className="min-w-0 flex-1 bg-transparent font-bold text-slate-900 outline-none"
+                  >
+                    {COMPANY_FILTERS.map((company) => (
+                      <option key={company.id} value={company.id}>
+                        {company.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
               <details className="relative w-full sm:self-end">
                 <summary className="flex h-10 cursor-pointer list-none items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 sm:min-w-[280px]">
                   <span className="min-w-0 truncate">Page: {selectedPageLabel}</span>
@@ -1325,7 +1372,7 @@ export default function BusinessStats() {
                     />
                   </label>
                   <div className="max-h-64 overflow-auto border-t border-slate-100 pt-1">
-                  {statsPages.length === 0 ? (
+                    {companyFilteredStatsPages.length === 0 ? (
                     <div className="px-3 py-2 text-sm text-slate-500">Không có Page đang bật AutoReply.</div>
                   ) : filteredStatsPages.length === 0 ? (
                     <div className="px-3 py-2 text-sm text-slate-500">Không tìm thấy Page phù hợp.</div>
@@ -1347,7 +1394,7 @@ export default function BusinessStats() {
                         </label>
                       );
                     })
-                  )}
+                    )}
                   </div>
                 </div>
               </details>

@@ -14,6 +14,7 @@ const APP_PERMISSIONS = {
     { id: "admin_products_tool", name: "Quản Trị Sản Phẩm" },
     { id: "admin_event_promo", name: "Chương Trình Khuyến Mãi Chung" },
     { id: "admin_vectorstore_tool", name: "Quản Trị Vector DB" },
+    { id: "admin_chat_v3_file_search", name: "File Search Chat V3" },
     { id: "admin_agent", name: "Quản Trị Agent" },
     { id: "admin_agent_promo", name: "Quản Lý Khuyến Mãi" },
     { id: "admin_agent_response_templates", name: "Mẫu câu trả lời theo intent" },
