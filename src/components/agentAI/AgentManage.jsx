@@ -11,6 +11,9 @@ const TEAMS = [
     { id: "Intent",  label: "Phân loại ý định" },
 ];
 
+const AGENT_TEAMS = TEAMS.filter(team => team.id !== "Intent");
+const INTENT_TEAMS = TEAMS.filter(team => team.id === "Intent");
+
 const TEAM_COLORS = {
     NNV: { badge: "bg-indigo-100 text-indigo-700", dot: "bg-indigo-500", icon: "bg-indigo-600", ring: "hover:border-indigo-200" },
     KF:  { badge: "bg-emerald-100 text-emerald-700", dot: "bg-emerald-500", icon: "bg-emerald-600", ring: "hover:border-emerald-200" },
@@ -25,13 +28,22 @@ const DEFAULT_CREATE = {
     activate: false, type: "instruction",
 };
 
-export default function AgentManage() {
+export default function AgentManage({ mode = "agent" }) {
+    const isIntentMode = mode === "intent";
+    const managedTeams = isIntentMode ? INTENT_TEAMS : AGENT_TEAMS;
+    const defaultTeam = managedTeams[0]?.id || "NNV";
+    const itemLabel = isIntentMode ? "Intent" : "Agent";
+    const headerTitle = isIntentMode ? "Quản lý Intent" : "Quản lý Agent";
+    const headerSubtitle = isIntentMode
+        ? "Quản lý cấu hình phân loại ý định"
+        : "Quản lý cấu hình hệ thống AI theo từng nhóm";
+    const createButtonLabel = `Tạo ${itemLabel}`;
     const { token } = useAuth();
     const [instructions, setInstructions] = useState([]);
     const [loading, setLoading]           = useState(false);
     const [isModalOpen, setIsModalOpen]   = useState(false);
     const [searchQuery, setSearchQuery]   = useState("");
-    const [selectedTeam, setSelectedTeam] = useState("NNV");
+    const [selectedTeam, setSelectedTeam] = useState(defaultTeam);
     const [editing, setEditing]           = useState(DEFAULT_CREATE);
     const [isSaving, setIsSaving]         = useState(false);
     const [activatingId, setActivatingId] = useState(null); // "teamId-version"
@@ -48,7 +60,7 @@ export default function AgentManage() {
         setLoading(true);
         try {
             const results = await Promise.all(
-                TEAMS.map(async t => {
+                managedTeams.map(async t => {
                     try {
                         const res = await fetch(`/api/instructions/${t.id}?type=instruction`, {
                             headers: { Authorization: `Bearer ${token}` },
@@ -73,7 +85,7 @@ export default function AgentManage() {
     const handleOpenModal = (item = null) => {
         setEditing(item
             ? { ...item, type: "instruction", options: { title: "", diachi: "", website: "", ...item.options } }
-            : { ...DEFAULT_CREATE }
+            : { ...DEFAULT_CREATE, teamId: isIntentMode ? "Intent" : "" }
         );
         setIsModalOpen(true);
     };
@@ -184,7 +196,7 @@ export default function AgentManage() {
     );
 
     const stats = useMemo(() => {
-        const byTeam = TEAMS.map(team => {
+        const byTeam = managedTeams.map(team => {
             const teamItems = visibleInstructions.filter(item => item.teamId === team.id);
             return {
                 ...team,
@@ -199,7 +211,7 @@ export default function AgentManage() {
             selectedTotal: selected?.total || 0,
             byTeam,
         };
-    }, [visibleInstructions, selectedTeam]);
+    }, [visibleInstructions, selectedTeam, managedTeams]);
 
     const filtered = visibleInstructions.filter(item => {
         const q = searchQuery.toLowerCase();
@@ -219,9 +231,9 @@ export default function AgentManage() {
                         <Bot size={24} />
                     </div>
                     <div>
-                        <h1 className="text-xl font-bold tracking-tight">Quản lý Agent</h1>
+                        <h1 className="text-xl font-bold tracking-tight">{headerTitle}</h1>
                         <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
-                            Quản lý cấu hình hệ thống AI theo từng nhóm
+                            {headerSubtitle}
                         </p>
                     </div>
                 </div>
@@ -229,7 +241,7 @@ export default function AgentManage() {
                     onClick={() => handleOpenModal()}
                     className="flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-xs font-bold text-white shadow-md transition-all hover:bg-indigo-700 active:scale-95"
                 >
-                    <Plus size={18} strokeWidth={3} /> Tạo Agent
+                    <Plus size={18} strokeWidth={3} /> {createButtonLabel}
                 </button>
             </header>
 
@@ -284,7 +296,7 @@ export default function AgentManage() {
                 ) : filtered.length > 0 ? (
                     <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
                         {filtered.map((item, idx) => {
-                            const team = TEAMS.find(entry => entry.id === item.teamId);
+                            const team = managedTeams.find(entry => entry.id === item.teamId);
                             const c   = TEAM_COLORS[item.teamId] || TEAM_COLORS.NNV;
                             const key = item._id ?? (item.teamId ? `${item.teamId}-${item.version}` : `row-${idx}`);
                             const actionKey = `${item.teamId}-${item.version}`;
@@ -337,7 +349,7 @@ export default function AgentManage() {
                                     </div>
 
                                     <h3 className="mb-2 line-clamp-1 text-lg font-bold leading-tight text-slate-800">
-                                        {item.label || item.options?.title || `Agent ${team?.label || item.teamId}`}
+                                        {item.label || item.options?.title || `${itemLabel} ${team?.label || item.teamId}`}
                                     </h3>
 
                                     <div className="mb-4 flex flex-wrap items-center gap-2">
@@ -394,15 +406,15 @@ export default function AgentManage() {
                 ) : (
                     <div className="flex h-80 flex-col items-center justify-center rounded-[2rem] border-2 border-dashed border-slate-200 bg-white">
                         <AlertCircle size={40} className="mb-4 text-slate-300" />
-                        <p className="font-medium text-slate-500">Không tìm thấy cấu hình Agent nào.</p>
+                        <p className="font-medium text-slate-500">Không tìm thấy cấu hình {itemLabel} nào.</p>
                         <button
                             onClick={() => {
-                                setSelectedTeam("NNV");
+                                setSelectedTeam(defaultTeam);
                                 setSearchQuery("");
                             }}
                             className="mt-4 text-sm font-bold text-indigo-600 hover:underline"
                         >
-                            Quay về NNV
+                            Quay về {defaultTeam}
                         </button>
                     </div>
                 )}
@@ -414,7 +426,7 @@ export default function AgentManage() {
                 onSave={handleSave}
                 editing={editing}
                 setEditing={(next) => setEditing({ ...next, type: "instruction" })}
-                teams={TEAMS}
+                teams={managedTeams}
                 isSaving={isSaving}
                 lockedType="instruction"
             />

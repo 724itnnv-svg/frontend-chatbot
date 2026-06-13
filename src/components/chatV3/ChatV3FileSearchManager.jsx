@@ -63,8 +63,40 @@ function getPageId(page) {
   return String(page?._id || page?.id || "");
 }
 
+function normalizeTextKey(value) {
+  return String(value || "")
+    .trim()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\u0111/g, "d")
+    .replace(/\u0110/g, "D")
+    .toUpperCase();
+}
+
+function normalizeProductType(value, fallback = "fertilizer") {
+  const fallbackType = fallback === "seedling" ? "seedling" : "fertilizer";
+  const raw = String(value || "").trim().toLowerCase();
+  const normalized = normalizeTextKey(raw);
+  if (!raw) return fallbackType;
+  if (raw === "seedling" || /CAY\s*GIONG|GIONG|SEEDLING/.test(normalized)) return "seedling";
+  if (raw === "fertilizer" || /PHAN\s*BON|FERTILIZER/.test(normalized)) return "fertilizer";
+  return fallbackType;
+}
+
+function inferPageTypeFromName(page) {
+  const normalizedName = normalizeTextKey(page?.name || "");
+  if (!normalizedName) return "";
+  if (/CAY\s*GIONG|CAY\s*XANH|CAY\s*CONG\s*TRINH|DUA\s*SAP|COCOSAP|NUOI\s*CAY\s*PHOI/.test(normalizedName)) {
+    return "seedling";
+  }
+  if (/PHAN\s*BON|VTNN|VAT\s*TU\s*NONG\s*NGHIEP|DINH\s*DUONG|NHA\s*NONG|XUONG\s*PHAN|NONG\s*DAN/.test(normalizedName)) {
+    return "fertilizer";
+  }
+  return "";
+}
+
 function getPageConsultingType(page) {
-  return page?.consultingType === "seedling" ? "seedling" : "fertilizer";
+  return inferPageTypeFromName(page) || normalizeProductType(page?.consultingType);
 }
 
 function clampMaxResults(value) {
@@ -84,6 +116,7 @@ export default function ChatV3FileSearchManager() {
   const [search, setSearch] = useState("");
   const [storeSearch, setStoreSearch] = useState("");
   const [pageSearch, setPageSearch] = useState("");
+  const [pageTypeFilter, setPageTypeFilter] = useState("all");
   const [selectedPageIds, setSelectedPageIds] = useState([]);
   const [loading, setLoading] = useState(false);
   const [storeLoading, setStoreLoading] = useState(false);
@@ -159,12 +192,14 @@ export default function ChatV3FileSearchManager() {
   useEffect(() => {
     setPageSearch("");
     if (!applyTarget) {
+      setPageTypeFilter("all");
       setSelectedPageIds([]);
       return;
     }
 
     const teamId = normalizeTeamId(applyTarget.teamId);
     const productType = applyTarget.productType === "seedling" ? "seedling" : "fertilizer";
+    setPageTypeFilter(productType);
     const teamPages = pages.filter((page) => normalizeTeamId(page.teamId) === teamId);
     const visiblePageIds = new Set(teamPages.map(getPageId).filter(Boolean));
     const savedPageIds = Array.isArray(applyTarget.appliedPageIds)
@@ -217,6 +252,7 @@ export default function ChatV3FileSearchManager() {
     const keyword = pageSearch.trim().toLowerCase();
     return pages
       .filter((page) => !teamId || normalizeTeamId(page.teamId) === teamId)
+      .filter((page) => pageTypeFilter === "all" || getPageConsultingType(page) === pageTypeFilter)
       .filter((page) => {
         if (!keyword) return true;
         return [page.name, page.facebookId, page.teamId, page.consultingType]
@@ -225,7 +261,13 @@ export default function ChatV3FileSearchManager() {
           .includes(keyword);
       })
       .sort((a, b) => String(a.name || a.facebookId || "").localeCompare(String(b.name || b.facebookId || "")));
-  }, [pages, pageSearch, applyTarget]);
+  }, [pages, pageSearch, pageTypeFilter, applyTarget]);
+
+  const filteredPageIds = useMemo(() => filteredPages.map(getPageId).filter(Boolean), [filteredPages]);
+  const selectedFilteredPageCount = useMemo(
+    () => filteredPageIds.filter((id) => selectedPageIds.includes(id)).length,
+    [filteredPageIds, selectedPageIds],
+  );
 
   const stats = useMemo(() => {
     const mainItems = items.filter((item) => ["fertilizer", "seedling"].includes(item.productType || "general"));
@@ -363,8 +405,13 @@ export default function ChatV3FileSearchManager() {
   };
 
   const toggleAllFilteredPages = () => {
-    const ids = filteredPages.map(getPageId).filter(Boolean);
-    setSelectedPageIds((prev) => (ids.length > 0 && ids.every((id) => prev.includes(id)) ? [] : ids));
+    setSelectedPageIds((prev) => {
+      const visibleIds = new Set(filteredPageIds);
+      if (!visibleIds.size) return prev;
+      const allVisibleSelected = filteredPageIds.every((id) => prev.includes(id));
+      if (allVisibleSelected) return prev.filter((id) => !visibleIds.has(id));
+      return Array.from(new Set([...prev, ...filteredPageIds]));
+    });
   };
 
   const handleApplyPages = async () => {
@@ -809,16 +856,30 @@ export default function ChatV3FileSearchManager() {
                             />
                           </div>
 
+                          <div className="mb-3 grid grid-cols-3 gap-2 rounded-xl border border-slate-200 bg-white p-1">
+                            {[{ value: "all", label: "Tất cả" }, ...PRODUCT_TYPE_OPTIONS].map((option) => (
+                              <button
+                                key={option.value}
+                                type="button"
+                                onClick={() => setPageTypeFilter(option.value)}
+                                className={`rounded-lg px-3 py-2 text-xs font-bold transition ${
+                                  pageTypeFilter === option.value
+                                    ? "bg-cyan-600 text-white shadow-sm"
+                                    : "text-slate-600 hover:bg-cyan-50 hover:text-cyan-700"
+                                }`}
+                              >
+                                {option.label}
+                              </button>
+                            ))}
+                          </div>
+
                           <div className="mb-3 flex items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-2">
                             <label className="flex items-center gap-2 text-sm font-semibold text-slate-700">
                               <input
                                 type="checkbox"
                                 checked={
-                                  filteredPages.length > 0 &&
-                                  filteredPages
-                                    .map(getPageId)
-                                    .filter(Boolean)
-                                    .every((id) => selectedPageIds.includes(id))
+                                  filteredPageIds.length > 0 &&
+                                  filteredPageIds.every((id) => selectedPageIds.includes(id))
                                 }
                                 onChange={toggleAllFilteredPages}
                                 className="h-4 w-4 rounded border-slate-300 text-cyan-600 focus:ring-cyan-500"
@@ -826,7 +887,7 @@ export default function ChatV3FileSearchManager() {
                               Chon tat ca
                             </label>
                             <span className="text-xs font-semibold text-slate-500">
-                              {selectedPageIds.length}/{filteredPages.length} Page
+                              {selectedFilteredPageCount}/{filteredPages.length} Page
                             </span>
                           </div>
 

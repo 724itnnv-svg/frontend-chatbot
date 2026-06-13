@@ -38,6 +38,7 @@ const ProductTool = lazy(() => import("./components/products/ProductsTool"));
 const PromoManager = lazy(() => import("./components/event_promo/PromoManager"));
 const VectorStoreManage = lazy(() => import("./components/vectorstores/VectorStore"));
 const AgentManage = lazy(() => import("./components/agentAI/AgentManage"));
+const AgentIntentManage = lazy(() => import("./components/agentAI/AgentIntentManage"));
 const AgentPromoManage = lazy(() => import("./components/agentAI/AgentPromoManage"));
 const AgentResponseTemplatesManager = lazy(() => import("./components/agentAI/AgentResponseTemplatesManager"));
 const ChatbotConfigManager = lazy(() => import("./components/chatbotConfig/ChatbotConfigManager"));
@@ -113,6 +114,7 @@ const ADMIN_ROUTE_BY_SCREEN = {
   admin_event_promo: "/admin/promotions",
   admin_vectorstore_tool: "/admin/vector-stores",
   admin_agent: "/admin/agents",
+  admin_agent_intent: "/admin/agent-intents",
   admin_agent_promo: "/admin/agent-promotions",
   admin_agent_response_templates: "/admin/intent-response-templates",
   admin_chatbot_config: "/admin/chatbot-config",
@@ -152,6 +154,7 @@ const adminRoutes = [
   { path: "promotions", screenId: "admin_event_promo", element: <PromoManager /> },
   { path: "vector-stores", screenId: "admin_vectorstore_tool", element: <VectorStoreManage /> },
   { path: "agents", screenId: "admin_agent", element: <AgentManage /> },// New route
+  { path: "agent-intents", screenId: "admin_agent_intent", element: <AgentIntentManage /> },
   { path: "agent-promotions", screenId: "admin_agent_promo", element: <AgentPromoManage /> },
   { path: "intent-response-templates", screenId: "admin_agent_response_templates", element: <AgentResponseTemplatesManager /> },
   { path: "agent-response-templates", screenId: "admin_agent_response_templates", element: <Navigate to="/admin/intent-response-templates" replace /> },
