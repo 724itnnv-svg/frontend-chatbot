@@ -756,6 +756,37 @@ function downloadPayrollInputTemplate(rows = [], fallbackPeriod = "") {
   XLSX.writeFile(workbook, `mau-nhap-lieu-payroll_${fallbackPeriod || new Date().toISOString().slice(0, 10)}.xlsx`);
 }
 
+function calcPayrollDots(row) {
+  const dot1ThuNhap =
+    toNumber(getDeep(row, "thuNhapTheoNgayCong.luongTheoNgayCong")) +
+    toNumber(getDeep(row, "thuNhapTheoNgayCong.phuCapComThucTe")) +
+    toNumber(getDeep(row, "thuNhapTheoNgayCong.phuCapChuyenCanThucTe")) +
+    toNumber(getDeep(row, "thuNhapTheoNgayCong.phuCapXangXeThucTe")) +
+    toNumber(getDeep(row, "thuNhapTheoNgayCong.phuCapDienThoaiThucTe")) +
+    toNumber(getDeep(row, "thuNhapTheoNgayCong.phuCapNhiemVuThucTe")) +
+    toNumber(getDeep(row, "thuNhapTheoNgayCong.luongLeTet")) +
+    toNumber(getDeep(row, "thuNhapTheoNgayCong.luongPhepNam")) +
+    toNumber(getDeep(row, "thuNhapTheoNgayCong.luongTangCaThuong")) +
+    toNumber(getDeep(row, "thuNhapTheoNgayCong.luongTangCaChuNhat")) +
+    toNumber(getDeep(row, "thuNhapTheoNgayCong.luongTangCaLeTet")) +
+    toNumber(getDeep(row, "thuNhapTheoNgayCong.comTangCa")) +
+    toNumber(getDeep(row, "thuNhapTheoNgayCong.traGiamLuong")) +
+    toNumber(getDeep(row, "thuNhapTheoNgayCong.congKhac"));
+  const luongDot2 =
+    toNumber(getDeep(row, "thuNhapTheoNgayCong.thuongKPI")) +
+    toNumber(getDeep(row, "thuNhapTheoNgayCong.hoaHong"));
+  const tongKhauTru = toNumber(getDeep(row, "khauTru.tongKhauTru"));
+  const thueTNCN = toNumber(getDeep(row, "tinhThueTNCN.thueTNCNTamTinh"));
+
+  let dot1ChinhThuc = dot1ThuNhap - tongKhauTru;
+  let dot2ChinhThuc = luongDot2 - thueTNCN;
+  if (dot2ChinhThuc < 0) {
+    dot1ChinhThuc += dot2ChinhThuc;
+    dot2ChinhThuc = 0;
+  }
+  return { dot1ChinhThuc, dot2ChinhThuc };
+}
+
 // Hàm phụ trợ: Chuyển đổi số chỉ mục cột thành chữ cái Excel (VD: 0 -> A, 1 -> B, 26 -> AA)
 const getExcelColumnLetter = (index) => {
   let letter = '';
@@ -769,11 +800,17 @@ const getExcelColumnLetter = (index) => {
 async function exportPayrollExcel(rows, columns) {
   const workbook = new ExcelJS.Workbook();
 
+  const extraColumns = [
+    { key: "__dot1ChinhThuc", label: "Lương nhận đợt 1", type: "number" },
+    { key: "__dot2ChinhThuc", label: "Lương nhận đợt 2", type: "number" },
+  ];
+  const allColumns = [...columns, ...extraColumns];
+
   // ==========================================
   // 1. SHEET DATA (Chứa toàn bộ dữ liệu gốc)
   // ==========================================
   const dataSheet = workbook.addWorksheet('Data');
-  dataSheet.columns = columns.map(col => ({
+  dataSheet.columns = allColumns.map(col => ({
     header: col.label || col.key,
     key: col.key,
     width: 15
@@ -785,6 +822,9 @@ async function exportPayrollExcel(rows, columns) {
       const value = getDeep(row, col.key);
       rowData[col.key] = col.type === "number" ? roundPayrollNumber(value) : (value ?? "");
     });
+    const { dot1ChinhThuc, dot2ChinhThuc } = calcPayrollDots(row);
+    rowData["__dot1ChinhThuc"] = roundPayrollNumber(dot1ChinhThuc);
+    rowData["__dot2ChinhThuc"] = roundPayrollNumber(dot2ChinhThuc);
     dataSheet.addRow(rowData);
   });
 
@@ -801,7 +841,7 @@ async function exportPayrollExcel(rows, columns) {
   }
 
   const colLetter = getExcelColumnLetter(companyColIndex);
-  const lastColLetter = getExcelColumnLetter(columns.length - 1);
+  const lastColLetter = getExcelColumnLetter(allColumns.length - 1);
   const totalRows = rows.length + 1;
 
   // --- DÒNG 1: CÔNG THỨC ĐỔI TÊN TIÊU ĐỀ (Ô A1:H1) ---
@@ -849,7 +889,7 @@ async function exportPayrollExcel(rows, columns) {
   dropdownCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF2CC' } };
 
   // --- DÒNG 5: TIÊU ĐỀ CỘT DỮ LIỆU ---
-  columns.forEach((col, index) => {
+  allColumns.forEach((col, index) => {
     const cell = reportSheet.getCell(5, index + 1);
     cell.value = col.label || col.key;
     cell.font = { bold: true };
@@ -1256,7 +1296,7 @@ export default function PayrollManager() {
     try {
       const saved = JSON.parse(localStorage.getItem(STORAGE_COLUMN_ORDER) || "null");
       if (Array.isArray(saved) && saved.length) return saved;
-    } catch {}
+    } catch { }
     return PAYROLL_COLUMNS.map((c) => c.key);
   });
 
