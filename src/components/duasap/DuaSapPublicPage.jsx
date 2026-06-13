@@ -65,15 +65,22 @@ export default function DuaSapPublicPage() {
   const [error, setError] = useState(null);
   const [search, setSearch] = useState("");
   const [searchInput, setSearchInput] = useState("");
+  const [viTri, setViTri] = useState("");
   const [khuVuc, setKhuVuc] = useState("");
-  const [khuVucList, setKhuVucList] = useState([]);
+  const [distinctViTri, setDistinctViTri] = useState([]);
+  const [distinctKhuVuc, setDistinctKhuVuc] = useState([]);
   const sentinelRef = useRef(null);
 
-  // Fetch danh sách khu vực cho dropdown (1 lần)
+  // Fetch distinct viTri & khuVuc cho dropdown — gọi 1 lần khi mount
   useEffect(() => {
     axios
-      .get(apiUrl("/api/public/dua-sap/khu-vuc"))
-      .then((r) => setKhuVucList(Array.isArray(r?.data?.data) ? r.data.data : []))
+      .get(apiUrl("/api/public/dua-sap/options"))
+      .then((r) => {
+        if (r.data?.ok) {
+          setDistinctViTri(r.data.viTri || []);
+          setDistinctKhuVuc(r.data.khuVuc || []);
+        }
+      })
       .catch(() => {});
   }, []);
 
@@ -90,6 +97,7 @@ export default function DuaSapPublicPage() {
       .get(apiUrl("/api/public/dua-sap"), {
         params: {
           ...(search ? { search } : {}),
+          ...(viTri ? { viTri } : {}),
           ...(khuVuc ? { khuVuc } : {}),
           page,
           limit: PAGE_SIZE,
@@ -112,7 +120,7 @@ export default function DuaSapPublicPage() {
         setLoadingMore(false);
       });
     return () => controller.abort();
-  }, [page, search, khuVuc]);
+  }, [page, search, viTri, khuVuc]);
 
   // IntersectionObserver: khi sentinel vào viewport thì tải trang tiếp
   useEffect(() => {
@@ -142,6 +150,12 @@ export default function DuaSapPublicPage() {
     setHasMore(true);
     setSearchInput("");
     setSearch("");
+  }
+
+  function handleViTriChange(val) {
+    setPage(1);
+    setHasMore(true);
+    setViTri(val);
   }
 
   function handleKhuVucChange(val) {
@@ -195,20 +209,35 @@ export default function DuaSapPublicPage() {
             </button>
           </form>
 
-          {/* Dropdown lọc khu vực */}
-          {khuVucList.length > 0 && (
-            <div className="mt-3 flex justify-center">
-              <select
-                value={khuVuc}
-                onChange={(e) => handleKhuVucChange(e.target.value)}
-                className="bg-white/20 text-white text-sm rounded-xl px-4 py-2 border border-white/30 focus:outline-none focus:ring-2 focus:ring-white/50 cursor-pointer appearance-none pr-8"
-                style={{ backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.5'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E\")", backgroundRepeat: "no-repeat", backgroundPosition: "right 12px center" }}
-              >
-                <option value="" className="text-gray-800 bg-white">Tất cả khu vực</option>
-                {khuVucList.map((kv) => (
-                  <option key={kv} value={kv} className="text-gray-800 bg-white">{kv}</option>
-                ))}
-              </select>
+          {/* Dropdown lọc vị trí & khu vực */}
+          {(distinctViTri.length > 0 || distinctKhuVuc.length > 0) && (
+            <div className="mt-3 flex justify-center gap-2 flex-wrap">
+              {distinctViTri.length > 0 && (
+                <select
+                  value={viTri}
+                  onChange={(e) => handleViTriChange(e.target.value)}
+                  className="bg-white/20 text-white text-sm rounded-xl px-4 py-2 border border-white/30 focus:outline-none focus:ring-2 focus:ring-white/50 cursor-pointer appearance-none pr-8"
+                  style={{ backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.5'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E\")", backgroundRepeat: "no-repeat", backgroundPosition: "right 12px center" }}
+                >
+                  <option value="" className="text-gray-800 bg-white">Tất cả vị trí</option>
+                  {distinctViTri.map((v) => (
+                    <option key={v} value={v} className="text-gray-800 bg-white">{v}</option>
+                  ))}
+                </select>
+              )}
+              {distinctKhuVuc.length > 0 && (
+                <select
+                  value={khuVuc}
+                  onChange={(e) => handleKhuVucChange(e.target.value)}
+                  className="bg-white/20 text-white text-sm rounded-xl px-4 py-2 border border-white/30 focus:outline-none focus:ring-2 focus:ring-white/50 cursor-pointer appearance-none pr-8"
+                  style={{ backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.5'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E\")", backgroundRepeat: "no-repeat", backgroundPosition: "right 12px center" }}
+                >
+                  <option value="" className="text-gray-800 bg-white">Tất cả khu / lô</option>
+                  {distinctKhuVuc.map((kv) => (
+                    <option key={kv} value={kv} className="text-gray-800 bg-white">{kv}</option>
+                  ))}
+                </select>
+              )}
             </div>
           )}
         </div>
@@ -225,6 +254,19 @@ export default function DuaSapPublicPage() {
               ) : "Tất cả cây: "}
               <span className="font-semibold text-emerald-700">{total}</span> cây
             </span>
+            {viTri && (
+              <span className="inline-flex items-center gap-1 bg-emerald-100 text-emerald-700 text-xs font-medium px-2.5 py-0.5 rounded-full">
+                <MapPin size={11} />
+                {viTri}
+                <button
+                  onClick={() => handleViTriChange("")}
+                  className="ml-0.5 hover:text-emerald-900 leading-none"
+                  aria-label="Bỏ lọc vị trí"
+                >
+                  ×
+                </button>
+              </span>
+            )}
             {khuVuc && (
               <span className="inline-flex items-center gap-1 bg-emerald-100 text-emerald-700 text-xs font-medium px-2.5 py-0.5 rounded-full">
                 <MapPin size={11} />

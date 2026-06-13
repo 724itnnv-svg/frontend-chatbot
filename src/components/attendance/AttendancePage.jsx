@@ -430,8 +430,28 @@ function buildPayslipHTML(payroll) {
   const thuongKPI = toNumber(payroll.thuNhapTheoNgayCong?.thuongKPI);
   const hoaHong = toNumber(payroll.thuNhapTheoNgayCong?.hoaHong);
   const luongDot2 = thuongKPI + hoaHong;
-  const luongDot1 = Math.max(0, tongThucLinh - luongDot2);
   const hasBonus = luongDot2 > 0;
+  const dot1ThuNhapPrint =
+    toNumber(payroll.thuNhapTheoNgayCong?.luongTheoNgayCong) +
+    toNumber(payroll.thuNhapTheoNgayCong?.phuCapComThucTe) +
+    toNumber(payroll.thuNhapTheoNgayCong?.phuCapChuyenCanThucTe) +
+    toNumber(payroll.thuNhapTheoNgayCong?.phuCapXangXeThucTe) +
+    toNumber(payroll.thuNhapTheoNgayCong?.phuCapDienThoaiThucTe) +
+    toNumber(payroll.thuNhapTheoNgayCong?.phuCapNhiemVuThucTe) +
+    toNumber(payroll.thuNhapTheoNgayCong?.luongLeTet) +
+    toNumber(payroll.thuNhapTheoNgayCong?.luongPhepNam) +
+    toNumber(payroll.thuNhapTheoNgayCong?.luongTangCaThuong) +
+    toNumber(payroll.thuNhapTheoNgayCong?.luongTangCaChuNhat) +
+    toNumber(payroll.thuNhapTheoNgayCong?.luongTangCaLeTet) +
+    toNumber(payroll.thuNhapTheoNgayCong?.comTangCa) +
+    toNumber(payroll.thuNhapTheoNgayCong?.traGiamLuong) +
+    toNumber(payroll.thuNhapTheoNgayCong?.congKhac);
+  let dot1ChinhThuc = dot1ThuNhapPrint - toNumber(payroll.khauTru?.tongKhauTru);
+  let dot2ChinhThuc = luongDot2 - toNumber(payroll.tinhThueTNCN?.thueTNCNTamTinh);
+  if (dot2ChinhThuc < 0) {
+    dot1ChinhThuc += dot2ChinhThuc;
+    dot2ChinhThuc = 0;
+  }
 
   const incomeHTML = incomeRows
     .map(([label, path]) => {
@@ -495,12 +515,12 @@ function buildPayslipHTML(payroll) {
     <div class="pr">
       <span class="badge g-bg">1</span>
       <div class="pi"><div class="pt">Dot 1 — Cuoi thang</div><div class="pd">Luong + phu cap + cac khoan co dinh</div></div>
-      <span class="pa">${money(luongDot1)}</span>
+      <span class="pa">${money(dot1ChinhThuc)}</span>
     </div>
     <div class="pr">
       <span class="badge ${hasBonus ? "v-bg" : "gr-bg"}">2</span>
       <div class="pi"><div class="pt">Dot 2 — Giua thang</div><div class="pd">${dot2Desc}</div></div>
-      <span class="pa ${hasBonus ? "v" : "gray"}">${money(luongDot2)}</span>
+      <span class="pa ${hasBonus ? "v" : "gray"}">${money(dot2ChinhThuc)}</span>
     </div>
     <div class="ptot"><span>TONG THUC LINH</span><span>${money(tongThucLinh)}</span></div>
   </div>
@@ -1629,10 +1649,39 @@ export default function AttendancePage() {
                   const hoaHong = toNumber(payroll.thuNhapTheoNgayCong?.hoaHong);
                   const tongThucLinh = toNumber(payroll.luongThucLinh);
                   const luongDot2 = thuongKPI + hoaHong;
-                  const luongDot1 = Math.max(0, tongThucLinh - luongDot2);
                   const hasBonus = luongDot2 > 0;
                   const tongThuNhap = toNumber(payroll.thuNhapTheoNgayCong?.tongThuNhap);
                   const tongKhauTruTotal = toNumber(payroll.khauTru?.tongKhauTru) + toNumber(payroll.tinhThueTNCN?.thueTNCNTamTinh);
+                  const dot1ThuNhap =
+                    toNumber(payroll.thuNhapTheoNgayCong?.luongTheoNgayCong) +
+                    toNumber(payroll.thuNhapTheoNgayCong?.phuCapComThucTe) +
+                    toNumber(payroll.thuNhapTheoNgayCong?.phuCapChuyenCanThucTe) +
+                    toNumber(payroll.thuNhapTheoNgayCong?.phuCapXangXeThucTe) +
+                    toNumber(payroll.thuNhapTheoNgayCong?.phuCapDienThoaiThucTe) +
+                    toNumber(payroll.thuNhapTheoNgayCong?.phuCapNhiemVuThucTe) +
+                    toNumber(payroll.thuNhapTheoNgayCong?.luongLeTet) +
+                    toNumber(payroll.thuNhapTheoNgayCong?.luongPhepNam) +
+                    toNumber(payroll.thuNhapTheoNgayCong?.luongTangCaThuong) +
+                    toNumber(payroll.thuNhapTheoNgayCong?.luongTangCaChuNhat) +
+                    toNumber(payroll.thuNhapTheoNgayCong?.luongTangCaLeTet) +
+                    toNumber(payroll.thuNhapTheoNgayCong?.comTangCa) +
+                    toNumber(payroll.thuNhapTheoNgayCong?.traGiamLuong) +
+                    toNumber(payroll.thuNhapTheoNgayCong?.congKhac);
+
+
+                  const tongLuong12 = (dot1ThuNhap + luongDot2) - toNumber(payroll.khauTru?.tongKhauTru);
+
+                  const tongLuongTruTNCN = tongLuong12 - toNumber(payroll.tinhThueTNCN?.thueTNCNTamTinh);
+
+                  let dot1ChinhThuc = dot1ThuNhap - toNumber(payroll.khauTru?.tongKhauTru);
+
+                  let dot2ChinhThuc = tongLuongTruTNCN - dot1ChinhThuc;
+
+                  if (dot2ChinhThuc < 0) {
+                    dot1ChinhThuc += dot2ChinhThuc;
+                    dot2ChinhThuc = 0;
+                  }
+
                   const netPct = tongThuNhap > 0 ? Math.round(Math.max(0, Math.min(100, (tongThucLinh / tongThuNhap) * 100))) : 0;
                   const dedPct = tongThuNhap > 0 ? Math.round(Math.max(0, Math.min(100 - netPct, (tongKhauTruTotal / tongThuNhap) * 100))) : 0;
                   const luongTangCaTong =
@@ -1742,7 +1791,7 @@ export default function AttendancePage() {
                               <div className="text-sm font-semibold text-slate-800">Đợt 1 — Cuối tháng</div>
                               <div className="text-xs text-slate-400">Lương + phụ cấp + các khoản cố định</div>
                             </div>
-                            <div className="text-base font-black text-emerald-700 tabular-nums">{money(luongDot1)}</div>
+                            <div className="text-base font-black text-emerald-700 tabular-nums">{money(dot1ChinhThuc)}</div>
                           </div>
                           <div className="flex items-center gap-3 px-4 py-3.5">
                             <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-xs font-black text-white ${hasBonus ? "bg-violet-600" : "bg-slate-300"}`}>2</div>
@@ -1754,7 +1803,7 @@ export default function AttendancePage() {
                                 {!hasBonus && <span className="italic">Không có thưởng kỳ này</span>}
                               </div>
                             </div>
-                            <div className={`text-base font-black tabular-nums ${hasBonus ? "text-violet-700" : "text-slate-400"}`}>{money(luongDot2)}</div>
+                            <div className={`text-base font-black tabular-nums ${hasBonus ? "text-violet-700" : "text-slate-400"}`}>{money(dot2ChinhThuc)}</div>
                           </div>
                           <div className="flex items-center justify-between bg-emerald-50 px-4 py-3">
                             <span className="text-sm font-bold text-emerald-800">Tổng thực lĩnh</span>
