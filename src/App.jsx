@@ -45,6 +45,7 @@ const ChatbotConfigManager = lazy(() => import("./components/chatbotConfig/Chatb
 const FAQManager = lazy(() => import("./components/FAQManager"));
 const ChatV3FAQManager = lazy(() => import("./components/ChatV3FAQManager"));
 const ChatV3FileSearchManager = lazy(() => import("./components/chatV3/ChatV3FileSearchManager"));
+const ChatV3ContextManager = lazy(() => import("./components/chatV3/ChatV3ContextManager"));
 const LogsManage = lazy(() => import("./components/logs/LogsManager"));
 const NotificationManager = lazy(() => import("./components/NotificationManager"));
 const PayrollManager = lazy(() => import("./components/PayrollManager"));
@@ -121,6 +122,7 @@ const ADMIN_ROUTE_BY_SCREEN = {
   admin_faq: "/admin/faqs",
   admin_chat_v3_faq: "/admin/chat-v3-faqs",
   admin_chat_v3_file_search: "/admin/chat-v3-file-search",
+  admin_chat_v3_contexts: "/admin/chat-v3-contexts",
   admin_testcase: "/admin/test-chatbot-v3",
   admin_chat_v4_rules: "/admin/chat-v4-rules",
   admin_chat_v4_function_calls: "/admin/chat-v4-function-calls",
@@ -162,6 +164,7 @@ const adminRoutes = [
   { path: "faqs", screenId: "admin_faq", element: <FAQManager /> },
   { path: "chat-v3-faqs", screenId: "admin_chat_v3_faq", element: <ChatV3FAQManager /> },
   { path: "chat-v3-file-search", screenId: "admin_chat_v3_file_search", element: <ChatV3FileSearchManager /> },
+  { path: "chat-v3-contexts", screenId: "admin_chat_v3_contexts", element: <ChatV3ContextManager /> },
   { path: "test-chatbot-v3", screenId: "admin_testcase", element: <TestCaseChatBotManager /> },
   { path: "test-cases", screenId: "admin_testcase", element: <Navigate to="/admin/test-chatbot-v3" replace /> },
   { path: "test-chat", screenId: "admin_testcase", element: <Navigate to="/admin/test-chatbot-v3" replace /> },

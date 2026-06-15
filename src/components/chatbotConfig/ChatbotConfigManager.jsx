@@ -171,6 +171,28 @@ function SectionCard({ id, title, description, icon: Icon, activeSection, childr
   );
 }
 
+function extractZaloOaUserId(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+
+  try {
+    const parsed = new URL(text);
+    const uid = parsed.searchParams.get("uid")
+      || parsed.searchParams.get("user_id")
+      || parsed.searchParams.get("userId");
+    if (uid) return String(uid).trim();
+  } catch {
+    // Keep raw userId input supported when the value is not a full URL.
+  }
+
+  const queryMatch = text.match(/[?&](?:uid|user_id|userId)=([^&#\s]+)/i);
+  if (queryMatch?.[1]) return decodeURIComponent(queryMatch[1]).trim();
+
+  const compact = text.replace(/\s+/g, "");
+  if (/^\d{6,}$/.test(compact)) return compact;
+  return "";
+}
+
 export default function ChatbotConfigManager() {
   const { token } = useAuth();
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
@@ -344,11 +366,13 @@ export default function ChatbotConfigManager() {
 
   const handleSaveZaloAdmin = async () => {
     if (!token || savingZaloAdmin) return;
+    const note = String(zaloAdminForm.note || "").trim();
+    const rawUserId = String(zaloAdminForm.userId || "").trim();
     const payload = {
       phone: String(zaloAdminForm.phone || "").trim(),
       username: String(zaloAdminForm.username || "").trim(),
-      userId: String(zaloAdminForm.userId || "").trim(),
-      note: String(zaloAdminForm.note || "").trim(),
+      userId: extractZaloOaUserId(rawUserId) || extractZaloOaUserId(note) || rawUserId,
+      note,
     };
     if (!payload.phone || !payload.userId) {
       setMessage("Vui lòng nhập SĐT và userID quản trị viên Zalo OA.");
@@ -1112,13 +1136,24 @@ export default function ChatbotConfigManager() {
                         <input
                           type="text"
                           value={zaloAdminForm.userId}
-                          onChange={(event) => setZaloAdminForm((prev) => ({ ...prev, userId: event.target.value }))}
+                          onChange={(event) => {
+                            const value = event.target.value;
+                            setZaloAdminForm((prev) => ({ ...prev, userId: extractZaloOaUserId(value) || value }));
+                          }}
                           className="h-9 w-full rounded-md border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-950 outline-none transition focus:border-cyan-300 focus:ring-2 focus:ring-cyan-50"
                           placeholder="userID Zalo OA"
                         />
                         <textarea
                           value={zaloAdminForm.note}
-                          onChange={(event) => setZaloAdminForm((prev) => ({ ...prev, note: event.target.value }))}
+                          onChange={(event) => {
+                            const value = event.target.value;
+                            const extractedUserId = extractZaloOaUserId(value);
+                            setZaloAdminForm((prev) => ({
+                              ...prev,
+                              note: value,
+                              userId: prev.userId || extractedUserId || prev.userId,
+                            }));
+                          }}
                           rows={4}
                           className="w-full resize-y rounded-md border border-slate-200 bg-white px-2.5 py-2 text-xs leading-5 text-slate-950 outline-none transition focus:border-cyan-300 focus:ring-2 focus:ring-cyan-50"
                           placeholder="Note: tên, vai trò, khu vực phụ trách..."

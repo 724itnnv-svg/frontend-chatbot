@@ -51,6 +51,7 @@ const MENU_CONFIG = [
   { id: "admin_event_promo", path: "/admin/promotions", label: "Chương trình khuyến mãi", icon: BotMessageSquare },
   { id: "admin_vectorstore_tool", path: "/admin/vector-stores", label: "Quản trị Vector DB", icon: Database },
   { id: "admin_chat_v3_file_search", path: "/admin/chat-v3-file-search", label: "File Search Chat V3", icon: Search },
+  { id: "admin_chat_v3_contexts", path: "/admin/chat-v3-contexts", label: "Ngữ cảnh Chat V3", icon: BrainCircuit },
   { id: "admin_testcase", path: "/admin/test-chatbot-v3", label: "Test ChatBOT V3", icon: Database },
   { id: "admin_chat_v4_rules", path: "/admin/chat-v4-rules", label: "Quy tắc Chat V4", icon: Settings2 },
   { id: "admin_chat_v4_function_calls", path: "/admin/chat-v4-function-calls", label: "Function Call V4", icon: Code2 },
@@ -104,7 +105,7 @@ const MENU_GROUPS = [
     id: "system",
     label: "Hệ thống & AI",
     icon: ShieldCheck,
-    items: ["admin_dashboard", "admin_products_tool", "admin_vectorstore_tool", "admin_chat_v3_file_search", "admin_agent", "admin_agent_intent", "admin_agent_promo", "admin_agent_response_templates", "admin_chatbot_config", "admin_chat_v3_faq", "admin_testcase", "admin_logs"],
+    items: ["admin_dashboard", "admin_products_tool", "admin_vectorstore_tool", "admin_chat_v3_file_search", "admin_chat_v3_contexts", "admin_agent", "admin_agent_intent", "admin_agent_promo", "admin_agent_response_templates", "admin_chatbot_config", "admin_chat_v3_faq", "admin_testcase", "admin_logs"],
   },
   {
     id: "experimental",

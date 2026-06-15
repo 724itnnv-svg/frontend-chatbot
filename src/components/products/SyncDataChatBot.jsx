@@ -114,6 +114,7 @@ function SyncDataChatBot({ open, onClose }) {
           companyId: company,
           q,
           limit: "1000",
+          active: "true",
         });
         if (type) params.set("type", type);
 
@@ -126,7 +127,8 @@ function SyncDataChatBot({ open, onClose }) {
 
         const result = await res.json();
         const list = Array.isArray(result.data) ? result.data : Array.isArray(result) ? result : [];
-        setData(list);
+        const activeProducts = list.filter((item) => item.isActive !== false);
+        setData(activeProducts);
       } catch (err) {
         if (err.name !== "AbortError") setError(err.message);
       } finally {
