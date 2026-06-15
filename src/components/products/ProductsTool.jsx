@@ -12,6 +12,7 @@ import {
   ImageUp,
   Database,
   Loader2,
+  Power,
   ChevronDown,
   ChevronUp,
 } from "lucide-react";
@@ -68,6 +69,7 @@ export default function ProductManager() {
   const [filterCompany, setFilterCompany] = useState("");
   const [selectedImportType, setSelectedImportType] = useState("fertilizer");
   const [filterType, setFilterType] = useState("");
+  const [filterActive, setFilterActive] = useState("true");
   const [showEditModal, setShowEditModal] = useState(false);
   const [showSyncDataModal, setShowSyncDataModal] = useState(false);
   const [showNameCheckModal, setShowNameCheckModal] = useState(false);
@@ -77,13 +79,14 @@ export default function ProductManager() {
   const [checkingProductNames, setCheckingProductNames] = useState(false);
   const [editingProduct, setEditingProduct] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [togglingActiveId, setTogglingActiveId] = useState(null);
   const [sortField, setSortField] = useState("");
   const [sortOrder, setSortOrder] = useState("asc");
 
   const loadMoreRef = useRef(null);
   const observerRef = useRef(null);
   const listAbortControllerRef = useRef(null);
-  const latestQueryRef = useRef({ q: "", companyId: "" });
+  const latestQueryRef = useRef({ q: "", companyId: "", type: "", active: "true" });
   const loadingNextPageRef = useRef(false);
   const importFieldRefs = useRef({});
 
@@ -174,6 +177,15 @@ export default function ProductManager() {
     "TEN CONG TY": "COMPANY",
     COMPANY_ID: "COMPANY_ID",
     COMANY: "COMPANY_ID",
+    IS_ACTIVE: "isActive",
+    isActive: "isActive",
+    ACTIVE: "isActive",
+    active: "isActive",
+    STATUS: "isActive",
+    "TRẠNG THÁI": "isActive",
+    "TRANG THAI": "isActive",
+    "KÍCH HOẠT": "isActive",
+    "KICH HOAT": "isActive",
   };
   const PRODUCT_DB_FIELDS = [
     "PRODUCT_CODE",
@@ -192,6 +204,7 @@ export default function ProductManager() {
     "STAGES",
     "KEYWORDS",
     "IMAGE_URL",
+    "isActive",
     "COMPANY",
     "COMPANY_ID",
   ];
@@ -295,6 +308,19 @@ export default function ProductManager() {
     return Number(String(value || "").replace(/[^0-9.-]/g, "")) || 0;
   };
 
+  const parseBoolean = (value, fallback = true) => {
+    if (typeof value === "boolean") return value;
+    if (typeof value === "number") return value !== 0;
+    const raw = String(value ?? "").trim().toLowerCase();
+    if (!raw) return fallback;
+    const normalized = normalizeHeader(raw);
+    if (["true", "1", "yes", "y", "on", "active", "enabled"].includes(raw)) return true;
+    if (["false", "0", "no", "n", "off", "inactive", "disabled"].includes(raw)) return false;
+    if (/DANG\s*BAT|HOAT\s*DONG|KICH\s*HOAT|BAT/.test(normalized)) return true;
+    if (/DA\s*TAT|TAM\s*TAT|NGUNG|KHONG\s*KICH\s*HOAT|TAT/.test(normalized)) return false;
+    return fallback;
+  };
+
   const splitList = (value, splitLines = false) => {
     if (Array.isArray(value)) return value.map((item) => String(item || "").trim()).filter(Boolean);
     const text = String(value || "").trim();
@@ -363,6 +389,7 @@ export default function ProductManager() {
       USAGE: String(mapped.USAGE || "").trim(),
       KEYWORDS: splitList(mapped.KEYWORDS),
       IMAGE_URL: splitList(imageValues.join(",")),
+      isActive: parseBoolean(mapped.isActive, true),
       COMPANY: companyId,
       COMPANY_ID: companyId,
     };
@@ -850,7 +877,7 @@ export default function ProductManager() {
     if (!token) return;
 
     const trimmedQuery = q.trim();
-    const currentQueryKey = `${trimmedQuery}__${filterCompany}__${filterType}`;
+    const currentQueryKey = `${trimmedQuery}__${filterCompany}__${filterType}__${filterActive}`;
 
     try {
       setError("");
@@ -861,7 +888,7 @@ export default function ProductManager() {
         setLoading(true);
         setReadyForLoadMore(false);
         loadingNextPageRef.current = false;
-        latestQueryRef.current = { q: trimmedQuery, companyId: filterCompany, type: filterType };
+        latestQueryRef.current = { q: trimmedQuery, companyId: filterCompany, type: filterType, active: filterActive };
 
         if (listAbortControllerRef.current) {
           listAbortControllerRef.current.abort();
@@ -875,7 +902,7 @@ export default function ProductManager() {
         : listAbortControllerRef.current?.signal;
 
       const res = await fetch(
-        `/api/products?q=${encodeURIComponent(trimmedQuery)}&page=${pageNumber}&limit=10&companyId=${encodeURIComponent(filterCompany)}&type=${encodeURIComponent(filterType)}&sortField=${sortField}&sortOrder=${sortOrder}`,
+        `/api/products?q=${encodeURIComponent(trimmedQuery)}&page=${pageNumber}&limit=10&companyId=${encodeURIComponent(filterCompany)}&type=${encodeURIComponent(filterType)}&active=${encodeURIComponent(filterActive)}&sortField=${sortField}&sortOrder=${sortOrder}`,
         {
           headers: {
             Authorization: `Bearer ${token}`,
@@ -893,7 +920,7 @@ export default function ProductManager() {
           ? data
           : [];
 
-      const latestKey = `${latestQueryRef.current.q}__${latestQueryRef.current.companyId}__${latestQueryRef.current.type || ""}`;
+      const latestKey = `${latestQueryRef.current.q}__${latestQueryRef.current.companyId}__${latestQueryRef.current.type || ""}__${latestQueryRef.current.active || "all"}`;
       if (currentQueryKey !== latestKey) return;
 
       const nextProducts = normalizeProducts(rawList);
@@ -931,7 +958,7 @@ export default function ProductManager() {
     }, 400);
 
     return () => clearTimeout(delay);
-  }, [search, filterCompany, filterType, sortField, sortOrder, token]);
+  }, [search, filterCompany, filterType, filterActive, sortField, sortOrder, token]);
 
   useEffect(() => {
     if (!readyForLoadMore || page === 1) return;
@@ -1022,7 +1049,7 @@ export default function ProductManager() {
         codes.map(async (code) => {
           try {
             const res = await fetch(
-              `/api/products?q=${encodeURIComponent(code)}&page=1&limit=20&companyId=${encodeURIComponent(filterCompany)}&type=${encodeURIComponent(filterType)}&sortField=&sortOrder=asc`,
+              `/api/products?q=${encodeURIComponent(code)}&page=1&limit=20&companyId=${encodeURIComponent(filterCompany)}&type=${encodeURIComponent(filterType)}&active=${encodeURIComponent(filterActive)}&sortField=&sortOrder=asc`,
               {
                 headers: { Authorization: `Bearer ${token}` },
               }
@@ -1100,6 +1127,40 @@ export default function ProductManager() {
       alert(err.message);
     } finally {
       setDeletingId(null);
+    }
+  };
+
+  const handleToggleActive = async (product) => {
+    const id = product._id || product.id;
+    if (!id) return;
+    const nextActive = product.isActive === false;
+
+    try {
+      setTogglingActiveId(id);
+      const res = await fetch(`/api/products/${id}/active`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ isActive: nextActive }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.ok === false) throw new Error(data.message || "Cập nhật trạng thái thất bại");
+
+      setProducts((prev) => {
+        const nextList = prev.map((item) => (getProductKey(item) === String(id) ? { ...item, isActive: nextActive } : item));
+        if (filterActive === "true" && !nextActive) return nextList.filter((item) => getProductKey(item) !== String(id));
+        if (filterActive === "false" && nextActive) return nextList.filter((item) => getProductKey(item) !== String(id));
+        return nextList;
+      });
+      if ((filterActive === "true" && !nextActive) || (filterActive === "false" && nextActive)) {
+        setTotal((prev) => Math.max(prev - 1, 0));
+      }
+    } catch (err) {
+      alert(err.message || "Cập nhật trạng thái thất bại");
+    } finally {
+      setTogglingActiveId(null);
     }
   };
 
@@ -1518,6 +1579,34 @@ export default function ProductManager() {
             <option value="seedling">Cây giống</option>
           </select>
 
+          <div className="grid h-[42px] w-full grid-cols-3 rounded-xl border border-slate-200 bg-white p-1 shadow-sm md:w-[280px]">
+            {[
+              { value: "true", label: "Bật" },
+              { value: "false", label: "Tắt" },
+              { value: "all", label: "Tất cả" },
+            ].map((option) => {
+              const active = filterActive === option.value;
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => setFilterActive(option.value)}
+                  className={`rounded-lg px-2 text-xs font-bold transition ${
+                    active
+                      ? option.value === "false"
+                        ? "bg-rose-500 text-white shadow-sm"
+                        : option.value === "all"
+                          ? "bg-slate-900 text-white shadow-sm"
+                          : "bg-emerald-500 text-white shadow-sm"
+                      : "text-slate-500 hover:bg-slate-50 hover:text-slate-800"
+                  }`}
+                >
+                  {option.label}
+                </button>
+              );
+            })}
+          </div>
+
           <select
             value={sortField}
             onChange={(e) => setSortField(e.target.value)}
@@ -1546,7 +1635,10 @@ export default function ProductManager() {
 
         <div className="grid md:grid-cols-2 lg:grid-cols-5 gap-6 relative overflow-auto">
           {filteredProducts.map((product) => (
-            <div key={product.id} className="bg-white rounded-2xl p-4 shadow relative">
+            <div
+              key={product.id}
+              className={`bg-white rounded-2xl p-4 pb-16 shadow relative ${product.isActive === false ? "opacity-70" : ""}`}
+            >
               <img
                 src={getImageSrc(product.IMAGE_URL)}
                 className="w-full h-60 object-cover rounded-xl mb-3"
@@ -1565,6 +1657,15 @@ export default function ProductManager() {
                 <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-emerald-700">
                   {product.TYPE === "seedling" ? "Cây giống" : "Phân bón"}
                 </span>
+                <span
+                  className={`rounded-full px-2 py-0.5 ${
+                    product.isActive === false
+                      ? "bg-rose-50 text-rose-700"
+                      : "bg-cyan-50 text-cyan-700"
+                  }`}
+                >
+                  {product.isActive === false ? "Đã tắt" : "Đang bật"}
+                </span>
                 {product.UNIT_NAME && (
                   <span className="rounded-full bg-slate-100 px-2 py-0.5 text-slate-600">
                     {product.UNIT_NAME}
@@ -1582,6 +1683,34 @@ export default function ProductManager() {
               )}
 
               <div className="flex gap-2 justify-end absolute bottom-2 right-2">
+                <button
+                  onClick={() => handleToggleActive(product)}
+                  title={product.isActive === false ? "Bật sản phẩm" : "Tắt sản phẩm"}
+                  disabled={togglingActiveId === (product._id || product.id)}
+                  className={`flex items-center gap-2 rounded-full border px-2.5 py-1 shadow-sm transition disabled:opacity-70 ${
+                    product.isActive === false
+                      ? "border-rose-100 bg-rose-50 text-rose-600 hover:bg-rose-100"
+                      : "border-emerald-100 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                  }`}
+                >
+                  {togglingActiveId === (product._id || product.id) ? (
+                    <Loader2 size={15} className="animate-spin" />
+                  ) : (
+                    <span
+                      className={`relative inline-flex h-4 w-8 items-center rounded-full transition ${
+                        product.isActive === false ? "bg-rose-200" : "bg-emerald-500"
+                      }`}
+                    >
+                      <span
+                        className={`h-3 w-3 rounded-full bg-white shadow transition ${
+                          product.isActive === false ? "translate-x-0.5" : "translate-x-4"
+                        }`}
+                      />
+                    </span>
+                  )}
+                  <Power size={13} />
+                </button>
+
                 <button
                   onClick={() => handleDelete(product._id || product.id)}
                   title="Xóa sản phẩm"

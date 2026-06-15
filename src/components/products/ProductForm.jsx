@@ -18,6 +18,7 @@ const DEFAULT_FORM = {
   PRODUCT_CODE: "",
   PRODUCT_NAME: "",
   TYPE: "fertilizer",
+  isActive: true,
   UNIT_NAME: "",
   PACKING_QUANTITY: "",
   PRICE: 0,
@@ -91,6 +92,7 @@ function ProductForm({ open, onClose, onSubmit, onSubmitCreate, productId }) {
           ...DEFAULT_FORM,
           ...data,
           TYPE: data.TYPE || "fertilizer",
+          isActive: data.isActive !== false,
           PRICE: data.PRICE ?? data.PRICE_VND ?? 0,
           PRICE_VND: data.PRICE_VND ?? data.PRICE ?? 0,
           COMPANY: data.COMPANY || data.COMPANY_ID || data.COMANY || "",
@@ -138,9 +140,9 @@ function ProductForm({ open, onClose, onSubmit, onSubmitCreate, productId }) {
   };
 
   const handleChange = (event) => {
-    const { name, value } = event.target;
+    const { name, value, type, checked } = event.target;
     setForm((prev) => {
-      const next = { ...prev, [name]: value };
+      const next = { ...prev, [name]: type === "checkbox" ? checked : value };
       if (name === "COMPANY") next.COMPANY_ID = value;
       return next;
     });
@@ -200,6 +202,7 @@ function ProductForm({ open, onClose, onSubmit, onSubmitCreate, productId }) {
         ...form,
         PRICE: price,
         PRICE_VND: price,
+        isActive: form.isActive !== false,
         COMPANY: form.COMPANY || form.COMPANY_ID || "",
         COMPANY_ID: form.COMPANY_ID || form.COMPANY || "",
         PROMO: undefined,
@@ -231,6 +234,7 @@ function ProductForm({ open, onClose, onSubmit, onSubmitCreate, productId }) {
   const labelClass = "text-xs font-bold uppercase tracking-wide text-slate-500";
 
   const productTypeLabel = form.TYPE === "seedling" ? "Cây giống" : "Phân bón";
+  const activeLabel = form.isActive === false ? "Đã tắt" : "Đang bật";
   const priceText = `${Number(form.PRICE || 0).toLocaleString("vi-VN")} đ`;
 
   const fieldError = (name) =>
@@ -379,9 +383,14 @@ function ProductForm({ open, onClose, onSubmit, onSubmitCreate, productId }) {
                 <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
                   <div className="bg-gradient-to-br from-cyan-600 via-sky-600 to-emerald-500 p-5 text-white">
                     <div className="mb-8 flex items-center justify-between gap-3">
-                      <span className="rounded-full bg-white/20 px-3 py-1 text-xs font-bold backdrop-blur">
-                        {productTypeLabel}
-                      </span>
+                      <div className="flex flex-wrap gap-2">
+                        <span className="rounded-full bg-white/20 px-3 py-1 text-xs font-bold backdrop-blur">
+                          {productTypeLabel}
+                        </span>
+                        <span className="rounded-full bg-white/20 px-3 py-1 text-xs font-bold backdrop-blur">
+                          {activeLabel}
+                        </span>
+                      </div>
                       <Package size={22} />
                     </div>
                     <div className="text-xs font-semibold uppercase tracking-wide text-white/75">
@@ -466,6 +475,42 @@ function ProductForm({ open, onClose, onSubmit, onSubmitCreate, productId }) {
                       {fieldError("COMPANY")}
                     </label>
                   </div>
+                  <label
+                    className={`mt-4 flex cursor-pointer items-center justify-between gap-4 rounded-2xl border px-4 py-3 transition ${
+                      form.isActive === false
+                        ? "border-rose-100 bg-rose-50"
+                        : "border-emerald-100 bg-emerald-50"
+                    }`}
+                  >
+                    <span>
+                      <span className={labelClass}>Trạng thái</span>
+                      <span
+                        className={`mt-1 block text-sm font-bold ${
+                          form.isActive === false ? "text-rose-700" : "text-emerald-700"
+                        }`}
+                      >
+                        {form.isActive === false ? "Sản phẩm đang tắt" : "Sản phẩm đang bật"}
+                      </span>
+                    </span>
+                    <input
+                      name="isActive"
+                      type="checkbox"
+                      checked={form.isActive !== false}
+                      onChange={handleChange}
+                      className="sr-only"
+                    />
+                    <span
+                      className={`relative inline-flex h-7 w-12 shrink-0 items-center rounded-full transition ${
+                        form.isActive === false ? "bg-rose-300" : "bg-emerald-500"
+                      }`}
+                    >
+                      <span
+                        className={`h-5 w-5 rounded-full bg-white shadow transition ${
+                          form.isActive === false ? "translate-x-1" : "translate-x-6"
+                        }`}
+                      />
+                    </span>
+                  </label>
                   <div className="mt-4 grid gap-4 md:grid-cols-3">
                     {textInput("FORM_COLOR", "Dạng / màu")}
                   </div>
