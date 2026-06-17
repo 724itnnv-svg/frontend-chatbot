@@ -25,6 +25,7 @@ const APP_PERMISSIONS = {
     { id: "admin_faq", name: "FAQ Theo Page" },
     { id: "admin_testcase", name: "Quản Trị Test Case ChatBot" },
     { id: "admin_chat_v4_rules", name: "Quy tắc Chat V4" },
+    { id: "admin_chat_v3_rules", name: "Luật vận hành Chat V3" },
     { id: "admin_chat_v4_function_calls", name: "Function Call Chat V4" },
     { id: "admin_chat_v4_contexts", name: "Ngữ cảnh Chat V4" },
     { id: "admin_chat_v4_settings", name: "Cài đặt Chat V4" },

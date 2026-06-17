@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import {
     X,
     BookOpen,
@@ -14,21 +14,46 @@ import {
     Maximize2,
     Minimize2,
     Layers,
+    Search,
 } from "lucide-react";
 
-export default function InstructionModal({ isOpen, onClose, onSave, editing, setEditing, teams, isSaving, lockedType = null }) {
+export default function InstructionModal({
+    isOpen,
+    onClose,
+    onSave,
+    editing,
+    setEditing,
+    teams,
+    pages = [],
+    isSaving,
+    lockedType = null,
+}) {
     const [activeTab, setActiveTab] = useState("system");
     const [promptExpanded, setPromptExpanded] = useState(false);
     const [expandedTool, setExpandedTool] = useState(null);
-
-    if (!isOpen) return null;
+    const [pageQuery, setPageQuery] = useState("");
 
     const isCreate = !editing._id;
     const isPromo = (lockedType || editing.type) === "promo";
+    const isPageScope = editing.scope === "page";
     const isSimplified = editing.teamId === "Intent" || isPromo;
-    const visibleTeams = isPromo ? teams.filter(t => t.id !== "Intent") : teams;
+    const visibleTeams = isPromo ? teams.filter((team) => team.id !== "Intent") : teams;
+
     const set = (field, value) => setEditing({ ...editing, [field]: value });
-    const setOpt = (key, value) => setEditing({ ...editing, options: { ...editing.options, [key]: value } });
+    const setOpt = (key, value) => setEditing({ ...editing, options: { ...(editing.options || {}), [key]: value } });
+    const getPageKey = (page) => String(page?.facebookId || page?.pageId || page?._id || "");
+    const getPageName = (page) => page?.name || page?.pageName || page?.title || page?.facebookId || "Page";
+    const getPageTeamId = (page) => page?.teamId || page?.team || "";
+
+    const filteredPages = useMemo(() => {
+        const keyword = pageQuery.trim().toLowerCase();
+        if (!keyword) return pages;
+        return pages.filter((page) =>
+            [getPageName(page), getPageKey(page), getPageTeamId(page)]
+                .filter(Boolean)
+                .some((value) => String(value).toLowerCase().includes(keyword)),
+        );
+    }, [pageQuery, pages]);
 
     const toolPrompts = [
         { key: "createOrderFromAssistant", label: "CreateOrderFromAssistant" },
@@ -36,13 +61,17 @@ export default function InstructionModal({ isOpen, onClose, onSave, editing, set
         { key: "calculateShipping", label: "CalculateShipping" },
         { key: "findPromoEvent", label: "FindPromoEvent" },
     ];
+
     const rightTabs = [
         ...(!isSimplified ? [{ id: "options", label: "Thông tin đơn vị", icon: Tag }] : []),
         { id: "system", label: isPromo ? "Nội dung khuyến mãi" : "System Prompt", icon: FileText },
         ...(!isSimplified ? [{ id: "tools", label: "Prompt công cụ", icon: Layers }] : []),
     ];
-    const currentTab = rightTabs.some(tab => tab.id === activeTab) ? activeTab : "system";
-    const expandedToolMeta = toolPrompts.find(item => item.key === expandedTool);
+
+    const currentTab = rightTabs.some((tab) => tab.id === activeTab) ? activeTab : "system";
+    const expandedToolMeta = toolPrompts.find((item) => item.key === expandedTool);
+
+    if (!isOpen) return null;
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm md:p-8">
@@ -53,14 +82,12 @@ export default function InstructionModal({ isOpen, onClose, onSave, editing, set
                             <BookOpen className="text-indigo-600" size={22} />
                             {isPromo
                                 ? (isCreate ? "Tạo khuyến mãi mới" : "Chỉnh sửa khuyến mãi")
-                                : (isCreate ? "Tạo Instruction mới" : "Chỉnh sửa Instruction")
-                            }
+                                : (isCreate ? "Tạo Instruction mới" : "Chỉnh sửa Instruction")}
                         </h2>
                         <p className="text-xs font-medium text-slate-400">
                             {isCreate
                                 ? (isPromo ? "Nhập version và nội dung khuyến mãi cho nhóm áp dụng" : "Version sẽ được tự động gán bởi hệ thống")
-                                : `Đang chỉnh sửa: ${editing.teamId} · v${editing.version}`
-                            }
+                                : `Đang chỉnh sửa: ${editing.teamId} · v${editing.version}`}
                         </p>
                     </div>
                     <button onClick={onClose} className="rounded-full p-2 transition-colors hover:bg-slate-100">
@@ -69,7 +96,7 @@ export default function InstructionModal({ isOpen, onClose, onSave, editing, set
                 </div>
 
                 <div className="flex min-h-0 flex-1 overflow-hidden">
-                    <div className="w-72 shrink-0 space-y-5 overflow-y-auto border-r border-slate-100 bg-slate-50/40 p-6">
+                    <div className="w-[22rem] shrink-0 space-y-5 overflow-y-auto border-r border-slate-100 bg-slate-50/40 p-5">
                         {isCreate ? (
                             <div
                                 onClick={() => set("activate", !editing.activate)}
@@ -122,6 +149,13 @@ export default function InstructionModal({ isOpen, onClose, onSave, editing, set
                                             {editing.type || "instruction"}
                                         </span>
                                     </div>
+                                    {isPageScope && (
+                                        <div className="space-y-1 rounded-xl bg-white/70 p-2">
+                                            <span className="text-[10px] font-black uppercase tracking-widest text-cyan-600">Page áp dụng</span>
+                                            <p className="truncate text-xs font-bold text-slate-700">{editing.pageName || editing.pageId}</p>
+                                            <p className="truncate font-mono text-[10px] text-slate-400">{editing.pageId}</p>
+                                        </div>
+                                    )}
                                 </div>
                             </>
                         )}
@@ -134,14 +168,13 @@ export default function InstructionModal({ isOpen, onClose, onSave, editing, set
                                 </div>
                             ) : (
                                 <div className="grid grid-cols-2 gap-2">
-                                    {[{ v: "instruction", label: "Instruction" }, { v: "promo", label: "Promo" }].map(opt => (
+                                    {[{ v: "instruction", label: "Instruction" }, { v: "promo", label: "Promo" }].map((opt) => (
                                         <button
                                             key={opt.v}
                                             type="button"
                                             onClick={() => isCreate
                                                 ? setEditing({ ...editing, type: opt.v, teamId: "", version: "", system: "" })
-                                                : set("type", opt.v)
-                                            }
+                                                : set("type", opt.v)}
                                             className={`rounded-xl border py-2 text-xs font-bold transition-colors ${editing.type === opt.v ? "border-indigo-600 bg-indigo-600 text-white shadow" : "border-slate-200 bg-white text-slate-500 hover:border-indigo-300"}`}
                                         >
                                             {opt.label}
@@ -151,19 +184,93 @@ export default function InstructionModal({ isOpen, onClose, onSave, editing, set
                             )}
                         </div>
 
-                        {isCreate && (
+                        {isCreate && isPageScope ? (
+                            <div className="space-y-3 rounded-2xl border border-cyan-100 bg-cyan-50/80 p-3">
+                                <div className="flex items-center justify-between gap-2">
+                                    <p className="text-[10px] font-black uppercase tracking-widest text-cyan-700">
+                                        Page áp dụng <span className="text-red-400">*</span>
+                                    </p>
+                                    <span className="rounded-full bg-white px-2 py-0.5 text-[10px] font-black text-cyan-700">
+                                        {filteredPages.length}/{pages.length}
+                                    </span>
+                                </div>
+                                <div className="relative">
+                                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-cyan-500" size={14} />
+                                    <input
+                                        type="text"
+                                        value={pageQuery}
+                                        onChange={(e) => setPageQuery(e.target.value)}
+                                        placeholder="Tìm Page, ID, team..."
+                                        className="w-full rounded-xl border border-cyan-100 bg-white py-2.5 pl-9 pr-3 text-sm outline-none transition-all focus:border-cyan-300 focus:ring-2 focus:ring-cyan-200"
+                                    />
+                                </div>
+                                <div className="max-h-48 space-y-2 overflow-y-auto pr-1">
+                                    {filteredPages.length === 0 ? (
+                                        <div className="rounded-xl border border-dashed border-cyan-200 bg-white/70 px-3 py-3 text-xs font-bold text-cyan-700">
+                                            Không có Page phù hợp
+                                        </div>
+                                    ) : (
+                                        filteredPages.map((page) => {
+                                            const pageId = getPageKey(page);
+                                            const active = editing.pageId === pageId;
+                                            return (
+                                                <label
+                                                    key={pageId}
+                                                    className={`flex cursor-pointer items-start gap-3 rounded-xl border px-3 py-2.5 transition-all ${
+                                                        active
+                                                            ? "border-cyan-300 bg-white text-cyan-950 shadow-sm ring-2 ring-cyan-100"
+                                                            : "border-cyan-100 bg-white/80 text-slate-700 hover:border-cyan-200 hover:bg-white"
+                                                    }`}
+                                                >
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={active}
+                                                        onChange={() => setEditing({
+                                                            ...editing,
+                                                            pageId,
+                                                            pageName: getPageName(page),
+                                                            teamId: "",
+                                                        })}
+                                                        className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300 text-cyan-600 focus:ring-cyan-500"
+                                                    />
+                                                    <span className="min-w-0 flex-1">
+                                                        <span className="line-clamp-2 text-sm font-black leading-snug">{getPageName(page)}</span>
+                                                        <span className="mt-1 flex min-w-0 items-center gap-2">
+                                                            <span className="truncate font-mono text-[10px] text-slate-400">{pageId}</span>
+                                                            <span className="shrink-0 rounded-md bg-cyan-50 px-1.5 py-0.5 text-[10px] font-black text-cyan-700">
+                                                                {getPageTeamId(page) || "N/A"}
+                                                            </span>
+                                                        </span>
+                                                    </span>
+                                                </label>
+                                            );
+                                        })
+                                    )}
+                                </div>
+                                <div className="rounded-xl border border-cyan-100 bg-white p-3">
+                                    <p className="text-[10px] font-black uppercase text-cyan-600">Đang chọn</p>
+                                    <p className="mt-1 truncate text-sm font-black text-slate-800">{editing.pageName || "Chưa chọn Page"}</p>
+                                    <div className="mt-2 flex items-center gap-2">
+                                        <span className="truncate font-mono text-[10px] text-slate-400">{editing.pageId || "N/A"}</span>
+                                        <span className="ml-auto rounded-md bg-cyan-50 px-2 py-0.5 font-mono text-[10px] font-black text-cyan-700">
+                                            {editing.teamId || "N/A"}
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+                        ) : isCreate && (
                             <div className="space-y-1.5">
                                 <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">
                                     Team ID <span className="text-red-400">*</span>
                                 </label>
                                 <select
-                                    value={editing.teamId}
-                                    onChange={e => setEditing({ ...editing, teamId: e.target.value, version: "", system: "" })}
+                                    value={editing.teamId ?? ""}
+                                    onChange={(e) => setEditing({ ...editing, teamId: e.target.value, version: "", system: "" })}
                                     className="w-full cursor-pointer appearance-none rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm shadow-sm outline-none focus:ring-2 focus:ring-indigo-500"
                                 >
                                     <option value="" disabled>-- Chọn nhóm --</option>
-                                    {visibleTeams.map(t => (
-                                        <option key={t.id} value={t.id}>{t.id} - {t.label}</option>
+                                    {visibleTeams.map((team) => (
+                                        <option key={team.id} value={team.id}>{team.id} - {team.label}</option>
                                     ))}
                                 </select>
                             </div>
@@ -177,7 +284,7 @@ export default function InstructionModal({ isOpen, onClose, onSave, editing, set
                                 <input
                                     type="text"
                                     value={editing.version ?? ""}
-                                    onChange={e => set("version", e.target.value)}
+                                    onChange={(e) => set("version", e.target.value)}
                                     placeholder="VD: 1.0.0"
                                     className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm shadow-sm outline-none focus:ring-2 focus:ring-indigo-500"
                                 />
@@ -189,8 +296,8 @@ export default function InstructionModal({ isOpen, onClose, onSave, editing, set
                                 <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Nhãn (Label)</label>
                                 <input
                                     type="text"
-                                    value={editing.label}
-                                    onChange={e => set("label", e.target.value)}
+                                    value={editing.label ?? ""}
+                                    onChange={(e) => set("label", e.target.value)}
                                     placeholder="VD: Phiên bản tháng 5"
                                     className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm shadow-sm outline-none focus:ring-2 focus:ring-indigo-500"
                                 />
@@ -201,7 +308,7 @@ export default function InstructionModal({ isOpen, onClose, onSave, editing, set
                     <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
                         <div className="shrink-0 border-b border-slate-100 bg-white px-6 py-3">
                             <div className="flex flex-wrap items-center gap-2">
-                                {rightTabs.map(tab => {
+                                {rightTabs.map((tab) => {
                                     const Icon = tab.icon;
                                     return (
                                         <button
@@ -235,8 +342,8 @@ export default function InstructionModal({ isOpen, onClose, onSave, editing, set
                                             </label>
                                             <input
                                                 type="text"
-                                                value={editing.options.title}
-                                                onChange={e => setOpt("title", e.target.value)}
+                                                value={editing.options?.title ?? ""}
+                                                onChange={(e) => setOpt("title", e.target.value)}
                                                 placeholder="VD: Công ty TNHH Phân Bón Nông Nghiệp Việt"
                                                 className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm shadow-sm outline-none focus:ring-2 focus:ring-indigo-500"
                                             />
@@ -247,8 +354,8 @@ export default function InstructionModal({ isOpen, onClose, onSave, editing, set
                                             </label>
                                             <input
                                                 type="text"
-                                                value={editing.options.website}
-                                                onChange={e => setOpt("website", e.target.value)}
+                                                value={editing.options?.website ?? ""}
+                                                onChange={(e) => setOpt("website", e.target.value)}
                                                 placeholder="VD: https://phanbon.com.vn"
                                                 className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm shadow-sm outline-none focus:ring-2 focus:ring-indigo-500"
                                             />
@@ -259,8 +366,8 @@ export default function InstructionModal({ isOpen, onClose, onSave, editing, set
                                             </label>
                                             <input
                                                 type="text"
-                                                value={editing.options.diachi}
-                                                onChange={e => setOpt("diachi", e.target.value)}
+                                                value={editing.options?.diachi ?? ""}
+                                                onChange={(e) => setOpt("diachi", e.target.value)}
                                                 placeholder="VD: 123 Đường ABC, Quận 1, TP.HCM"
                                                 className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm shadow-sm outline-none focus:ring-2 focus:ring-indigo-500"
                                             />
@@ -271,8 +378,8 @@ export default function InstructionModal({ isOpen, onClose, onSave, editing, set
                                             </label>
                                             <input
                                                 type="text"
-                                                value={editing.options.hotline}
-                                                onChange={e => setOpt("hotline", e.target.value)}
+                                                value={editing.options?.hotline ?? ""}
+                                                onChange={(e) => setOpt("hotline", e.target.value)}
                                                 placeholder="VD: 19008020"
                                                 className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm shadow-sm outline-none focus:ring-2 focus:ring-indigo-500"
                                             />
@@ -296,8 +403,8 @@ export default function InstructionModal({ isOpen, onClose, onSave, editing, set
                                         </button>
                                     </div>
                                     <textarea
-                                        value={editing.system}
-                                        onChange={e => set("system", e.target.value)}
+                                        value={editing.system ?? ""}
+                                        onChange={(e) => set("system", e.target.value)}
                                         placeholder={isPromo ? "Nhập nội dung khuyến mãi cho AI Agent..." : "Nhập nội dung system prompt cho AI Agent..."}
                                         className="min-h-0 flex-1 resize-none rounded-2xl border border-slate-200 px-5 py-4 font-mono text-sm leading-relaxed outline-none focus:ring-2 focus:ring-indigo-500"
                                     />
@@ -306,7 +413,7 @@ export default function InstructionModal({ isOpen, onClose, onSave, editing, set
 
                             {currentTab === "tools" && !isSimplified && (
                                 <div className="grid gap-5 lg:grid-cols-2">
-                                    {toolPrompts.map(item => (
+                                    {toolPrompts.map((item) => (
                                         <div key={item.key} className="flex min-h-[300px] flex-col rounded-2xl border border-slate-200 bg-white p-4">
                                             <div className="mb-2 flex shrink-0 items-center justify-between">
                                                 <label className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest text-slate-400">
@@ -321,8 +428,8 @@ export default function InstructionModal({ isOpen, onClose, onSave, editing, set
                                                 </button>
                                             </div>
                                             <textarea
-                                                value={editing.options[item.key] || ""}
-                                                onChange={e => setOpt(item.key, e.target.value)}
+                                                value={editing.options?.[item.key] ?? ""}
+                                                onChange={(e) => setOpt(item.key, e.target.value)}
                                                 placeholder={`Nhập nội dung ${item.label} cho AI Agent...`}
                                                 className="min-h-0 flex-1 resize-none rounded-xl border border-slate-200 px-4 py-3 font-mono text-xs leading-relaxed outline-none focus:ring-2 focus:ring-indigo-500"
                                             />
@@ -351,8 +458,8 @@ export default function InstructionModal({ isOpen, onClose, onSave, editing, set
                             </div>
                             <textarea
                                 autoFocus
-                                value={editing.system}
-                                onChange={e => set("system", e.target.value)}
+                                value={editing.system ?? ""}
+                                onChange={(e) => set("system", e.target.value)}
                                 placeholder={isPromo ? "Nhập nội dung khuyến mãi cho AI Agent..." : "Nhập nội dung system prompt cho AI Agent..."}
                                 className="flex-1 resize-none px-6 py-5 font-mono text-sm leading-relaxed outline-none"
                             />
@@ -377,8 +484,8 @@ export default function InstructionModal({ isOpen, onClose, onSave, editing, set
                             </div>
                             <textarea
                                 autoFocus
-                                value={editing.options[expandedToolMeta.key] || ""}
-                                onChange={e => setOpt(expandedToolMeta.key, e.target.value)}
+                                value={editing.options?.[expandedToolMeta.key] ?? ""}
+                                onChange={(e) => setOpt(expandedToolMeta.key, e.target.value)}
                                 placeholder={`Nhập nội dung ${expandedToolMeta.label} prompt cho AI Agent...`}
                                 className="flex-1 resize-none px-6 py-5 font-mono text-sm leading-relaxed outline-none"
                             />
