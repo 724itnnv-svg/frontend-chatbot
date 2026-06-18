@@ -229,7 +229,7 @@ export default function InstructionModal({
                                                             ...editing,
                                                             pageId,
                                                             pageName: getPageName(page),
-                                                            teamId: "",
+                                                            teamId: getPageTeamId(page),
                                                         })}
                                                         className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300 text-cyan-600 focus:ring-cyan-500"
                                                     />

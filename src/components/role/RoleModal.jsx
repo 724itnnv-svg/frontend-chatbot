@@ -36,6 +36,26 @@ export default function RoleModal({ isOpen, onClose, onSave, initialData }) {
 
   if (!isOpen) return null;
 
+  const screenById = new Map(APP_PERMISSIONS.screens.map((screen) => [screen.id, screen]));
+  const groupedPermissions = (APP_PERMISSIONS.groups || [])
+    .map((group) => ({
+      ...group,
+      screens: (group.screenIds || []).map((id) => screenById.get(id)).filter(Boolean),
+    }))
+    .filter((group) => group.screens.length > 0);
+  const groupedIds = new Set(groupedPermissions.flatMap((group) => group.screens.map((screen) => screen.id)));
+  const ungroupedScreens = APP_PERMISSIONS.screens.filter((screen) => !groupedIds.has(screen.id));
+  if (ungroupedScreens.length > 0) {
+    groupedPermissions.push({
+      id: "other",
+      name: "Khác",
+      description: "Các màn chưa được gán nhóm",
+      screens: ungroupedScreens,
+    });
+  }
+  const allActionIds = APP_PERMISSIONS.actions.map(a => a.id);
+  const allScreenIds = APP_PERMISSIONS.screens.map(s => s.id);
+
   // 1. Bật/Tắt quyền truy cập màn hình (Menu)
   const toggleScreen = (screenId) => {
     setSelectedScreens(prev => {
@@ -69,8 +89,6 @@ export default function RoleModal({ isOpen, onClose, onSave, initialData }) {
     if (!selectedScreens.includes(screenId)) {
       setSelectedScreens(prev => [...prev, screenId]);
     }
-
-    const allActionIds = APP_PERMISSIONS.actions.map(a => a.id);
     const current = permissions[screenId] || {};
 
     // Kiểm tra xem hàng này đã được tích hết tất cả các cột chưa
@@ -87,32 +105,59 @@ export default function RoleModal({ isOpen, onClose, onSave, initialData }) {
 
   // 4. Toggle toàn bộ cột "Hiển thị"
   const handleToggleAllVisible = () => {
-    const allScreens = APP_PERMISSIONS.screens.map(s => s.id);
-    const allVisible = allScreens.every(id => selectedScreens.includes(id));
+    const allVisible = allScreenIds.every(id => selectedScreens.includes(id));
     if (allVisible) {
       setSelectedScreens([]);
       if (screenDefault) setScreenDefault("");
     } else {
-      setSelectedScreens(allScreens);
+      setSelectedScreens(allScreenIds);
     }
   };
 
   // 5. Toggle toàn bộ 1 cột action (xem/thêm/sửa/...)
   const handleSelectAllColumn = (actionId) => {
-    const allScreens = APP_PERMISSIONS.screens.map(s => s.id);
-    const allChecked = allScreens.every(id => permissions[id]?.[actionId] === true);
+    const allChecked = allScreenIds.every(id => permissions[id]?.[actionId] === true);
     const newPermissions = { ...permissions };
-    allScreens.forEach(id => {
+    allScreenIds.forEach(id => {
       newPermissions[id] = { ...(newPermissions[id] || {}), [actionId]: !allChecked };
     });
-    if (!allChecked) setSelectedScreens(allScreens);
+    if (!allChecked) setSelectedScreens(allScreenIds);
     setPermissions(newPermissions);
+  };
+
+  const handleSelectAllGroup = (group) => {
+    const groupScreenIds = group.screens.map((screen) => screen.id);
+    const groupIsFull = groupScreenIds.every((id) =>
+      selectedScreens.includes(id) && allActionIds.every((actionId) => permissions[id]?.[actionId] === true)
+    );
+
+    if (groupIsFull) {
+      setSelectedScreens(prev => prev.filter((id) => !groupScreenIds.includes(id)));
+      if (groupScreenIds.includes(screenDefault)) setScreenDefault("");
+      setPermissions(prev => {
+        const next = { ...prev };
+        groupScreenIds.forEach((id) => delete next[id]);
+        return next;
+      });
+      return;
+    }
+
+    setSelectedScreens(prev => Array.from(new Set([...prev, ...groupScreenIds])));
+    setPermissions(prev => {
+      const next = { ...prev };
+      groupScreenIds.forEach((id) => {
+        const row = { ...(next[id] || {}) };
+        allActionIds.forEach((actionId) => {
+          row[actionId] = true;
+        });
+        next[id] = row;
+      });
+      return next;
+    });
   };
 
   // 6. CHỨC NĂNG TOÀN QUYỀN (SUPER ADMIN): Active toàn bộ màn hình và mọi hành động
   const handleSelectAllGlobal = () => {
-    const allScreens = APP_PERMISSIONS.screens.map(s => s.id);
-    const allActionIds = APP_PERMISSIONS.actions.map(a => a.id);
     const fullPermissions = {};
 
     APP_PERMISSIONS.screens.forEach(screen => {
@@ -123,7 +168,7 @@ export default function RoleModal({ isOpen, onClose, onSave, initialData }) {
       fullPermissions[screen.id] = rowActions;
     });
 
-    setSelectedScreens(allScreens);
+    setSelectedScreens(allScreenIds);
     setPermissions(fullPermissions);
   };
 
@@ -204,7 +249,11 @@ export default function RoleModal({ isOpen, onClose, onSave, initialData }) {
                   className="w-full px-4 py-3 bg-indigo-50 border border-indigo-200 rounded-sm outline-none font-bold text-slate-700 text-sm appearance-none cursor-pointer"
                 >
                   <option value="">-- Mặc định --</option>
-                  {APP_PERMISSIONS.screens.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  {groupedPermissions.map((group) => (
+                    <optgroup key={group.id} label={group.name}>
+                      {group.screens.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                    </optgroup>
+                  ))}
                 </select>
                 <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-indigo-400 italic text-[10px] uppercase font-black">SET</div>
               </div>
@@ -316,54 +365,97 @@ export default function RoleModal({ isOpen, onClose, onSave, initialData }) {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {APP_PERMISSIONS.screens.map((screen) => {
-                    const isVisible = selectedScreens.includes(screen.id);
+                  {groupedPermissions.map((group) => {
+                    const groupScreenIds = group.screens.map((screen) => screen.id);
+                    const visibleCount = groupScreenIds.filter((id) => selectedScreens.includes(id)).length;
+                    const actionCount = groupScreenIds.reduce((total, id) => {
+                      return total + allActionIds.filter((actionId) => permissions[id]?.[actionId] === true).length;
+                    }, 0);
+                    const maxActionCount = groupScreenIds.length * allActionIds.length;
+                    const groupIsFull = visibleCount === groupScreenIds.length && actionCount === maxActionCount;
+
                     return (
-                      <tr key={screen.id} className={`hover:bg-slate-50/50 transition-colors ${!isVisible && 'bg-slate-50/20 opacity-60'}`}>
-                        <td className="pl-10 pr-6 py-4">
-                          <div className="flex items-center gap-3">
-                            <span className={`text-sm font-bold ${isVisible ? 'text-slate-900' : 'text-slate-300'}`}>{screen.name}</span>
-                            {screenDefault === screen.id && <span className="bg-indigo-600 text-white text-[8px] px-1.5 py-0.5 font-black uppercase">Home</span>}
-                          </div>
-                        </td>
-                        <td className="px-4 py-4 text-center">
-                          <button
-                            onClick={() => toggleScreen(screen.id)}
-                            className={`w-10 h-5 border mx-auto transition-all relative ${isVisible ? 'bg-indigo-600 border-indigo-600' : 'bg-white border-slate-300'}`}
-                          >
-                            <div className={`absolute top-0 w-4 h-full transition-all ${isVisible ? 'left-5 bg-white' : 'left-0 bg-slate-300'}`} />
-                          </button>
-                        </td>
-                        {APP_PERMISSIONS.actions.map(action => {
-                          const isChecked = permissions[screen.id]?.[action.id];
-                          return (
-                            <td key={action.id} className="px-4 py-4 text-center">
+                      <React.Fragment key={group.id}>
+                        <tr className="bg-slate-100/70">
+                          <td colSpan={APP_PERMISSIONS.actions.length + 3} className="px-10 py-3 border-y border-slate-200">
+                            <div className="flex items-center justify-between gap-4">
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-700">{group.name}</span>
+                                  <span className="rounded-sm bg-white px-2 py-0.5 text-[9px] font-black text-slate-500 ring-1 ring-slate-200">
+                                    {visibleCount}/{groupScreenIds.length} menu
+                                  </span>
+                                  <span className="rounded-sm bg-emerald-50 px-2 py-0.5 text-[9px] font-black text-emerald-600 ring-1 ring-emerald-100">
+                                    {actionCount}/{maxActionCount} action
+                                  </span>
+                                </div>
+                                <p className="mt-1 truncate text-[10px] font-semibold text-slate-400">{group.description}</p>
+                              </div>
                               <button
-                                disabled={!isVisible}
-                                onClick={() => toggleAction(screen.id, action.id)}
-                                className={`w-6 h-6 rounded border-2 mx-auto transition-all flex items-center justify-center ${isVisible && isChecked
-                                  ? 'bg-emerald-500 border-emerald-600 shadow-sm shadow-emerald-200'
-                                  : isVisible
-                                    ? 'bg-white border-slate-300 hover:border-emerald-400'
-                                    : 'bg-slate-50 border-slate-200 cursor-not-allowed'
+                                type="button"
+                                onClick={() => handleSelectAllGroup(group)}
+                                className={`shrink-0 rounded-sm border px-3 py-1.5 text-[9px] font-black uppercase transition-all active:scale-95 ${groupIsFull
+                                  ? "border-slate-300 bg-white text-slate-500 hover:border-rose-200 hover:text-rose-600"
+                                  : "border-indigo-200 bg-indigo-50 text-indigo-600 hover:bg-indigo-600 hover:text-white"
                                   }`}
                               >
-                                {isVisible && isChecked && <Check size={13} className="text-white stroke-[3]" />}
+                                {groupIsFull ? "Tắt nhóm" : "Bật nhóm"}
                               </button>
-                            </td>
+                            </div>
+                          </td>
+                        </tr>
+
+                        {group.screens.map((screen) => {
+                          const isVisible = selectedScreens.includes(screen.id);
+                          return (
+                            <tr key={screen.id} className={`hover:bg-slate-50/50 transition-colors ${!isVisible && 'bg-slate-50/20 opacity-60'}`}>
+                              <td className="pl-10 pr-6 py-4">
+                                <div className="flex items-center gap-3">
+                                  <span className={`text-sm font-bold ${isVisible ? 'text-slate-900' : 'text-slate-300'}`}>{screen.name}</span>
+                                  {screenDefault === screen.id && <span className="bg-indigo-600 text-white text-[8px] px-1.5 py-0.5 font-black uppercase">Home</span>}
+                                </div>
+                              </td>
+                              <td className="px-4 py-4 text-center">
+                                <button
+                                  onClick={() => toggleScreen(screen.id)}
+                                  className={`w-10 h-5 border mx-auto transition-all relative ${isVisible ? 'bg-indigo-600 border-indigo-600' : 'bg-white border-slate-300'}`}
+                                >
+                                  <div className={`absolute top-0 w-4 h-full transition-all ${isVisible ? 'left-5 bg-white' : 'left-0 bg-slate-300'}`} />
+                                </button>
+                              </td>
+                              {APP_PERMISSIONS.actions.map(action => {
+                                const isChecked = permissions[screen.id]?.[action.id];
+                                return (
+                                  <td key={action.id} className="px-4 py-4 text-center">
+                                    <button
+                                      disabled={!isVisible}
+                                      onClick={() => toggleAction(screen.id, action.id)}
+                                      className={`w-6 h-6 rounded border-2 mx-auto transition-all flex items-center justify-center ${isVisible && isChecked
+                                        ? 'bg-emerald-500 border-emerald-600 shadow-sm shadow-emerald-200'
+                                        : isVisible
+                                          ? 'bg-white border-slate-300 hover:border-emerald-400'
+                                          : 'bg-slate-50 border-slate-200 cursor-not-allowed'
+                                        }`}
+                                    >
+                                      {isVisible && isChecked && <Check size={13} className="text-white stroke-[3]" />}
+                                    </button>
+                                  </td>
+                                );
+                              })}
+                              <td className="pr-10 py-4 text-right">
+                                <button
+                                  type="button"
+                                  disabled={!isVisible}
+                                  onClick={() => handleSelectAllRow(screen.id)}
+                                  className={`text-[9px] font-bold uppercase border-b border-slate-200 hover:border-slate-900 ${isVisible ? 'text-slate-400 hover:text-slate-900' : 'text-slate-100'}`}
+                                >
+                                  All
+                                </button>
+                              </td>
+                            </tr>
                           );
                         })}
-                        <td className="pr-10 py-4 text-right">
-                          <button
-                            type="button"
-                            disabled={!isVisible}
-                            onClick={() => handleSelectAllRow(screen.id)}
-                            className={`text-[9px] font-bold uppercase border-b border-slate-200 hover:border-slate-900 ${isVisible ? 'text-slate-400 hover:text-slate-900' : 'text-slate-100'}`}
-                          >
-                            All
-                          </button>
-                        </td>
-                      </tr>
+                      </React.Fragment>
                     );
                   })}
                 </tbody>
