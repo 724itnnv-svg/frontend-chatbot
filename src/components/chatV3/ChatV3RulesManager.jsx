@@ -6,7 +6,6 @@ import {
   RefreshCw,
   Save,
   ShieldCheck,
-  Sparkles,
 } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 
@@ -20,26 +19,6 @@ const PROMPT_LABELS = {
   modifyOrderNoteRule: "Tool modifyOrderNote",
   customerRewardRule: "Điểm tích lũy khách hàng",
 };
-
-const INTENT_LABELS = {
-  contactHandoff: "Chuyển nhân viên/Zalo/SĐT",
-  negotiationHandoff: "Giảm giá, sửa giá, tặng thêm",
-  priceQuestion: "Hỏi giá",
-  promoGift: "Khuyến mãi/quà tặng",
-  productInfo: "Thông tin sản phẩm",
-  customerReward: "Điểm tích lũy",
-};
-
-function listToText(value) {
-  return Array.isArray(value) ? value.join("\n") : "";
-}
-
-function textToList(value) {
-  return String(value || "")
-    .split(/\r?\n|,/)
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
 
 function cloneRules(rules = {}) {
   return {
@@ -64,11 +43,7 @@ export default function ChatV3RulesManager() {
 
   const stats = useMemo(() => {
     const promptCount = Object.values(rules.promptBlocks || {}).filter(Boolean).length;
-    const keywordCount = Object.values(rules.intentKeywords || {}).reduce(
-      (sum, list) => sum + (Array.isArray(list) ? list.length : 0),
-      0,
-    );
-    return { promptCount, keywordCount };
+    return { promptCount };
   }, [rules]);
 
   const authHeaders = () => ({
@@ -128,13 +103,6 @@ export default function ChatV3RulesManager() {
     }));
   };
 
-  const updateKeywords = (key, value) => {
-    setRules((current) => ({
-      ...current,
-      intentKeywords: { ...(current.intentKeywords || {}), [key]: textToList(value) },
-    }));
-  };
-
   const updateNested = (group, key, value) => {
     setRules((current) => ({
       ...current,
@@ -145,8 +113,6 @@ export default function ChatV3RulesManager() {
   const resetCurrentTab = () => {
     if (activeTab === "prompt") {
       setRules((current) => ({ ...current, promptBlocks: { ...(defaults.promptBlocks || {}) } }));
-    } else if (activeTab === "intent") {
-      setRules((current) => ({ ...current, intentKeywords: cloneRules(defaults).intentKeywords }));
     } else if (activeTab === "oa") {
       setRules((current) => ({ ...current, oaHandoff: { ...(defaults.oaHandoff || {}) } }));
     } else {
@@ -171,7 +137,7 @@ export default function ChatV3RulesManager() {
             <p className="text-xs font-bold uppercase tracking-wide text-cyan-700">Chat V3 Rules</p>
             <h1 className="text-2xl font-black text-slate-950">Luật vận hành Chat V3</h1>
             <p className="mt-1 text-sm text-slate-600">
-              Quản lý prompt, keyword intent, template OA và fallback mà luồng Chat V3 đang sử dụng.
+              Quản lý prompt vận hành, template OA và fallback mà luồng Chat V3 đang sử dụng.
             </p>
           </div>
         </div>
@@ -211,8 +177,8 @@ export default function ChatV3RulesManager() {
           <p className="mt-2 text-3xl font-black">{stats.promptCount}</p>
         </div>
         <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-4 shadow-sm">
-          <p className="text-xs font-bold uppercase text-emerald-700">Keyword intent</p>
-          <p className="mt-2 text-3xl font-black text-emerald-700">{stats.keywordCount}</p>
+          <p className="text-xs font-bold uppercase text-emerald-700">Intent policy</p>
+          <p className="mt-2 text-sm font-bold text-emerald-900">Quản lý riêng tại màn hình Quản lý Intent</p>
         </div>
         <div className="rounded-2xl border border-indigo-100 bg-indigo-50 p-4 shadow-sm">
           <p className="text-xs font-bold uppercase text-indigo-700">Runtime</p>
@@ -224,7 +190,6 @@ export default function ChatV3RulesManager() {
         <div className="flex flex-wrap gap-2 border-b border-slate-200 p-4">
           {[
             ["prompt", "Prompt", MessageSquareText],
-            ["intent", "Intent", Sparkles],
             ["oa", "OA handoff", ShieldCheck],
             ["fallback", "Fallback", RefreshCw],
           ].map(([key, label, Icon]) => (
@@ -273,22 +238,6 @@ export default function ChatV3RulesManager() {
                     value={rules.promptBlocks?.[key] || ""}
                     onChange={(event) => updatePrompt(key, event.target.value)}
                     className="h-52 w-full resize-y rounded-xl border border-slate-200 bg-slate-50 p-3 font-mono text-xs leading-5 outline-none focus:border-cyan-400 focus:bg-white"
-                  />
-                </label>
-              ))}
-            </div>
-          ) : null}
-
-          {!loading && activeTab === "intent" ? (
-            <div className="grid gap-4 xl:grid-cols-2">
-              {Object.entries(INTENT_LABELS).map(([key, label]) => (
-                <label key={key} className="block">
-                  <span className="mb-2 block text-sm font-extrabold text-slate-700">{label}</span>
-                  <textarea
-                    value={listToText(rules.intentKeywords?.[key])}
-                    onChange={(event) => updateKeywords(key, event.target.value)}
-                    placeholder="Mỗi dòng là một cụm từ..."
-                    className="h-44 w-full resize-y rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm leading-6 outline-none focus:border-cyan-400 focus:bg-white"
                   />
                 </label>
               ))}

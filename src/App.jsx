@@ -47,6 +47,7 @@ const ChatV3FAQManager = lazy(() => import("./components/ChatV3FAQManager"));
 const ChatV3FileSearchManager = lazy(() => import("./components/chatV3/ChatV3FileSearchManager"));
 const ChatV3ContextManager = lazy(() => import("./components/chatV3/ChatV3ContextManager"));
 const ChatV3RulesManager = lazy(() => import("./components/chatV3/ChatV3RulesManager"));
+const ChatV3TryChat = lazy(() => import("./components/chatV3/ChatV3TryChat"));
 const LogsManage = lazy(() => import("./components/logs/LogsManager"));
 const NotificationManager = lazy(() => import("./components/NotificationManager"));
 const PayrollManager = lazy(() => import("./components/PayrollManager"));
@@ -56,7 +57,6 @@ const AttendanceShiftManager = lazy(() => import("./components/attendance/Attend
 const WorkLocationManager = lazy(() => import("./components/attendance/WorkLocationManager"));
 const AttendanceManager = lazy(() => import("./components/attendance/AttendanceManager"));
 const StandaloneAttendance = lazy(() => import("./components/attendance/StandaloneAttendance"));
-const TestCaseChatBotManager = lazy(() => import("./components/testChatBot/TestChatBot"));
 const DuaSapPublicPage = lazy(() => import("./components/duasap/DuaSapPublicPage"));
 const DuaSapDetailPage = lazy(() => import("./components/duasap/DuaSapDetailPage"));
 const DuaSapManager = lazy(() => import("./components/duasap/DuaSapManager"));
@@ -125,6 +125,7 @@ const ADMIN_ROUTE_BY_SCREEN = {
   admin_chat_v3_file_search: "/admin/chat-v3-file-search",
   admin_chat_v3_contexts: "/admin/chat-v3-contexts",
   admin_chat_v3_rules: "/admin/chat-v3-rules",
+  admin_chat_v3_try: "/admin/chat-v3-try",
   admin_testcase: "/admin/test-chatbot-v3",
   admin_chat_v4_rules: "/admin/chat-v4-rules",
   admin_chat_v4_function_calls: "/admin/chat-v4-function-calls",
@@ -168,7 +169,8 @@ const adminRoutes = [
   { path: "chat-v3-file-search", screenId: "admin_chat_v3_file_search", element: <ChatV3FileSearchManager /> },
   { path: "chat-v3-contexts", screenId: "admin_chat_v3_contexts", element: <ChatV3ContextManager /> },
   { path: "chat-v3-rules", screenId: "admin_chat_v3_rules", element: <ChatV3RulesManager /> },
-  { path: "test-chatbot-v3", screenId: "admin_testcase", element: <TestCaseChatBotManager /> },
+  { path: "chat-v3-try", screenId: "admin_chat_v3_try", element: <ChatV3TryChat /> },
+  { path: "test-chatbot-v3", screenId: "admin_testcase", element: <ChatV3TryChat /> },
   { path: "test-cases", screenId: "admin_testcase", element: <Navigate to="/admin/test-chatbot-v3" replace /> },
   { path: "test-chat", screenId: "admin_testcase", element: <Navigate to="/admin/test-chatbot-v3" replace /> },
   { path: "chat-v4-rules", screenId: "admin_chat_v4_rules", element: <ChatV4RulesManager /> },

@@ -15,6 +15,8 @@ import {
     Minimize2,
     Layers,
     Search,
+    Plus,
+    Trash2,
 } from "lucide-react";
 
 export default function InstructionModal({
@@ -32,15 +34,23 @@ export default function InstructionModal({
     const [promptExpanded, setPromptExpanded] = useState(false);
     const [expandedTool, setExpandedTool] = useState(null);
     const [pageQuery, setPageQuery] = useState("");
+    const [isFullscreen, setIsFullscreen] = useState(false);
 
     const isCreate = !editing._id;
     const isPromo = (lockedType || editing.type) === "promo";
+    const isIntent = editing.teamId === "Intent" && !isPromo;
     const isPageScope = editing.scope === "page";
     const isSimplified = editing.teamId === "Intent" || isPromo;
     const visibleTeams = isPromo ? teams.filter((team) => team.id !== "Intent") : teams;
 
     const set = (field, value) => setEditing({ ...editing, [field]: value });
     const setOpt = (key, value) => setEditing({ ...editing, options: { ...(editing.options || {}), [key]: value } });
+    const intentPromptValue = editing.options?.intentPrompt ?? editing.system ?? "";
+    const intentRows = Array.isArray(editing.options?.intents) ? editing.options.intents : [];
+    const setIntentRows = (rows) => setOpt("intents", rows);
+    const updateIntentRow = (index, patch) => setIntentRows(intentRows.map((row, rowIndex) => rowIndex === index ? { ...row, ...patch } : row));
+    const addIntentRow = () => setIntentRows([...intentRows, { intentName: "", keyword: "", rule: "" }]);
+    const removeIntentRow = (index) => setIntentRows(intentRows.filter((_, rowIndex) => rowIndex !== index));
     const getPageKey = (page) => String(page?.facebookId || page?.pageId || page?._id || "");
     const getPageName = (page) => page?.name || page?.pageName || page?.title || page?.facebookId || "Page";
     const getPageTeamId = (page) => page?.teamId || page?.team || "";
@@ -62,20 +72,34 @@ export default function InstructionModal({
         { key: "findPromoEvent", label: "FindPromoEvent" },
     ];
 
-    const rightTabs = [
+    let rightTabs = [
         ...(!isSimplified ? [{ id: "options", label: "Thông tin đơn vị", icon: Tag }] : []),
         { id: "system", label: isPromo ? "Nội dung khuyến mãi" : "System Prompt", icon: FileText },
         ...(!isSimplified ? [{ id: "tools", label: "Prompt công cụ", icon: Layers }] : []),
     ];
 
-    const currentTab = rightTabs.some((tab) => tab.id === activeTab) ? activeTab : "system";
+    if (isIntent) {
+        rightTabs = [
+            { id: "intentPrompt", label: "Prompt", icon: FileText },
+            { id: "intentList", label: "Danh sach intent", icon: Layers },
+        ];
+    }
+
+    const currentTab = rightTabs.some((tab) => tab.id === activeTab) ? activeTab : rightTabs[0]?.id || "system";
     const expandedToolMeta = toolPrompts.find((item) => item.key === expandedTool);
 
     if (!isOpen) return null;
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm md:p-8">
-            <div className="flex max-h-[90vh] min-h-[80vh] w-full max-w-7xl flex-col overflow-hidden rounded-[2rem] bg-white shadow-2xl">
+        <div className={`fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm ${isFullscreen ? "p-2" : "p-4 md:p-8"}`}>
+            <div
+                className={[
+                    "flex w-full flex-col overflow-hidden bg-white shadow-2xl transition-all duration-200",
+                    isFullscreen
+                        ? "h-[calc(100vh-1rem)] max-h-[calc(100vh-1rem)] max-w-none rounded-2xl"
+                        : "max-h-[90vh] min-h-[80vh] max-w-7xl rounded-[2rem]",
+                ].join(" ")}
+            >
                 <div className="flex shrink-0 items-center justify-between border-b bg-white px-8 py-5">
                     <div>
                         <h2 className="flex items-center gap-2 text-xl font-bold text-slate-800">
@@ -90,9 +114,19 @@ export default function InstructionModal({
                                 : `Đang chỉnh sửa: ${editing.teamId} · v${editing.version}`}
                         </p>
                     </div>
-                    <button onClick={onClose} className="rounded-full p-2 transition-colors hover:bg-slate-100">
-                        <X size={22} />
-                    </button>
+                    <div className="flex items-center gap-2">
+                        <button
+                            type="button"
+                            onClick={() => setIsFullscreen((value) => !value)}
+                            className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-xs font-bold text-slate-600 transition-colors hover:bg-slate-50 hover:text-slate-900"
+                        >
+                            {isFullscreen ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+                            {isFullscreen ? "Thu nho" : "Full man"}
+                        </button>
+                        <button onClick={onClose} className="rounded-full p-2 transition-colors hover:bg-slate-100">
+                            <X size={22} />
+                        </button>
+                    </div>
                 </div>
 
                 <div className="flex min-h-0 flex-1 overflow-hidden">
@@ -411,6 +445,128 @@ export default function InstructionModal({
                                 </div>
                             )}
 
+                            {currentTab === "intentPrompt" && (
+                                <div className="flex min-h-[calc(90vh-250px)] flex-col">
+                                    <div className="mb-2 flex shrink-0 items-center justify-between">
+                                        <label className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest text-slate-400">
+                                            <FileText size={10} /> Intent router prompt <span className="text-red-400">*</span>
+                                        </label>
+                                        <button
+                                            type="button"
+                                            onClick={() => setPromptExpanded(true)}
+                                            className="flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] font-bold text-indigo-500 transition-colors hover:bg-indigo-50 hover:text-indigo-700"
+                                        >
+                                            <Maximize2 size={11} /> Mo rong
+                                        </button>
+                                    </div>
+                                    <textarea
+                                        value={intentPromptValue}
+                                        onChange={(e) => setEditing({
+                                            ...editing,
+                                            system: e.target.value,
+                                            options: { ...(editing.options || {}), intentPrompt: e.target.value },
+                                        })}
+                                        placeholder="Nhap prompt chung cho Intent Router..."
+                                        className="min-h-0 flex-1 resize-none rounded-2xl border border-slate-200 px-5 py-4 font-mono text-sm leading-relaxed outline-none focus:ring-2 focus:ring-indigo-500"
+                                    />
+                                </div>
+                            )}
+
+                            {currentTab === "intentList" && (
+                                <div className="flex min-h-0 flex-1 flex-col gap-4">
+                                    <div className="sticky -top-6 z-20 -mx-6 -mt-6 border-b border-indigo-100 bg-indigo-50/95 px-6 py-3 shadow-sm backdrop-blur">
+                                        <div className="flex flex-wrap items-center justify-between gap-3">
+                                            <div>
+                                                <p className="text-[10px] font-black uppercase tracking-widest text-indigo-500">Intent array</p>
+                                                <p className="mt-1 text-xs font-semibold text-slate-600">
+                                                    {intentRows.length} intent dang cau hinh. Keyword nen nhap moi dong hoac cach nhau bang dau phay.
+                                                </p>
+                                            </div>
+                                            <button
+                                                type="button"
+                                                onClick={addIntentRow}
+                                                className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-xs font-black text-white shadow-sm transition-colors hover:bg-indigo-700"
+                                            >
+                                                <Plus size={15} /> Them intent
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    {intentRows.length === 0 ? (
+                                        <button
+                                            type="button"
+                                            onClick={addIntentRow}
+                                            className="flex min-h-72 w-full flex-col items-center justify-center gap-3 rounded-3xl border-2 border-dashed border-slate-200 bg-slate-50 text-center transition-colors hover:border-indigo-200 hover:bg-indigo-50/40"
+                                        >
+                                            <span className="grid h-12 w-12 place-items-center rounded-2xl bg-white text-indigo-500 shadow-sm">
+                                                <Layers size={22} />
+                                            </span>
+                                            <span className="text-sm font-black text-slate-600">Chua co intent nao</span>
+                                            <span className="max-w-sm text-xs font-semibold leading-5 text-slate-400">
+                                                Bam de them intent dau tien, gom ten intent, keyword va rule chon intent.
+                                            </span>
+                                        </button>
+                                    ) : (
+                                        <div className="space-y-4 pb-3">
+                                            {intentRows.map((row, index) => (
+                                                <div key={index} className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+                                                    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 bg-slate-50/80 px-4 py-3">
+                                                        <div className="flex min-w-0 items-center gap-3">
+                                                            <span className="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-indigo-100 font-mono text-xs font-black text-indigo-600">
+                                                                #{index + 1}
+                                                            </span>
+                                                            <div className="min-w-0">
+                                                                <p className="truncate font-mono text-sm font-black text-slate-800">
+                                                                    {(row.intentName ?? row.name) || "new_intent"}
+                                                                </p>
+                                                                <p className="text-[11px] font-semibold text-slate-400">Intent name, keyword va rule se duoc ghep vao prompt runtime.</p>
+                                                            </div>
+                                                        </div>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => removeIntentRow(index)}
+                                                            className="inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-bold text-red-500 transition-colors hover:bg-red-50"
+                                                        >
+                                                            <Trash2 size={14} /> Xoa
+                                                        </button>
+                                                    </div>
+                                                    <div className="grid gap-4 p-4 xl:grid-cols-[minmax(220px,0.9fr)_minmax(260px,1fr)]">
+                                                        <label className="space-y-1.5">
+                                                            <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Intent name</span>
+                                                            <input
+                                                                type="text"
+                                                                value={row.intentName ?? row.name ?? ""}
+                                                                onChange={(e) => updateIntentRow(index, { intentName: e.target.value })}
+                                                                placeholder="find_product_info"
+                                                                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 font-mono text-sm outline-none transition focus:bg-white focus:ring-2 focus:ring-indigo-500"
+                                                            />
+                                                        </label>
+                                                        <label className="space-y-1.5">
+                                                            <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Keyword</span>
+                                                            <textarea
+                                                                value={row.keyword ?? row.examples ?? ""}
+                                                                onChange={(e) => updateIntentRow(index, { keyword: e.target.value })}
+                                                                placeholder="gia, bao gia, cong dung...\nkhuyen mai, qua tang..."
+                                                                className="h-[74px] w-full resize-y rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 outline-none transition focus:bg-white focus:ring-2 focus:ring-indigo-500"
+                                                            />
+                                                        </label>
+                                                        <label className="space-y-1.5 xl:col-span-2">
+                                                            <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Rule</span>
+                                                            <textarea
+                                                                value={row.rule ?? row.description ?? ""}
+                                                                onChange={(e) => updateIntentRow(index, { rule: e.target.value })}
+                                                                placeholder="Quy tac khi nao chon intent nay..."
+                                                                className="min-h-28 w-full resize-y rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 font-mono text-sm leading-relaxed outline-none transition focus:bg-white focus:ring-2 focus:ring-indigo-500"
+                                                            />
+                                                        </label>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
                             {currentTab === "tools" && !isSimplified && (
                                 <div className="grid gap-5 lg:grid-cols-2">
                                     {toolPrompts.map((item) => (
@@ -458,8 +614,14 @@ export default function InstructionModal({
                             </div>
                             <textarea
                                 autoFocus
-                                value={editing.system ?? ""}
-                                onChange={(e) => set("system", e.target.value)}
+                                value={isIntent ? intentPromptValue : (editing.system ?? "")}
+                                onChange={(e) => isIntent
+                                    ? setEditing({
+                                        ...editing,
+                                        system: e.target.value,
+                                        options: { ...(editing.options || {}), intentPrompt: e.target.value },
+                                    })
+                                    : set("system", e.target.value)}
                                 placeholder={isPromo ? "Nhập nội dung khuyến mãi cho AI Agent..." : "Nhập nội dung system prompt cho AI Agent..."}
                                 className="flex-1 resize-none px-6 py-5 font-mono text-sm leading-relaxed outline-none"
                             />

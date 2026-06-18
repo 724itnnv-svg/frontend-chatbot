@@ -85,6 +85,27 @@ export default function AgentManage({ mode = "agent" }) {
     };
 
     const text = (value) => String(value ?? "").trim();
+    const normalizeIntentRows = (rows) => (Array.isArray(rows) ? rows : [])
+        .map((row) => ({
+            intentName: text(row?.intentName || row?.name),
+            keyword: text(row?.keyword || row?.examples),
+            rule: text(row?.rule || row?.description),
+        }))
+        .filter((row) => row.intentName || row.keyword || row.rule);
+    const composeIntentSystem = (prompt, rows) => {
+        const basePrompt = text(prompt);
+        const intentList = normalizeIntentRows(rows);
+        if (!intentList.length) return basePrompt;
+        return [
+            basePrompt,
+            "DANH SACH INTENT",
+            ...intentList.map((intent, index) => [
+                `${index + 1}. ${intent.intentName}`,
+                intent.keyword ? `Keyword: ${intent.keyword}` : "",
+                intent.rule ? `Rule: ${intent.rule}` : "",
+            ].filter(Boolean).join("\n")),
+        ].filter(Boolean).join("\n\n");
+    };
     const getPageKey = (page) => text(page?.facebookId || page?.pageId || page?._id);
     const getPageName = (page) => text(page?.name || page?.pageName || page?.title || page?.facebookId) || "Page";
     const getPageTeamId = (page) => text(page?.teamId || page?.team);
@@ -226,8 +247,14 @@ export default function AgentManage({ mode = "agent" }) {
         const isCreate = !editing._id;
         const isSimplified = editing.teamId === "Intent" || editing.type === "promo";
         const isPageScope = editing.scope === "page";
+        const isIntentInstruction = editing.teamId === "Intent";
+        const intentPrompt = editing.options?.intentPrompt ?? editing.system ?? "";
+        const intentRows = normalizeIntentRows(editing.options?.intents);
+        const systemToSave = isIntentInstruction
+            ? composeIntentSystem(intentPrompt, intentRows)
+            : editing.system;
 
-        if ((!isPageScope && !editing.teamId) || !editing.system) {
+        if ((!isPageScope && !editing.teamId) || !systemToSave) {
             alert(isPageScope ? "Vui lòng nhập System Prompt" : "Vui lòng nhập đủ: Team và System Prompt");
             return;
         }
@@ -251,8 +278,10 @@ export default function AgentManage({ mode = "agent" }) {
                 : buildInstructionPath(editing);
             const method = isCreate ? "POST" : "PUT";
             const body = {
-                system: editing.system,
-                options: editing.options || {},
+                system: systemToSave,
+                options: isIntentInstruction
+                    ? { ...(editing.options || {}), intentPrompt: text(intentPrompt), intents: intentRows }
+                    : (editing.options || {}),
                 label: editing.label,
                 type: editing.type,
                 scope: editing.scope || "company",
