@@ -16,6 +16,10 @@ import { useAuth } from "../../context/AuthContext";
 const EMPTY_FORM = {
   teamId: "",
   productType: "fertilizer",
+  scope: "team",
+  pageId: "",
+  pageFacebookId: "",
+  pageName: "",
   vectorStoreId: "",
   maxNumResults: 4,
   enabled: true,
@@ -49,6 +53,10 @@ function toForm(item) {
   return {
     teamId: item.teamId || "",
     productType: item.productType || "general",
+    scope: item.scope === "page" ? "page" : "team",
+    pageId: item.pageId || "",
+    pageFacebookId: item.pageFacebookId || "",
+    pageName: item.pageName || "",
     vectorStoreId: item.vectorStoreId || "",
     maxNumResults: Number.isFinite(Number(item.maxNumResults)) ? Number(item.maxNumResults) : 4,
     enabled: item.enabled !== false,
@@ -61,6 +69,10 @@ function getProductTypeLabel(value) {
 
 function getPageId(page) {
   return String(page?._id || page?.id || "");
+}
+
+function getPageName(page) {
+  return String(page?.name || page?.pageName || page?.facebookId || "");
 }
 
 function normalizeTextKey(value) {
@@ -113,6 +125,7 @@ export default function ChatV3FileSearchManager() {
   const [form, setForm] = useState(EMPTY_FORM);
   const [editingConfig, setEditingConfig] = useState(null);
   const [applyTarget, setApplyTarget] = useState(null);
+  const [configTab, setConfigTab] = useState("team");
   const [search, setSearch] = useState("");
   const [storeSearch, setStoreSearch] = useState("");
   const [pageSearch, setPageSearch] = useState("");
@@ -221,20 +234,20 @@ export default function ChatV3FileSearchManager() {
 
   const filteredItems = useMemo(() => {
     const keyword = search.trim().toLowerCase();
-    const manageableItems = items.filter((item) =>
-      ["fertilizer", "seedling"].includes(item.productType || "general"),
-    );
+    const manageableItems = items
+      .filter((item) => ["fertilizer", "seedling"].includes(item.productType || "general"))
+      .filter((item) => (configTab === "page" ? item.scope === "page" : item.scope !== "page"));
     const sorted = [...manageableItems].sort((a, b) =>
       `${a.teamId}:${a.productType || "general"}`.localeCompare(`${b.teamId}:${b.productType || "general"}`),
     );
     if (!keyword) return sorted;
     return sorted.filter((item) =>
-      [item.teamId, item.productType, getProductTypeLabel(item.productType), item.vectorStoreId, item.defaultVectorStoreId, item.source]
+      [item.teamId, item.productType, getProductTypeLabel(item.productType), item.vectorStoreId, item.defaultVectorStoreId, item.source, item.scope, item.pageName, item.pageFacebookId]
         .join(" ")
         .toLowerCase()
         .includes(keyword),
     );
-  }, [items, search]);
+  }, [items, search, configTab]);
 
   const filteredStores = useMemo(() => {
     const keyword = storeSearch.trim().toLowerCase();
@@ -273,17 +286,23 @@ export default function ChatV3FileSearchManager() {
     const mainItems = items.filter((item) => ["fertilizer", "seedling"].includes(item.productType || "general"));
     const custom = mainItems.filter((item) => item.source === "custom").length;
     const enabled = mainItems.filter((item) => item.enabled !== false).length;
-    return { custom, enabled, total: mainItems.length, vectorStores: vectorStores.length };
+    const page = mainItems.filter((item) => item.scope === "page").length;
+    return { custom, enabled, total: mainItems.length, page, vectorStores: vectorStores.length };
   }, [items, vectorStores]);
 
   const resetForm = () => {
-    setForm(EMPTY_FORM);
+    setForm({ ...EMPTY_FORM, scope: configTab === "page" ? "page" : "team" });
     setEditingConfig(null);
   };
 
   const handleEdit = (item) => {
     setForm(toForm(item));
-    setEditingConfig({ teamId: item.teamId, productType: item.productType || "general" });
+    setEditingConfig({
+      teamId: item.teamId,
+      productType: item.productType || "general",
+      scope: item.scope || "team",
+      pageId: item.pageId || "",
+    });
     setMessage("");
   };
 
@@ -291,10 +310,15 @@ export default function ChatV3FileSearchManager() {
     const teamId = normalizeTeamId(form.teamId);
     const vectorStoreId = String(form.vectorStoreId || "").trim();
     if (!teamId) throw new Error("Team ID là bắt buộc.");
+    if (form.scope === "page" && !form.pageId) throw new Error("Page là bắt buộc khi cấu hình vector store riêng.");
     if (!vectorStoreId) throw new Error("Vector Store ID là bắt buộc.");
     return {
       teamId,
       productType: form.productType || "general",
+      scope: form.scope === "page" ? "page" : "team",
+      pageId: form.scope === "page" ? form.pageId : "",
+      pageFacebookId: form.scope === "page" ? form.pageFacebookId : "",
+      pageName: form.scope === "page" ? form.pageName : "",
       vectorStoreId,
       maxNumResults: clampMaxResults(form.maxNumResults),
       enabled: form.enabled !== false,
@@ -307,11 +331,9 @@ export default function ChatV3FileSearchManager() {
     setMessage("");
     try {
       const payload = buildPayload();
-      const url = editingConfig
-        ? `/api/chat-v3/file-search/${encodeURIComponent(editingConfig.teamId)}`
-        : "/api/chat-v3/file-search";
+      const url = "/api/chat-v3/file-search";
       const response = await fetch(url, {
-        method: editingConfig ? "PUT" : "POST",
+        method: "POST",
         headers: authHeaders(),
         body: JSON.stringify(payload),
       });
@@ -333,11 +355,15 @@ export default function ChatV3FileSearchManager() {
     setSaving(true);
     setMessage("");
     try {
-      const response = await fetch(`/api/chat-v3/file-search/${encodeURIComponent(item.teamId)}`, {
-        method: "PUT",
+      const response = await fetch("/api/chat-v3/file-search", {
+        method: "POST",
         headers: authHeaders(),
         body: JSON.stringify({
           teamId: item.teamId,
+          scope: item.scope || "team",
+          pageId: item.pageId || "",
+          pageFacebookId: item.pageFacebookId || "",
+          pageName: item.pageName || "",
           productType: item.productType || "general",
           vectorStoreId: item.vectorStoreId,
           maxNumResults: item.maxNumResults || 4,
@@ -358,13 +384,15 @@ export default function ChatV3FileSearchManager() {
 
   const handleDelete = async (item) => {
     const productType = item.productType || "general";
+    const scope = item.scope || "team";
     const label = item.source === "custom" ? "xóa cấu hình custom" : "khôi phục cấu hình mặc định";
-    if (!window.confirm(`Bạn có chắc muốn ${label} cho team ${item.teamId} - ${getProductTypeLabel(productType)}?`)) return;
+    const targetLabel = scope === "page" ? (item.pageName || item.pageId || item.teamId) : `team ${item.teamId}`;
+    if (!window.confirm(`Bạn có chắc muốn ${label} cho ${targetLabel} - ${getProductTypeLabel(productType)}?`)) return;
     setSaving(true);
     setMessage("");
     try {
       const response = await fetch(
-        `/api/chat-v3/file-search/${encodeURIComponent(item.teamId)}?productType=${encodeURIComponent(productType)}`,
+        `/api/chat-v3/file-search/${encodeURIComponent(item.teamId)}?productType=${encodeURIComponent(productType)}&scope=${encodeURIComponent(scope)}&pageId=${encodeURIComponent(item.pageId || "")}`,
         {
         method: "DELETE",
         headers: authHeaders(),
@@ -374,7 +402,7 @@ export default function ChatV3FileSearchManager() {
       if (!response.ok || !json.ok) {
         throw new Error(json.message || "Không thể xóa cấu hình File Search.");
       }
-      if (editingConfig?.teamId === item.teamId && editingConfig?.productType === productType) resetForm();
+      if (editingConfig?.teamId === item.teamId && editingConfig?.productType === productType && editingConfig?.scope === scope && editingConfig?.pageId === (item.pageId || "")) resetForm();
       setMessage(item.source === "custom" ? "Đã xóa cấu hình custom." : "Đã giữ cấu hình mặc định.");
       await fetchItems();
     } catch (error) {
@@ -544,6 +572,70 @@ export default function ChatV3FileSearchManager() {
             </div>
 
             <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-2 rounded-xl border border-slate-200 bg-slate-50 p-1">
+                {[
+                  { value: "team", label: "Theo team" },
+                  { value: "page", label: "Theo Page" },
+                ].map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() =>
+                      setForm((prev) => ({
+                        ...prev,
+                        scope: option.value,
+                        pageId: option.value === "page" ? prev.pageId : "",
+                        pageFacebookId: option.value === "page" ? prev.pageFacebookId : "",
+                        pageName: option.value === "page" ? prev.pageName : "",
+                      }))
+                    }
+                    disabled={Boolean(editingConfig)}
+                    className={`rounded-lg px-3 py-2 text-sm font-bold transition disabled:cursor-not-allowed ${
+                      form.scope === option.value
+                        ? "bg-cyan-600 text-white shadow-sm"
+                        : "text-slate-600 hover:bg-white hover:text-cyan-700"
+                    }`}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+
+              {form.scope === "page" ? (
+                <label className="block">
+                  <span className="mb-1.5 block text-xs font-bold uppercase text-slate-600">Page</span>
+                  <select
+                    value={form.pageId}
+                    onChange={(event) => {
+                      const page = pages.find((item) => getPageId(item) === event.target.value);
+                      setForm((prev) => ({
+                        ...prev,
+                        pageId: event.target.value,
+                        pageFacebookId: page?.facebookId || "",
+                        pageName: getPageName(page),
+                        teamId: normalizeTeamId(page?.teamId || prev.teamId),
+                        productType: getPageConsultingType(page) || prev.productType,
+                      }));
+                    }}
+                    disabled={Boolean(editingConfig)}
+                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none transition focus:border-cyan-400 focus:ring-2 focus:ring-cyan-100 disabled:bg-slate-100"
+                  >
+                    <option value="">-- Chọn Page --</option>
+                    {pages.map((page) => {
+                      const pageId = getPageId(page);
+                      return (
+                        <option key={pageId} value={pageId}>
+                          {getPageName(page)} - {page.teamId || "N/A"} - {page.facebookId}
+                        </option>
+                      );
+                    })}
+                  </select>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Nếu Page có cấu hình riêng, Chat V3 sẽ ưu tiên vector store này trước cấu hình theo team.
+                  </p>
+                </label>
+              ) : null}
+
               <label className="block">
                 <span className="mb-1.5 block text-xs font-bold uppercase text-slate-600">Team ID</span>
                 <div className="grid grid-cols-[130px_minmax(0,1fr)] gap-2">
@@ -720,9 +812,41 @@ export default function ChatV3FileSearchManager() {
             </div>
           </div>
 
+          <div className="mb-4 flex flex-wrap items-center gap-2">
+            {[
+              { value: "team", label: "Theo công ty" },
+              { value: "page", label: "Theo Page" },
+            ].map((tab) => (
+              <button
+                key={tab.value}
+                type="button"
+                onClick={() => {
+                  setConfigTab(tab.value);
+                  setApplyTarget(null);
+                  setEditingConfig(null);
+                  setForm((prev) => ({
+                    ...prev,
+                    scope: tab.value === "page" ? "page" : "team",
+                    pageId: tab.value === "page" ? prev.pageId : "",
+                    pageFacebookId: tab.value === "page" ? prev.pageFacebookId : "",
+                    pageName: tab.value === "page" ? prev.pageName : "",
+                  }));
+                }}
+                className={`inline-flex items-center justify-center rounded-xl px-4 py-2 text-sm font-bold transition ${
+                  configTab === tab.value
+                    ? "bg-cyan-600 text-white shadow-sm"
+                    : "border border-slate-200 bg-white text-slate-600 hover:border-cyan-200 hover:text-cyan-700"
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
           <div className="overflow-hidden rounded-2xl border border-slate-200">
-            <div className="grid grid-cols-[120px_120px_minmax(220px,1fr)_90px_110px_190px] bg-slate-50 px-4 py-3 text-xs font-bold uppercase text-slate-500">
+            <div className="grid grid-cols-[120px_140px_120px_minmax(220px,1fr)_90px_110px_190px] bg-slate-50 px-4 py-3 text-xs font-bold uppercase text-slate-500">
               <div>Team</div>
+              <div>Phạm vi</div>
               <div>Loại</div>
               <div>Vector Store</div>
               <div>Kết quả</div>
@@ -739,12 +863,16 @@ export default function ChatV3FileSearchManager() {
                 <div className="p-8 text-center text-sm text-slate-500">Chưa có cấu hình phù hợp.</div>
               ) : (
                 filteredItems.map((item) => {
-                  const configKey = `${item.teamId}:${item.productType || "fertilizer"}`;
-                  const isApplyingThis = applyTarget?.teamId === item.teamId && applyTarget?.productType === (item.productType || "fertilizer");
+                  const configKey = `${item.teamId}:${item.productType || "fertilizer"}:${item.scope || "team"}:${item.pageId || ""}`;
+                  const canApplyPages = item.scope !== "page" && configTab !== "page";
+                  const isApplyingThis =
+                    canApplyPages &&
+                    applyTarget?.teamId === item.teamId &&
+                    applyTarget?.productType === (item.productType || "fertilizer");
                   return (
                   <React.Fragment key={configKey}>
                   <div
-                    className="grid grid-cols-[120px_120px_minmax(220px,1fr)_90px_110px_190px] items-center gap-0 border-t border-slate-100 px-4 py-4 text-sm"
+                    className="grid grid-cols-[120px_140px_120px_minmax(220px,1fr)_90px_110px_190px] items-center gap-0 border-t border-slate-100 px-4 py-4 text-sm"
                   >
                     <div>
                       <div className="font-bold text-slate-900">{item.teamId}</div>
@@ -757,6 +885,19 @@ export default function ChatV3FileSearchManager() {
                       >
                         {item.source === "custom" ? "Custom" : "Default"}
                       </div>
+                    </div>
+                    <div>
+                      <div className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-bold ${
+                        item.scope === "page" ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"
+                      }`}>
+                        {item.scope === "page" ? "Page" : "Team"}
+                      </div>
+                      {item.scope === "page" ? (
+                        <div className="mt-1 min-w-0">
+                          <div className="truncate text-xs font-bold text-slate-800">{item.pageName || item.pageId}</div>
+                          <div className="truncate text-[11px] text-slate-400">{item.pageFacebookId || item.pageId}</div>
+                        </div>
+                      ) : null}
                     </div>
                     <div>
                       <span className="inline-flex rounded-full bg-cyan-50 px-2.5 py-1 text-xs font-bold text-cyan-700">
@@ -790,13 +931,15 @@ export default function ChatV3FileSearchManager() {
                       </span>
                     </div>
                     <div className="flex justify-end gap-2">
-                      <button
-                        type="button"
-                        onClick={() => openApplyPages(item)}
-                        className="inline-flex h-9 items-center justify-center rounded-xl border border-emerald-100 px-3 text-xs font-bold text-emerald-700 hover:bg-emerald-50"
-                      >
-                        Page
-                      </button>
+                      {canApplyPages ? (
+                        <button
+                          type="button"
+                          onClick={() => openApplyPages(item)}
+                          className="inline-flex h-9 items-center justify-center rounded-xl border border-emerald-100 px-3 text-xs font-bold text-emerald-700 hover:bg-emerald-50"
+                        >
+                          Page
+                        </button>
+                      ) : null}
                       <button
                         type="button"
                         onClick={() => handleEdit(item)}
