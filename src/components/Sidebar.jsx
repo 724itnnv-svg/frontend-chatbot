@@ -138,6 +138,24 @@ function isPathActive(pathname, path) {
   return pathname === path || pathname.startsWith(`${path}/`);
 }
 
+function formatRoleLabel(user) {
+  const raw =
+    user?.roleName ||
+    user?.roleTitle ||
+    user?.roles ||
+    user?.role ||
+    "";
+  const value = String(raw).trim();
+  if (!value) return "Chua co vai tro";
+
+  const lower = value.toLowerCase();
+  if (lower === "superadmin") return "Super Admin";
+  if (lower === "admin") return "Admin";
+  if (lower === "user") return "User";
+
+  return value.toUpperCase();
+}
+
 const Sidebar = memo(() => {
   const { logout, user } = useAuth();
   const navigate = useNavigate();
@@ -237,6 +255,7 @@ const Sidebar = memo(() => {
   }, [flatMenus, handleNavigate]);
 
   const displayName = user?.fullName || user?.name || user?.email || "Người dùng";
+  const roleLabel = formatRoleLabel(user);
   const avatarInitial = displayName?.trim()?.charAt(0)?.toUpperCase?.() || "?";
   const isProfileActive = location.pathname === "/admin/profile";
   const canViewProfile = canAccessScreen(user, "profile");
@@ -295,7 +314,7 @@ const Sidebar = memo(() => {
                 <div className="rainbow-text whitespace-nowrap overflow-hidden text-ellipsis text-sm font-semibold text-slate-900">{displayName}</div>
                 <div className="mt-1">
                   <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold ${isFullAdmin ? "border-cyan-200 bg-cyan-50 text-cyan-700" : "border-sky-200 bg-sky-50 text-sky-700"}`}>
-                    {isFullAdmin ? "Admin" : "User"}
+                    {roleLabel}
                   </span>
                 </div>
               </div>

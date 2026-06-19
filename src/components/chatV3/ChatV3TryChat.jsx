@@ -42,6 +42,118 @@ function getMessageTone(role) {
   return "bg-indigo-600 border-indigo-600 text-white shadow-[0_16px_32px_rgba(79,70,229,0.22)]";
 }
 
+function normalizeEscapedText(text) {
+  if (!text) return "";
+  return String(text)
+    .replace(/\\\\r\\\\n|\\\\n|\\\\r/g, "\n")
+    .replace(/\\r\\n|\\n|\\r/g, "\n")
+    .replace(/\\t/g, " ")
+    .replace(/\u00a0/g, " ");
+}
+
+function removeEmptyListMarkers(text) {
+  if (!text) return "";
+  return String(text)
+    .split(/\n/)
+    .filter((line) => !/^\s*(?:[-*\u2022]+|\d+[\.)])\s*$/.test(line))
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function normalizeTextKey(text) {
+  return String(text || "")
+    .replace(/\s+/g, " ")
+    .replace(/[.!?\u3002\uFF01\uFF1F]+$/g, "")
+    .trim()
+    .toLowerCase();
+}
+
+function uniqueTextParts(parts = []) {
+  const seen = new Set();
+  const out = [];
+
+  for (const part of parts) {
+    const cleaned = String(part || "").trim();
+    if (!cleaned) continue;
+
+    const key = normalizeTextKey(cleaned);
+    if (!key || seen.has(key)) continue;
+
+    seen.add(key);
+    out.push(cleaned);
+  }
+
+  return out;
+}
+
+function splitLongTextPart(text, maxLength = 1800) {
+  const value = String(text || "").trim();
+  if (!value) return [];
+  if (value.length <= maxLength) return [value];
+
+  const chunks = [];
+  let rest = value;
+
+  while (rest.length > maxLength) {
+    let cutAt = rest.lastIndexOf(" ", maxLength);
+    if (cutAt < Math.floor(maxLength * 0.6)) cutAt = maxLength;
+
+    chunks.push(rest.slice(0, cutAt).trim());
+    rest = rest.slice(cutAt).trim();
+  }
+
+  if (rest) chunks.push(rest);
+  return chunks;
+}
+
+function splitAsFacebookMessages(text) {
+  const rawText = normalizeEscapedText(text || "");
+  const withoutMarkdownImages = rawText
+    .replace(/!\[([^\]]*)\]\((https?:\/\/[^)]+)\)/g, "")
+    .trim();
+  const bareUrlRegex = /https?:\/\/[^\s<>"')]+/g;
+  const textWithoutImageUrls = withoutMarkdownImages
+    .replace(bareUrlRegex, (url) => (/\.(png|jpe?g|webp|gif)(?:$|\?)/i.test(url) ? "" : url))
+    .trim();
+  const cleanedText = removeEmptyListMarkers(
+    normalizeEscapedText(textWithoutImageUrls).replace(/\u3010\d+:\d+\u2020[^\u3011]+\u3011/g, ""),
+  );
+
+  const rawParts = cleanedText.includes("\n\n")
+    ? cleanedText.split(/\n\n+/).map((part) => part.trim()).filter(Boolean)
+    : cleanedText ? [cleanedText] : [];
+  const mergedParts = rawParts.reduce((acc, part) => {
+    if (part.length < 5 && acc.length > 0) {
+      acc[acc.length - 1] += ` ${part}`;
+    } else {
+      acc.push(part);
+    }
+    return acc;
+  }, []);
+
+  return uniqueTextParts(mergedParts).flatMap((part) => splitLongTextPart(part));
+}
+
+function expandTranscriptMessage(item) {
+  if (item.role !== "assistant") {
+    return [{ ...item, displayText: item.text, splitIndex: 0, splitTotal: 1 }];
+  }
+
+  const parts = splitAsFacebookMessages(item.text);
+  if (parts.length <= 1) {
+    return [{ ...item, displayText: parts[0] || item.text, splitIndex: 0, splitTotal: 1 }];
+  }
+
+  return parts.map((part, index) => ({
+    ...item,
+    id: `${item.id || item.createdAt || "assistant"}:${index}`,
+    displayText: part,
+    splitIndex: index,
+    splitTotal: parts.length,
+  }));
+}
+
 function ChatV3TryChat() {
   const { token } = useAuth();
   const [pages, setPages] = useState([]);
@@ -61,6 +173,10 @@ function ChatV3TryChat() {
   const selectedPage = useMemo(
     () => pages.find((page) => String(page.facebookId) === String(selectedPageId)),
     [pages, selectedPageId],
+  );
+  const renderedMessages = useMemo(
+    () => messages.flatMap((item) => expandTranscriptMessage(item)),
+    [messages],
   );
 
   const authHeaders = useMemo(() => ({
@@ -370,7 +486,7 @@ function ChatV3TryChat() {
               </div>
             ) : (
               <div className="space-y-3">
-                {messages.map((item) => {
+                {renderedMessages.map((item) => {
                   const isUser = item.role === "user";
                   const Icon = item.role === "assistant" ? BotMessageSquare : UserRound;
                   return (
@@ -381,7 +497,7 @@ function ChatV3TryChat() {
                         </div>
                       )}
                       <div className={`max-w-[78%] rounded-3xl border px-4 py-3 text-sm leading-relaxed ${getMessageTone(item.role)}`}>
-                        <div className="whitespace-pre-wrap break-words">{item.text}</div>
+                        <div className="whitespace-pre-wrap break-words">{item.displayText}</div>
                         <div className={`mt-1 text-[10px] font-semibold ${isUser ? "text-indigo-100" : "text-slate-400"}`}>
                           {item.role === "admin" ? "Admin" : item.role === "assistant" ? "BOT" : "Khách"} {formatTime(item.createdAt)}
                         </div>
