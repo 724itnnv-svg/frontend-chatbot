@@ -1,8 +1,10 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
-import { Search, MapPin, Leaf, ChevronRight, TreePine, AlertCircle, Loader2 } from "lucide-react";
+import { Search, MapPin, Leaf, ChevronRight, TreePine, AlertCircle, Loader2, Plus, X, Link, Save, Trash2 } from "lucide-react";
 import { apiUrl } from "../../api/baseUrl";
+import { useAuth } from "../../context/AuthContext";
+import { canAccessScreen } from "../../utils/screenAccess";
 
 function toDirectImageUrl(url) {
   if (!url) return url;
@@ -56,6 +58,10 @@ const PAGE_SIZE = 12;
 
 export default function DuaSapPublicPage() {
   const navigate = useNavigate();
+  const auth = useAuth() || {};
+  const user = auth.user || null;
+  const api = auth.api;
+  const canManage = Boolean(user && api && canAccessScreen(user, "dua_sap"));
   const [trees, setTrees] = useState([]);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
@@ -69,6 +75,11 @@ export default function DuaSapPublicPage() {
   const [khuVuc, setKhuVuc] = useState("");
   const [distinctViTri, setDistinctViTri] = useState([]);
   const [distinctKhuVuc, setDistinctKhuVuc] = useState([]);
+  const [imageTree, setImageTree] = useState(null);
+  const [imageUrl, setImageUrl] = useState("");
+  const [imageDraftUrls, setImageDraftUrls] = useState([]);
+  const [imageError, setImageError] = useState("");
+  const [savingImage, setSavingImage] = useState(false);
   const sentinelRef = useRef(null);
 
   // Fetch distinct viTri & khuVuc cho dropdown — gọi 1 lần khi mount
@@ -81,7 +92,7 @@ export default function DuaSapPublicPage() {
           setDistinctKhuVuc(r.data.khuVuc || []);
         }
       })
-      .catch(() => {});
+      .catch(() => { });
   }, []);
 
   // Fetch khi page, search hoặc khuVuc thay đổi
@@ -164,6 +175,50 @@ export default function DuaSapPublicPage() {
     setKhuVuc(val);
   }
 
+  function openAddImage(tree, e) {
+    e.stopPropagation();
+    setImageTree(tree);
+    setImageUrl("");
+    setImageDraftUrls(Array.isArray(tree.anhUrl) ? tree.anhUrl : []);
+    setImageError("");
+  }
+
+  function addImageUrl() {
+    const url = imageUrl.trim();
+    if (!url) return setImageError("Vui lòng nhập link ảnh.");
+    if (!/^https?:\/\//i.test(url) && !/^data:image\//i.test(url)) {
+      return setImageError("URL phải bắt đầu bằng http://, https:// hoặc data:image/");
+    }
+    if (imageDraftUrls.includes(url)) return setImageError("Ảnh này đã được thêm.");
+
+    setImageDraftUrls((prev) => [...prev, url]);
+    setImageUrl("");
+    setImageError("");
+  }
+
+  function removeImageUrl(idx) {
+    setImageDraftUrls((prev) => prev.filter((_, i) => i !== idx));
+    setImageError("");
+  }
+
+  async function saveImageUrls() {
+    if (!imageTree || !api || savingImage) return;
+    setSavingImage(true);
+    setImageError("");
+    try {
+      await api.put(`/dua-sap/${imageTree.maCay}`, { ...imageTree, anhUrl: imageDraftUrls });
+      setTrees((prev) => prev.map((t) => (
+        t.maCay === imageTree.maCay ? { ...t, anhUrl: imageDraftUrls } : t
+      )));
+      setImageTree(null);
+      setImageUrl("");
+      setImageDraftUrls([]);
+    } catch (e) {
+      setImageError(e.response?.data?.message || "Không thể lưu ảnh. Vui lòng thử lại.");
+    } finally {
+      setSavingImage(false);
+    }
+  }
   const grouped = trees.reduce((acc, t) => {
     const key = t.viTri || "Chưa phân loại";
     if (!acc[key]) acc[key] = [];
@@ -343,6 +398,21 @@ export default function DuaSapPublicPage() {
                           +{tree.anhUrl.length - 1}
                         </span>
                       )}
+                      {canManage && (
+                        <span
+                          role="button"
+                          tabIndex={0}
+                          onClick={(e) => openAddImage(tree, e)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === " ") openAddImage(tree, e);
+                          }}
+                          className="absolute top-1.5 right-1.5 inline-flex items-center justify-center w-8 h-8 rounded-full bg-white/90 text-emerald-700 shadow hover:bg-emerald-50 transition"
+                          title="Thêm link ảnh"
+                          aria-label={`Thêm link ảnh cho cây ${tree.maCay}`}
+                        >
+                          <Plus size={15} />
+                        </span>
+                      )}
                     </div>
 
                     {/* Thông tin */}
@@ -395,6 +465,86 @@ export default function DuaSapPublicPage() {
       <footer className="text-center py-6 text-xs text-gray-400 border-t border-gray-100">
         © {new Date().getFullYear()} Hệ thống quản lý vườn dừa sáp
       </footer>
+
+      {imageTree && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => setImageTree(null)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+              <div>
+                <p className="font-semibold text-gray-800">Ảnh cây {imageTree.maCay}</p>
+                <p className="text-xs text-gray-400 mt-0.5">Thêm, xem nhiều ảnh hoặc xóa ảnh trước khi lưu</p>
+              </div>
+              <button onClick={() => setImageTree(null)} className="text-gray-400 hover:text-gray-600 transition">
+                <X size={18} />
+              </button>
+            </div>
+            <div className="p-5 space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">Ảnh cây (URL hoặc base64)</label>
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <Link size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                    <input
+                      value={imageUrl}
+                      onChange={(e) => { setImageUrl(e.target.value); setImageError(""); }}
+                      onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addImageUrl(); } }}
+                      placeholder="https://... hoặc data:image/jpeg;base64,..."
+                      className="w-full pl-9 pr-3 py-2.5 text-sm border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-300"
+                      autoFocus
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={addImageUrl}
+                    className="shrink-0 flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 rounded-xl text-sm font-semibold transition"
+                  >
+                    <Plus size={15} /> Thêm
+                  </button>
+                </div>
+                {imageError && <p className="text-xs text-red-500 mt-1">{imageError}</p>}
+              </div>
+
+              {imageDraftUrls.length > 0 ? (
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 max-h-72 overflow-y-auto pr-1">
+                  {imageDraftUrls.map((url, idx) => (
+                    <div key={`${url}-${idx}`} className="relative group aspect-square rounded-xl overflow-hidden bg-emerald-50 border border-gray-100">
+                      <TreeThumb url={url} maCay={imageTree.maCay} />
+                      <button
+                        type="button"
+                        onClick={() => removeImageUrl(idx)}
+                        className="absolute top-1.5 right-1.5 bg-red-500 hover:bg-red-600 text-white rounded-full p-1.5 shadow opacity-0 group-hover:opacity-100 transition"
+                        title="Xóa ảnh"
+                        aria-label={`Xóa ảnh ${idx + 1}`}
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-gray-400">Chưa có ảnh nào. Nhập URL và nhấn Thêm.</p>
+              )}
+
+              <div className="flex justify-end gap-3 pt-2">
+                <button
+                  onClick={() => setImageTree(null)}
+                  className="px-4 py-2 text-sm text-gray-500 hover:text-gray-700 transition"
+                >
+                  Hủy
+                </button>
+                <button
+                  onClick={saveImageUrls}
+                  disabled={savingImage}
+                  className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2.5 rounded-xl text-sm font-semibold transition disabled:opacity-60"
+                >
+                  {savingImage ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+                  Lưu thay đổi
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

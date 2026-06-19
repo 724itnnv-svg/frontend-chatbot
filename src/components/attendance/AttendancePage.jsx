@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import { AndroidLocationSettings } from "../../utils/androidLocationSettings";
+import { canAccessScreen, hasFullAccess } from "../../utils/screenAccess";
 
 const TONE = {
   emerald: "border-emerald-200 bg-emerald-50 text-emerald-700",
@@ -32,7 +33,7 @@ const TONE = {
 };
 
 const HIST_LIMIT = 10;
-const ADMIN_CONFIRM_FAILURE_LIMIT = 3;
+const ADMIN_CONFIRM_FAILURE_LIMIT = 1;
 const ATTENDANCE_TABS = [
   { id: "attendance", label: "Chấm công", Icon: Clock },
   { id: "history", label: "Lịch sử chấm công", Icon: CalendarDays },
@@ -636,10 +637,12 @@ export default function AttendancePage() {
     () => String(user?.code || user?.employeeCode || user?.maNhanVien || "").trim().toUpperCase(),
     [user?.code, user?.employeeCode, user?.maNhanVien]
   );
+  const canLookupOtherPayroll =
+    hasFullAccess(user) || (canAccessScreen(user, "payroll") && user?.action?.payroll?.view === true);
 
   useEffect(() => {
-    if (payrollEmployeeCode) setLookupCode(payrollEmployeeCode);
-  }, [payrollEmployeeCode]);
+    if (!canLookupOtherPayroll && payrollEmployeeCode) setLookupCode(payrollEmployeeCode);
+  }, [canLookupOtherPayroll, payrollEmployeeCode]);
   const payrollMeta = useMemo(() => statusMeta(payroll?.status), [payroll?.status]);
 
   const requestNativeGpsPermission = useCallback(async () => {
@@ -833,7 +836,7 @@ export default function AttendancePage() {
   }, [api]);
 
   const loadPayroll = useCallback(async () => {
-    const code = lookupCodeRef.current.trim().toUpperCase();
+    const code = (canLookupOtherPayroll ? lookupCodeRef.current : payrollEmployeeCode).trim().toUpperCase();
     if (!code) {
       setPayroll(null);
       setPayrollMessage("Vui lòng nhập mã nhân viên để tra cứu bảng lương.");
@@ -857,7 +860,7 @@ export default function AttendancePage() {
     } finally {
       setPayrollLoading(false);
     }
-  }, [api]);
+  }, [api, canLookupOtherPayroll, payrollEmployeeCode]);
 
   useEffect(() => {
     loadLocations();
@@ -1595,9 +1598,12 @@ export default function AttendancePage() {
                     <input
                       type="text"
                       value={lookupCode}
-                      onChange={(e) => setLookupCode(e.target.value.toUpperCase())}
+                      onChange={(e) => {
+                        if (canLookupOtherPayroll) setLookupCode(e.target.value.toUpperCase());
+                      }}
+                      disabled={!canLookupOtherPayroll}
                       placeholder={payrollEmployeeCode || "Nhập mã nhân viên..."}
-                      className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold uppercase text-slate-800 outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
+                      className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold uppercase text-slate-800 outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 disabled:cursor-not-allowed disabled:text-slate-500"
                     />
                   </label>
                   <label className="block text-xs font-semibold text-slate-500">

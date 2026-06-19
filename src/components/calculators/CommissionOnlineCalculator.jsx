@@ -15,7 +15,7 @@ const UNIT_CONVERSION = {
   "17KG": 1,
   "22KG": 1,
   "25KG": 1,
-  "15KG": 2,
+  "15KG": 2, //=60k
   "10KG": 2,
   "5KG": 4,
   "5 LÍT": 6,
