@@ -25,6 +25,7 @@ const DEFAULT_SETTINGS = {
   responseDelayMs: 1200,
   replyDebounceMs: 1200,
   aggregateWindowMs: 5000,
+  messageSplitEnabled: true,
   messageSplitMaxLength: 1800,
   chatV3FaqPageIds: [],
   model: "gpt-4.1-mini",
@@ -613,6 +614,7 @@ export default function ChatbotConfigManager() {
             responseDelayMs: settings.responseDelayMs,
             replyDebounceMs: settings.responseDelayMs,
             aggregateWindowMs: settings.aggregateWindowMs,
+            messageSplitEnabled: settings.messageSplitEnabled !== false,
             messageSplitMaxLength: settings.messageSplitMaxLength,
             chatV3FaqPageIds: chatV3FaqApplyAllPages ? [] : chatV3FaqPageIds,
             model: settings.model,
@@ -728,7 +730,7 @@ export default function ChatbotConfigManager() {
                 icon={Clock3}
                 activeSection={activeSection}
               >
-                <div className="grid gap-3 lg:grid-cols-3">
+                <div className="grid gap-3 lg:grid-cols-4">
                   <NumberField
                     label="Delay gom tin khách"
                     value={replyDebounceSeconds}
@@ -758,6 +760,15 @@ export default function ChatbotConfigManager() {
                         ...prev,
                         aggregateWindowMs: Math.round(Number(event.target.value || 0) * 1000),
                       }))
+                    }
+                  />
+                  <ToggleSetting
+                    title="Tách tin Facebook"
+                    description="Khi bật, câu trả lời dài sẽ được chia thành nhiều tin nhắn trước khi gửi Facebook."
+                    enabled={settings.messageSplitEnabled !== false}
+                    tone="emerald"
+                    onToggle={() =>
+                      setSettings((prev) => ({ ...prev, messageSplitEnabled: prev.messageSplitEnabled === false }))
                     }
                   />
                   <NumberField
