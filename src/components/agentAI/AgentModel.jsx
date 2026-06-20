@@ -32,7 +32,6 @@ export default function InstructionModal({
 }) {
     const [activeTab, setActiveTab] = useState("system");
     const [promptExpanded, setPromptExpanded] = useState(false);
-    const [expandedTool, setExpandedTool] = useState(null);
     const [pageQuery, setPageQuery] = useState("");
     const [isFullscreen, setIsFullscreen] = useState(false);
 
@@ -65,17 +64,9 @@ export default function InstructionModal({
         );
     }, [pageQuery, pages]);
 
-    const toolPrompts = [
-        { key: "createOrderFromAssistant", label: "CreateOrderFromAssistant" },
-        { key: "fileSearch", label: "FileSearch" },
-        { key: "calculateShipping", label: "CalculateShipping" },
-        { key: "findPromoEvent", label: "FindPromoEvent" },
-    ];
-
     let rightTabs = [
         ...(!isSimplified ? [{ id: "options", label: "Thông tin đơn vị", icon: Tag }] : []),
         { id: "system", label: isPromo ? "Nội dung khuyến mãi" : "System Prompt", icon: FileText },
-        ...(!isSimplified ? [{ id: "tools", label: "Prompt công cụ", icon: Layers }] : []),
     ];
 
     if (isIntent) {
@@ -86,8 +77,6 @@ export default function InstructionModal({
     }
 
     const currentTab = rightTabs.some((tab) => tab.id === activeTab) ? activeTab : rightTabs[0]?.id || "system";
-    const expandedToolMeta = toolPrompts.find((item) => item.key === expandedTool);
-
     if (!isOpen) return null;
 
     return (
@@ -567,32 +556,6 @@ export default function InstructionModal({
                                 </div>
                             )}
 
-                            {currentTab === "tools" && !isSimplified && (
-                                <div className="grid gap-5 lg:grid-cols-2">
-                                    {toolPrompts.map((item) => (
-                                        <div key={item.key} className="flex min-h-[300px] flex-col rounded-2xl border border-slate-200 bg-white p-4">
-                                            <div className="mb-2 flex shrink-0 items-center justify-between">
-                                                <label className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest text-slate-400">
-                                                    <FileText size={10} /> {item.label}
-                                                </label>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => setExpandedTool(item.key)}
-                                                    className="flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] font-bold text-indigo-500 transition-colors hover:bg-indigo-50 hover:text-indigo-700"
-                                                >
-                                                    <Maximize2 size={11} /> Mở rộng
-                                                </button>
-                                            </div>
-                                            <textarea
-                                                value={editing.options?.[item.key] ?? ""}
-                                                onChange={(e) => setOpt(item.key, e.target.value)}
-                                                placeholder={`Nhập nội dung ${item.label} cho AI Agent...`}
-                                                className="min-h-0 flex-1 resize-none rounded-xl border border-slate-200 px-4 py-3 font-mono text-xs leading-relaxed outline-none focus:ring-2 focus:ring-indigo-500"
-                                            />
-                                        </div>
-                                    ))}
-                                </div>
-                            )}
                         </div>
                     </div>
                 </div>
@@ -623,32 +586,6 @@ export default function InstructionModal({
                                     })
                                     : set("system", e.target.value)}
                                 placeholder={isPromo ? "Nhập nội dung khuyến mãi cho AI Agent..." : "Nhập nội dung system prompt cho AI Agent..."}
-                                className="flex-1 resize-none px-6 py-5 font-mono text-sm leading-relaxed outline-none"
-                            />
-                        </div>
-                    </div>
-                )}
-
-                {expandedToolMeta && (
-                    <div className="fixed inset-0 z-[60] flex flex-col bg-slate-900/70 p-6 backdrop-blur-sm">
-                        <div className="flex flex-1 flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
-                            <div className="flex shrink-0 items-center justify-between border-b border-slate-100 px-6 py-4">
-                                <span className="flex items-center gap-2 text-sm font-black text-slate-700">
-                                    <FileText size={15} className="text-indigo-500" /> Prompt {expandedToolMeta.label}
-                                </span>
-                                <button
-                                    type="button"
-                                    onClick={() => setExpandedTool(null)}
-                                    className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800"
-                                >
-                                    <Minimize2 size={13} /> Thu nhỏ
-                                </button>
-                            </div>
-                            <textarea
-                                autoFocus
-                                value={editing.options?.[expandedToolMeta.key] ?? ""}
-                                onChange={(e) => setOpt(expandedToolMeta.key, e.target.value)}
-                                placeholder={`Nhập nội dung ${expandedToolMeta.label} prompt cho AI Agent...`}
                                 className="flex-1 resize-none px-6 py-5 font-mono text-sm leading-relaxed outline-none"
                             />
                         </div>

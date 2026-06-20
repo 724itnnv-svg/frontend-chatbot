@@ -7,6 +7,7 @@ import {
   MousePointerClick,
   RefreshCcw,
   RotateCcw,
+  Search,
   Send,
   Sparkles,
   UserRound,
@@ -170,6 +171,15 @@ function splitAsFacebookMessages(text) {
   return uniqueTextParts(mergedParts).flatMap((part) => splitLongTextPart(part));
 }
 
+function normalizeSearchText(value = "") {
+  return String(value || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function expandTranscriptMessage(item) {
   if (item.role !== "assistant") {
     return [{ ...item, displayText: item.text, splitIndex: 0, splitTotal: 1 }];
@@ -193,8 +203,9 @@ function ChatV3TryChat() {
   const { token } = useAuth();
   const [pages, setPages] = useState([]);
   const [selectedPageId, setSelectedPageId] = useState("");
+  const [pageSearch, setPageSearch] = useState("");
   const [senderId, setSenderId] = useState(() => localStorage.getItem("chat_v3_try_sender") || makeSessionId());
-  const [message, setMessage] = useState("Tư vấn giúp tôi sản phẩm trị rụng lá mai");
+  const [message, setMessage] = useState("");
   const [adTitle, setAdTitle] = useState("MAX FLOWER rụng lá mai - tư vấn phục hồi cây");
   const [messages, setMessages] = useState([]);
   const [status, setStatus] = useState("idle");
@@ -208,6 +219,24 @@ function ChatV3TryChat() {
   const selectedPage = useMemo(
     () => pages.find((page) => String(page.facebookId) === String(selectedPageId)),
     [pages, selectedPageId],
+  );
+  const filteredPages = useMemo(() => {
+    const keyword = normalizeSearchText(pageSearch);
+    if (!keyword) return pages;
+
+    return pages.filter((page) => {
+      const haystack = normalizeSearchText([
+        page.name,
+        page.teamId,
+        page.facebookId,
+        page._id,
+      ].filter(Boolean).join(" "));
+      return haystack.includes(keyword);
+    });
+  }, [pageSearch, pages]);
+  const selectedPageVisible = useMemo(
+    () => filteredPages.some((page) => String(page.facebookId) === String(selectedPageId)),
+    [filteredPages, selectedPageId],
   );
   const renderedMessages = useMemo(
     () => messages.flatMap((item) => expandTranscriptMessage(item)),
@@ -451,16 +480,53 @@ function ChatV3TryChat() {
         <aside className="min-h-0 overflow-y-auto rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
           <div className="space-y-4">
             <div>
-              <label className="mb-1.5 block text-xs font-black uppercase tracking-wider text-slate-500">Page</label>
+              <div className="mb-1.5 flex items-center justify-between gap-2">
+                <label className="block text-xs font-black uppercase tracking-wider text-slate-500">Page</label>
+                <span className="text-[11px] font-bold text-slate-400">
+                  {filteredPages.length}/{pages.length}
+                </span>
+              </div>
+              <div className="relative mb-2">
+                <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                <input
+                  value={pageSearch}
+                  onChange={(event) => setPageSearch(event.target.value)}
+                  placeholder="Tim page theo ten, team, ID..."
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 py-2.5 pl-9 pr-10 text-sm font-semibold text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-indigo-400 focus:bg-white focus:ring-4 focus:ring-indigo-100"
+                />
+                {pageSearch && (
+                  <button
+                    type="button"
+                    onClick={() => setPageSearch("")}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full px-2 py-1 text-xs font-black text-slate-400 transition hover:bg-white hover:text-slate-700"
+                    title="Xoa tim kiem"
+                  >
+                    X
+                  </button>
+                )}
+              </div>
               <select
-                value={selectedPageId}
-                onChange={(event) => setSelectedPageId(event.target.value)}
+                value={selectedPageVisible ? selectedPageId : ""}
+                onChange={(event) => {
+                  if (event.target.value) setSelectedPageId(event.target.value);
+                }}
                 className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm font-semibold text-slate-800 outline-none transition focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100"
               >
                 {pages.length === 0 ? (
                   <option value="">Không có Page</option>
+                ) : !selectedPageVisible && filteredPages.length > 0 ? (
+                  <>
+                    <option value="">Chon Page trong ket qua tim kiem</option>
+                    {filteredPages.map((page) => (
+                    <option key={page.facebookId} value={page.facebookId}>
+                      {page.name} ({page.teamId}) - {page.facebookId}
+                    </option>
+                    ))}
+                  </>
                 ) : (
-                  pages.map((page) => (
+                  filteredPages.length === 0 ? (
+                    <option value={selectedPageId}>Khong tim thay Page phu hop</option>
+                  ) : filteredPages.map((page) => (
                     <option key={page.facebookId} value={page.facebookId}>
                       {page.name} ({page.teamId}) - {page.facebookId}
                     </option>
