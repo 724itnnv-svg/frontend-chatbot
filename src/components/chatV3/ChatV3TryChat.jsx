@@ -13,11 +13,23 @@ import {
 } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 
-const POLL_INTERVAL_MS = 1400;
-const POLL_MAX_TICKS = 24;
+const POLL_INTERVAL_MS = 700;
+const POLL_MAX_TICKS = 50;
 
 function makeSessionId() {
   return `789${Date.now().toString().slice(-10)}`;
+}
+
+function makeLocalMessage({ role = "user", text = "", kind = "customer_message", mid = "" }) {
+  const now = new Date().toISOString();
+  return {
+    id: `local_${mid || Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    role,
+    kind,
+    text,
+    createdAt: now,
+    metadata: { optimistic: true },
+  };
 }
 
 function formatTime(value) {
@@ -36,10 +48,33 @@ function getMessageTone(role) {
   if (role === "assistant") {
     return "bg-white border-slate-200 text-slate-900 shadow-sm";
   }
+  if (role === "system") {
+    return "bg-cyan-50 border-cyan-200 text-cyan-950";
+  }
   if (role === "admin") {
     return "bg-amber-50 border-amber-200 text-amber-900";
   }
   return "bg-indigo-600 border-indigo-600 text-white shadow-[0_16px_32px_rgba(79,70,229,0.22)]";
+}
+
+function TypingIndicator() {
+  return (
+    <div className="flex justify-start gap-2">
+      <div className="mt-1 grid h-8 w-8 shrink-0 place-items-center rounded-full bg-white text-slate-500 shadow-sm">
+        <BotMessageSquare size={16} />
+      </div>
+      <div className="rounded-3xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-500 shadow-sm">
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-bold">BOT dang nhap</span>
+          <span className="flex items-center gap-1">
+            <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400" />
+            <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400 [animation-delay:120ms]" />
+            <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400 [animation-delay:240ms]" />
+          </span>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function normalizeEscapedText(text) {
@@ -276,7 +311,7 @@ function ChatV3TryChat() {
 
   useEffect(() => () => stopPolling("idle"), [stopPolling]);
 
-  async function sendTestEvent(type, data) {
+  async function sendTestEvent(type, data, options = {}) {
     if (!senderId.trim() || !selectedPageId) {
       setError("Vui lòng chọn Page và nhập Sender ID.");
       return false;
@@ -286,6 +321,24 @@ function ChatV3TryChat() {
     setError("");
     setStatus("sending");
     setLastAction(type);
+
+    if (options.optimisticText) {
+      setMessages((current) => [
+        ...current,
+        makeLocalMessage({
+          role: options.optimisticRole || "user",
+          kind: options.optimisticKind || "customer_message",
+          text: options.optimisticText,
+          mid: data?.mid,
+        }),
+      ]);
+      scrollToBottom();
+    }
+
+    const shouldWaitForBotReply = options.expectBotReply !== false;
+    if (shouldWaitForBotReply) {
+      startPolling(beforeCount);
+    }
 
     try {
       const res = await fetch("/api/test-v3/send", {
@@ -305,7 +358,9 @@ function ChatV3TryChat() {
       const json = await res.json();
       if (!res.ok || !json.ok) throw new Error(json.error || json.message || "Gửi event thất bại");
       await loadTranscript();
-      startPolling(beforeCount);
+      if (!shouldWaitForBotReply) {
+        stopPolling("idle");
+      }
       return true;
     } catch (err) {
       setError(err.message);
@@ -316,20 +371,26 @@ function ChatV3TryChat() {
 
   async function handleSendMessage() {
     const text = message.trim();
-    if (!text || status === "sending" || status === "waiting") return;
+    if (!text || status === "sending") return;
 
     const sent = await sendTestEvent("message", {
       text,
       mid: `mid_chat_try_${Date.now()}`,
-    });
+    }, { optimisticText: text });
     if (sent) setMessage("");
   }
 
   async function handleAdClick() {
-    if (status === "sending" || status === "waiting") return;
+    if (status === "sending") return;
+    const title = adTitle.trim() || "quảng cáo không rõ tên";
     await sendTestEvent("referral", {
       ads_context_data: adTitle.trim() ? { ad_title: adTitle.trim() } : {},
       ad_id: `ad_try_${Date.now()}`,
+    }, {
+      optimisticText: `Khách click quảng cáo: ${title}`,
+      optimisticRole: "system",
+      optimisticKind: "system_context",
+      expectBotReply: false,
     });
   }
 
@@ -342,6 +403,11 @@ function ChatV3TryChat() {
   }
 
   const isBusy = status === "sending" || status === "waiting";
+  const isSending = status === "sending";
+  const isBotTyping = status === "waiting" || (status === "sending" && lastAction === "message");
+  useEffect(() => {
+    if (isBotTyping) scrollToBottom();
+  }, [isBotTyping, scrollToBottom]);
   const emptyText = selectedPageId
     ? "Chưa có tin nhắn trong phiên này."
     : "Chọn Page để bắt đầu chat thử.";
@@ -435,10 +501,10 @@ function ChatV3TryChat() {
               <button
                 type="button"
                 onClick={handleAdClick}
-                disabled={isBusy || !selectedPageId}
+                disabled={isSending || !selectedPageId}
                 className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-indigo-600 px-4 py-3 text-sm font-black text-white shadow-[0_16px_32px_rgba(79,70,229,0.22)] transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-slate-300"
               >
-                {isBusy && lastAction === "referral" ? <Loader2 size={17} className="animate-spin" /> : <Sparkles size={17} />}
+                {isSending && lastAction === "referral" ? <Loader2 size={17} className="animate-spin" /> : <Sparkles size={17} />}
                 Gửi referral
               </button>
             </div>
@@ -488,7 +554,20 @@ function ChatV3TryChat() {
               <div className="space-y-3">
                 {renderedMessages.map((item) => {
                   const isUser = item.role === "user";
-                  const Icon = item.role === "assistant" ? BotMessageSquare : UserRound;
+                  const Icon =
+                    item.role === "assistant"
+                      ? BotMessageSquare
+                      : item.role === "system"
+                        ? MousePointerClick
+                        : UserRound;
+                  const roleLabel =
+                    item.role === "admin"
+                      ? "Admin"
+                      : item.role === "assistant"
+                        ? "BOT"
+                        : item.role === "system"
+                          ? "Context"
+                          : "Khách";
                   return (
                     <div key={item.id} className={`flex gap-2 ${isUser ? "justify-end" : "justify-start"}`}>
                       {!isUser && (
@@ -499,12 +578,13 @@ function ChatV3TryChat() {
                       <div className={`max-w-[78%] rounded-3xl border px-4 py-3 text-sm leading-relaxed ${getMessageTone(item.role)}`}>
                         <div className="whitespace-pre-wrap break-words">{item.displayText}</div>
                         <div className={`mt-1 text-[10px] font-semibold ${isUser ? "text-indigo-100" : "text-slate-400"}`}>
-                          {item.role === "admin" ? "Admin" : item.role === "assistant" ? "BOT" : "Khách"} {formatTime(item.createdAt)}
+                          {roleLabel} {formatTime(item.createdAt)}
                         </div>
                       </div>
                     </div>
                   );
                 })}
+                {isBotTyping ? <TypingIndicator /> : null}
               </div>
             )}
           </div>
@@ -527,11 +607,11 @@ function ChatV3TryChat() {
               <button
                 type="button"
                 onClick={handleSendMessage}
-                disabled={isBusy || !message.trim() || !selectedPageId}
+                disabled={isSending || !message.trim() || !selectedPageId}
                 className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-indigo-600 text-white shadow-[0_14px_28px_rgba(79,70,229,0.22)] transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-slate-300"
                 title="Gửi tin nhắn"
               >
-                {isBusy && lastAction === "message" ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
+                {isSending && lastAction === "message" ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
               </button>
             </div>
           </div>
