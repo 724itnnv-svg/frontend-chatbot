@@ -19,6 +19,36 @@ function toDirectImageUrl(url) {
   return url;
 }
 
+function TreeImageCell({ tree }) {
+  const [error, setError] = useState(false);
+  const images = Array.isArray(tree.anhUrl) ? tree.anhUrl : [];
+  const firstImage = images[0] ? toDirectImageUrl(images[0]) : "";
+
+  return (
+    <div className="flex items-center gap-2">
+      <div className="w-12 h-12 rounded-xl overflow-hidden border border-gray-100 bg-emerald-50 shrink-0">
+        {firstImage && !error ? (
+          <img
+            src={firstImage}
+            alt={`Ảnh ${tree.maCay}`}
+            className="w-full h-full object-cover"
+            onError={() => setError(true)}
+          />
+        ) : (
+          <div className="w-full h-full flex items-center justify-center text-emerald-300">
+            <ImageOff size={18} />
+          </div>
+        )}
+      </div>
+      {images.length > 1 && (
+        <span className="text-[11px] text-gray-400 bg-gray-100 rounded-full px-1.5 py-0.5 leading-none">
+          +{images.length - 1}
+        </span>
+      )}
+    </div>
+  );
+}
+
 // ─── QR PDF helpers ───────────────────────────────────────────────────────────
 const GIONG_LABEL_MAP = { dua_sap: "Dừa sáp", dua_thuong: "Dừa thường", khac: "Khác" };
 
@@ -2763,6 +2793,7 @@ export default function DuaSapManager() {
                     title="Chọn tất cả"
                   />
                 </th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500">Ảnh</th>
                 <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500">Mã cây/ống nghiệm</th>
                 <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500">Vị trí</th>
                 <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 hidden sm:table-cell">Giống</th>
@@ -2785,6 +2816,9 @@ export default function DuaSapManager() {
                         onChange={(e) => toggleSelectTree(tree.maCay, e)}
                         className="w-4 h-4 rounded accent-emerald-600 cursor-pointer"
                       />
+                    </td>
+                    <td className="px-4 py-3">
+                      <TreeImageCell tree={tree} />
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
@@ -2839,7 +2873,7 @@ export default function DuaSapManager() {
                   {/* Expanded: Records panel */}
                   {expandedMaCay === tree.maCay && (
                     <tr>
-                      <td colSpan={6} className="bg-emerald-50/40 px-4 py-4 border-b border-emerald-100">
+                      <td colSpan={7} className="bg-emerald-50/40 px-4 py-4 border-b border-emerald-100">
                         <div className="max-w-3xl">
                           <div className="flex items-center justify-between mb-3">
                             <h4 className="text-sm font-semibold text-gray-700 flex items-center gap-2">

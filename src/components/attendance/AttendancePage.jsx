@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import { AndroidLocationSettings } from "../../utils/androidLocationSettings";
+import { canAccessScreen, hasFullAccess } from "../../utils/screenAccess";
 
 const TONE = {
   emerald: "border-emerald-200 bg-emerald-50 text-emerald-700",
@@ -32,7 +33,7 @@ const TONE = {
 };
 
 const HIST_LIMIT = 10;
-const ADMIN_CONFIRM_FAILURE_LIMIT = 3;
+const ADMIN_CONFIRM_FAILURE_LIMIT = 1;
 const ATTENDANCE_TABS = [
   { id: "attendance", label: "Chấm công", Icon: Clock },
   { id: "history", label: "Lịch sử chấm công", Icon: CalendarDays },
@@ -46,6 +47,8 @@ const SHIFT_WINDOWS = {
 };
 const EMPTY_SHIFTS = [];
 const GPS_OPTIONS = { enableHighAccuracy: true, timeout: 10000 };
+const SHOW_ATTENDANCE_TASKBAR_RUNNER = false;
+const RUNNER_GIF_SRC = "/attendance-runner.gif";
 
 const dayWorkIncomeKeys = [
   "thuNhapTheoNgayCong.luongTheoNgayCong",
@@ -415,6 +418,265 @@ function PayrollDetailList({ title, rows, payroll, totalLabel, totalValue, tone 
 
 // ── Payroll print helpers ──────────────────────────────────────────────────────
 
+function clockMinutesFromValue(value) {
+  if (!value) return null;
+  const match = String(value).match(/^(\d{1,2}):(\d{2})/);
+  if (!match) return null;
+  return Number(match[1]) * 60 + Number(match[2]);
+}
+
+function minutesLabel(totalMinutes) {
+  if (totalMinutes == null) return "--:--";
+  const minutes = ((Math.round(totalMinutes) % 1440) + 1440) % 1440;
+  return `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+}
+
+function getShiftTaskbarRange(shift) {
+  const shiftNo = Number(shift?.shiftNo);
+  const start =
+    clockMinutesFromValue(shift?.scheduledStart) ??
+    clockMinutesFromValue(shift?.checkInStart) ??
+    (shiftNo === 1 ? 7 * 60 + 30 : shiftNo === 2 ? 12 * 60 + 30 : null);
+  let end =
+    clockMinutesFromValue(shift?.scheduledEnd) ??
+    clockMinutesFromValue(shift?.checkInEnd) ??
+    (shiftNo === 1 ? 11 * 60 + 30 : shiftNo === 2 ? 17 * 60 : null);
+  if (start != null && end != null && end <= start) end += 24 * 60;
+  return { start, end };
+}
+
+function currentVietnamMinutes(nowMs) {
+  const now = new Date(nowMs + 7 * 60 * 60 * 1000);
+  return now.getUTCHours() * 60 + now.getUTCMinutes();
+}
+
+function PinkRunnerFallback({ active }) {
+  return (
+    <div className={`relative h-9 w-9 ${active ? "attendance-taskbar-runner" : ""}`}>
+      <div className="absolute left-3 top-0 h-4 w-4 rounded-full bg-pink-100 shadow-sm">
+        <span className="absolute left-1 top-1.5 h-1 w-1 rounded-full bg-slate-700" />
+        <span className="absolute right-1 top-1.5 h-1 w-1 rounded-full bg-slate-700" />
+        <span className="absolute -right-0.5 -top-0.5 h-2 w-3 rounded-full bg-pink-500" />
+        <span className="absolute left-1 bottom-1 h-0.5 w-2 rounded-full bg-pink-500" />
+      </div>
+      <div className="absolute left-2 top-3 h-4 w-5 rounded-xl bg-pink-500 shadow-sm">
+        <span className="absolute left-1 top-1 h-2 w-3 rounded-full bg-pink-300/70" />
+      </div>
+      <div className="attendance-runner-arm-a absolute left-0 top-4 h-2 w-5 rounded-full bg-pink-300" />
+      <div className="attendance-runner-arm-b absolute left-5 top-4 h-2 w-5 rounded-full bg-pink-300" />
+      <div className="attendance-runner-leg-a absolute left-2 top-6 h-2 w-5 rounded-full bg-fuchsia-700" />
+      <div className="attendance-runner-leg-b absolute left-5 top-6 h-2 w-5 rounded-full bg-fuchsia-700" />
+      <div className="attendance-runner-foot-a absolute left-0 top-8 h-1.5 w-5 rounded-full bg-pink-100 shadow-sm" />
+      <div className="attendance-runner-foot-b absolute left-5 top-8 h-1.5 w-5 rounded-full bg-pink-100 shadow-sm" />
+    </div>
+  );
+}
+
+function ShiftRunnerIcon({ active }) {
+  const [gifFailed, setGifFailed] = useState(false);
+
+  if (gifFailed) {
+    return <PinkRunnerFallback active={active} />;
+  }
+
+  return (
+    <div className={`relative h-10 w-10 ${active ? "attendance-taskbar-runner" : ""}`}>
+      <img
+        src={RUNNER_GIF_SRC}
+        alt=""
+        className="h-full w-full object-contain drop-shadow-sm"
+        draggable="false"
+        onError={() => setGifFailed(true)}
+      />
+    </div>
+  );
+}
+
+function getShiftTaskbarProgress(shift, clockNow) {
+  const currentMinutes = currentVietnamMinutes(clockNow);
+  const { start, end } = getShiftTaskbarRange(shift);
+  const hasCheckIn = !!shift?.checkIn?.time;
+  const hasCheckOut = !!shift?.checkOut?.time;
+  const rawProgress = start != null && end != null && end > start
+    ? ((currentMinutes < start && end > 1440 ? currentMinutes + 1440 : currentMinutes) - start) / (end - start)
+    : 0;
+  return {
+    hasCheckIn,
+    hasCheckOut,
+    isRunning: hasCheckIn && !hasCheckOut,
+    progress: hasCheckOut ? 100 : hasCheckIn ? Math.max(0, Math.min(100, Math.round(rawProgress * 100))) : 0,
+  };
+}
+
+function ShiftTaskbarRail({ shift, clockNow }) {
+  const { hasCheckIn, hasCheckOut, isRunning, progress } = getShiftTaskbarProgress(shift, clockNow);
+  const barColor = hasCheckOut ? "bg-emerald-400" : isRunning ? "bg-sky-400" : "bg-slate-300";
+
+  return (
+    <div className="relative h-9 min-w-[130px] flex-1 rounded-xl border border-white bg-white/90 px-3 shadow-sm">
+      <style>{`
+        @keyframes attendance-taskbar-runner-bob {
+          0%, 100% { transform: translateY(0); }
+          50% { transform: translateY(-3px); }
+        }
+        .attendance-taskbar-runner {
+          animation: attendance-taskbar-runner-bob .52s ease-in-out infinite;
+        }
+        .attendance-runner-arm-a,
+        .attendance-runner-arm-b,
+        .attendance-runner-leg-a,
+        .attendance-runner-leg-b,
+        .attendance-runner-foot-a,
+        .attendance-runner-foot-b {
+          animation-duration: .52s;
+          animation-iteration-count: infinite;
+          animation-timing-function: ease-in-out;
+          transform-origin: 50% 50%;
+        }
+        .attendance-runner-arm-a { animation-name: attendance-runner-arm-a; }
+        .attendance-runner-arm-b { animation-name: attendance-runner-arm-b; }
+        .attendance-runner-leg-a { animation-name: attendance-runner-leg-a; }
+        .attendance-runner-leg-b { animation-name: attendance-runner-leg-b; }
+        .attendance-runner-foot-a { animation-name: attendance-runner-foot-a; }
+        .attendance-runner-foot-b { animation-name: attendance-runner-foot-b; }
+        @keyframes attendance-runner-arm-a {
+          0%, 100% { transform: rotate(-32deg) translateX(-1px); }
+          50% { transform: rotate(30deg) translateX(1px); }
+        }
+        @keyframes attendance-runner-arm-b {
+          0%, 100% { transform: rotate(30deg) translateX(1px); }
+          50% { transform: rotate(-32deg) translateX(-1px); }
+        }
+        @keyframes attendance-runner-leg-a {
+          0%, 100% { transform: rotate(34deg) translateX(1px); }
+          50% { transform: rotate(-34deg) translateX(-2px); }
+        }
+        @keyframes attendance-runner-leg-b {
+          0%, 100% { transform: rotate(-34deg) translateX(-2px); }
+          50% { transform: rotate(34deg) translateX(1px); }
+        }
+        @keyframes attendance-runner-foot-a {
+          0%, 100% { transform: translateX(2px) rotate(7deg); }
+          50% { transform: translateX(-4px) rotate(-8deg); }
+        }
+        @keyframes attendance-runner-foot-b {
+          0%, 100% { transform: translateX(-4px) rotate(-8deg); }
+          50% { transform: translateX(2px) rotate(7deg); }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .attendance-taskbar-runner,
+          .attendance-runner-arm-a,
+          .attendance-runner-arm-b,
+          .attendance-runner-leg-a,
+          .attendance-runner-leg-b,
+          .attendance-runner-foot-a,
+          .attendance-runner-foot-b {
+            animation: none !important;
+          }
+        }
+      `}</style>
+      <div className="absolute left-3 right-3 top-[15px] h-2 overflow-hidden rounded-full bg-slate-100">
+        <div className={`h-full rounded-full ${barColor}`} style={{ width: `${progress}%` }} />
+      </div>
+      <span className="absolute left-3 top-[11px] h-4 w-0.5 rounded-full bg-slate-300" />
+      <span className="absolute right-3 top-[11px] h-4 w-0.5 rounded-full bg-slate-300" />
+      {(hasCheckIn || hasCheckOut) && (
+        <div className="absolute top-0 -ml-4 scale-75 transition-[left] duration-700 ease-out" style={{ left: `${progress}%` }}>
+          <ShiftRunnerIcon active={isRunning} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ShiftRunTaskbar({ shifts, activeShiftNo, clockNow }) {
+  if (!shifts.length) return null;
+  const currentMinutes = currentVietnamMinutes(clockNow);
+
+  return (
+    <div className="mb-4 overflow-hidden rounded-2xl border border-slate-200 bg-slate-950 p-3 text-white shadow-sm">
+      <style>{`
+        @keyframes attendance-taskbar-runner-bob {
+          0%, 100% { transform: translateY(0); }
+          50% { transform: translateY(-4px); }
+        }
+        .attendance-taskbar-runner {
+          animation: attendance-taskbar-runner-bob .52s ease-in-out infinite;
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .attendance-taskbar-runner { animation: none !important; }
+        }
+      `}</style>
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div>
+          <div className="text-xs font-bold uppercase tracking-wide text-sky-200">Taskbar ca làm</div>
+          <div className="text-[11px] text-slate-400">Nhân vật chạy theo tiến độ thời gian của ca đã chấm vào</div>
+        </div>
+        <div className="rounded-full bg-white/10 px-2.5 py-1 text-xs font-bold tabular-nums text-slate-200">
+          {minutesLabel(currentMinutes)}
+        </div>
+      </div>
+
+      <div className="space-y-3">
+        {shifts.map((shift) => {
+          const { start, end } = getShiftTaskbarRange(shift);
+          const hasCheckIn = !!shift?.checkIn?.time;
+          const hasCheckOut = !!shift?.checkOut?.time;
+          const isActive = activeShiftNo != null && Number(shift.shiftNo) === Number(activeShiftNo);
+          const isRunning = hasCheckIn && !hasCheckOut;
+          const rawProgress = start != null && end != null && end > start
+            ? ((currentMinutes < start && end > 1440 ? currentMinutes + 1440 : currentMinutes) - start) / (end - start)
+            : 0;
+          const progress = hasCheckOut ? 100 : hasCheckIn ? Math.max(0, Math.min(100, Math.round(rawProgress * 100))) : 0;
+          const tone = hasCheckOut ? "emerald" : isRunning ? "sky" : isActive ? "amber" : "slate";
+          const barColor = hasCheckOut ? "bg-emerald-400" : isRunning ? "bg-sky-400" : "bg-amber-300";
+
+          return (
+            <div key={shift.shiftNo || shift.name} className="rounded-xl border border-white/10 bg-white/[0.06] p-3">
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className={`h-2.5 w-2.5 rounded-full ${tone === "emerald" ? "bg-emerald-400" : tone === "sky" ? "bg-sky-400" : tone === "amber" ? "bg-amber-300" : "bg-slate-500"}`} />
+                  <span className="truncate text-sm font-black">{shift.name || `Ca ${shift.shiftNo}`}</span>
+                  {isActive && <span className="rounded-full bg-sky-400/15 px-2 py-0.5 text-[11px] font-bold text-sky-200">Đang mở</span>}
+                </div>
+                <div className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-300">
+                  <span>{minutesLabel(start)}</span>
+                  <span className="text-slate-500">-</span>
+                  <span>{minutesLabel(end)}</span>
+                </div>
+              </div>
+
+              <div className="relative h-14">
+                <div className="absolute left-0 right-0 top-6 h-3 overflow-hidden rounded-full bg-slate-800">
+                  <div className={`h-full rounded-full ${barColor}`} style={{ width: `${progress}%` }} />
+                </div>
+                <span className="absolute left-0 top-4 h-7 w-1 rounded-full bg-white/40" />
+                <span className="absolute right-0 top-4 h-7 w-1 rounded-full bg-white/40" />
+                <div
+                  className="absolute top-0 -ml-4 transition-[left] duration-700 ease-out"
+                  style={{ left: `${progress}%` }}
+                >
+                  <ShiftRunnerIcon active={isRunning} />
+                </div>
+                {hasCheckIn && (
+                  <div className="absolute left-0 top-10 rounded-lg border border-sky-300/30 bg-sky-400/15 px-2 py-1 text-[10px] font-bold text-sky-100">
+                    Vào {fmtTime(shift.checkIn.time)}
+                  </div>
+                )}
+                {hasCheckOut && (
+                  <div className="absolute right-0 top-10 rounded-lg border border-emerald-300/30 bg-emerald-400/15 px-2 py-1 text-[10px] font-bold text-emerald-100">
+                    Ra {fmtTime(shift.checkOut.time)}
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function buildPayslipHTML(payroll) {
   const name = payroll.tenNhanVien || payroll.employeeName || "—";
   const code = payroll.maNhanVien || "—";
@@ -636,10 +898,12 @@ export default function AttendancePage() {
     () => String(user?.code || user?.employeeCode || user?.maNhanVien || "").trim().toUpperCase(),
     [user?.code, user?.employeeCode, user?.maNhanVien]
   );
+  const canLookupOtherPayroll =
+    hasFullAccess(user) || (canAccessScreen(user, "payroll") && user?.action?.payroll?.view === true);
 
   useEffect(() => {
-    if (payrollEmployeeCode) setLookupCode(payrollEmployeeCode);
-  }, [payrollEmployeeCode]);
+    if (!canLookupOtherPayroll && payrollEmployeeCode) setLookupCode(payrollEmployeeCode);
+  }, [canLookupOtherPayroll, payrollEmployeeCode]);
   const payrollMeta = useMemo(() => statusMeta(payroll?.status), [payroll?.status]);
 
   const requestNativeGpsPermission = useCallback(async () => {
@@ -833,7 +1097,7 @@ export default function AttendancePage() {
   }, [api]);
 
   const loadPayroll = useCallback(async () => {
-    const code = lookupCodeRef.current.trim().toUpperCase();
+    const code = (canLookupOtherPayroll ? lookupCodeRef.current : payrollEmployeeCode).trim().toUpperCase();
     if (!code) {
       setPayroll(null);
       setPayrollMessage("Vui lòng nhập mã nhân viên để tra cứu bảng lương.");
@@ -857,7 +1121,7 @@ export default function AttendancePage() {
     } finally {
       setPayrollLoading(false);
     }
-  }, [api]);
+  }, [api, canLookupOtherPayroll, payrollEmployeeCode]);
 
   useEffect(() => {
     loadLocations();
@@ -1358,10 +1622,13 @@ export default function AttendancePage() {
                         key={shift.shiftNo || shift.name}
                         className={`rounded-xl border p-3 ${isActiveShift ? "border-sky-200 bg-sky-50/70" : "border-slate-100 bg-slate-50"}`}
                       >
-                        <div className="mb-2 flex items-center justify-between gap-2">
-                          <div>
-                            <p className="text-sm font-bold text-slate-800">{shift.name || `Ca ${shift.shiftNo}`}</p>
-                            {range && <p className="text-xs text-slate-400">{range}</p>}
+                        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex min-w-[220px] flex-1 items-center gap-3">
+                            <div className="shrink-0">
+                              <p className="text-sm font-bold text-slate-800">{shift.name || `Ca ${shift.shiftNo}`}</p>
+                              {range && <p className="text-xs text-slate-400">{range}</p>}
+                            </div>
+                            {SHOW_ATTENDANCE_TASKBAR_RUNNER && <ShiftTaskbarRail shift={shift} clockNow={clockNow} />}
                           </div>
                           <div className="flex flex-wrap justify-end gap-1.5">
                             {isActiveShift && <Badge tone="sky">Đang mở</Badge>}
@@ -1595,9 +1862,12 @@ export default function AttendancePage() {
                     <input
                       type="text"
                       value={lookupCode}
-                      onChange={(e) => setLookupCode(e.target.value.toUpperCase())}
+                      onChange={(e) => {
+                        if (canLookupOtherPayroll) setLookupCode(e.target.value.toUpperCase());
+                      }}
+                      disabled={!canLookupOtherPayroll}
                       placeholder={payrollEmployeeCode || "Nhập mã nhân viên..."}
-                      className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold uppercase text-slate-800 outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
+                      className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold uppercase text-slate-800 outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 disabled:cursor-not-allowed disabled:text-slate-500"
                     />
                   </label>
                   <label className="block text-xs font-semibold text-slate-500">

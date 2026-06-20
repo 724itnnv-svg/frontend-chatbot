@@ -1284,6 +1284,10 @@ export default function PayrollManager() {
   const [attendanceImporting, setAttendanceImporting] = useState(false);
   const [attendanceHoursPerDay, setAttendanceHoursPerDay] = useState(8);
   const [attendanceSources, setAttendanceSources] = useState(makeAttendanceSources);
+  const [showAttendanceSync, setShowAttendanceSync] = useState(false);
+  const [attendanceSyncLoading, setAttendanceSyncLoading] = useState(false);
+  const [attendanceSyncApplying, setAttendanceSyncApplying] = useState(false);
+  const [attendanceSyncResult, setAttendanceSyncResult] = useState(null);
   const [hiddenColumns, setHiddenColumns] = useState(() => {
     try {
       return new Set(JSON.parse(localStorage.getItem(STORAGE_HIDDEN_COLUMNS) || "[]"));
@@ -1494,6 +1498,11 @@ export default function PayrollManager() {
   const validAttendanceRows = useMemo(
     () => attendancePreview.filter((row) => row.statusText === "Khớp"),
     [attendancePreview]
+  );
+
+  const validAttendanceSyncRows = useMemo(
+    () => (attendanceSyncResult?.rows || []).filter((row) => row.statusText === "Khớp"),
+    [attendanceSyncResult]
   );
 
   const fetchFormulaSettings = async () => {
@@ -1903,6 +1912,68 @@ export default function PayrollManager() {
     }
   };
 
+  const previewAttendanceSync = async () => {
+    if (!canEdit) return;
+    if (!period) {
+      setMessage("Vui lòng chọn kỳ lương trước khi lấy dữ liệu chấm công.");
+      return;
+    }
+    setShowAttendanceSync(true);
+    setAttendanceSyncLoading(true);
+    setAttendanceSyncResult(null);
+    try {
+      const res = await fetch("/api/payroll/sync-attendance", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeader },
+        body: JSON.stringify({
+          period,
+          hoursPerDay: toNumber(attendanceHoursPerDay || 8),
+          mode: "preview",
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || data?.success === false) {
+        throw new Error(data?.message || "Không lấy được dữ liệu chấm công.");
+      }
+      setAttendanceSyncResult(data);
+      setMessage(`Đã đọc chấm công ${data.from} đến ${data.to}: khớp ${data.matched || 0} nhân viên.`);
+    } catch (error) {
+      console.error(error);
+      setMessage(error.message || "Không lấy được dữ liệu chấm công.");
+    } finally {
+      setAttendanceSyncLoading(false);
+    }
+  };
+
+  const applyAttendanceSync = async () => {
+    if (!canEdit || !validAttendanceSyncRows.length) return;
+    setAttendanceSyncApplying(true);
+    try {
+      const res = await fetch("/api/payroll/sync-attendance", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeader },
+        body: JSON.stringify({
+          period,
+          hoursPerDay: toNumber(attendanceHoursPerDay || 8),
+          mode: "apply",
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || data?.success === false) {
+        throw new Error(data?.message || "Cập nhật chấm công vào bảng lương thất bại.");
+      }
+      setAttendanceSyncResult(data);
+      setShowAttendanceSync(false);
+      setMessage(`Đã cập nhật chấm công vào bảng lương cho ${data.updated || 0} nhân viên.`);
+      await fetchPayroll();
+    } catch (error) {
+      console.error(error);
+      setMessage(error.message || "Cập nhật chấm công vào bảng lương thất bại.");
+    } finally {
+      setAttendanceSyncApplying(false);
+    }
+  };
+
   const toggleRowSelection = (rowId) => {
     setSelectedRowIds((current) => {
       const next = new Set(current);
@@ -2112,6 +2183,12 @@ export default function PayrollManager() {
               <button onClick={() => setShowImport(true)} className="inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-50">
                 <UploadCloud className="h-4 w-4" />
                 Import
+              </button>
+            )}
+            {canEdit && (
+              <button onClick={previewAttendanceSync} disabled={attendanceSyncLoading || !rows.length} className="inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-50 disabled:opacity-50">
+                {attendanceSyncLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                Lấy chấm công
               </button>
             )}
             {canEdit && (
@@ -2519,6 +2596,107 @@ export default function PayrollManager() {
             <button disabled={!importRows.length || !selectedImportColumns.size || importing} onClick={importPayroll} className="inline-flex items-center gap-2 rounded-xl bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700 disabled:opacity-50">
               {importing ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}
               Import dữ liệu
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal open={showAttendanceSync} onClose={() => setShowAttendanceSync(false)} title="Lấy dữ liệu chấm công">
+        <div className="space-y-4">
+          <div className="grid gap-3 lg:grid-cols-[180px_1fr]">
+            <label className="text-sm font-semibold text-slate-700">
+              Giờ công / ngày
+              <input
+                type="number"
+                min="1"
+                value={attendanceHoursPerDay}
+                onChange={(event) => setAttendanceHoursPerDay(toNumber(event.target.value) || 8)}
+                className="mt-1 w-full rounded-xl border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-sky-100"
+              />
+            </label>
+            <div className="rounded-xl border bg-slate-50 px-3 py-2 text-sm text-slate-600">
+              Dữ liệu được lấy từ hệ thống chấm công theo mã nhân viên trong kỳ lương {period}. Tăng ca Chủ nhật được tách theo ngày Chủ nhật; tăng ca lễ/tết chỉ được tách khi backend nhận danh sách ngày lễ.
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="text-sm text-slate-600">
+              {attendanceSyncResult ? (
+                <span>
+                  Từ {attendanceSyncResult.from} đến {attendanceSyncResult.to}: {attendanceSyncResult.totalAttendanceRows || 0} bản ghi chấm công, khớp {attendanceSyncResult.matched || 0} nhân viên.
+                </span>
+              ) : (
+                <span>Bấm tải lại để xem trước dữ liệu chấm công sẽ đưa vào bảng lương.</span>
+              )}
+            </div>
+            <button onClick={previewAttendanceSync} disabled={attendanceSyncLoading} className="inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-50 disabled:opacity-50">
+              {attendanceSyncLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+              Tải lại preview
+            </button>
+          </div>
+
+          {attendanceSyncLoading ? (
+            <div className="flex justify-center rounded-xl border py-12 text-slate-400">
+              <Loader2 className="h-6 w-6 animate-spin" />
+            </div>
+          ) : attendanceSyncResult?.rows?.length ? (
+            <div className="overflow-hidden rounded-xl border">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b bg-slate-50 px-3 py-2 text-sm font-semibold">
+                <span>Preview {attendanceSyncResult.rows.length} dòng, hợp lệ {validAttendanceSyncRows.length} dòng</span>
+                <span className="text-xs text-slate-500">Chỉ cập nhật dòng có trạng thái Khớp</span>
+              </div>
+              <div className="max-h-96 overflow-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="sticky top-0 bg-slate-100">
+                    <tr>
+                      <th className="px-3 py-2">Mã NV</th>
+                      <th className="px-3 py-2">Tên bảng lương</th>
+                      <th className="px-3 py-2">Tên chấm công</th>
+                      <th className="px-3 py-2 text-right">Tổng giờ</th>
+                      <th className="px-3 py-2 text-right">Đi muộn</th>
+                      <th className="px-3 py-2 text-right">TC thường</th>
+                      <th className="px-3 py-2 text-right">TC CN</th>
+                      <th className="px-3 py-2 text-right">TC lễ</th>
+                      <th className="px-3 py-2 text-right">Ngày công cũ</th>
+                      <th className="px-3 py-2 text-right">Ngày công mới</th>
+                      <th className="px-3 py-2">Trạng thái</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {attendanceSyncResult.rows.map((row, index) => (
+                      <tr key={`${row._id || row.maNhanVien}-${index}`} className="border-t">
+                        <td className="px-3 py-2 font-mono">{row.maNhanVien || "-"}</td>
+                        <td className="px-3 py-2">{row.tenNhanVien || "-"}</td>
+                        <td className="px-3 py-2">{row.attendanceName || "-"}</td>
+                        <td className="px-3 py-2 text-right">{formatPayrollNumber(row.tongGioLam)}</td>
+                        <td className="px-3 py-2 text-right">{formatPayrollNumber(row.tongGioDiMuon)}</td>
+                        <td className="px-3 py-2 text-right">{formatPayrollNumber(row.tangCaThuong)}</td>
+                        <td className="px-3 py-2 text-right">{formatPayrollNumber(row.tangCaChuNhat)}</td>
+                        <td className="px-3 py-2 text-right">{formatPayrollNumber(row.tangCaLeTet)}</td>
+                        <td className="px-3 py-2 text-right">{formatPayrollNumber(row.oldNgayCong)}</td>
+                        <td className="px-3 py-2 text-right font-semibold">{formatPayrollNumber(row.ngayCong)}</td>
+                        <td className="px-3 py-2">
+                          <span className={`rounded-full px-2 py-1 text-[11px] font-semibold ${row.statusText === "Khớp" ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>
+                            {row.statusText}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : (
+            <div className="rounded-xl border bg-slate-50 px-3 py-8 text-center text-sm text-slate-500">
+              Chưa có dữ liệu preview.
+            </div>
+          )}
+
+          <div className="flex justify-end gap-2">
+            <button onClick={() => setShowAttendanceSync(false)} className="rounded-xl border bg-white px-4 py-2 text-sm font-semibold hover:bg-slate-50">Đóng</button>
+            <button disabled={!validAttendanceSyncRows.length || attendanceSyncApplying} onClick={applyAttendanceSync} className="inline-flex items-center gap-2 rounded-xl bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700 disabled:opacity-50">
+              {attendanceSyncApplying ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+              Cập nhật payroll ({validAttendanceSyncRows.length})
             </button>
           </div>
         </div>

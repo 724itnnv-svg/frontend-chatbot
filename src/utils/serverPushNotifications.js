@@ -1,20 +1,11 @@
 import { Capacitor } from "@capacitor/core";
 import { PushNotifications } from "@capacitor/push-notifications";
 import { apiUrl } from "../api/baseUrl.js";
+import { getDeviceId } from "./deviceIdentity.js";
 
 const PUSH_CHANNEL_ID = "server_push_high";
 const PUSH_TOKEN_KEY = "nnvPushToken";
 let listenersReady = false;
-
-function getDeviceId() {
-  const key = "nnvDeviceId";
-  const existing = localStorage.getItem(key);
-  if (existing) return existing;
-
-  const next = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-  localStorage.setItem(key, next);
-  return next;
-}
 
 function notificationRoute(notification) {
   return notification?.data?.route || notification?.notification?.data?.route || "/cham-cong";
