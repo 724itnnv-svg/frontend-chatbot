@@ -6,7 +6,7 @@ import {
   TrendingUp, TrendingDown, Minus, AlertCircle, Loader2,
   TreePine, CheckCircle2, ClipboardList, StickyNote,
   ImageOff, X, ChevronLeft, ChevronRight, ZoomIn, Pencil,
-  Plus, Trash2,
+  Plus, Trash2, Link,
 } from "lucide-react";
 import { apiUrl } from "../../api/baseUrl";
 import { useAuth } from "../../context/AuthContext";
@@ -416,8 +416,12 @@ function EditModal({ treeData, onClose, onSaved }) {
     tenGiong: treeData.tenGiong || "",
     trangThai: treeData.trangThai || "dang_theo_doi",
     ghiChu: treeData.ghiChu || "",
+    anhUrl: Array.isArray(treeData.anhUrl) ? treeData.anhUrl : [],
   });
   const setT = (k, v) => setTf((p) => ({ ...p, [k]: v }));
+  const [urlInput, setUrlInput] = useState("");
+  const [urlError, setUrlError] = useState("");
+  const [imgErrors, setImgErrors] = useState({});
 
   /* ── Record form (tháng hiện tại) ── */
   const [currentRecord, setCurrentRecord] = useState(null);
@@ -447,6 +451,31 @@ function EditModal({ treeData, onClose, onSaved }) {
     });
   const removeChamSoc = (key, idx) =>
     setRf((p) => ({ ...p, [key]: p[key].filter((_, i) => i !== idx) }));
+
+  function addImageUrl() {
+    const url = urlInput.trim();
+    if (!url) return;
+    if (!/^https?:\/\//i.test(url) && !/^data:image\//i.test(url)) {
+      setUrlError("URL phải bắt đầu bằng http://, https:// hoặc data:image/");
+      return;
+    }
+    if ((tf.anhUrl || []).includes(url)) {
+      setUrlError("Ảnh này đã được thêm");
+      return;
+    }
+    setT("anhUrl", [...(tf.anhUrl || []), url]);
+    setUrlInput("");
+    setUrlError("");
+  }
+
+  function removeImageUrl(idx) {
+    setT("anhUrl", (tf.anhUrl || []).filter((_, i) => i !== idx));
+    setImgErrors((prev) => {
+      const next = { ...prev };
+      delete next[idx];
+      return next;
+    });
+  }
 
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState(null);
@@ -601,6 +630,62 @@ function EditModal({ treeData, onClose, onSaved }) {
               <div className="col-span-2">
                 <label className={lbl}>Ghi chú cây</label>
                 <textarea className={inp + " resize-none"} rows={2} value={tf.ghiChu} onChange={(e) => setT("ghiChu", e.target.value)} placeholder="Ghi chú..." />
+              </div>
+              <div className="col-span-2">
+                <label className={lbl}>{isOngNghiem ? "Ảnh ống nghiệm" : "Ảnh cây dừa"}</label>
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <Link size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                    <input
+                      className={inp + " pl-8"}
+                      value={urlInput}
+                      onChange={(e) => { setUrlInput(e.target.value); setUrlError(""); }}
+                      onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addImageUrl(); } }}
+                      placeholder="https://... hoặc data:image/..."
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={addImageUrl}
+                    className="px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-sm flex items-center gap-1 transition"
+                  >
+                    <Plus size={14} /> Thêm
+                  </button>
+                </div>
+                {urlError && <p className="text-xs text-red-500 mt-1">{urlError}</p>}
+                {(tf.anhUrl || []).length > 0 ? (
+                  <div className="grid grid-cols-3 gap-2 mt-2">
+                    {(tf.anhUrl || []).map((url, idx) => (
+                      <div key={`${url}-${idx}`} className="relative group aspect-square rounded-xl overflow-hidden border border-gray-200 bg-gray-50">
+                        {imgErrors[idx] ? (
+                          <div className="w-full h-full flex flex-col items-center justify-center gap-1 text-gray-400 px-2">
+                            <ImageOff size={20} />
+                            <span className="text-[10px] text-center break-all line-clamp-2">
+                              {url.startsWith("data:image/") ? `Ảnh #${idx + 1}` : url}
+                            </span>
+                          </div>
+                        ) : (
+                          <img
+                            src={toDirectImageUrl(url)}
+                            alt={`Ảnh ${idx + 1}`}
+                            className="w-full h-full object-cover"
+                            onError={() => setImgErrors((prev) => ({ ...prev, [idx]: true }))}
+                          />
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => removeImageUrl(idx)}
+                          className="absolute top-1 right-1 bg-red-500 hover:bg-red-600 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition"
+                          title="Xóa ảnh"
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-gray-400 mt-1">Chưa có ảnh nào. Nhập link ảnh rồi nhấn Thêm.</p>
+                )}
               </div>
             </div>
           </section>

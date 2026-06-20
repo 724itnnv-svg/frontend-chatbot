@@ -29,7 +29,7 @@ import { canAccessScreen } from "../utils/screenAccess";
 
 import ExcelComparer from "./ExcelComparer";
 
-// ===== Định nghĩa các field có thể xuất =====
+// ===== Định nghĩa các field có thể xuất =====ds
 const EXPORT_FIELDS = [
     { key: "stt", label: "STT", getValue: (o, i) => i + 1 },
     { key: "createdAt", label: "Ngày tạo", getValue: (o) => o.createdAt ? new Date(o.createdAt).toLocaleDateString("vi-VN") : "" },
@@ -68,13 +68,25 @@ function formatCurrency(value) {
     }).format(Number(value) || 0);
 }
 
+function buildExportOrderParams(exportConfig) {
+    const params = new URLSearchParams({
+        from: exportConfig.startDate,
+        to: exportConfig.endDate,
+    });
+
+    if (exportConfig.startTime) params.set("fromTime", exportConfig.startTime);
+    if (exportConfig.endTime) params.set("toTime", exportConfig.endTime);
+
+    return params;
+}
+
 export default function AdminDashboard() {
     const { user, token } = useAuth() || {};
     const navigate = useNavigate();
     const isAdmin = user?.role?.toLowerCase() === "admin";
 
     // ===== States: Export đơn hàng =====
-    const [exportConfig, setExportConfig] = useState({ startDate: "", endDate: "" });
+    const [exportConfig, setExportConfig] = useState({ startDate: "", endDate: "", startTime: "", endTime: "" });
     const [isExporting, setIsExporting] = useState(false);
     const [selectedFields, setSelectedFields] = useState(DEFAULT_FIELDS);
 
@@ -222,7 +234,7 @@ export default function AdminDashboard() {
         }
         setIsExporting(true);
         try {
-            const params = new URLSearchParams({ from: exportConfig.startDate, to: exportConfig.endDate });
+            const params = buildExportOrderParams(exportConfig);
             const res = await fetch(`/api/order/allpage?${params}`, {
                 headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
             });
@@ -283,7 +295,7 @@ export default function AdminDashboard() {
         }
         setIsExportingProducts(true);
         try {
-            const params = new URLSearchParams({ from: exportConfig.startDate, to: exportConfig.endDate });
+            const params = buildExportOrderParams(exportConfig);
             const res = await fetch(`/api/order/allpage?${params}`, {
                 headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
             });
@@ -564,7 +576,7 @@ export default function AdminDashboard() {
                     </div>
 
                     {/* Khoảng ngày */}
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
                         <div>
                             <label className="mb-1.5 flex items-center gap-1 text-xs font-semibold text-slate-600">
                                 <Calendar size={11} /> Từ ngày
@@ -575,11 +587,27 @@ export default function AdminDashboard() {
                         </div>
                         <div>
                             <label className="mb-1.5 flex items-center gap-1 text-xs font-semibold text-slate-600">
+                                <Calendar size={11} /> Từ giờ
+                            </label>
+                            <input type="time" className={inputCls}
+                                value={exportConfig.startTime}
+                                onChange={e => setExportConfig(c => ({ ...c, startTime: e.target.value }))} />
+                        </div>
+                        <div>
+                            <label className="mb-1.5 flex items-center gap-1 text-xs font-semibold text-slate-600">
                                 <Calendar size={11} /> Đến ngày
                             </label>
                             <input type="date" className={inputCls}
                                 value={exportConfig.endDate}
                                 onChange={e => setExportConfig(c => ({ ...c, endDate: e.target.value }))} />
+                        </div>
+                        <div>
+                            <label className="mb-1.5 flex items-center gap-1 text-xs font-semibold text-slate-600">
+                                <Calendar size={11} /> Đến giờ
+                            </label>
+                            <input type="time" className={inputCls}
+                                value={exportConfig.endTime}
+                                onChange={e => setExportConfig(c => ({ ...c, endTime: e.target.value }))} />
                         </div>
                     </div>
 

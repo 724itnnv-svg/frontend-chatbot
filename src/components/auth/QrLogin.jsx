@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { CheckCircle2, Loader2, QrCode, ShieldAlert, Smartphone } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import { apiUrl } from "../../api/baseUrl";
+import { getDeviceInfo } from "../../utils/deviceIdentity";
 
 const APP_SCHEME = "nnvchamcong";
 const APP_PACKAGE = "com.nnv.chamcongvip";
@@ -93,7 +94,7 @@ export default function QrLogin() {
         const res = await fetch(apiUrl("/api/auth/qr-login"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ token }),
+          body: JSON.stringify({ token, ...getDeviceInfo() }),
         });
         const data = await res.json();
 
