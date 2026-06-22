@@ -8,15 +8,26 @@ import { canAccessScreen } from "../../utils/screenAccess";
 
 function toDirectImageUrl(url) {
   if (!url) return url;
-  const m = url.match(/drive\.google\.com\/file\/d\/([^/?]+)/);
-  if (m) return `https://lh3.googleusercontent.com/d/${m[1]}`;
+  if (/^data:image\//i.test(url)) return url;
+  const driveFileId =
+    url.match(/drive\.google\.com\/file\/d\/([^/?#]+)/)?.[1] ||
+    url.match(/[?&]id=([^&#]+)/)?.[1];
+  if (driveFileId && /(?:drive|googleusercontent)\.google\.com/.test(url)) {
+    return `https://lh3.googleusercontent.com/d/${encodeURIComponent(decodeURIComponent(driveFileId))}`;
+  }
   return url;
 }
 
-function TreeThumb({ url, maCay }) {
-  const [err, setErr] = useState(false);
-  const src = toDirectImageUrl(url);
-  if (!src || err) {
+function TreeThumb({ urls, maCay }) {
+  const [imageIndex, setImageIndex] = useState(0);
+  const images = Array.isArray(urls) ? urls : [];
+  const src = images[imageIndex] ? toDirectImageUrl(images[imageIndex]) : "";
+
+  useEffect(() => {
+    setImageIndex(0);
+  }, [maCay, images.join("|")]);
+
+  if (!src) {
     return (
       <div className="w-full h-full flex items-center justify-center bg-emerald-50">
         <svg viewBox="0 0 80 110" className="w-14 h-20 opacity-25" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -36,7 +47,7 @@ function TreeThumb({ url, maCay }) {
       src={src}
       alt={`Cây ${maCay}`}
       className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-      onError={() => setErr(true)}
+      onError={() => setImageIndex((idx) => idx + 1)}
     />
   );
 }
@@ -381,7 +392,6 @@ export default function DuaSapPublicPage() {
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
               {list.map((tree) => {
                 const ts = TRANG_THAI_LABEL[tree.trangThai] || TRANG_THAI_LABEL.dang_theo_doi;
-                const thumb = tree.anhUrl?.[0] || null;
                 return (
                   <button
                     key={tree.maCay}
@@ -391,7 +401,7 @@ export default function DuaSapPublicPage() {
                     {/* Ảnh thumbnail */}
                     <div className="relative w-full overflow-hidden bg-emerald-50" style={{ paddingBottom: "75%" }}>
                       <div className="absolute inset-0">
-                        <TreeThumb url={thumb} maCay={tree.maCay} />
+                        <TreeThumb urls={tree.anhUrl} maCay={tree.maCay} />
                       </div>
                       {tree.anhUrl?.length > 1 && (
                         <span className="absolute bottom-1.5 right-1.5 bg-black/50 text-white text-[10px] px-1.5 py-0.5 rounded-full leading-none">
@@ -508,7 +518,7 @@ export default function DuaSapPublicPage() {
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 max-h-72 overflow-y-auto pr-1">
                   {imageDraftUrls.map((url, idx) => (
                     <div key={`${url}-${idx}`} className="relative group aspect-square rounded-xl overflow-hidden bg-emerald-50 border border-gray-100">
-                      <TreeThumb url={url} maCay={imageTree.maCay} />
+                      <TreeThumb urls={[url]} maCay={imageTree.maCay} />
                       <button
                         type="button"
                         onClick={() => removeImageUrl(idx)}

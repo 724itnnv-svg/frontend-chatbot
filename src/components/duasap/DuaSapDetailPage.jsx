@@ -40,8 +40,13 @@ function fmtShort(dateStr) {
 // Chuyển link share "drive.google.com/file/d/ID/view" → link nhúng trực tiếp
 function toDirectImageUrl(url) {
   if (!url) return url;
-  const m = url.match(/drive\.google\.com\/file\/d\/([^/?]+)/);
-  if (m) return `https://lh3.googleusercontent.com/d/${m[1]}`;
+  if (/^data:image\//i.test(url)) return url;
+  const driveFileId =
+    url.match(/drive\.google\.com\/file\/d\/([^/?#]+)/)?.[1] ||
+    url.match(/[?&]id=([^&#]+)/)?.[1];
+  if (driveFileId && /(?:drive|googleusercontent)\.google\.com/.test(url)) {
+    return `https://lh3.googleusercontent.com/d/${encodeURIComponent(decodeURIComponent(driveFileId))}`;
+  }
   return url;
 }
 
@@ -50,12 +55,18 @@ function ImageGallery({ images, maCay, loai }) {
   const [lightbox, setLightbox] = useState(null); // index đang xem
   const [imgErrors, setImgErrors] = useState({});
   const isOngNghiem = loai === "ong_nghiem";
-  const normalizedImages = (images || []).map(toDirectImageUrl);
-  const validImages = normalizedImages.filter((img, i) => img && !imgErrors[i]);
-  const hasImages = validImages.length > 0;
+  const imageItems = (images || [])
+    .map((url, originalIndex) => ({ url: toDirectImageUrl(url), originalIndex }))
+    .filter((item) => item.url && !imgErrors[item.originalIndex]);
+  const hasImages = imageItems.length > 0;
 
-  function prev() { setLightbox((i) => (i > 0 ? i - 1 : validImages.length - 1)); }
-  function next() { setLightbox((i) => (i < validImages.length - 1 ? i + 1 : 0)); }
+  useEffect(() => {
+    setImgErrors({});
+    setLightbox(null);
+  }, [(images || []).join("|")]);
+
+  function prev() { setLightbox((i) => (i > 0 ? i - 1 : imageItems.length - 1)); }
+  function next() { setLightbox((i) => (i < imageItems.length - 1 ? i + 1 : 0)); }
 
   function handleKeyDown(e) {
     if (e.key === "ArrowLeft") prev();
@@ -116,36 +127,36 @@ function ImageGallery({ images, maCay, loai }) {
             onClick={() => setLightbox(0)}
           >
             <img
-              src={validImages[0]}
+              src={imageItems[0].url}
               alt={`Cây ${maCay} - ảnh 1`}
               className="absolute inset-0 w-full h-full object-cover transition group-hover:scale-105"
-              onError={() => setImgErrors((e) => ({ ...e, 0: true }))}
+              onError={() => setImgErrors((e) => ({ ...e, [imageItems[0].originalIndex]: true }))}
             />
             <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition flex items-center justify-center">
               <ZoomIn size={28} className="text-white opacity-0 group-hover:opacity-80 transition" />
             </div>
-            {validImages.length > 1 && (
+            {imageItems.length > 1 && (
               <span className="absolute top-2 right-2 bg-black/50 text-white text-xs px-2 py-0.5 rounded-full">
-                {validImages.length} ảnh
+                {imageItems.length} ảnh
               </span>
             )}
           </div>
 
           {/* Thumbnails */}
-          {validImages.length > 1 && (
+          {imageItems.length > 1 && (
             <div className="flex gap-2 overflow-x-auto pb-1">
-              {validImages.map((url, i) => (
+              {imageItems.map((item, i) => (
                 <button
-                  key={i}
+                  key={`${item.originalIndex}-${item.url}`}
                   onClick={() => setLightbox(i)}
                   className={`shrink-0 w-16 h-16 rounded-lg overflow-hidden border-2 transition ${lightbox === i ? "border-emerald-500" : "border-transparent hover:border-emerald-200"
                     }`}
                 >
                   <img
-                    src={url}
+                    src={item.url}
                     alt={`thumbnail ${i + 1}`}
                     className="w-full h-full object-cover"
-                    onError={() => setImgErrors((e) => ({ ...e, [i]: true }))}
+                    onError={() => setImgErrors((e) => ({ ...e, [item.originalIndex]: true }))}
                   />
                 </button>
               ))}
@@ -155,7 +166,7 @@ function ImageGallery({ images, maCay, loai }) {
       )}
 
       {/* Lightbox */}
-      {lightbox !== null && validImages.length > 0 && (
+      {lightbox !== null && imageItems.length > 0 && (
         <div
           className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4"
           onClick={() => setLightbox(null)}
@@ -171,7 +182,7 @@ function ImageGallery({ images, maCay, loai }) {
             <X size={20} />
           </button>
 
-          {validImages.length > 1 && (
+          {imageItems.length > 1 && (
             <>
               <button
                 onClick={(e) => { e.stopPropagation(); prev(); }}
@@ -190,12 +201,17 @@ function ImageGallery({ images, maCay, loai }) {
 
           <div className="text-center" onClick={(e) => e.stopPropagation()}>
             <img
-              src={validImages[lightbox]}
+              src={imageItems[lightbox]?.url}
               alt={`Cây ${maCay} - ảnh ${lightbox + 1}`}
               className="max-w-full max-h-[80vh] rounded-xl shadow-2xl object-contain"
+              onError={() => {
+                const item = imageItems[lightbox];
+                if (item) setImgErrors((e) => ({ ...e, [item.originalIndex]: true }));
+                setLightbox(null);
+              }}
             />
             <p className="text-white/50 text-xs mt-3">
-              {lightbox + 1} / {validImages.length}
+              {lightbox + 1} / {imageItems.length}
             </p>
           </div>
         </div>

@@ -14,25 +14,34 @@ import QRCode from "qrcode";
 // ─── Google Drive URL normalizer ─────────────────────────────────────────────
 function toDirectImageUrl(url) {
   if (!url) return url;
-  const m = url.match(/drive\.google\.com\/file\/d\/([^/?]+)/);
-  if (m) return `https://lh3.googleusercontent.com/d/${m[1]}`;
+  if (/^data:image\//i.test(url)) return url;
+  const driveFileId =
+    url.match(/drive\.google\.com\/file\/d\/([^/?#]+)/)?.[1] ||
+    url.match(/[?&]id=([^&#]+)/)?.[1];
+  if (driveFileId && /(?:drive|googleusercontent)\.google\.com/.test(url)) {
+    return `https://lh3.googleusercontent.com/d/${encodeURIComponent(decodeURIComponent(driveFileId))}`;
+  }
   return url;
 }
 
 function TreeImageCell({ tree }) {
-  const [error, setError] = useState(false);
+  const [imageIndex, setImageIndex] = useState(0);
   const images = Array.isArray(tree.anhUrl) ? tree.anhUrl : [];
-  const firstImage = images[0] ? toDirectImageUrl(images[0]) : "";
+  const imageUrl = images[imageIndex] ? toDirectImageUrl(images[imageIndex]) : "";
+
+  useEffect(() => {
+    setImageIndex(0);
+  }, [tree.maCay, images.join("|")]);
 
   return (
     <div className="flex items-center gap-2">
       <div className="w-12 h-12 rounded-xl overflow-hidden border border-gray-100 bg-emerald-50 shrink-0">
-        {firstImage && !error ? (
+        {imageUrl ? (
           <img
-            src={firstImage}
+            src={imageUrl}
             alt={`Ảnh ${tree.maCay}`}
             className="w-full h-full object-cover"
-            onError={() => setError(true)}
+            onError={() => setImageIndex((idx) => idx + 1)}
           />
         ) : (
           <div className="w-full h-full flex items-center justify-center text-emerald-300">
@@ -142,10 +151,10 @@ async function generateQRAssets(tree, url) {
   const textY = 20 * SC;
 
   // Vị trí
-  const loc = [tree.viTri, tree.khuVuc].filter(Boolean).join(" — ");
+  const loc = tree.viTri || "";
   if (loc) {
     ctx.fillStyle = "#000000";
-    drawWrappedText(loc, SIDE_PAD, textY, SIDE_W, "left", "600", 9, 4.5, 3);
+    drawScaledText(loc, SIDE_PAD, textY, SIDE_W, "left", "bold", 12, 7);
   }
 
   // Mã cây/ống nghiệm (bold, đen)
@@ -163,21 +172,23 @@ async function generateQRAssets(tree, url) {
 // ── Layout constants ──────────────────────────────────────────────────────────
 const PAGE_W = 210, PAGE_H = 297;
 
-// Cây giống: 3 cột × 4 hàng = 12/trang
+// Cay giong: 2 cot x 3 hang = 6/trang, chia deu A4 de de cat
 const CG = (() => {
-  const MARGIN = 10, COLS = 3, ROWS = 4, PAD = 2;
-  const CELL_W = (PAGE_W - MARGIN * 2) / COLS;   // ~63.3 mm
-  const CELL_H = (PAGE_H - MARGIN * 2) / ROWS;   // ~69.3 mm
+  const MARGIN = 0, COLS = 2, ROWS = 3, PAD = 6;
+  const CELL_W = (PAGE_W - MARGIN * 2) / COLS;   // 105 mm
+  const CELL_H = (PAGE_H - MARGIN * 2) / ROWS;   // 99 mm
   const INN_W = CELL_W - PAD * 2;
   const INN_H = CELL_H - PAD * 2;
-  const TEXT_H = 14;
-  const TEXT_GAP = 1;
-  const QR = Math.min(INN_W - 6, INN_H - TEXT_H - TEXT_GAP - 2);
+  const TEXT_H = 16;
+  const TEXT_GAP = 3;
+  const QR = Math.min(INN_W - 6, INN_H - TEXT_H - TEXT_GAP - 12);
   return {
     MARGIN, COLS, ROWS, PAD, CELL_W, CELL_H, INN_W, INN_H, QR, TEXT_H, TEXT_GAP,
     QR_X: (INN_W - QR) / 2,
     PER_PAGE: COLS * ROWS,
     BORDER: [210, 210, 210],
+    CUT_GUIDES: true,
+    QR_BOTTOM_GAP: 2,
   };
 })();
 
@@ -200,11 +211,13 @@ const ON = (() => {
 
 /** Vẽ 1 nhãn QR lên jsPDF tại vị trí (cx, cy) theo layout L */
 function drawQRLabel(doc, layout, cx, cy, assets, tree) {
-  const { INN_W, INN_H, QR, TEXT_H, TEXT_GAP, QR_X, BORDER } = layout;
+  const { INN_W, INN_H, QR, TEXT_H, TEXT_GAP, QR_X, BORDER, QR_BOTTOM_GAP } = layout;
   const contentH = TEXT_H + TEXT_GAP + QR;
   const contentY = Math.max(0, (INN_H - contentH) / 2);
   const textY = cy + contentY;
-  const qrY = textY + TEXT_H + TEXT_GAP;
+  const qrY = QR_BOTTOM_GAP != null
+    ? cy + INN_H - QR - QR_BOTTOM_GAP
+    : textY + TEXT_H + TEXT_GAP;
 
   doc.setFillColor(255, 255, 255);
   doc.setDrawColor(...BORDER);
@@ -214,9 +227,24 @@ function drawQRLabel(doc, layout, cx, cy, assets, tree) {
   doc.addImage(assets.qrPng, "PNG", cx + QR_X, qrY, QR, QR, `qr_${tree.maCay}`, "NONE");
 }
 
+function drawA4CutGuides(doc, layout) {
+  doc.setDrawColor(160, 160, 160);
+  doc.setLineWidth(0.25);
+  doc.setLineDashPattern([2, 2], 0);
+  for (let col = 1; col < layout.COLS; col++) {
+    const x = (PAGE_W / layout.COLS) * col;
+    doc.line(x, 0, x, PAGE_H);
+  }
+  for (let row = 1; row < layout.ROWS; row++) {
+    const y = (PAGE_H / layout.ROWS) * row;
+    doc.line(0, y, PAGE_W, y);
+  }
+  doc.setLineDashPattern([], 0);
+}
+
 /**
  * Tạo PDF A4:
- *  - Cây giống: layout 3×4 (size gốc)
+ *  - Cay giong: layout 2x3, 6 ma/trang A4 de de cat
  *  - Ống nghiệm: layout 7×8, QR 20mm (2cm) — trang riêng
  */
 async function exportAllQRtoPDF(trees, onProgress) {
@@ -244,6 +272,10 @@ async function exportAllQRtoPDF(trees, onProgress) {
           doc.addPage();
         } else if (i > 0 && posInPage === 0) {
           doc.addPage();
+        }
+
+        if (layout.CUT_GUIDES && posInPage === 0) {
+          drawA4CutGuides(doc, layout);
         }
 
         const col = posInPage % layout.COLS;
@@ -2481,7 +2513,7 @@ export default function DuaSapManager() {
         setDistinctKhuVuc(r.data.khuVuc || []);
         setDistinctGiong(r.data.giong || []);
       }
-    }).catch(() => {});
+    }).catch(() => { });
   }, []); // eslint-disable-line
 
   // Khi filter/search thay đổi → về trang 1
