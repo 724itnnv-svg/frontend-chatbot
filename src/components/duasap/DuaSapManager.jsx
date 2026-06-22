@@ -58,12 +58,14 @@ const GIONG_LABEL_MAP = { dua_sap: "Dừa sáp", dua_thuong: "Dừa thường", 
  * Trả về { qrPng, textPng } để embed riêng.
  */
 async function generateQRAssets(tree, url) {
-  // ── 1. QR PNG nhỏ (150px là đủ để scan ở kích thước in 45mm) ──
+  // QR PNG phân giải cao để in rõ ở kích thước tem.
   const qrPng = await QRCode.toDataURL(url, {
-    width: 150,
-    margin: 1,
-    color: { dark: "#14532d", light: "#ffffff" },
-    errorCorrectionLevel: "M",
+    width: 768,
+    margin: 2,
+    color: { dark: "#000000", light: "#ffffff" },
+    errorCorrectionLevel: "H",
+    type: "image/png",
+    rendererOpts: { quality: 1 },
   });
 
   // ── 2. Text canvas nhỏ (SC=2, chỉ vẽ 3 dòng chữ tiếng Việt) ──
@@ -76,20 +78,79 @@ async function generateQRAssets(tree, url) {
   const ctx = tc.getContext("2d");
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, TW, TH);
-  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
 
-  // Mã cây (bold, xanh)
-  ctx.fillStyle = "#14532d";
-  ctx.font = `bold ${12 * SC}px -apple-system, BlinkMacSystemFont, sans-serif`;
-  ctx.fillText(tree.maCay, TW / 2, 15 * SC);
+  function setTextFont(weight, size) {
+    ctx.font = `${weight} ${size * SC}px -apple-system, BlinkMacSystemFont, sans-serif`;
+  }
+
+  function drawScaledText(text, x, y, maxWidth, align, weight, startSize, minSize) {
+    const value = String(text || "").trim();
+    if (!value) return;
+    ctx.textAlign = align;
+    for (let size = startSize; size >= minSize; size -= 0.5) {
+      setTextFont(weight, size);
+      if (ctx.measureText(value).width <= maxWidth) break;
+    }
+    ctx.fillText(value, x, y, maxWidth);
+  }
+
+  function wrapText(value, maxWidth, maxLines) {
+    const words = String(value || "").trim().split(/\s+/).filter(Boolean);
+    const lines = [];
+    let line = "";
+
+    for (const word of words) {
+      const test = line ? `${line} ${word}` : word;
+      if (ctx.measureText(test).width <= maxWidth || !line) {
+        line = test;
+      } else {
+        lines.push(line);
+        line = word;
+      }
+
+      if (lines.length >= maxLines) return null;
+    }
+
+    if (line) lines.push(line);
+    return lines.length <= maxLines ? lines : null;
+  }
+
+  function drawWrappedText(text, x, centerY, maxWidth, align, weight, startSize, minSize, maxLines) {
+    const value = String(text || "").trim();
+    if (!value) return;
+    ctx.textAlign = align;
+
+    for (let size = startSize; size >= minSize; size -= 0.5) {
+      setTextFont(weight, size);
+      const lines = wrapText(value, maxWidth, maxLines);
+      if (!lines) continue;
+
+      const lineH = size * SC * 1.15;
+      const firstY = centerY - ((lines.length - 1) * lineH) / 2;
+      lines.forEach((line, index) => ctx.fillText(line, x, firstY + index * lineH, maxWidth));
+      return;
+    }
+
+    setTextFont(weight, minSize);
+    ctx.fillText(value, x, centerY, maxWidth);
+  }
+
+  const SIDE_PAD = 8 * SC;
+  const CENTER_CLEAR = 44 * SC;
+  const SIDE_W = (TW - SIDE_PAD * 2 - CENTER_CLEAR) / 2;
+  const textY = 20 * SC;
 
   // Vị trí
   const loc = [tree.viTri, tree.khuVuc].filter(Boolean).join(" — ");
   if (loc) {
-    ctx.fillStyle = "#374151";
-    ctx.font = `${9 * SC}px -apple-system, BlinkMacSystemFont, sans-serif`;
-    ctx.fillText(loc, TW / 2, 28 * SC);
+    ctx.fillStyle = "#000000";
+    drawWrappedText(loc, SIDE_PAD, textY, SIDE_W, "left", "600", 9, 4.5, 3);
   }
+
+  // Mã cây/ống nghiệm (bold, đen)
+  ctx.fillStyle = "#000000";
+  drawScaledText(tree.maCay, TW - SIDE_PAD, textY, SIDE_W, "right", "bold", 12, 7);
 
   // // Giống
   // ctx.fillStyle = "#6b7280";
@@ -109,12 +170,12 @@ const CG = (() => {
   const CELL_H = (PAGE_H - MARGIN * 2) / ROWS;   // ~69.3 mm
   const INN_W = CELL_W - PAD * 2;
   const INN_H = CELL_H - PAD * 2;
-  const QR = INN_W - 6;
   const TEXT_H = 14;
+  const TEXT_GAP = 1;
+  const QR = Math.min(INN_W - 6, INN_H - TEXT_H - TEXT_GAP - 2);
   return {
-    MARGIN, COLS, ROWS, PAD, CELL_W, CELL_H, INN_W, INN_H, QR, TEXT_H,
+    MARGIN, COLS, ROWS, PAD, CELL_W, CELL_H, INN_W, INN_H, QR, TEXT_H, TEXT_GAP,
     QR_X: (INN_W - QR) / 2,
-    QR_Y: (INN_H - QR - TEXT_H) / 2,
     PER_PAGE: COLS * ROWS,
     BORDER: [210, 210, 210],
   };
@@ -123,16 +184,15 @@ const CG = (() => {
 // Ống nghiệm: QR 20mm, cell 31×39mm, ~6 cột × 7 hàng = 42/trang
 const ON = (() => {
   const MARGIN = 8, PAD = 2;
-  const QR = 20, TEXT_H = 7;
+  const QR = 20, TEXT_H = 7, TEXT_GAP = 1;
   const CELL_W = 31, CELL_H = 39;
   const INN_W = CELL_W - PAD * 2;
   const INN_H = CELL_H - PAD * 2;
   const COLS = Math.floor((PAGE_W - MARGIN * 2) / CELL_W);  // 6
   const ROWS = Math.floor((PAGE_H - MARGIN * 2) / CELL_H);  // 7
   return {
-    MARGIN, COLS, ROWS, PAD, CELL_W, CELL_H, INN_W, INN_H, QR, TEXT_H,
+    MARGIN, COLS, ROWS, PAD, CELL_W, CELL_H, INN_W, INN_H, QR, TEXT_H, TEXT_GAP,
     QR_X: (INN_W - QR) / 2,
-    QR_Y: (INN_H - QR - TEXT_H) / 2,
     PER_PAGE: COLS * ROWS,
     BORDER: [180, 180, 220],  // viền xanh tím nhạt để phân biệt
   };
@@ -140,13 +200,18 @@ const ON = (() => {
 
 /** Vẽ 1 nhãn QR lên jsPDF tại vị trí (cx, cy) theo layout L */
 function drawQRLabel(doc, layout, cx, cy, assets, tree) {
-  const { INN_W, INN_H, QR, TEXT_H, QR_X, QR_Y, BORDER } = layout;
+  const { INN_W, INN_H, QR, TEXT_H, TEXT_GAP, QR_X, BORDER } = layout;
+  const contentH = TEXT_H + TEXT_GAP + QR;
+  const contentY = Math.max(0, (INN_H - contentH) / 2);
+  const textY = cy + contentY;
+  const qrY = textY + TEXT_H + TEXT_GAP;
+
   doc.setFillColor(255, 255, 255);
   doc.setDrawColor(...BORDER);
   doc.setLineWidth(0.2);
   doc.roundedRect(cx, cy, INN_W, INN_H, 1.5, 1.5, "FD");
-  doc.addImage(assets.qrPng, "PNG", cx + QR_X, cy + QR_Y, QR, QR, `qr_${tree.maCay}`, "FAST");
-  doc.addImage(assets.textPng, "PNG", cx, cy + QR_Y + QR + 1, INN_W, TEXT_H, `txt_${tree.maCay}`, "FAST");
+  doc.addImage(assets.textPng, "PNG", cx, textY, INN_W, TEXT_H, `txt_${tree.maCay}`, "FAST");
+  doc.addImage(assets.qrPng, "PNG", cx + QR_X, qrY, QR, QR, `qr_${tree.maCay}`, "NONE");
 }
 
 /**
@@ -366,10 +431,12 @@ function QRModal({ tree, onClose }) {
 
   useEffect(() => {
     QRCode.toDataURL(publicUrl, {
-      width: 280,
+      width: 768,
       margin: 2,
-      color: { dark: "#14532d", light: "#ffffff" },
-      errorCorrectionLevel: "M",
+      color: { dark: "#000000", light: "#ffffff" },
+      errorCorrectionLevel: "H",
+      type: "image/png",
+      rendererOpts: { quality: 1 },
     }).then(setQrDataUrl).catch(() => { });
   }, [publicUrl]);
 
