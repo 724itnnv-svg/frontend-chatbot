@@ -250,6 +250,9 @@ function buildExportRows(records) {
 
   for (const record of records || []) {
     const shifts = getRecordShifts(record);
+    const isOvertimeMealApproved =
+      record.isOvertimeMealApproved === true ||
+      shifts.some((shift) => shift?.isOvertimeMealApproved === true);
     const morningShift = shifts.find((shift) => Number(shift.shiftNo) === 1) || {};
     const afternoonShift = shifts.find((shift) => Number(shift.shiftNo) === 2) || {};
     const summarizeShift = (shift) => getShiftBadges(shift).map((badge) => badge.text).join(", ");
@@ -332,6 +335,7 @@ function buildExportRows(records) {
         "Công chuẩn": shift.regularHours ?? "",
         "Công ca": shift.workHours ?? "",
         "Tính tăng ca": yesNo(shift.isOvertimeApproved),
+        "Cơm tăng ca": yesNo(isOvertimeMealApproved),
         "Tăng ca phút": shift.overtimeMinutes ?? "",
         "Tăng ca giờ": shift.overtimeHours ?? "",
         "Trạng thái ngày": STATUS_CONFIG[record.status]?.label || record.status || "",
@@ -431,6 +435,7 @@ function createEmptyForm() {
     locationId: "",
     date: todayVN(),
     note: "",
+    isOvertimeMealApproved: false,
     shifts: DEFAULT_SHIFT_FORM.map((shift) => ({
       ...shift,
       checkInTime: "",
@@ -450,6 +455,7 @@ function createBulkStampForm() {
     locationId: "",
     dateFrom: todayVN(),
     dateTo: todayVN(),
+    isOvertimeMealApproved: false,
     workDays: [1, 2, 3, 4, 5, 6], // T2-T7, bỏ CN theo mặc định
     shifts: DEFAULT_SHIFT_FORM.map((shift) => ({
       ...shift,
@@ -469,6 +475,9 @@ function recordToForm(record) {
     locationId: record.locationId || "",
     date: record.date || todayVN(),
     note: record.note || "",
+    isOvertimeMealApproved:
+      record.isOvertimeMealApproved === true ||
+      shifts.some((shift) => shift?.isOvertimeMealApproved === true),
     shifts: DEFAULT_SHIFT_FORM.map((defaultShift, index) => {
       const shift = shifts.find((item) => Number(item.shiftNo) === Number(defaultShift.shiftNo)) || shifts[index] || {};
       return {
@@ -819,6 +828,7 @@ export default function AttendanceManager() {
         locationId: form.locationId,
         date: form.date,
         note: form.note,
+        isOvertimeMealApproved: form.isOvertimeMealApproved,
         shifts: form.shifts,
       };
 
@@ -915,7 +925,13 @@ export default function AttendanceManager() {
     const records = [];
     for (const userId of userIds) {
       for (const date of dates) {
-        records.push({ userId, locationId: bulkStampForm.locationId, date, shifts: enabledShifts });
+        records.push({
+          userId,
+          locationId: bulkStampForm.locationId,
+          date,
+          isOvertimeMealApproved: bulkStampForm.isOvertimeMealApproved,
+          shifts: enabledShifts,
+        });
       }
     }
 
@@ -1265,6 +1281,15 @@ export default function AttendanceManager() {
                   className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
                 />
               </div>
+              <label className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700 md:col-span-2">
+                <input
+                  type="checkbox"
+                  checked={form.isOvertimeMealApproved}
+                  onChange={(e) => setForm((prev) => ({ ...prev, isOvertimeMealApproved: e.target.checked }))}
+                  className="accent-emerald-600"
+                />
+                Cộng tiền cơm tăng ca
+              </label>
             </div>
 
             <div className="mt-4 grid gap-3 md:grid-cols-2">
@@ -1551,6 +1576,16 @@ export default function AttendanceManager() {
                       ))}
                     </select>
                   </div>
+
+                  <label className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700">
+                    <input
+                      type="checkbox"
+                      checked={bulkStampForm.isOvertimeMealApproved}
+                      onChange={(e) => setBulkStampForm((prev) => ({ ...prev, isOvertimeMealApproved: e.target.checked }))}
+                      className="accent-emerald-600"
+                    />
+                    Cộng tiền cơm tăng ca
+                  </label>
 
                   <div className="flex flex-col gap-2">
                     <label className="text-xs font-semibold text-slate-500">CA LÀM VIỆC</label>

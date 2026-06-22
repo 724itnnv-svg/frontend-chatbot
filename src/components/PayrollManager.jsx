@@ -2657,6 +2657,7 @@ export default function PayrollManager() {
                       <th className="px-3 py-2 text-right">TC thường</th>
                       <th className="px-3 py-2 text-right">TC CN</th>
                       <th className="px-3 py-2 text-right">TC lễ</th>
+                      <th className="px-3 py-2 text-right">Cơm TC</th>
                       <th className="px-3 py-2 text-right">Ngày công cũ</th>
                       <th className="px-3 py-2 text-right">Ngày công mới</th>
                       <th className="px-3 py-2">Trạng thái</th>
@@ -2673,6 +2674,7 @@ export default function PayrollManager() {
                         <td className="px-3 py-2 text-right">{formatPayrollNumber(row.tangCaThuong)}</td>
                         <td className="px-3 py-2 text-right">{formatPayrollNumber(row.tangCaChuNhat)}</td>
                         <td className="px-3 py-2 text-right">{formatPayrollNumber(row.tangCaLeTet)}</td>
+                        <td className="px-3 py-2 text-right">{formatPayrollNumber(row.comTangCa)}</td>
                         <td className="px-3 py-2 text-right">{formatPayrollNumber(row.oldNgayCong)}</td>
                         <td className="px-3 py-2 text-right font-semibold">{formatPayrollNumber(row.ngayCong)}</td>
                         <td className="px-3 py-2">

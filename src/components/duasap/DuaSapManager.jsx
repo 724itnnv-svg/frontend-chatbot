@@ -14,25 +14,34 @@ import QRCode from "qrcode";
 // ─── Google Drive URL normalizer ─────────────────────────────────────────────
 function toDirectImageUrl(url) {
   if (!url) return url;
-  const m = url.match(/drive\.google\.com\/file\/d\/([^/?]+)/);
-  if (m) return `https://lh3.googleusercontent.com/d/${m[1]}`;
+  if (/^data:image\//i.test(url)) return url;
+  const driveFileId =
+    url.match(/drive\.google\.com\/file\/d\/([^/?#]+)/)?.[1] ||
+    url.match(/[?&]id=([^&#]+)/)?.[1];
+  if (driveFileId && /(?:drive|googleusercontent)\.google\.com/.test(url)) {
+    return `https://lh3.googleusercontent.com/d/${encodeURIComponent(decodeURIComponent(driveFileId))}`;
+  }
   return url;
 }
 
 function TreeImageCell({ tree }) {
-  const [error, setError] = useState(false);
+  const [imageIndex, setImageIndex] = useState(0);
   const images = Array.isArray(tree.anhUrl) ? tree.anhUrl : [];
-  const firstImage = images[0] ? toDirectImageUrl(images[0]) : "";
+  const imageUrl = images[imageIndex] ? toDirectImageUrl(images[imageIndex]) : "";
+
+  useEffect(() => {
+    setImageIndex(0);
+  }, [tree.maCay, images.join("|")]);
 
   return (
     <div className="flex items-center gap-2">
       <div className="w-12 h-12 rounded-xl overflow-hidden border border-gray-100 bg-emerald-50 shrink-0">
-        {firstImage && !error ? (
+        {imageUrl ? (
           <img
-            src={firstImage}
+            src={imageUrl}
             alt={`Ảnh ${tree.maCay}`}
             className="w-full h-full object-cover"
-            onError={() => setError(true)}
+            onError={() => setImageIndex((idx) => idx + 1)}
           />
         ) : (
           <div className="w-full h-full flex items-center justify-center text-emerald-300">
