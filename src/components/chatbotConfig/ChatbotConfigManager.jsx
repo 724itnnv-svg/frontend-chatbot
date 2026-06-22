@@ -25,6 +25,7 @@ const DEFAULT_SETTINGS = {
   responseDelayMs: 1200,
   replyDebounceMs: 1200,
   aggregateWindowMs: 5000,
+  facebookSendEnabled: true,
   messageSplitEnabled: true,
   messageSplitMaxLength: 1800,
   chatV3FaqPageIds: [],
@@ -614,6 +615,7 @@ export default function ChatbotConfigManager() {
             responseDelayMs: settings.responseDelayMs,
             replyDebounceMs: settings.responseDelayMs,
             aggregateWindowMs: settings.aggregateWindowMs,
+            facebookSendEnabled: settings.facebookSendEnabled !== false,
             messageSplitEnabled: settings.messageSplitEnabled !== false,
             messageSplitMaxLength: settings.messageSplitMaxLength,
             chatV3FaqPageIds: chatV3FaqApplyAllPages ? [] : chatV3FaqPageIds,
@@ -759,6 +761,18 @@ export default function ChatbotConfigManager() {
                       setSettings((prev) => ({
                         ...prev,
                         aggregateWindowMs: Math.round(Number(event.target.value || 0) * 1000),
+                      }))
+                    }
+                  />
+                  <ToggleSetting
+                    title="Gửi tin nhắn Facebook"
+                    description="Áp dụng cho tất cả Page. Khi tắt, Chat V3 không gửi Facebook và không lưu lịch sử BOT trả lời; hệ thống chỉ lưu tin nhắn nhận được."
+                    enabled={settings.facebookSendEnabled !== false}
+                    tone="emerald"
+                    onToggle={() =>
+                      setSettings((prev) => ({
+                        ...prev,
+                        facebookSendEnabled: prev.facebookSendEnabled === false,
                       }))
                     }
                   />
