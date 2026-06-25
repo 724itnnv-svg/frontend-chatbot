@@ -151,12 +151,6 @@ export default function Login() {
     setForm({ ...form, [e.target.name]: e.target.value });
   }
 
-  function handleForgotPassword() {
-    alert(
-      "Quên mật khẩu?\nVui lòng liên hệ Trần Khánh 0949015724 để lấy lại mật khẩu."
-    );
-  }
-
   async function handleSubmit(e) {
     e.preventDefault();
     setError("");
