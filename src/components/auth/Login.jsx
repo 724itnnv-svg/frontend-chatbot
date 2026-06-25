@@ -24,6 +24,26 @@ function decodeData(str) {
   }
 }
 
+function getDeviceInfo() {
+  let deviceId = localStorage.getItem("_did");
+  if (!deviceId) {
+    deviceId = crypto.randomUUID();
+    localStorage.setItem("_did", deviceId);
+  }
+  const ua = navigator.userAgent || "";
+  let platform = "web";
+  if (/android/i.test(ua)) platform = "android";
+  else if (/iphone|ipad|ipod/i.test(ua)) platform = "ios";
+  else if (/windows/i.test(ua)) platform = "windows";
+  else if (/macintosh|mac os/i.test(ua)) platform = "mac";
+  else if (/linux/i.test(ua)) platform = "linux";
+  return {
+    deviceId,
+    deviceName: ua.slice(0, 200),
+    platform,
+  };
+}
+
 function looksLikePhone(value) {
   const raw = String(value || "").trim();
   const digits = raw.replace(/\D/g, "");
@@ -150,6 +170,8 @@ export default function Login() {
         loginIdentifier = `${loginIdentifier}@gmail.com`;
       }
 
+      const { deviceId, deviceName, platform } = getDeviceInfo();
+
       const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -157,6 +179,9 @@ export default function Login() {
           ...form,
           email: loginIdentifier,
           identifier: loginIdentifier,
+          deviceId,
+          deviceName,
+          platform,
         }),
       });
 
@@ -179,7 +204,7 @@ export default function Login() {
       } else {
         localStorage.removeItem(REMEMBER_KEY);
       }
-     
+
       if (data && data.user && data.user.screenDefault) {
         localStorage.setItem("dashboard_active_tab", data.user.screenDefault);
       }
