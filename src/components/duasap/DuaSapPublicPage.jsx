@@ -66,6 +66,15 @@ const GIONG_LABEL = {
 };
 
 const PAGE_SIZE = 12;
+const SESSION_KEY = "duaSapListState";
+
+function getRestoredState() {
+  try {
+    const raw = sessionStorage.getItem(SESSION_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch { return null; }
+}
 
 export default function DuaSapPublicPage() {
   const navigate = useNavigate();
@@ -73,17 +82,22 @@ export default function DuaSapPublicPage() {
   const user = auth.user || null;
   const api = auth.api;
   const canManage = Boolean(user && api && canAccessScreen(user, "dua_sap"));
-  const [trees, setTrees] = useState([]);
-  const [page, setPage] = useState(1);
-  const [total, setTotal] = useState(0);
-  const [hasMore, setHasMore] = useState(true);
-  const [loading, setLoading] = useState(true);
+
+  // Khôi phục snapshot từ sessionStorage nếu user vừa bấm "về danh sách"
+  const [restoredState] = useState(getRestoredState);
+  const isRestoring = restoredState != null;
+
+  const [trees, setTrees] = useState(() => restoredState?.trees ?? []);
+  const [page, setPage] = useState(() => restoredState?.page ?? 1);
+  const [total, setTotal] = useState(() => restoredState?.total ?? 0);
+  const [hasMore, setHasMore] = useState(() => restoredState?.hasMore ?? true);
+  const [loading, setLoading] = useState(() => !isRestoring);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState(null);
-  const [search, setSearch] = useState("");
-  const [searchInput, setSearchInput] = useState("");
-  const [viTri, setViTri] = useState("");
-  const [khuVuc, setKhuVuc] = useState("");
+  const [search, setSearch] = useState(() => restoredState?.search ?? "");
+  const [searchInput, setSearchInput] = useState(() => restoredState?.searchInput ?? "");
+  const [viTri, setViTri] = useState(() => restoredState?.viTri ?? "");
+  const [khuVuc, setKhuVuc] = useState(() => restoredState?.khuVuc ?? "");
   const [distinctViTri, setDistinctViTri] = useState([]);
   const [distinctKhuVuc, setDistinctKhuVuc] = useState([]);
   const [imageTree, setImageTree] = useState(null);
@@ -92,6 +106,18 @@ export default function DuaSapPublicPage() {
   const [imageError, setImageError] = useState("");
   const [savingImage, setSavingImage] = useState(false);
   const sentinelRef = useRef(null);
+  // Bỏ qua lần fetch đầu tiên nếu đang khôi phục từ sessionStorage
+  const skipFetchRef = useRef(isRestoring);
+
+  // Dọn sessionStorage và cuộn về vị trí cũ khi khôi phục từ danh sách
+  useEffect(() => {
+    if (!isRestoring) return;
+    sessionStorage.removeItem(SESSION_KEY);
+    const y = restoredState.scrollY || 0;
+    if (y > 0) {
+      requestAnimationFrame(() => requestAnimationFrame(() => window.scrollTo(0, y)));
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fetch distinct viTri & khuVuc cho dropdown — gọi 1 lần khi mount
   useEffect(() => {
@@ -108,6 +134,11 @@ export default function DuaSapPublicPage() {
 
   // Fetch khi page, search hoặc khuVuc thay đổi
   useEffect(() => {
+    // Bỏ qua lần chạy đầu tiên nếu đang khôi phục từ sessionStorage
+    if (skipFetchRef.current) {
+      skipFetchRef.current = false;
+      return;
+    }
     const controller = new AbortController();
     if (page === 1) {
       setLoading(true);
@@ -184,6 +215,23 @@ export default function DuaSapPublicPage() {
     setPage(1);
     setHasMore(true);
     setKhuVuc(val);
+  }
+
+  function handleTreeClick(maCay) {
+    try {
+      sessionStorage.setItem(SESSION_KEY, JSON.stringify({
+        scrollY: window.scrollY,
+        trees,
+        page,
+        total,
+        hasMore,
+        search,
+        searchInput,
+        viTri,
+        khuVuc,
+      }));
+    } catch { /* sessionStorage có thể bị tắt */ }
+    navigate(`/dua-sap/${maCay}`);
   }
 
   function openAddImage(tree, e) {
@@ -395,7 +443,7 @@ export default function DuaSapPublicPage() {
                 return (
                   <button
                     key={tree.maCay}
-                    onClick={() => navigate(`/dua-sap/${tree.maCay}`)}
+                    onClick={() => handleTreeClick(tree.maCay)}
                     className="group bg-white rounded-2xl shadow-sm border border-gray-100 text-left hover:shadow-md hover:border-emerald-200 transition-all overflow-hidden"
                   >
                     {/* Ảnh thumbnail */}

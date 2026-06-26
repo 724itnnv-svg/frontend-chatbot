@@ -194,8 +194,8 @@ const EMPLOYEE_TYPES = [
 const DEFAULT_AD_COST_TYPE = "PB";
 
 const AD_COST_TYPE_OPTIONS = [
-  { value: "PB", label: "Quảng cáo phân bón" },
-  { value: "CG", label: "Quảng cáo cây giống" },
+  { value: "PB", label: "Phân bón" },
+  { value: "CG", label: "Cây giống" },
 ];
 
 const CASHFLOW_NOTE_CLASS_OPTIONS = [
@@ -211,7 +211,6 @@ const CASHFLOW_NOTE_CLASS_OPTIONS = [
   { value: "CG_CTDB", label: "CG CTDB" },
   { value: "DG", label: "DG - Dừa giống" },
   { value: "DST", label: "DST" },
-  { value: "UNKNOWN", label: "Chưa phân loại" },
 ];
 
 const formatMoney = (n) =>
@@ -305,10 +304,11 @@ const classifyDSCP1ByPrice = (price) => {
     };
   }
   return {
-    group: "unknown",
-    value: "unknown",
-    label: "Chưa phân loại",
-    priceKeySuffix: "unknown",
+    group: "DSCP1",
+    value: 1000000,
+    tier: "tier1000000",
+    label: "DSCP1 1,000,000",
+    priceKeySuffix: "dscp1_1000000",
   };
 };
 
@@ -333,10 +333,11 @@ const classifyDSCP2ByPrice = (price) => {
     };
   }
   return {
-    group: "unknown",
-    value: "unknown",
-    label: "Chưa phân loại",
-    priceKeySuffix: "unknown",
+    group: "DSCP2",
+    value: 1200000,
+    tier: "tier1200000",
+    label: "DSCP2 1,200,000",
+    priceKeySuffix: "dscp2_1200000",
   };
 };
 
@@ -599,7 +600,18 @@ const classifyCashflowNote = (note) => {
     return { ...classifyDSCP1ByPrice(parseProgramPrice(note)), raw: note };
   }
 
+  // "DSCP-1.200.000", "DSCP-1.500.000", ... → xác định DSCP1/DSCP2 theo giá trị
+  if (/^DSCP-\d/.test(text)) {
+    const price = parseProgramPrice(note);
+    if (price >= 1500000) return { ...classifyDSCP2ByPrice(price), raw: note };
+    return { ...classifyDSCP1ByPrice(price), raw: note };
+  }
+
+  // "DSCP - 1.500.000", "DSCP 1.200.000", ... → xác định DSCP1/DSCP2 theo giá trị
   if (text === "DSCP" || text.startsWith("DSCP ")) {
+    const price = parseProgramPrice(note);
+    if (price >= 1500000) return { ...classifyDSCP2ByPrice(price), raw: note };
+    if (price >= 1000000) return { ...classifyDSCP1ByPrice(price), raw: note };
     return { ...classifyDSCP1ByPrice(1200000), raw: note };
   }
 
@@ -657,19 +669,19 @@ const getCashflowNoteOptionValue = (cls) => {
   if (cls.group === "DSCP1") {
     if (cls.value === 1000000) return "DSCP1_1000000";
     if (cls.value === 1200000) return "DSCP1_1200000";
-    return "UNKNOWN";
+    return "";
   }
   if (cls.group === "DSCP2") {
     if (cls.value === 1200000) return "DSCP2_1200000";
     if (cls.value === 1500000) return "DSCP2_1500000";
-    return "UNKNOWN";
+    return "";
   }
   if (cls.group === "CG") {
     return cls.program === "CTDB" ? "CG_CTDB" : "CG_NORMAL";
   }
   if (cls.group === "DG") return "DG";
   if (cls.group === "DST") return "DST";
-  return "UNKNOWN";
+  return "";
 };
 
 const classifyAdCostType = (type) => {
@@ -682,6 +694,12 @@ const classifyAdCostType = (type) => {
 const classifyAdCostTypeFromNote = (note) => {
   const text = normalizeNotePlain(note);
   if (text === "CG") return "CG";
+  return "";
+};
+
+const classifyAdCostTypeFromCampaign = (campaignName) => {
+  const text = normalizeNotePlain(campaignName);
+  if (text.includes("CÂY GIỐNG") || text.includes("CAY GIONG")) return "CG";
   return "";
 };
 
@@ -1657,6 +1675,7 @@ export default function CommissionABCCalculator() {
       overrideAdCosts = adCostOverrides,
       reviewCashflowNotes = false,
       reviewReturnPrices = false,
+      reviewAdCosts = false,
       forceModal = false,
     } = options;
 
@@ -2003,6 +2022,21 @@ export default function CommissionABCCalculator() {
                 : itemCode === DSCP2_SKU_1500000
                   ? classifyDSCP2ByPrice(overridePrice)
                   : baseRule;
+            if (rule.group === "unknown") {
+              missingGiftsLocal.push({
+                employee,
+                itemCode,
+                itemName,
+                unit,
+                unitPrice,
+                qty,
+                invoiceId,
+                customerCode,
+                customerName,
+                note,
+              });
+              return;
+            }
             const giftValue = overridePrice * qty;
             if (giftValue > 0) {
               applyDelta(stats, rule, -giftValue);
@@ -2305,6 +2339,23 @@ export default function CommissionABCCalculator() {
               pricedCls.label = "PB Đại lý";
               pricedCls.priceKey = `${sku}__agency`;
             }
+            if (pricedCls.group === "unknown") {
+              missingReturnsLocal.push({
+                employee,
+                sku,
+                groupLabel:
+                  sku === DSCP1_SKU_1200000
+                    ? "DSCP1 (nhập giá để xác định mốc)"
+                    : sku === DSCP2_SKU_1500000
+                      ? "DSCP2 (nhập giá để xác định mốc)"
+                      : cls.label,
+                qty,
+                salePrice,
+                priceKey: overrideKey,
+                sourceLabel: def.label,
+              });
+              return;
+            }
             const lineValue = qty * effectiveBasePrice * 1.05;
             const deduction = lineValue * 0.1;
             applyDelta(stats, pricedCls, -deduction);
@@ -2367,6 +2418,23 @@ export default function CommissionABCCalculator() {
             pricedCls.customer = "agency";
             pricedCls.label = "PB Đại lý";
             pricedCls.priceKey = `${sku}__agency`;
+          }
+          if (pricedCls.group === "unknown") {
+            missingReturnsLocal.push({
+              employee,
+              sku,
+              groupLabel:
+                sku === DSCP1_SKU_1200000
+                  ? "DSCP1 (nhập giá để xác định mốc)"
+                  : sku === DSCP2_SKU_1500000
+                    ? "DSCP2 (nhập giá để xác định mốc)"
+                    : cls.label,
+              qty,
+              salePrice,
+              priceKey: overrideKey,
+              sourceLabel: def.label,
+            });
+            return;
           }
           const addValue = qty * priceValue;
           applyDelta(stats, pricedCls, addValue);
@@ -2432,10 +2500,12 @@ export default function CommissionABCCalculator() {
                 );
                 const adNote = normalizeText(getCell(row, headerMap, "Ghi chú"));
                 const adTypeFromNote = classifyAdCostTypeFromNote(adNote);
+                const adTypeFromCampaign = classifyAdCostTypeFromCampaign(campaignName);
                 const isTcpAd = normalizeNotePlain(adNote) === "TCP";
                 const adKey = `${employee}||${campaignName || "(trống)"}`;
-                const selectedAdType = adTypeFromNote || overrideAdCosts[adKey];
-                if (!selectedAdType) {
+                const selectedAdType = adTypeFromNote || adTypeFromCampaign || overrideAdCosts[adKey];
+                const shouldReviewAdCost = reviewAdCosts || !selectedAdType;
+                if (shouldReviewAdCost) {
                   const prev = pendingAdCostMap.get(adKey);
                   if (prev) {
                     prev.cost += cost;
@@ -2450,7 +2520,7 @@ export default function CommissionABCCalculator() {
                       cost,
                       revenue,
                       count: 1,
-                      selected: DEFAULT_AD_COST_TYPE,
+                      selected: selectedAdType || DEFAULT_AD_COST_TYPE,
                     });
                   }
                   return;
@@ -2751,19 +2821,43 @@ export default function CommissionABCCalculator() {
     const storedAdCostOverrides = readStoredObject(AD_COST_OVERRIDES_STORAGE_KEY);
     setCashflowNoteOverrides(storedCashflowNoteOverrides);
     setAdCostOverrides(storedAdCostOverrides);
+    if (invoiceGiftRows.length > 0) {
+      setMissingReturns([]);
+      setMissingGifts(invoiceGiftRows.map((item) => ({ ...item })));
+      setMissingPriceModalMode("invoice");
+      setMissingPriceModalOpen(true);
+      setErrors([]);
+      return;
+    }
     runClassification({
       overrideGiftPrices: buildOverrideGiftPriceMap(),
       overrideCashflowNotes: storedCashflowNoteOverrides,
       overrideAdCosts: storedAdCostOverrides,
       reviewCashflowNotes: true,
       reviewReturnPrices: true,
+      reviewAdCosts: true,
     });
   };
 
   const handleConfirmCashflowNotes = () => {
     const nextOverrides = { ...cashflowNoteOverrides };
+    const invalidItems = pendingCashflowNotes.filter(
+      (item) =>
+        !item.selected ||
+        !CASHFLOW_NOTE_CLASS_OPTIONS.some(
+          (option) => option.value === item.selected,
+        ),
+    );
+
+    if (invalidItems.length > 0) {
+      setErrors([
+        `Vui lòng chọn nhóm doanh số cho ${invalidItems.length} ghi chú sổ quỹ chưa phân loại.`,
+      ]);
+      return;
+    }
+
     pendingCashflowNotes.forEach((item) => {
-      nextOverrides[item.key] = item.selected || "UNKNOWN";
+      nextOverrides[item.key] = item.selected;
     });
     saveStoredObject(CASHFLOW_NOTE_OVERRIDES_STORAGE_KEY, nextOverrides);
     setCashflowNoteOverrides(nextOverrides);
@@ -2773,6 +2867,7 @@ export default function CommissionABCCalculator() {
       overrideCashflowNotes: nextOverrides,
       overrideAdCosts: adCostOverrides,
       reviewReturnPrices: true,
+      reviewAdCosts: true,
     });
   };
 
@@ -2802,6 +2897,7 @@ export default function CommissionABCCalculator() {
       overrideGiftPrices: buildOverrideGiftPriceMap(),
       overrideCashflowNotes: cashflowNoteOverrides,
       overrideAdCosts: adCostOverrides,
+      reviewAdCosts: true,
     });
   };
 
@@ -2870,11 +2966,13 @@ export default function CommissionABCCalculator() {
 
     overrideGiftPrices.forEach((item) => {
       const code = normalizeText(item.itemCode).toUpperCase();
-      if (!code || item.price == null || item.price === "") {
+      const priceText = normalizeText(item.price);
+      if (!code && !priceText) return;
+      if (!code || !priceText) {
         invalid = true;
         return;
       }
-      const val = parseNumber(item.price);
+      const val = parseNumber(priceText);
       if (!Number.isFinite(val) || val < 0) {
         invalid = true;
         return;
@@ -2895,8 +2993,18 @@ export default function CommissionABCCalculator() {
     setMissingPriceModalOpen(false);
     if (missingPriceModalMode === "invoice") {
       setErrors([]);
+      setInvoiceGiftRows(missingGifts.map((item) => ({ ...item })));
       setMissingGifts([]);
       setMissingPriceModalMode("calculation");
+      runClassification({
+        overrideReturnsPrices: returnsPriceMap,
+        overrideGiftPrices: giftPriceMap,
+        overrideCashflowNotes: cashflowNoteOverrides,
+        overrideAdCosts: adCostOverrides,
+        reviewCashflowNotes: true,
+        reviewReturnPrices: true,
+        reviewAdCosts: true,
+      });
       return;
     }
 
@@ -3449,6 +3557,9 @@ export default function CommissionABCCalculator() {
                           });
                         }}
                       >
+                        <option value="" disabled>
+                          Chọn nhóm...
+                        </option>
                         {CASHFLOW_NOTE_CLASS_OPTIONS.map((option) => (
                           <option key={option.value} value={option.value}>
                             {option.label}
@@ -3675,6 +3786,14 @@ export default function CommissionABCCalculator() {
         showClose={false}
       >
         <div className="space-y-4">
+          {errors.length > 0 && (
+            <div className="rounded-2xl border border-rose-200 bg-rose-50/90 p-3 text-sm text-rose-700">
+              {errors.map((e, idx) => (
+                <div key={`missing-price-err-${idx}`}>- {e}</div>
+              ))}
+            </div>
+          )}
+
           {missingGifts.length > 0 && (
             <div>
               <div className="text-sm font-semibold text-slate-800">
@@ -3862,7 +3981,7 @@ export default function CommissionABCCalculator() {
               onClick={handleConfirmMissingPrices}
               className="inline-flex items-center justify-center gap-2 rounded-2xl bg-amber-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-amber-700 active:scale-[0.98]"
             >
-              {missingPriceModalMode === "invoice" ? "Lưu giá" : "Tiếp tục tính"}
+              {missingPriceModalMode === "invoice" ? "Lưu giá và tiếp tục tính" : "Tiếp tục tính"}
             </button>
           </div>
         </div>

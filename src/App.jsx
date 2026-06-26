@@ -14,6 +14,7 @@ const Register = lazy(() => import("./components/auth/Register"));
 const ForgotPassword = lazy(() => import("./components/auth/ForgotPassword"));
 const ResetPassword = lazy(() => import("./components/auth/ResetPassword"));
 const QrLogin = lazy(() => import("./components/auth/QrLogin"));
+const AttendancePunchQr = lazy(() => import("./components/attendance/AttendancePunchQr"));
 
 const UserDashboard = lazy(() => import("./components/UserDashboard"));
 const WelcomePage = lazy(() => import("./components/home/WelcomePage"));
@@ -299,6 +300,7 @@ export default function App() {
         <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/qr-login" element={<QrLogin />} />
         <Route path="/app-login" element={<QrLogin />} />
+        <Route path="/cham-cong-qr" element={<AttendancePunchQr />} />
 
         <Route
           path="/login"

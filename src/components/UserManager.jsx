@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import UserForm from "./UserForm";
 import defaultAvatar from "../assets/default-avatar.png";
 import { useAuth } from "../context/AuthContext";
-import { Download, FileSpreadsheet, Link as LinkIcon, QrCode, RefreshCcw, Search, Upload, Users, Sparkles } from "lucide-react";
+import { Clock, Download, FileSpreadsheet, Link as LinkIcon, MapPin, QrCode, RefreshCcw, Search, Upload, Users, Sparkles, X } from "lucide-react";
 import * as XLSX from "xlsx";
 import QRCode from "qrcode";
 import JSZip from "jszip";
@@ -52,6 +52,10 @@ export default function UsersPage() {
   const [importingCodes, setImportingCodes] = useState(false);
   const [linkLoadingId, setLinkLoadingId] = useState(null);
   const [bulkQrLoading, setBulkQrLoading] = useState(false);
+  const [workLocations, setWorkLocations] = useState([]);
+  const [ccLinkModal, setCcLinkModal] = useState(null);
+  const [ccLinkLocationId, setCcLinkLocationId] = useState("");
+  const [ccLinkLoading, setCcLinkLoading] = useState(false);
   const [importSummary, setImportSummary] = useState(null);
   const [filters, setFilters] = useState({
     search: "",
@@ -89,6 +93,19 @@ export default function UsersPage() {
     }
   };
 
+  const fetchWorkLocations = async () => {
+    try {
+      const res = await fetch(`/api/work-locations?isActive=true`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      setWorkLocations(Array.isArray(data?.data) ? data.data : []);
+    } catch {
+      // silent — work locations are optional
+    }
+  };
+
   const fetchPages = async () => {
     try {
       setLoadingPages(true);
@@ -115,6 +132,7 @@ export default function UsersPage() {
   useEffect(() => {
     fetchUsers();
     fetchPages();
+    fetchWorkLocations();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -514,6 +532,45 @@ export default function UsersPage() {
       alert(err.message || "Không thể lấy link đăng nhập");
     } finally {
       setLinkLoadingId(null);
+    }
+  };
+
+  const handleOpenCcLinkModal = (user) => {
+    if (!workLocations.length) {
+      alert("Chưa có vị trí làm việc nào. Hãy tạo vị trí trước trong mục Vị trí làm việc.");
+      return;
+    }
+    setCcLinkLocationId(workLocations.length === 1 ? workLocations[0]._id : "");
+    setCcLinkModal(user);
+  };
+
+  const handleGetAttendanceLinkForUser = async () => {
+    if (!ccLinkModal) return;
+    if (!ccLinkLocationId) {
+      alert("Vui lòng chọn vị trí làm việc");
+      return;
+    }
+    try {
+      setCcLinkLoading(true);
+      const data = await createQrLoginToken(ccLinkModal);
+      if (!data.token) throw new Error("Server không trả về token");
+
+      const attendanceUrl = `${window.location.origin}/cham-cong-qr?token=${encodeURIComponent(data.token)}&loc=${encodeURIComponent(ccLinkLocationId)}`;
+
+      try {
+        await navigator.clipboard.writeText(attendanceUrl);
+        alert(`Đã copy link chấm công vào clipboard.\nGửi link này cho ${ccLinkModal.fullName} để chấm công bằng QR.\n\nLưu ý: Link đăng nhập cũ sẽ bị vô hiệu hóa.`);
+      } catch {
+        window.prompt("Copy link chấm công QR:", attendanceUrl);
+      }
+
+      setCcLinkModal(null);
+      setCcLinkLocationId("");
+    } catch (err) {
+      console.error("Lỗi lấy link chấm công:", err);
+      alert(err.message || "Không thể tạo link chấm công");
+    } finally {
+      setCcLinkLoading(false);
     }
   };
 
@@ -1022,14 +1079,14 @@ export default function UsersPage() {
                               {isLinkLoading ? "..." : "Link"}
                             </button>
 
-                            {/* <button
-                              disabled={isRevokeLoading}
-                              onClick={() => requireMasterPassword(u, () => handleRevokeQrToken(u))}
-                              className="px-2 py-1.5 text-xs rounded-xl border font-semibold transition disabled:opacity-60 border-orange-200 bg-orange-50 text-orange-700 hover:bg-orange-100"
-                              title="Thu hồi link đăng nhập"
+                            <button
+                              onClick={() => handleOpenCcLinkModal(u)}
+                              className="inline-flex items-center justify-center gap-1 px-2 py-1.5 text-xs rounded-xl border font-semibold transition border-teal-200 bg-teal-50 text-teal-700 hover:bg-teal-100"
+                              title="Tạo link chấm công QR cho user này"
                             >
-                              {isRevokeLoading ? "..." : "Thu hồi"}
-                            </button> */}
+                              <Clock size={12} />
+                              QR CC
+                            </button>
 
                             <button
                               onClick={() => requireMasterPassword(u, () => handleEdit(u))}
@@ -1041,7 +1098,7 @@ export default function UsersPage() {
                             <button
                               disabled={isProcessing}
                               onClick={() => requireMasterPassword(u, () => handleDelete(u))}
-                              className="px-2 py-1.5 text-xs rounded-xl border font-semibold transition disabled:opacity-60 border-red-200 bg-red-50 text-red-700 hover:bg-red-100"
+                              className="col-span-2 px-2 py-1.5 text-xs rounded-xl border font-semibold transition disabled:opacity-60 border-red-200 bg-red-50 text-red-700 hover:bg-red-100"
                             >
                               Xóa
                             </button>
@@ -1056,7 +1113,7 @@ export default function UsersPage() {
           )}
         </div>
 
-        {/* Modal */}
+        {/* Modal sửa user */}
         {showForm && (
           <UserForm
             user={editingUser}
@@ -1065,6 +1122,75 @@ export default function UsersPage() {
           />
         )}
       </div>
+
+      {/* Modal tạo link chấm công QR */}
+      {ccLinkModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+          <div className="w-full max-w-sm rounded-2xl bg-white border border-cyan-100 shadow-[0_24px_60px_rgba(8,145,178,0.18)] p-6">
+            {/* Header */}
+            <div className="flex items-start justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-teal-500 to-cyan-400 text-white shadow">
+                  <Clock size={17} />
+                </span>
+                <div>
+                  <h2 className="font-semibold text-slate-900 text-sm">Link chấm công QR</h2>
+                  <p className="text-xs text-slate-500 mt-0.5">{ccLinkModal.fullName}</p>
+                </div>
+              </div>
+              <button
+                onClick={() => { setCcLinkModal(null); setCcLinkLocationId(""); }}
+                className="p-1 rounded-lg text-slate-400 hover:bg-slate-100 transition"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            {workLocations.length === 0 ? (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 flex gap-2 mb-4">
+                <MapPin size={16} className="shrink-0 mt-0.5" />
+                <span>Chưa có vị trí làm việc. Hãy tạo vị trí trước trong mục Vị trí làm việc.</span>
+              </div>
+            ) : (
+              <>
+                <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">
+                  Vị trí làm việc
+                </label>
+                <select
+                  value={ccLinkLocationId}
+                  onChange={(e) => setCcLinkLocationId(e.target.value)}
+                  className="w-full rounded-xl border border-cyan-100 bg-white px-3 py-2.5 text-sm outline-none focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100 mb-4"
+                >
+                  {workLocations.length > 1 && <option value="">-- Chọn vị trí --</option>}
+                  {workLocations.map((loc) => (
+                    <option key={loc._id} value={loc._id}>{loc.name}</option>
+                  ))}
+                </select>
+
+                <p className="text-[11px] text-slate-400 mb-4">
+                  Khi quét QR này, nhân viên sẽ tự động check-in/check-out vị trí đã chọn.
+                  Link mới sẽ vô hiệu hóa link đăng nhập cũ.
+                </p>
+
+                <button
+                  onClick={handleGetAttendanceLinkForUser}
+                  disabled={!ccLinkLocationId || ccLinkLoading}
+                  className="w-full rounded-xl bg-gradient-to-r from-teal-500 to-cyan-500 px-4 py-2.5 text-sm font-bold text-white shadow-sm hover:from-teal-400 hover:to-cyan-400 disabled:opacity-60 transition mb-2"
+                >
+                  {ccLinkLoading ? "Đang tạo link..." : "Tạo link & Copy"}
+                </button>
+              </>
+            )}
+
+            <button
+              onClick={() => { setCcLinkModal(null); setCcLinkLocationId(""); }}
+              className="w-full rounded-xl border border-cyan-100 bg-white px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50 transition"
+            >
+              Đóng
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
