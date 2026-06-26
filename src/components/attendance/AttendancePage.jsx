@@ -2169,7 +2169,7 @@ export default function AttendancePage() {
                 onClick={() => setGpsAlertDismissed(true)}
                 className="flex-1 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-50"
               >
-                Đóng
+                Đóng & chấm lại
               </button>
               {canCheckIn && (
                 <button
@@ -2223,7 +2223,7 @@ export default function AttendancePage() {
                 onClick={() => setWrongLocationAlert(null)}
                 className="flex-1 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-50"
               >
-                Bỏ qua
+                Bỏ qua & chấm lại
               </button>
               <button
                 onClick={handleWrongLocationNotifyAdmin}

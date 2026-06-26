@@ -306,6 +306,15 @@ const TRANG_THAI_OPTIONS = [
   { value: "chet", label: "Đã chết" },
   { value: "ngung_theo_doi", label: "Ngừng theo dõi" },
 ];
+const TRANG_THAI_ONG_NGHIEM_OPTIONS = [
+  { value: "vo_mau", label: "Vô mẫu" },
+  { value: "nay_mam", label: "Nãy mầm" },
+  { value: "nhiem", label: "Nhiễm" },
+  { value: "xu_ly_nhiem", label: "Xử lý nhiễm" },
+  { value: "huy_mau", label: "Hủy mẫu" },
+  { value: "thuan_duong_truoc_ra_vuon_uom", label: "Thuần dưỡng trước ra vườn ươm" },
+  { value: "ra_cay", label: "Ra cây" },
+];
 const GIONG_OPTIONS = [
   { value: "dua_sap", label: "Dừa sáp" },
   { value: "dua_thuong", label: "Dừa thường" },
@@ -329,6 +338,13 @@ const TRANG_THAI_CLS = {
   da_thu_hoach: "bg-blue-100 text-blue-700",
   chet: "bg-red-100 text-red-700",
   ngung_theo_doi: "bg-gray-100 text-gray-400",
+  vo_mau: "bg-violet-100 text-violet-700",
+  nay_mam: "bg-lime-100 text-lime-700",
+  nhiem: "bg-red-100 text-red-700",
+  xu_ly_nhiem: "bg-orange-100 text-orange-700",
+  huy_mau: "bg-gray-100 text-gray-500",
+  thuan_duong_truoc_ra_vuon_uom: "bg-teal-100 text-teal-700",
+  ra_cay: "bg-emerald-100 text-emerald-700",
 };
 const TINH_TRANG_CLS = {
   I: "bg-emerald-100 text-emerald-700",
@@ -1083,7 +1099,14 @@ function TreeForm({ initial, onSave, onClose, saving }) {
         </div>
         <div>
           <Label>Loại</Label>
-          <Select value={form.loai} onChange={(e) => set("loai", e.target.value)}>
+          <Select value={form.loai} onChange={(e) => {
+            const newLoai = e.target.value;
+            setForm((f) => ({
+              ...f,
+              loai: newLoai,
+              trangThai: newLoai === "ong_nghiem" ? "vo_mau" : "dang_theo_doi",
+            }));
+          }}>
             <option value="cay_giong">Cây giống</option>
             <option value="ong_nghiem">Trong ống nghiệm</option>
           </Select>
@@ -1091,7 +1114,9 @@ function TreeForm({ initial, onSave, onClose, saving }) {
         <div>
           <Label>Trạng thái</Label>
           <Select value={form.trangThai} onChange={(e) => set("trangThai", e.target.value)}>
-            {TRANG_THAI_OPTIONS.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+            {(isON ? TRANG_THAI_ONG_NGHIEM_OPTIONS : TRANG_THAI_OPTIONS).map((t) => (
+              <option key={t.value} value={t.value}>{t.label}</option>
+            ))}
           </Select>
         </div>
       </div>
@@ -1305,7 +1330,14 @@ function BatchAddModal({ existingTrees, onClose, onDone }) {
         <div className="grid grid-cols-2 gap-3">
           <div>
             <Label>Loại</Label>
-            <Select value={template.loai} onChange={(e) => set("loai", e.target.value)}>
+            <Select value={template.loai} onChange={(e) => {
+              const newLoai = e.target.value;
+              setTemplate((p) => ({
+                ...p,
+                loai: newLoai,
+                trangThai: newLoai === "ong_nghiem" ? "vo_mau" : "dang_theo_doi",
+              }));
+            }}>
               <option value="cay_giong">Cây giống</option>
               <option value="ong_nghiem">Trong ống nghiệm</option>
             </Select>
@@ -1313,7 +1345,9 @@ function BatchAddModal({ existingTrees, onClose, onDone }) {
           <div>
             <Label>Trạng thái</Label>
             <Select value={template.trangThai} onChange={(e) => set("trangThai", e.target.value)}>
-              {TRANG_THAI_OPTIONS.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+              {(template.loai === "ong_nghiem" ? TRANG_THAI_ONG_NGHIEM_OPTIONS : TRANG_THAI_OPTIONS).map((t) => (
+                <option key={t.value} value={t.value}>{t.label}</option>
+              ))}
             </Select>
           </div>
           <div>
@@ -1751,7 +1785,7 @@ function RecordForm({ maCay, loai = "cay_giong", initial, onSave, onClose, savin
     thangBatDau: 1, thangKetThuc: 3, nam: currentYear,
     kyTheoDoiNhan: "", tinhTrangCay: "",
     soTau: "", soHoa: "",
-    nguoiGhiNhan: "", ghiChu: "",
+    ghiChu: "",
     sanLuongDuKien: [], sanLuongThucTe: [],
     yeuCauDeXuat: "",
     lichPhunThuoc: [], lichBonPhan: [],
@@ -1951,16 +1985,10 @@ function RecordForm({ maCay, loai = "cay_giong", initial, onSave, onClose, savin
         <ChamSocRows rows={form.lichBonPhan} bg="bg-amber-50" onUpdate={(i, f, v) => updateChamSoc("lichBonPhan", i, f, v)} onRemove={(i) => removeChamSoc("lichBonPhan", i)} />
       </div>
 
-      {/* ── Người ghi nhận + ghi chú ── */}
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <Label>Người ghi nhận</Label>
-          <Input value={form.nguoiGhiNhan} onChange={(e) => set("nguoiGhiNhan", e.target.value)} placeholder="Họ tên..." />
-        </div>
-        <div>
-          <Label>Ghi chú kỳ</Label>
-          <Input value={form.ghiChu} onChange={(e) => set("ghiChu", e.target.value)} placeholder="Ghi chú..." />
-        </div>
+      {/* ── Ghi chú ── */}
+      <div>
+        <Label>Ghi chú kỳ</Label>
+        <Input value={form.ghiChu} onChange={(e) => set("ghiChu", e.target.value)} placeholder="Ghi chú..." />
       </div>
 
       <div className="flex gap-3 pt-2 justify-end">
@@ -1979,7 +2007,7 @@ function RecordForm({ maCay, loai = "cay_giong", initial, onSave, onClose, savin
 
 // ─── Tạo bản ghi hàng loạt ───────────────────────────────────────────────────
 function BulkCreateRecordModal({ macays, trees, onClose, onDone }) {
-  const { api } = useAuth();
+  const { api, user } = useAuth();
   const currentYear = new Date().getFullYear();
 
   const selectedTreeObjs = trees.filter((t) => macays.includes(t.maCay));
@@ -2005,7 +2033,6 @@ function BulkCreateRecordModal({ macays, trees, onClose, onDone }) {
   const [yeuCauDeXuat, setYeuCauDeXuat] = useState("");
 
   // Dùng chung
-  const [nguoiGhiNhan, setNguoiGhiNhan] = useState("");
   const [ghiChu, setGhiChu] = useState("");
   const [lichPhunThuoc, setLichPhunThuoc] = useState([]);
   const [lichBonPhan, setLichBonPhan] = useState([]);
@@ -2043,7 +2070,7 @@ function BulkCreateRecordModal({ macays, trees, onClose, onDone }) {
         nam: Number(nam),
         kyTheoDoiNhan,
         tinhTrangCay: isON ? tinhTrangON : tinhTrangCG,
-        nguoiGhiNhan,
+        nguoiGhiNhan: user?.fullName || user?.name || "",
         ghiChu,
         lichPhunThuoc,
         lichBonPhan,
@@ -2277,16 +2304,10 @@ function BulkCreateRecordModal({ macays, trees, onClose, onDone }) {
         modeName="bcrMode2" hideMode
       />
 
-      {/* Người ghi nhận + ghi chú */}
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <Label>Người ghi nhận</Label>
-          <Input value={nguoiGhiNhan} onChange={(e) => setNguoiGhiNhan(e.target.value)} placeholder="Họ tên..." />
-        </div>
-        <div>
-          <Label>Ghi chú kỳ</Label>
-          <Input value={ghiChu} onChange={(e) => setGhiChu(e.target.value)} placeholder="Ghi chú chung..." />
-        </div>
+      {/* Ghi chú */}
+      <div>
+        <Label>Ghi chú kỳ</Label>
+        <Input value={ghiChu} onChange={(e) => setGhiChu(e.target.value)} placeholder="Ghi chú chung..." />
       </div>
 
       {creating && (
@@ -2316,7 +2337,7 @@ function BulkCreateRecordModal({ macays, trees, onClose, onDone }) {
 
 // ─── Main component ───────────────────────────────────────────────────────────
 export default function DuaSapManager() {
-  const { api } = useAuth();
+  const { api, user } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   // Lưu maCay cần mở sửa ngay khi vào trang (từ QR / detail page)
@@ -2603,10 +2624,11 @@ export default function DuaSapManager() {
   async function saveRecord(form) {
     setSavingRecord(true);
     try {
+      const payload = { ...form, nguoiGhiNhan: user?.fullName || user?.name || "" };
       if (editingRecord?._id) {
-        await api.put(`/dua-sap-record/${editingRecord._id}`, form);
+        await api.put(`/dua-sap-record/${editingRecord._id}`, payload);
       } else {
-        await api.post("/dua-sap-record", form);
+        await api.post("/dua-sap-record", payload);
       }
       setShowRecordForm(false);
       setEditingRecord(null);
@@ -2939,7 +2961,7 @@ export default function DuaSapManager() {
                     </td>
                     <td className="px-4 py-3">
                       <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${TRANG_THAI_CLS[tree.trangThai] || "bg-gray-100 text-gray-500"}`}>
-                        {TRANG_THAI_OPTIONS.find((t) => t.value === tree.trangThai)?.label || tree.trangThai}
+                        {(TRANG_THAI_OPTIONS.find((t) => t.value === tree.trangThai) || TRANG_THAI_ONG_NGHIEM_OPTIONS.find((t) => t.value === tree.trangThai))?.label || tree.trangThai}
                       </span>
                     </td>
                     <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
