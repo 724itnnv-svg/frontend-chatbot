@@ -1471,13 +1471,23 @@ const BULK_UPDATE_FIELDS = [
   { key: "ghiChu", label: "Ghi chú", type: "textarea", placeholder: "Ghi chú chung..." },
 ];
 
-function BulkUpdateModal({ macays, onClose, onDone }) {
+function BulkUpdateModal({ macays, trees, onClose, onDone }) {
   const { api } = useAuth();
+
+  // Kiểm tra loại trộn lẫn
+  const selectedObjs = (trees || []).filter((t) => macays.includes(t.maCay));
+  const loaiSet = new Set(selectedObjs.map((t) => t.loai || "cay_giong"));
+  const hasMixedTypes = loaiSet.size > 1;
+
   const [enabled, setEnabled] = useState(new Set());
-  const [values, setValues] = useState({
-    viTri: "", khuVuc: "", giong: "", tenGiong: "",
-    loai: "cay_giong", trangThai: "dang_theo_doi",
-    ngayTrong: "", ghiChu: "",
+  const [values, setValues] = useState(() => {
+    const loai = selectedObjs[0]?.loai || "cay_giong";
+    return {
+      viTri: "", khuVuc: "", giong: "", tenGiong: "",
+      loai,
+      trangThai: loai === "ong_nghiem" ? "vo_mau" : "dang_theo_doi",
+      ngayTrong: "", ghiChu: "",
+    };
   });
   const [updating, setUpdating] = useState(false);
   const [result, setResult] = useState(null);
@@ -1528,6 +1538,23 @@ function BulkUpdateModal({ macays, onClose, onDone }) {
     );
   }
 
+  if (hasMixedTypes) {
+    return (
+      <div className="space-y-4">
+        <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-700">
+          <AlertCircle size={15} className="shrink-0 mt-0.5" />
+          <span>
+            Không thể cập nhật hàng loạt khi chọn lẫn <strong>cây giống</strong> và <strong>ống nghiệm</strong>.
+            Vui lòng chỉ chọn <strong>một loại duy nhất</strong> rồi thử lại.
+          </span>
+        </div>
+        <div className="flex justify-end">
+          <button onClick={onClose} className="px-4 py-2 text-sm bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl transition">Đóng</button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4">
       <p className="text-xs text-gray-500">
@@ -1546,9 +1573,19 @@ function BulkUpdateModal({ macays, onClose, onDone }) {
             <label htmlFor={`bulk-${f.key}`} className="w-32 text-xs font-medium text-gray-600 pt-1 cursor-pointer shrink-0">{f.label}</label>
             <div className="flex-1">
               {f.type === "select" ? (
-                <Select value={values[f.key]} onChange={(e) => setValue(f.key, e.target.value)}
+                <Select
+                  value={values[f.key]}
+                  onChange={(e) => {
+                    setValue(f.key, e.target.value);
+                    if (f.key === "loai") {
+                      setValue("trangThai", e.target.value === "ong_nghiem" ? "vo_mau" : "dang_theo_doi");
+                    }
+                  }}
                   disabled={!enabled.has(f.key)} className={!enabled.has(f.key) ? "opacity-40" : ""}>
-                  {f.options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                  {(f.key === "trangThai"
+                    ? (values.loai === "ong_nghiem" ? TRANG_THAI_ONG_NGHIEM_OPTIONS : TRANG_THAI_OPTIONS)
+                    : f.options
+                  ).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                 </Select>
               ) : f.type === "textarea" ? (
                 <Textarea value={values[f.key]} onChange={(e) => setValue(f.key, e.target.value)}
@@ -3185,6 +3222,7 @@ export default function DuaSapManager() {
         >
           <BulkUpdateModal
             macays={[...selectedTrees]}
+            trees={trees}
             onClose={() => setShowBulkUpdate(false)}
             onDone={() => { fetchTrees(currentPage); }}
           />

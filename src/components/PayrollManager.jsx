@@ -1306,6 +1306,7 @@ export default function PayrollManager() {
 
   const [dragColKey, setDragColKey] = useState(null);
   const [dragOverColKey, setDragOverColKey] = useState(null);
+  const [pendingScrollId, setPendingScrollId] = useState(null);
 
   const visibleColumns = useMemo(() => {
     const visible = PAYROLL_COLUMNS.filter((column) => column.frozen || !hiddenColumns.has(column.key));
@@ -1376,6 +1377,15 @@ export default function PayrollManager() {
       });
     });
   }, [filtered, sortConfig]);
+
+  useEffect(() => {
+    if (!pendingScrollId) return;
+    const el = document.querySelector(`tr[data-clientid="${pendingScrollId}"]`);
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      setPendingScrollId(null);
+    }
+  }, [sortedRows, pendingScrollId]);
 
   const selectedRows = useMemo(
     () => rows.filter((row) => selectedRowIds.has(row.__clientId)),
@@ -1617,6 +1627,7 @@ export default function PayrollManager() {
     );
     setRows((current) => [newRow, ...current]);
     setDirtyIds((current) => new Set(current).add(newRow.__clientId));
+    setPendingScrollId(newRow.__clientId);
   };
 
   const saveRows = async (targetRows) => {
@@ -2334,7 +2345,7 @@ export default function PayrollManager() {
                 const isDirty = dirtyIds.has(row.__clientId);
                 const isSaving = savingIds.has(row.__clientId);
                 return (
-                  <tr key={row.__clientId} className={isDirty ? "bg-amber-50/60" : "odd:bg-white even:bg-slate-50/50"}>
+                  <tr key={row.__clientId} data-clientid={row.__clientId} className={isDirty ? "bg-amber-50/60" : "odd:bg-white even:bg-slate-50/50"}>
                     <td className="sticky left-0 z-10 border-b border-r bg-inherit px-2 py-1 text-center text-xs text-slate-500">
                       <div className="flex items-center justify-center gap-1">
                         <input
@@ -2518,10 +2529,10 @@ export default function PayrollManager() {
               <Download className="h-4 w-4" />
               Tải mẫu nhập liệu tháng này
             </button>
-            <button onClick={downloadPayrollTemplate} className="inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-50">
+            {/* <button onClick={downloadPayrollTemplate} className="inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-50">
               <FileSpreadsheet className="h-4 w-4" />
               Tải file mẫu đầy đủ cột
-            </button>
+            </button> */}
             <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl bg-sky-600 px-3 py-2 text-sm font-semibold text-white hover:bg-sky-700">
               <UploadCloud className="h-4 w-4" />
               Chọn file Excel
