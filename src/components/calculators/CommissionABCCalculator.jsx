@@ -1006,6 +1006,10 @@ export default function CommissionABCCalculator() {
   const [adCostModalOpen, setAdCostModalOpen] = useState(false);
   const [pendingAdCosts, setPendingAdCosts] = useState([]);
   const [adCostOverrides, setAdCostOverrides] = useState({});
+  const [cgShipFeeModalOpen, setCgShipFeeModalOpen] = useState(false);
+  const [pendingCgShipFees, setPendingCgShipFees] = useState([]);
+  const [cgShipFeeOverrides, setCgShipFeeOverrides] = useState(null);
+  const [cgShipFeeManuals, setCgShipFeeManuals] = useState(null);
   const [detailsByEmployee, setDetailsByEmployee] = useState({});
   const [logRows, setLogRows] = useState([]);
   const [cashflowEmployees, setCashflowEmployees] = useState([]);
@@ -1650,6 +1654,10 @@ export default function CommissionABCCalculator() {
     setGroupApplied(false);
     setInvoiceGiftRows([]);
     setOverrideGiftPrices(DEFAULT_SPECIAL_GIFT_PRICES);
+    setCgShipFeeModalOpen(false);
+    setPendingCgShipFees([]);
+    setCgShipFeeOverrides(null);
+    setCgShipFeeManuals(null);
     setLogRows([]);
     setInputKey((v) => v + 1);
   };
@@ -1667,12 +1675,17 @@ export default function CommissionABCCalculator() {
     setCashflowNoteModalOpen(false);
     setPendingAdCosts([]);
     setAdCostModalOpen(false);
+    setPendingCgShipFees([]);
+    setCgShipFeeModalOpen(false);
 
     const {
       overrideReturnsPrices = {},
       overrideGiftPrices = {},
       overrideCashflowNotes = cashflowNoteOverrides,
       overrideAdCosts = adCostOverrides,
+      overrideCgShipFees = null,
+      manualCgShipFees = null,
+      reviewCgShipFees = false,
       reviewCashflowNotes = false,
       reviewReturnPrices = false,
       reviewAdCosts = false,
@@ -1689,6 +1702,8 @@ export default function CommissionABCCalculator() {
     const pendingCashflowNoteMap = new Map();
     const pendingReturnPriceMap = new Map();
     const pendingAdCostMap = new Map();
+    const pendingCgShipFeeMap = new Map();
+    const cgShipFeeKeyCounter = new Map();
 
     const selectedSet = new Set(selectedEmployees);
     const shouldProcess = (name) =>
@@ -2152,6 +2167,54 @@ export default function CommissionABCCalculator() {
             partner.includes("XE CÔNG TY") ||
             partner.includes("XE CONG TY")
           ) {
+            if (unit === "CÂY" || unit === "CAY") {
+              const baseKey = `${employee}||${invoiceId}||${itemCode}`;
+              const cnt = (cgShipFeeKeyCounter.get(baseKey) || 0) + 1;
+              cgShipFeeKeyCounter.set(baseKey, cnt);
+              const stableKey = cnt === 1 ? baseKey : `${baseKey}||${cnt}`;
+              if (reviewCgShipFees) {
+                const _prevFee = (overrideCgShipFees !== null && overrideCgShipFees[stableKey] != null)
+                  ? overrideCgShipFees[stableKey] : null;
+                pendingCgShipFeeMap.set(stableKey, {
+                  key: stableKey,
+                  employee,
+                  invoiceId,
+                  itemCode,
+                  itemName,
+                  unit,
+                  qty,
+                  partnerRaw,
+                  isCTDB,
+                  feeTotal: (_prevFee != null && _prevFee > 0) ? String(_prevFee) : "",
+                  skip: _prevFee === 0 && _prevFee !== null,
+                  isManual: false,
+                });
+              } else if (overrideCgShipFees !== null) {
+                const fee = parseNumber(overrideCgShipFees[stableKey] ?? 0);
+                if (fee > 0) {
+                  if (isCTDB) stats.CG.CTDB -= fee;
+                  else stats.CG.normal -= fee;
+                  const log = getGiftLog(employee);
+                  if (isCTDB) log.shipCgCTDB += fee;
+                  else log.shipCgNormal += fee;
+                  details.shipFees.push([
+                    invoiceId,
+                    partnerRaw,
+                    unit,
+                    qty,
+                    1,
+                    qty,
+                    qty > 0 ? Math.round(fee / qty) : 0,
+                    fee,
+                    "CG",
+                  ]);
+                  const summary = getSummary(employee);
+                  summary.deduct.shipFee += fee;
+                }
+              }
+              return;
+            }
+
             const ratio = UNIT_CONVERSION[unit];
             if (!ratio) {
               return;
@@ -2198,6 +2261,41 @@ export default function CommissionABCCalculator() {
             }
           }
         });
+      }
+
+      if (reviewCgShipFees && (pendingCgShipFeeMap.size > 0 || (manualCgShipFees && manualCgShipFees.length > 0) || cgShipFeeOverrides !== null)) {
+        const autoItems = Array.from(pendingCgShipFeeMap.values());
+        const manualItems = (cgShipFeeManuals || []).map((m, i) => ({
+          key: `manual_reopen_${i}`,
+          employee: m.employee,
+          invoiceId: "",
+          itemCode: "",
+          qty: 0,
+          feeTotal: String(m.fee),
+          skip: false,
+          isManual: true,
+        }));
+        setPendingCgShipFees([...autoItems, ...manualItems]);
+        setCgShipFeeModalOpen(true);
+        setWarnings(newWarnings);
+        setProcessing(false);
+        return;
+      }
+
+      if (manualCgShipFees && manualCgShipFees.length > 0) {
+        for (const manualItem of manualCgShipFees) {
+          const { employee: manEmp, fee: manFee } = manualItem;
+          if (!shouldProcess(manEmp)) continue;
+          if (!(manFee > 0)) continue;
+          const stats = getStats(manEmp);
+          stats.CG.normal -= manFee;
+          const log = getGiftLog(manEmp);
+          log.shipCgNormal += manFee;
+          const details = getDetails(manEmp);
+          details.shipFees.push(["—", "Xe Công ty", "CÂY", "—", 1, "—", "—", manFee, "CG"]);
+          const summary = getSummary(manEmp);
+          summary.deduct.shipFee += manFee;
+        }
       }
 
       const returnLog = new Map();
@@ -2833,6 +2931,7 @@ export default function CommissionABCCalculator() {
       overrideGiftPrices: buildOverrideGiftPriceMap(),
       overrideCashflowNotes: storedCashflowNoteOverrides,
       overrideAdCosts: storedAdCostOverrides,
+      reviewCgShipFees: true,
       reviewCashflowNotes: true,
       reviewReturnPrices: true,
       reviewAdCosts: true,
@@ -2866,6 +2965,9 @@ export default function CommissionABCCalculator() {
       overrideGiftPrices: buildOverrideGiftPriceMap(),
       overrideCashflowNotes: nextOverrides,
       overrideAdCosts: adCostOverrides,
+      overrideCgShipFees: cgShipFeeOverrides,
+      manualCgShipFees: cgShipFeeManuals,
+      reviewCgShipFees: true,
       reviewReturnPrices: true,
       reviewAdCosts: true,
     });
@@ -2897,6 +2999,8 @@ export default function CommissionABCCalculator() {
       overrideGiftPrices: buildOverrideGiftPriceMap(),
       overrideCashflowNotes: cashflowNoteOverrides,
       overrideAdCosts: adCostOverrides,
+      overrideCgShipFees: cgShipFeeOverrides,
+      manualCgShipFees: cgShipFeeManuals,
       reviewAdCosts: true,
     });
   };
@@ -2913,6 +3017,35 @@ export default function CommissionABCCalculator() {
       overrideGiftPrices: buildOverrideGiftPriceMap(),
       overrideCashflowNotes: cashflowNoteOverrides,
       overrideAdCosts: nextOverrides,
+      overrideCgShipFees: cgShipFeeOverrides,
+      manualCgShipFees: cgShipFeeManuals,
+    });
+  };
+
+  const handleConfirmCgShipFees = () => {
+    const overrides = {};
+    const manuals = [];
+    for (const item of pendingCgShipFees) {
+      if (item.isManual) {
+        if (!item.skip) {
+          const fee = parseNumber(item.feeTotal);
+          if (fee > 0 && item.employee) manuals.push({ employee: item.employee, fee });
+        }
+      } else {
+        overrides[item.key] = item.skip ? 0 : parseNumber(item.feeTotal);
+      }
+    }
+    setCgShipFeeOverrides(overrides);
+    setCgShipFeeManuals(manuals);
+    setCgShipFeeModalOpen(false);
+    runClassification({
+      overrideGiftPrices: buildOverrideGiftPriceMap(),
+      overrideCashflowNotes: cashflowNoteOverrides,
+      overrideAdCosts: adCostOverrides,
+      overrideCgShipFees: overrides,
+      manualCgShipFees: manuals,
+      reviewReturnPrices: true,
+      reviewAdCosts: true,
     });
   };
 
@@ -3001,6 +3134,9 @@ export default function CommissionABCCalculator() {
         overrideGiftPrices: giftPriceMap,
         overrideCashflowNotes: cashflowNoteOverrides,
         overrideAdCosts: adCostOverrides,
+        overrideCgShipFees: cgShipFeeOverrides,
+        manualCgShipFees: cgShipFeeManuals,
+        reviewCgShipFees: true,
         reviewCashflowNotes: true,
         reviewReturnPrices: true,
         reviewAdCosts: true,
@@ -3013,6 +3149,9 @@ export default function CommissionABCCalculator() {
       overrideGiftPrices: giftPriceMap,
       overrideCashflowNotes: cashflowNoteOverrides,
       overrideAdCosts: adCostOverrides,
+      overrideCgShipFees: cgShipFeeOverrides,
+      manualCgShipFees: cgShipFeeManuals,
+      reviewCgShipFees: true,
     });
   };
 
@@ -3763,6 +3902,167 @@ export default function CommissionABCCalculator() {
             >
               Tiếp tục tính
             </button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        open={cgShipFeeModalOpen}
+        onClose={() => setCgShipFeeModalOpen(false)}
+        title="Phí xe công ty — Cây giống"
+        subtitle="Nhập tổng phí xe cho từng dòng. Để trống hoặc bỏ qua nếu không tính. Có thể thêm dòng thủ công."
+        showClose={false}
+      >
+        <div className="space-y-4">
+          <div className="overflow-auto rounded-2xl border bg-white/80">
+            <table className="w-full min-w-[760px] text-xs">
+              <thead className="bg-slate-50 text-slate-600">
+                <tr>
+                  <th className="px-3 py-2 text-left">Nhân viên</th>
+                  <th className="px-3 py-2 text-left">Mã HĐ / Ghi chú</th>
+                  <th className="px-3 py-2 text-left">Mã hàng</th>
+                  <th className="px-3 py-2 text-right">SL (cây)</th>
+                  <th className="px-3 py-2 text-right">Tổng phí</th>
+                  <th className="px-3 py-2 text-center">Bỏ qua</th>
+                  <th className="px-3 py-2 text-center"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {pendingCgShipFees.map((item, idx) => (
+                  <tr key={item.key} className={`border-t ${item.skip ? "opacity-40" : ""}`}>
+                    <td className="px-3 py-2">
+                      {item.isManual ? (
+                        <select
+                          className="w-36 rounded border bg-white px-2 py-1 text-sm"
+                          value={item.employee}
+                          onChange={(e) => {
+                            const value = e.target.value;
+                            setPendingCgShipFees((prev) => {
+                              const next = [...prev];
+                              next[idx] = { ...next[idx], employee: value };
+                              return next;
+                            });
+                          }}
+                        >
+                          <option value="">— Chọn NV —</option>
+                          {cashflowEmployees.map((name) => (
+                            <option key={name} value={name}>{name}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <span>{item.employee}</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 font-medium text-slate-800">
+                      {item.isManual ? (
+                        <input
+                          type="text"
+                          className="w-32 rounded border bg-white px-2 py-1 text-sm"
+                          value={item.invoiceId}
+                          placeholder="Ghi chú..."
+                          onChange={(e) => {
+                            const value = e.target.value;
+                            setPendingCgShipFees((prev) => {
+                              const next = [...prev];
+                              next[idx] = { ...next[idx], invoiceId: value };
+                              return next;
+                            });
+                          }}
+                        />
+                      ) : (
+                        item.invoiceId || "—"
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-slate-600">{item.itemCode || "—"}</td>
+                    <td className="px-3 py-2 text-right">{item.qty || "—"}</td>
+                    <td className="px-3 py-2">
+                      <input
+                        type="text"
+                        disabled={item.skip}
+                        className="w-32 rounded border bg-white px-2 py-1 text-right text-sm disabled:bg-slate-50"
+                        value={item.feeTotal}
+                        placeholder="0"
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          setPendingCgShipFees((prev) => {
+                            const next = [...prev];
+                            next[idx] = { ...next[idx], feeTotal: value };
+                            return next;
+                          });
+                        }}
+                      />
+                    </td>
+                    <td className="px-3 py-2 text-center">
+                      <input
+                        type="checkbox"
+                        checked={item.skip}
+                        onChange={(e) => {
+                          const checked = e.target.checked;
+                          setPendingCgShipFees((prev) => {
+                            const next = [...prev];
+                            next[idx] = { ...next[idx], skip: checked };
+                            return next;
+                          });
+                        }}
+                      />
+                    </td>
+                    <td className="px-3 py-2 text-center">
+                      {item.isManual && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPendingCgShipFees((prev) => prev.filter((_, i) => i !== idx));
+                          }}
+                          className="text-slate-400 hover:text-red-500"
+                          title="Xóa dòng"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="flex items-center justify-between gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setPendingCgShipFees((prev) => [
+                  ...prev,
+                  {
+                    key: `manual_${Date.now()}`,
+                    employee: cashflowEmployees[0] || "",
+                    invoiceId: "",
+                    itemCode: "",
+                    qty: 0,
+                    feeTotal: "",
+                    skip: false,
+                    isManual: true,
+                  },
+                ]);
+              }}
+              className="inline-flex items-center gap-1.5 rounded-2xl border bg-white/70 px-3 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-white active:scale-[0.98]"
+            >
+              + Thêm dòng
+            </button>
+            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center">
+              <button
+                type="button"
+                onClick={() => setCgShipFeeModalOpen(false)}
+                className="inline-flex items-center justify-center rounded-2xl border bg-white/70 px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-white active:scale-[0.98]"
+              >
+                Hủy
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmCgShipFees}
+                className="inline-flex items-center justify-center gap-2 rounded-2xl bg-amber-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-amber-700 active:scale-[0.98]"
+              >
+                Tiếp tục tính
+              </button>
+            </div>
           </div>
         </div>
       </Modal>
