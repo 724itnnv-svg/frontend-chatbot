@@ -47,7 +47,7 @@ const SHIFT_WINDOWS = {
 };
 const EMPTY_SHIFTS = [];
 const GPS_OPTIONS = { enableHighAccuracy: true, timeout: 10000 };
-const SHOW_ATTENDANCE_TASKBAR_RUNNER = false;
+const SHOW_ATTENDANCE_TASKBAR_RUNNER_DEFAULT = false;
 const RUNNER_GIF_SRC = "/attendance-runner.gif";
 
 const dayWorkIncomeKeys = [
@@ -879,6 +879,9 @@ export default function AttendancePage() {
   const [payroll, setPayroll] = useState(null);
   const [payrollLoading, setPayrollLoading] = useState(false);
   const [payrollMessage, setPayrollMessage] = useState("");
+  const [showTaskbarRunner, setShowTaskbarRunner] = useState(() => {
+    try { return localStorage.getItem("attendance_show_taskbar_runner") === "true"; } catch { return SHOW_ATTENDANCE_TASKBAR_RUNNER_DEFAULT; }
+  });
 
   const [lookupCode, setLookupCode] = useState(() =>
     String(user?.code || user?.employeeCode || user?.maNhanVien || "").trim().toUpperCase()
@@ -1453,20 +1456,75 @@ export default function AttendancePage() {
 
   return (
     <>
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-sky-50/30 p-3 sm:p-4 md:p-6">
+      <style>{`
+        @keyframes attendance-runner-aurora {
+          0%   { background-position: 0% 50%; }
+          25%  { background-position: 50% 0%; }
+          50%  { background-position: 100% 50%; }
+          75%  { background-position: 50% 100%; }
+          100% { background-position: 0% 50%; }
+        }
+        @keyframes attendance-runner-shimmer {
+          0%   { opacity: 0; transform: translateX(-100%) skewX(-15deg); }
+          40%  { opacity: 1; }
+          100% { opacity: 0; transform: translateX(200%) skewX(-15deg); }
+        }
+        .attendance-runner-bg {
+          background: linear-gradient(135deg,
+            #bae6fd 0%, #a5f3fc 15%, #d9f99d 30%,
+            #bbf7d0 45%, #c7d2fe 60%, #fbcfe8 75%,
+            #fde68a 90%, #bae6fd 100%);
+          background-size: 400% 400%;
+          animation: attendance-runner-aurora 8s ease infinite;
+        }
+        .attendance-runner-bg::before {
+          content: '';
+          position: fixed;
+          inset: 0;
+          pointer-events: none;
+          background: linear-gradient(105deg, transparent 40%, rgba(255,255,255,0.55) 50%, transparent 60%);
+          animation: attendance-runner-shimmer 4s ease-in-out infinite;
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .attendance-runner-bg { animation: none !important; background: #f0f9ff; }
+          .attendance-runner-bg::before { animation: none !important; }
+        }
+      `}</style>
+      <div className={`relative min-h-screen p-3 sm:p-4 md:p-6 transition-all duration-700 ${showTaskbarRunner ? "attendance-runner-bg" : "bg-gradient-to-br from-slate-50 to-sky-50/30"}`}>
         <div className="mx-auto max-w-6xl space-y-5">
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-xl font-bold text-slate-900">Chấm Công</h1>
               <p className="text-sm text-slate-500">{weekdayVN(attendanceDate)}, {fmtShortDate(attendanceDate)}</p>
             </div>
-            <button
-              onClick={refreshCurrentTab}
-              className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 shadow-sm hover:bg-slate-50"
-            >
-              <RefreshCcw size={14} />
-              Làm mới
-            </button>
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs font-medium text-slate-500">Runner</span>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={showTaskbarRunner}
+                  onClick={() => setShowTaskbarRunner((v) => {
+                    const next = !v;
+                    try { localStorage.setItem("attendance_show_taskbar_runner", String(next)); } catch { }
+                    return next;
+                  })}
+                  title={showTaskbarRunner ? "Tắt hiệu ứng runner ca làm" : "Bật hiệu ứng runner ca làm"}
+                  className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${showTaskbarRunner ? "bg-sky-500" : "bg-slate-200"}`}
+                >
+                  <span
+                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${showTaskbarRunner ? "translate-x-5" : "translate-x-0"}`}
+                  />
+                </button>
+              </div>
+              <button
+                onClick={refreshCurrentTab}
+                className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 shadow-sm hover:bg-slate-50"
+              >
+                <RefreshCcw size={14} />
+                Làm mới
+              </button>
+            </div>
           </div>
 
           {actionMsg && (
@@ -1628,7 +1686,7 @@ export default function AttendancePage() {
                               <p className="text-sm font-bold text-slate-800">{shift.name || `Ca ${shift.shiftNo}`}</p>
                               {range && <p className="text-xs text-slate-400">{range}</p>}
                             </div>
-                            {SHOW_ATTENDANCE_TASKBAR_RUNNER && <ShiftTaskbarRail shift={shift} clockNow={clockNow} />}
+                            {showTaskbarRunner && <ShiftTaskbarRail shift={shift} clockNow={clockNow} />}
                           </div>
                           <div className="flex flex-wrap justify-end gap-1.5">
                             {isActiveShift && <Badge tone="sky">Đang mở</Badge>}
