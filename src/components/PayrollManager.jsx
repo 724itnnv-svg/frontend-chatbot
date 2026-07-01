@@ -1260,7 +1260,7 @@ export default function PayrollManager() {
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
   const [q, setQ] = useState("");
-  const [period, setPeriod] = useState(getDefaultPayrollPeriod);
+  const [period, setPeriod] = useState("");
   const [dept, setDept] = useState("ALL");
   const [insuranceCompany, setInsuranceCompany] = useState("ALL");
   const [status, setStatus] = useState("ALL");
@@ -1552,6 +1552,7 @@ export default function PayrollManager() {
   };
 
   useEffect(() => {
+    if (!period) return;
     localStorage.setItem(STORAGE_PAYROLL_PERIOD, period);
     fetchPayroll();
     setImportRows([]);
@@ -1562,6 +1563,27 @@ export default function PayrollManager() {
     setShowAttendanceImport(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [period]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      let latestPeriod = "";
+      try {
+        const res = await fetch("/api/payroll/latest-period", { headers: authHeader });
+        const data = await res.json();
+        if (res.ok && data?.success && /^\d{4}-\d{2}$/.test(data.period || "")) {
+          latestPeriod = data.period;
+        }
+      } catch {
+        // Ignore errors and fall back to the saved/current period.
+      }
+      if (!cancelled) setPeriod(latestPeriod || getDefaultPayrollPeriod());
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     fetchFormulaSettings();

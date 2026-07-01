@@ -50,9 +50,10 @@ const TABS = [
 ];
 
 const DEFAULT_SHIFT_FORM = [
-  { shiftNo: 1, name: "Ca sáng", scheduledStart: "07:30", scheduledEnd: "11:30" },
-  { shiftNo: 2, name: "Ca chiều", scheduledStart: "13:00", scheduledEnd: "17:00" },
+  { shiftNo: 1, name: "Ca ngày", scheduledStart: "07:30", scheduledEnd: "17:00" },
 ];
+
+const REGULAR_END_TIME = "17:00";
 
 const BULK_WEEK_DAYS = [
   { value: 1, label: "T2" },
@@ -253,8 +254,7 @@ function buildExportRows(records) {
     const isOvertimeMealApproved =
       record.isOvertimeMealApproved === true ||
       shifts.some((shift) => shift?.isOvertimeMealApproved === true);
-    const morningShift = shifts.find((shift) => Number(shift.shiftNo) === 1) || {};
-    const afternoonShift = shifts.find((shift) => Number(shift.shiftNo) === 2) || {};
+    const dayShift = shifts.find((shift) => Number(shift.shiftNo) === 1) || {};
     const summarizeShift = (shift) => getShiftBadges(shift).map((badge) => badge.text).join(", ");
 
     employeeDayRows.push({
@@ -263,22 +263,14 @@ function buildExportRows(records) {
       "Nhân viên": record.userName || "",
       "Team": record.teamId || "",
       "Vị trí": record.locationName || "",
-      "Ca sáng giờ vào": fmtTime(morningShift.checkIn?.time),
-      "Ca sáng vị trí vào": punchLocationName(morningShift.checkIn, record.locationName),
-      "Ca sáng giờ ra": fmtTime(morningShift.checkOut?.time),
-      "Ca sáng vị trí ra": punchLocationName(morningShift.checkOut, record.locationName),
-      "Ca sáng công": morningShift.workHours ?? "",
-      "Ca sáng tăng ca phút": morningShift.overtimeMinutes ?? "",
-      "Ca sáng trạng thái": shiftStatusLabel(morningShift),
-      "Ca sáng ghi chú": summarizeShift(morningShift),
-      "Ca chiều giờ vào": fmtTime(afternoonShift.checkIn?.time),
-      "Ca chiều vị trí vào": punchLocationName(afternoonShift.checkIn, record.locationName),
-      "Ca chiều giờ ra": fmtTime(afternoonShift.checkOut?.time),
-      "Ca chiều vị trí ra": punchLocationName(afternoonShift.checkOut, record.locationName),
-      "Ca chiều công": afternoonShift.workHours ?? "",
-      "Ca chiều tăng ca phút": afternoonShift.overtimeMinutes ?? "",
-      "Ca chiều trạng thái": shiftStatusLabel(afternoonShift),
-      "Ca chiều ghi chú": summarizeShift(afternoonShift),
+      "Ca ngày giờ vào": fmtTime(dayShift.checkIn?.time),
+      "Ca ngày vị trí vào": punchLocationName(dayShift.checkIn, record.locationName),
+      "Ca ngày giờ ra": fmtTime(dayShift.checkOut?.time),
+      "Ca ngày vị trí ra": punchLocationName(dayShift.checkOut, record.locationName),
+      "Ca ngày công": dayShift.workHours ?? "",
+      "Ca ngày tăng ca phút": dayShift.overtimeMinutes ?? "",
+      "Ca ngày trạng thái": shiftStatusLabel(dayShift),
+      "Ca ngày ghi chú": summarizeShift(dayShift),
       "Tổng giờ làm": record.workHours ?? "",
       "Tổng tăng ca phút": record.overtimeMinutes ?? 0,
       "Tổng tăng ca giờ": record.overtimeHours ?? 0,
@@ -492,7 +484,7 @@ function recordToForm(record) {
         checkInNote: shift.checkIn?.note || "",
         checkOutNote: shift.checkOut?.note || "",
         isOvertimeApproved: shift.isOvertimeApproved === true,
-        overtimeMinutes: shift.overtimeMinutes ?? calcOvertimeMinutes(shift.scheduledEnd || defaultShift.scheduledEnd, fmtTimeInput(shift.checkOut?.time)),
+        overtimeMinutes: shift.overtimeMinutes ?? calcOvertimeMinutes(REGULAR_END_TIME, fmtTimeInput(shift.checkOut?.time)),
       };
     }),
   };
@@ -607,6 +599,11 @@ export default function AttendanceManager() {
   const [bulkStampUserIds, setBulkStampUserIds] = useState(new Set());
   const [bulkUserSearch, setBulkUserSearch] = useState("");
   const [bulkStamping, setBulkStamping] = useState(false);
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+  const [bulkDeleteDate, setBulkDeleteDate] = useState(todayVN);
+  const [bulkDeleteUserIds, setBulkDeleteUserIds] = useState(new Set());
+  const [bulkDeleteUserSearch, setBulkDeleteUserSearch] = useState("");
+  const [bulkDeleting, setBulkDeleting] = useState(false);
 
   function showFlash(ok, text) {
     setFlash({ ok, text });
@@ -738,6 +735,7 @@ export default function AttendanceManager() {
     setForm(createEmptyForm());
     setFormOpen(true);
     setBulkStampOpen(false);
+    setBulkDeleteOpen(false);
     setTab("list");
   }
 
@@ -762,6 +760,7 @@ export default function AttendanceManager() {
     });
     setFormOpen(true);
     setBulkStampOpen(false);
+    setBulkDeleteOpen(false);
     setTimeout(() => formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
   }
 
@@ -770,6 +769,7 @@ export default function AttendanceManager() {
     setForm(recordToForm(record));
     setFormOpen(true);
     setBulkStampOpen(false);
+    setBulkDeleteOpen(false);
     setTimeout(() => formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
   }
 
@@ -796,7 +796,7 @@ export default function AttendanceManager() {
         return {
           ...shift,
           checkOutTime: value,
-          overtimeMinutes: shift.isOvertimeApproved ? calcOvertimeMinutes(shift.scheduledEnd, value) : 0,
+          overtimeMinutes: shift.isOvertimeApproved ? calcOvertimeMinutes(REGULAR_END_TIME, value) : 0,
         };
       }),
     }));
@@ -810,7 +810,7 @@ export default function AttendanceManager() {
         return {
           ...shift,
           isOvertimeApproved: checked,
-          overtimeMinutes: checked ? calcOvertimeMinutes(shift.scheduledEnd, shift.checkOutTime) : 0,
+          overtimeMinutes: checked ? calcOvertimeMinutes(REGULAR_END_TIME, shift.checkOutTime) : 0,
         };
       }),
     }));
@@ -870,6 +870,7 @@ export default function AttendanceManager() {
   function openBulkStampPanel() {
     setBulkStampOpen(true);
     setFormOpen(false);
+    setBulkDeleteOpen(false);
     setBulkStampForm(createBulkStampForm());
     setBulkStampUserIds(new Set());
     setBulkUserSearch("");
@@ -944,6 +945,54 @@ export default function AttendanceManager() {
     } catch (err) {
       setBulkStamping(false);
       showFlash(false, err?.response?.data?.message || "Lỗi khi chấm công hàng loạt.");
+    }
+  }
+
+  function openBulkDeletePanel() {
+    setBulkDeleteOpen(true);
+    setFormOpen(false);
+    setBulkStampOpen(false);
+    setBulkDeleteDate(todayVN());
+    setBulkDeleteUserIds(new Set());
+    setBulkDeleteUserSearch("");
+  }
+
+  async function handleBulkDelete() {
+    const userIds = [...bulkDeleteUserIds];
+    if (userIds.length === 0) return showFlash(false, "Chưa chọn nhân viên nào.");
+    if (!bulkDeleteDate) return showFlash(false, "Vui lòng chọn ngày.");
+
+    if (!window.confirm(`Xóa bản ghi chấm công của ${userIds.length} nhân viên ngày ${fmtShortDate(bulkDeleteDate)}?\nThao tác này không thể hoàn tác.`)) return;
+
+    setBulkDeleting(true);
+    try {
+      const params = new URLSearchParams({ from: bulkDeleteDate, to: bulkDeleteDate, limit: 1000, page: 1 });
+      const res = await api.get(`/attendance?${params}`);
+      const dayRecords = (res.data?.data || []).filter((r) => {
+        const uid = r.userId?._id || r.userId || r.user?._id || String(r.userId);
+        return userIds.includes(uid);
+      });
+
+      if (dayRecords.length === 0) {
+        showFlash(false, `Không tìm thấy bản ghi chấm công ngày ${fmtShortDate(bulkDeleteDate)} của các nhân viên đã chọn.`);
+        setBulkDeleting(false);
+        return;
+      }
+
+      const ids = dayRecords.map((r) => r._id);
+      try {
+        await api.post("/attendance/bulk-delete", { ids });
+      } catch {
+        await Promise.all(ids.map((id) => api.delete(`/attendance/${id}`)));
+      }
+
+      showFlash(true, `Đã xóa ${dayRecords.length} bản ghi chấm công ngày ${fmtShortDate(bulkDeleteDate)}.`);
+      setBulkDeleteOpen(false);
+      refreshCurrentTab();
+    } catch (err) {
+      showFlash(false, err?.response?.data?.message || "Lỗi khi xóa bản ghi hàng loạt.");
+    } finally {
+      setBulkDeleting(false);
     }
   }
 
@@ -1045,8 +1094,7 @@ export default function AttendanceManager() {
 
       employeeDaySheet["!cols"] = [
         { wch: 12 }, { wch: 16 }, { wch: 24 }, { wch: 12 }, { wch: 24 },
-        { wch: 14 }, { wch: 14 }, { wch: 12 }, { wch: 18 }, { wch: 16 }, { wch: 26 },
-        { wch: 14 }, { wch: 14 }, { wch: 12 }, { wch: 18 }, { wch: 16 }, { wch: 26 },
+        { wch: 14 }, { wch: 24 }, { wch: 12 }, { wch: 24 }, { wch: 12 }, { wch: 16 }, { wch: 16 },
         { wch: 14 }, { wch: 18 }, { wch: 16 }, { wch: 16 },
       ];
       detailSheet["!cols"] = [
@@ -1179,7 +1227,7 @@ export default function AttendanceManager() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="text-xl font-bold text-slate-900">Quản lý chấm công</h1>
-            <p className="text-sm text-slate-500">Theo dõi chấm công mặc định 2 ca: sáng và chiều</p>
+            <p className="text-sm text-slate-500">Theo dõi chấm công 1 ca full-day: 07:30 – 17:00</p>
           </div>
           <button
             onClick={openCreateForm}
@@ -1192,6 +1240,12 @@ export default function AttendanceManager() {
             className="flex items-center gap-1.5 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-sm font-semibold text-violet-700 shadow-sm hover:bg-violet-100"
           >
             <Users size={14} /> Chấm hàng loạt
+          </button>
+          <button
+            onClick={openBulkDeletePanel}
+            className="flex items-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700 shadow-sm hover:bg-rose-100"
+          >
+            <Trash2 size={14} /> Xóa hàng loạt
           </button>
           <button
             onClick={exportAttendanceExcel}
@@ -1223,7 +1277,7 @@ export default function AttendanceManager() {
                 <h2 className="text-base font-bold text-slate-900">
                   {editingRecord ? "Sửa bản ghi chấm công" : "Thêm bản ghi chấm công"}
                 </h2>
-                <p className="text-xs text-slate-500">Nhập giờ theo 2 ca mặc định sáng và chiều.</p>
+                <p className="text-xs text-slate-500">Nhập giờ cho ca ngày (07:30 – 17:00).</p>
               </div>
               <button
                 onClick={closeForm}
@@ -1292,7 +1346,7 @@ export default function AttendanceManager() {
               </label>
             </div>
 
-            <div className="mt-4 grid gap-3 md:grid-cols-2">
+            <div className="mt-4 grid gap-3">
               {form.shifts.map((shift, index) => (
                 <div key={shift.shiftNo} className="rounded-xl border border-slate-200 bg-slate-50 p-3">
                   <div className="mb-3 flex items-center justify-between gap-2">
@@ -1443,7 +1497,7 @@ export default function AttendanceManager() {
                   <h2 className="flex items-center gap-2 text-base font-bold text-slate-900">
                     <Users size={16} className="text-violet-600" /> Chấm công hàng loạt
                   </h2>
-                  <p className="text-xs text-slate-500">Chọn nhân viên, khoảng ngày và ca để tạo bản ghi hàng loạt.</p>
+                  <p className="text-xs text-slate-500">Chọn nhân viên và khoảng ngày để tạo bản ghi chấm công hàng loạt (ca ngày 07:30 – 17:00).</p>
                 </div>
                 <button
                   onClick={() => setBulkStampOpen(false)}
@@ -1640,6 +1694,120 @@ export default function AttendanceManager() {
                   >
                     {bulkStamping ? <Loader2 size={15} className="animate-spin" /> : <Zap size={15} />}
                     {bulkStamping ? "Đang chấm..." : "Chấm hàng loạt"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
+        {bulkDeleteOpen && (() => {
+          const filteredDeleteUsers = bulkDeleteUserSearch.trim()
+            ? users.filter((u) => `${getUserName(u)} ${u.teamId || ""}`.toLowerCase().includes(bulkDeleteUserSearch.trim().toLowerCase()))
+            : users;
+
+          return (
+            <div className="rounded-2xl border border-rose-200 bg-white p-4 shadow-sm">
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h2 className="flex items-center gap-2 text-base font-bold text-slate-900">
+                    <Trash2 size={16} className="text-rose-600" /> Xóa bản ghi chấm công hàng loạt
+                  </h2>
+                  <p className="text-xs text-slate-500">Chọn ngày và nhân viên cần xóa toàn bộ bản ghi chấm công.</p>
+                </div>
+                <button
+                  onClick={() => setBulkDeleteOpen(false)}
+                  className="flex items-center gap-1 rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                >
+                  <X size={13} /> Đóng
+                </button>
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-2">
+                {/* Employee list */}
+                <div className="flex flex-col gap-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-semibold text-slate-500">
+                      CHỌN NHÂN VIÊN ({bulkDeleteUserIds.size}/{filteredDeleteUsers.length})
+                    </label>
+                    <div className="flex gap-3">
+                      <button
+                        type="button"
+                        onClick={() => setBulkDeleteUserIds(new Set(filteredDeleteUsers.map((u) => u._id)))}
+                        className="text-xs font-semibold text-rose-600 hover:underline"
+                      >
+                        Chọn tất cả
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setBulkDeleteUserIds(new Set([...bulkDeleteUserIds].filter((id) => !filteredDeleteUsers.some((u) => u._id === id))))}
+                        className="text-xs font-semibold text-slate-500 hover:underline"
+                      >
+                        Bỏ chọn
+                      </button>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5">
+                    <Search size={13} className="text-slate-400" />
+                    <input
+                      value={bulkDeleteUserSearch}
+                      onChange={(e) => setBulkDeleteUserSearch(e.target.value)}
+                      placeholder="Tìm nhân viên..."
+                      className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder-slate-400"
+                    />
+                  </div>
+                  <div className="max-h-64 divide-y divide-slate-100 overflow-y-auto rounded-xl border border-slate-200">
+                    {filteredDeleteUsers.length === 0 ? (
+                      <p className="py-6 text-center text-xs text-slate-400">Không tìm thấy nhân viên.</p>
+                    ) : filteredDeleteUsers.map((u) => (
+                      <label key={u._id} className={`flex cursor-pointer items-center gap-2.5 px-3 py-2 hover:bg-slate-50 ${bulkDeleteUserIds.has(u._id) ? "bg-rose-50/60" : ""}`}>
+                        <input
+                          type="checkbox"
+                          checked={bulkDeleteUserIds.has(u._id)}
+                          onChange={() => setBulkDeleteUserIds((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(u._id)) next.delete(u._id); else next.add(u._id);
+                            return next;
+                          })}
+                          className="accent-rose-600"
+                        />
+                        <span className="text-sm font-medium text-slate-700">{getUserName(u)}</span>
+                        {u.teamId && <span className="text-xs text-slate-400">{u.teamId}</span>}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Config panel */}
+                <div className="flex flex-col gap-4">
+                  <div className="flex flex-col gap-1">
+                    <label className="text-xs font-semibold text-slate-500">NGÀY CẦN XÓA</label>
+                    <input
+                      type="date"
+                      value={bulkDeleteDate}
+                      onChange={(e) => setBulkDeleteDate(e.target.value)}
+                      className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none focus:border-rose-400 focus:ring-2 focus:ring-rose-100"
+                    />
+                  </div>
+
+                  {bulkDeleteUserIds.size > 0 && bulkDeleteDate && (
+                    <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700">
+                      Sẽ xóa bản ghi chấm công của {bulkDeleteUserIds.size} nhân viên ngày {fmtShortDate(bulkDeleteDate)}
+                    </div>
+                  )}
+
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+                    <AlertCircle size={12} className="mr-1 inline" />
+                    Thao tác xóa không thể hoàn tác. Chỉ xóa các bản ghi tồn tại trong ngày đã chọn.
+                  </div>
+
+                  <button
+                    onClick={handleBulkDelete}
+                    disabled={bulkDeleting || bulkDeleteUserIds.size === 0 || !bulkDeleteDate}
+                    className="flex items-center justify-center gap-2 rounded-xl bg-rose-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-rose-700 disabled:opacity-50"
+                  >
+                    {bulkDeleting ? <Loader2 size={15} className="animate-spin" /> : <Trash2 size={15} />}
+                    {bulkDeleting ? "Đang xóa..." : "Xóa bản ghi"}
                   </button>
                 </div>
               </div>
