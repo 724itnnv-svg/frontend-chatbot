@@ -892,6 +892,36 @@ export default function AttendancePage() {
   useEffect(() => { payrollPeriodRef.current = payrollPeriod; }, [payrollPeriod]);
   const lookupCodeRef = useRef(lookupCode);
   useEffect(() => { lookupCodeRef.current = lookupCode; }, [lookupCode]);
+  useEffect(() => {
+    const html = document.documentElement;
+    const body = document.body;
+    const previousHtmlTranslate = html.getAttribute("translate");
+    const previousBodyTranslate = body?.getAttribute("translate");
+    const meta = document.querySelector('meta[name="google"]');
+    const createdMeta = !meta;
+    const googleMeta = meta || document.createElement("meta");
+    const previousMetaContent = googleMeta.getAttribute("content");
+
+    googleMeta.setAttribute("name", "google");
+    googleMeta.setAttribute("content", "notranslate");
+    if (createdMeta) document.head.appendChild(googleMeta);
+    html.setAttribute("translate", "no");
+    html.classList.add("notranslate");
+    body?.setAttribute("translate", "no");
+    body?.classList.add("notranslate");
+
+    return () => {
+      if (previousHtmlTranslate == null) html.removeAttribute("translate");
+      else html.setAttribute("translate", previousHtmlTranslate);
+      if (previousBodyTranslate == null) body?.removeAttribute("translate");
+      else body?.setAttribute("translate", previousBodyTranslate);
+      html.classList.remove("notranslate");
+      body?.classList.remove("notranslate");
+      if (createdMeta) googleMeta.remove();
+      else if (previousMetaContent == null) googleMeta.removeAttribute("content");
+      else googleMeta.setAttribute("content", previousMetaContent);
+    };
+  }, []);
 
   const activeWindow = useMemo(() => getActiveAttendanceWindow(new Date(clockNow), assignedShifts), [assignedShifts, clockNow]);
   const adminConfirmPromptVisible = adminConfirmFailureCount >= ADMIN_CONFIRM_FAILURE_LIMIT;
@@ -1490,7 +1520,7 @@ export default function AttendancePage() {
           .attendance-runner-bg::before { animation: none !important; }
         }
       `}</style>
-      <div className={`relative min-h-screen p-3 sm:p-4 md:p-6 transition-all duration-700 ${showTaskbarRunner ? "attendance-runner-bg" : "bg-gradient-to-br from-slate-50 to-sky-50/30"}`}>
+      <div translate="no" className={`notranslate relative min-h-screen p-3 sm:p-4 md:p-6 transition-all duration-700 ${showTaskbarRunner ? "attendance-runner-bg" : "bg-gradient-to-br from-slate-50 to-sky-50/30"}`}>
         <div className="mx-auto max-w-6xl space-y-5">
           <div className="flex items-center justify-between">
             <div>
@@ -1498,7 +1528,7 @@ export default function AttendancePage() {
               <p className="text-sm text-slate-500">{weekdayVN(attendanceDate)}, {fmtShortDate(attendanceDate)}</p>
             </div>
             <div className="flex items-center gap-2">
-              <div className="flex items-center gap-1.5">
+              {/* <div className="flex items-center gap-1.5">
                 <span className="text-xs font-medium text-slate-500">Runner</span>
                 <button
                   type="button"
@@ -1516,7 +1546,7 @@ export default function AttendancePage() {
                     className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${showTaskbarRunner ? "translate-x-5" : "translate-x-0"}`}
                   />
                 </button>
-              </div>
+              </div> */}
               <button
                 onClick={refreshCurrentTab}
                 className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 shadow-sm hover:bg-slate-50"
