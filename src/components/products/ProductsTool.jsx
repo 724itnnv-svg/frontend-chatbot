@@ -13,6 +13,7 @@ import {
   Database,
   Loader2,
   Power,
+  Copy,
   ChevronDown,
   ChevronUp,
 } from "lucide-react";
@@ -78,6 +79,7 @@ export default function ProductManager() {
   const [productNameResultFormat, setProductNameResultFormat] = useState("card");
   const [checkingProductNames, setCheckingProductNames] = useState(false);
   const [editingProduct, setEditingProduct] = useState(null);
+  const [cloningProduct, setCloningProduct] = useState(null);
   const [saving, setSaving] = useState(false);
   const [togglingActiveId, setTogglingActiveId] = useState(null);
   const [sortField, setSortField] = useState("");
@@ -1006,11 +1008,27 @@ export default function ProductManager() {
 
   const handleEdit = (product) => {
     setEditingProduct(product._id || product.id);
+    setCloningProduct(null);
     setShowEditModal(true);
   };
 
   const handleCreate = () => {
     setEditingProduct(null);
+    setCloningProduct(null);
+    setShowEditModal(true);
+  };
+
+  const handleClone = (product) => {
+    const { _id, id, createdAt, updatedAt, __v, ...copySource } = product || {};
+    setEditingProduct(null);
+    setCloningProduct({
+      ...copySource,
+      PRODUCT_CODE: "",
+      PRICE: product?.PRICE ?? product?.PRICE_VND ?? 0,
+      PRICE_VND: product?.PRICE_VND ?? product?.PRICE ?? 0,
+      COMPANY: product?.COMPANY || product?.COMPANY_ID || product?.COMANY || "",
+      COMPANY_ID: product?.COMPANY_ID || product?.COMANY || product?.COMPANY || "",
+    });
     setShowEditModal(true);
   };
 
@@ -1186,6 +1204,8 @@ export default function ProductManager() {
       await fetchProducts(search, 1, false);
       setImportText("");
       setShowEditModal(false);
+      setEditingProduct(null);
+      setCloningProduct(null);
     } catch (err) {
       alert(err.message);
     } finally {
@@ -1215,6 +1235,7 @@ export default function ProductManager() {
       await fetchProducts(search, 1, false);
       setImportText("");
       setShowEditModal(false);
+      setCloningProduct(null);
       alert("Tạo sản phẩm thành công!");
     } catch (err) {
       alert(err.message);
@@ -1449,6 +1470,8 @@ export default function ProductManager() {
 
   const handleCloseCreate = () => {
     setShowEditModal(false);
+    setEditingProduct(null);
+    setCloningProduct(null);
   };
 
   const toggleExpand = (index) => {
@@ -1682,7 +1705,7 @@ export default function ProductManager() {
                 </p>
               )}
 
-              <div className="flex gap-2 justify-end absolute bottom-2 right-2">
+              <div className="flex flex-wrap gap-1.5 justify-end absolute bottom-2 left-2 right-2">
                 <button
                   onClick={() => handleToggleActive(product)}
                   title={product.isActive === false ? "Bật sản phẩm" : "Tắt sản phẩm"}
@@ -1722,6 +1745,15 @@ export default function ProductManager() {
                     <X size={16} />
                   )}
                   <span className="text-xs font-medium">Xóa</span>
+                </button>
+
+                <button
+                  onClick={() => handleClone(product)}
+                  title="Clone sản phẩm"
+                  className="flex items-center gap-1 text-violet-600 hover:text-violet-800 bg-violet-50 hover:bg-violet-100 px-2 py-1 rounded"
+                >
+                  <Copy size={16} />
+                  <span className="text-xs font-medium">Clone</span>
                 </button>
 
                 <button
@@ -1888,6 +1920,7 @@ export default function ProductManager() {
           open={showEditModal}
           onClose={handleCloseCreate}
           productId={editingProduct}
+          initialProduct={cloningProduct}
           onSubmit={handleUpdate}
           onSubmitCreate={handleFormCreate}
         />

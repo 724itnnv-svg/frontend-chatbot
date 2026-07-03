@@ -25,6 +25,7 @@ const NotFoundPage = lazy(() => import("./components/NotFoundPage"));
 
 const PageManager = lazy(() => import("./components/PageManager"));
 const PageMessage = lazy(() => import("./components/PageMessage"));
+const CustomerCareManager = lazy(() => import("./components/CustomerCareManager"));
 const ChatwebManager = lazy(() => import("./components/ChatwebManager"));
 const DonHang = lazy(() => import("./components/DonHang"));
 const DonHangWeb = lazy(() => import("./components/DonHangWeb"));
@@ -103,6 +104,7 @@ class ErrorBoundary extends Component {
 const ADMIN_ROUTE_BY_SCREEN = {
   pages: "/admin/pages",
   pagesmessage: "/admin/page-messages",
+  customer_care: "/admin/customer-care",
   chatweb: "/admin/chatweb",
   donhang: "/admin/orders",
   donhangWeb: "/admin/orders-web",
@@ -146,6 +148,7 @@ const ADMIN_ROUTE_BY_SCREEN = {
 const adminRoutes = [
   { path: "pages", screenId: "pages", element: <PageManager /> },
   { path: "page-messages", screenId: "pagesmessage", element: <PageMessage /> },
+  { path: "customer-care", screenId: "customer_care", element: <CustomerCareManager /> },
   { path: "chatweb", screenId: "chatweb", element: <ChatwebManager /> },
   { path: "orders", screenId: "donhang", element: <DonHang /> },
   { path: "orders-web", screenId: "donhangWeb", element: <DonHangWeb /> },

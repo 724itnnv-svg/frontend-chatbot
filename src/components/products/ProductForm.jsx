@@ -56,7 +56,24 @@ function toArrayValue(value) {
   return [""];
 }
 
-function ProductForm({ open, onClose, onSubmit, onSubmitCreate, productId }) {
+function normalizeProductForm(data = {}, { clearProductCode = false } = {}) {
+  return {
+    ...DEFAULT_FORM,
+    ...data,
+    PRODUCT_CODE: clearProductCode ? "" : data.PRODUCT_CODE || "",
+    TYPE: data.TYPE || "fertilizer",
+    isActive: data.isActive !== false,
+    PRICE: data.PRICE ?? data.PRICE_VND ?? 0,
+    PRICE_VND: data.PRICE_VND ?? data.PRICE ?? 0,
+    COMPANY: data.COMPANY || data.COMPANY_ID || data.COMANY || "",
+    COMPANY_ID: data.COMPANY_ID || data.COMANY || data.COMPANY || "",
+    BENEFITS: toArrayValue(data.BENEFITS),
+    KEYWORDS: toArrayValue(data.KEYWORDS),
+    IMAGE_URL: toArrayValue(data.IMAGE_URL),
+  };
+}
+
+function ProductForm({ open, onClose, onSubmit, onSubmitCreate, productId, initialProduct }) {
   const { token } = useAuth();
   const fieldRefs = useRef({});
   const [loading, setLoading] = useState(false);
@@ -68,7 +85,7 @@ function ProductForm({ open, onClose, onSubmit, onSubmitCreate, productId }) {
   useEffect(() => {
     if (!open) return;
     if (!productId) {
-      setForm(DEFAULT_FORM);
+      setForm(initialProduct ? normalizeProductForm(initialProduct, { clearProductCode: true }) : DEFAULT_FORM);
       setErrors({});
       setFetchError("");
       return;
@@ -88,19 +105,7 @@ function ProductForm({ open, onClose, onSubmit, onSubmitCreate, productId }) {
         }
 
         const data = json.product;
-        setForm({
-          ...DEFAULT_FORM,
-          ...data,
-          TYPE: data.TYPE || "fertilizer",
-          isActive: data.isActive !== false,
-          PRICE: data.PRICE ?? data.PRICE_VND ?? 0,
-          PRICE_VND: data.PRICE_VND ?? data.PRICE ?? 0,
-          COMPANY: data.COMPANY || data.COMPANY_ID || data.COMANY || "",
-          COMPANY_ID: data.COMPANY_ID || data.COMANY || data.COMPANY || "",
-          BENEFITS: toArrayValue(data.BENEFITS),
-          KEYWORDS: toArrayValue(data.KEYWORDS),
-          IMAGE_URL: toArrayValue(data.IMAGE_URL),
-        });
+        setForm(normalizeProductForm(data));
       } catch (error) {
         setFetchError(error.message || "Không thể tải dữ liệu sản phẩm");
       } finally {
@@ -109,7 +114,7 @@ function ProductForm({ open, onClose, onSubmit, onSubmitCreate, productId }) {
     };
 
     fetchProduct();
-  }, [productId, open, token]);
+  }, [productId, initialProduct, open, token]);
 
   const selectedCompanyName = useMemo(() => {
     const selected = COMPANIES.find((company) => company._id === (form.COMPANY || form.COMPANY_ID));
@@ -343,7 +348,7 @@ function ProductForm({ open, onClose, onSubmit, onSubmitCreate, productId }) {
               <div>
                 <div className="flex flex-wrap items-center gap-2">
                   <h3 className="text-lg font-bold text-slate-950">
-                    {productId ? "Cập nhật sản phẩm" : "Thêm sản phẩm"}
+                    {productId ? "Cập nhật sản phẩm" : initialProduct ? "Clone sản phẩm" : "Thêm sản phẩm"}
                   </h3>
                   <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-bold text-emerald-700">
                     {productTypeLabel}
@@ -554,7 +559,11 @@ function ProductForm({ open, onClose, onSubmit, onSubmitCreate, productId }) {
         <div className="border-t border-slate-200 bg-white px-5 py-4 md:px-6">
           <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="text-xs text-slate-500">
-              {productId ? "Mã sản phẩm được khóa khi cập nhật." : "Các trường có dấu * là bắt buộc."}
+              {productId
+                ? "Mã sản phẩm được khóa khi cập nhật."
+                : initialProduct
+                  ? "Đã copy thông tin, vui lòng nhập mã sản phẩm mới."
+                  : "Các trường có dấu * là bắt buộc."}
             </div>
             <div className="flex items-center justify-end gap-2">
               <button
@@ -571,7 +580,7 @@ function ProductForm({ open, onClose, onSubmit, onSubmitCreate, productId }) {
                 className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-slate-950 px-5 text-sm font-bold text-white shadow-lg shadow-slate-200 transition hover:bg-slate-800 disabled:opacity-60"
               >
                 {loading ? <Loader2 className="animate-spin" size={17} /> : <Save size={17} />}
-                {loading ? "Đang lưu..." : productId ? "Lưu cập nhật" : "Tạo sản phẩm"}
+                {loading ? "Đang lưu..." : productId ? "Lưu cập nhật" : initialProduct ? "Tạo bản clone" : "Tạo sản phẩm"}
               </button>
             </div>
           </div>

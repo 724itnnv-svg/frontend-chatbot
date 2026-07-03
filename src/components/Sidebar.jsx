@@ -38,6 +38,7 @@ const ACTIVE_TAB_KEY = "dashboard_active_tab";
 const MENU_CONFIG = [
   { id: "pages", path: "/admin/pages", label: "Quản lý Page", icon: LayoutDashboard },
   { id: "pagesmessage", path: "/admin/page-messages", label: "Tin nhắn Page", icon: MessageCircle },
+  { id: "customer_care", path: "/admin/customer-care", label: "Chăm sóc khách hàng", icon: UserCheck },
   { id: "chatweb", path: "/admin/chatweb", label: "Chatbot Web", icon: BotMessageSquare },
   { id: "donhang", path: "/admin/orders", label: "Đơn hàng", icon: ClipboardList },
   { id: "donhangWeb", path: "/admin/orders-web", label: "Đơn hàng Web", icon: ClipboardList },
@@ -82,7 +83,7 @@ const MENU_GROUPS = [
     id: "business",
     label: "Kinh doanh",
     icon: MessageCircle,
-    items: ["business_stats", "pages", "pagesmessage", "chatweb", "donhang", "donhangWeb"],
+    items: ["business_stats", "pages", "pagesmessage", "customer_care", "chatweb", "donhang", "donhangWeb"],
   },
   {
     id: "attendance",
