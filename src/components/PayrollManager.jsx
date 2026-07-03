@@ -70,6 +70,19 @@ function makeAttendanceSources() {
   }));
 }
 
+function getAttendanceLogContext(sources = []) {
+  const sourceFiles = sources
+    .filter((source) => source.fileName || source.sheetName || source.rows?.length)
+    .map((source) => ({
+      company: source.company || "",
+      fileName: source.fileName || "",
+      sheetName: source.sheetName || "",
+      rowCount: source.rows?.length || 0,
+    }));
+
+  return { sourceFiles };
+}
+
 const PAYROLL_COLUMNS = [
   { key: "period", label: "Kỳ lương", width: 120, type: "month", required: true, frozen: true },
   { key: "status", label: "Trạng thái", width: 130, type: "status" },
@@ -703,6 +716,16 @@ function normalizeExcelRow(raw, fallbackPeriod, formulaSettings = DEFAULT_PAYROL
   return normalizePayrollRow(row, fallbackPeriod, formulaSettings);
 }
 
+function normalizeCommissionExcelRow(raw, fallbackPeriod) {
+  return {
+    period: String(fallbackPeriod || readCell(raw, ["period", "Kỳ lương", "Ky luong", "Tháng", "Thang"])).trim(),
+    maNhanVien: String(readCell(raw, ["maNhanVien", "employeeCode", "Mã NV", "Ma NV", "Mã nhân viên"])).trim(),
+    tenNhanVien: String(readCell(raw, ["tenNhanVien", "employeeName", "Tên NV", "Ten NV", "Tên nhân viên"])).trim(),
+    doanhSo: toNumber(readCell(raw, ["doanhSo", "sales", "revenue", "Doanh số", "Doanh so", "thuNhapTheoNgayCong.doanhSo"])),
+    hoaHong: toNumber(readCell(raw, ["hoaHong", "commission", "Hoa hồng", "Hoa hong", "thuNhapTheoNgayCong.hoaHong"])),
+  };
+}
+
 function downloadPayrollTemplate() {
   const sample = Object.fromEntries(TEMPLATE_COLUMNS.map((column) => [column, 0]));
   Object.assign(sample, {
@@ -754,6 +777,31 @@ function downloadPayrollInputTemplate(rows = [], fallbackPeriod = "") {
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, sheet, "PayrollInput");
   XLSX.writeFile(workbook, `mau-nhap-lieu-payroll_${fallbackPeriod || new Date().toISOString().slice(0, 10)}.xlsx`);
+}
+
+function downloadCommissionTemplate(rows = null, fallbackPeriod = "") {
+  const headers = ["period", "maNhanVien", "tenNhanVien", "khoiPhongBan", "doanhSo", "hoaHong"];
+  const sourceRows = Array.isArray(rows) ? rows : [{
+    period: fallbackPeriod || new Date().toISOString().slice(0, 7),
+    maNhanVien: "NV001",
+    tenNhanVien: "Nguyen Van A",
+    khoiPhongBan: "SALE ADMIN",
+    doanhSo: 0,
+    hoaHong: 1000000,
+  }];
+  const data = sourceRows.map((row) => ({
+    period: row.period || fallbackPeriod || new Date().toISOString().slice(0, 7),
+    maNhanVien: row.maNhanVien || "",
+    tenNhanVien: row.tenNhanVien || "",
+    khoiPhongBan: row.khoiPhongBan || "",
+    doanhSo: roundPayrollNumber(row.doanhSo ?? getDeep(row, "thuNhapTheoNgayCong.doanhSo")),
+    hoaHong: roundPayrollNumber(row.hoaHong ?? getDeep(row, "thuNhapTheoNgayCong.hoaHong")),
+  }));
+  const sheet = XLSX.utils.json_to_sheet(data, { header: headers });
+  sheet["!cols"] = headers.map((column) => ({ wch: Math.max(12, column.length + 2) }));
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, sheet, "Commission");
+  XLSX.writeFile(workbook, `mau-import-doanh-so-hoa-hong_${fallbackPeriod || new Date().toISOString().slice(0, 10)}.xlsx`);
 }
 
 function calcPayrollDots(row) {
@@ -1242,12 +1290,16 @@ function Modal({ open, title, children, onClose }) {
 export default function PayrollManager() {
   const { user, token } = useAuth();
   const hasFullAccess = Number(user?.allpage) === 1;
+  const hasPayrollScreen = Array.isArray(user?.screen) && user.screen.includes("payroll");
   const payrollPerms = hasFullAccess
     ? { view: true, create: true, edit: true, delete: true, export: true }
     : (user?.action?.payroll || {});
   const canEdit = payrollPerms.edit === true;
   const canCreate = payrollPerms.create === true;
   const canDelete = payrollPerms.delete === true;
+  const canImportCommission = hasFullAccess || hasPayrollScreen || canEdit;
+  const canViewPayroll = hasFullAccess || payrollPerms.view === true || canEdit || canCreate || canDelete;
+  const commissionOnlyMode = canImportCommission && !canViewPayroll;
   const authHeader = useMemo(
     () => ({ Authorization: `Bearer ${token || localStorage.getItem("token") || ""}` }),
     [token]
@@ -1266,6 +1318,7 @@ export default function PayrollManager() {
   const [status, setStatus] = useState("ALL");
   const [sortConfig, setSortConfig] = useState({ key: "tenNhanVien", direction: "asc" });
   const [showImport, setShowImport] = useState(false);
+  const [showCommissionImport, setShowCommissionImport] = useState(false);
   const [showAttendanceImport, setShowAttendanceImport] = useState(false);
   const [showColumns, setShowColumns] = useState(false);
   const [showFormulaSettings, setShowFormulaSettings] = useState(false);
@@ -1279,6 +1332,11 @@ export default function PayrollManager() {
   const [importColumns, setImportColumns] = useState([]);
   const [selectedImportColumns, setSelectedImportColumns] = useState(() => new Set());
   const [importing, setImporting] = useState(false);
+  const [commissionRows, setCommissionRows] = useState([]);
+  const [commissionFileName, setCommissionFileName] = useState("");
+  const [commissionImporting, setCommissionImporting] = useState(false);
+  const [commissionTemplateLoading, setCommissionTemplateLoading] = useState(false);
+  const [commissionResult, setCommissionResult] = useState(null);
   const [isCloning, setIsCloning] = useState(false);
   const [isDeletingMonth, setIsDeletingMonth] = useState(false);
   const [attendanceImporting, setAttendanceImporting] = useState(false);
@@ -1531,6 +1589,11 @@ export default function PayrollManager() {
   };
 
   const fetchPayroll = async () => {
+    if (!canViewPayroll) {
+      setLoading(false);
+      setRows([]);
+      return;
+    }
     setLoading(true);
     setMessage("");
     try {
@@ -1554,15 +1617,20 @@ export default function PayrollManager() {
   useEffect(() => {
     if (!period) return;
     localStorage.setItem(STORAGE_PAYROLL_PERIOD, period);
-    fetchPayroll();
+    if (canViewPayroll) fetchPayroll();
+    else setLoading(false);
     setImportRows([]);
     setImportColumns([]);
     setSelectedImportColumns(new Set());
+    setCommissionRows([]);
+    setCommissionResult(null);
+    setCommissionFileName("");
     setAttendanceSources(makeAttendanceSources());
     setShowImport(false);
+    setShowCommissionImport(false);
     setShowAttendanceImport(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [period]);
+  }, [period, canViewPayroll]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1586,9 +1654,10 @@ export default function PayrollManager() {
   }, []);
 
   useEffect(() => {
+    if (commissionOnlyMode) return;
     fetchFormulaSettings();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [commissionOnlyMode]);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_HIDDEN_COLUMNS, JSON.stringify(Array.from(hiddenColumns)));
@@ -1829,6 +1898,88 @@ export default function PayrollManager() {
     }
   };
 
+  const downloadCommissionTemplateFromPayroll = async () => {
+    if (!canImportCommission) return;
+    if (!period) {
+      setMessage("Vui lòng chọn kỳ lương trước khi tải mẫu doanh số/hoa hồng.");
+      return;
+    }
+    setCommissionTemplateLoading(true);
+    try {
+      const res = await fetch(`/api/payroll/commission-template?period=${encodeURIComponent(period)}`, {
+        headers: authHeader,
+      });
+      const data = await res.json();
+      if (!res.ok || data?.success === false) {
+        throw new Error(data?.message || "Không tải được mẫu doanh số/hoa hồng");
+      }
+      downloadCommissionTemplate(data.data || [], data.period || period);
+      setMessage(`Đã tải mẫu doanh số/hoa hồng kỳ ${data.period || period} với ${data.total || data.data?.length || 0} nhân viên.`);
+    } catch (error) {
+      console.error(error);
+      setMessage(error.message || "Không tải được mẫu doanh số/hoa hồng");
+    } finally {
+      setCommissionTemplateLoading(false);
+    }
+  };
+
+  const handleCommissionExcelUpload = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    try {
+      const buffer = await file.arrayBuffer();
+      const workbook = XLSX.read(buffer, { type: "array" });
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      const rawRows = XLSX.utils.sheet_to_json(sheet, { defval: "" });
+      const parsed = rawRows
+        .map((row) => normalizeCommissionExcelRow(row, period))
+        .filter((row) => row.maNhanVien || row.tenNhanVien);
+      setCommissionRows(parsed);
+      setCommissionFileName(file.name);
+      setCommissionResult(null);
+      setMessage(parsed.length ? `Đã đọc ${parsed.length} dòng doanh số/hoa hồng từ Excel.` : "File chưa có dòng doanh số/hoa hồng hợp lệ.");
+    } catch (error) {
+      console.error(error);
+      setCommissionRows([]);
+      setCommissionFileName("");
+      setCommissionResult(null);
+      setMessage("Không đọc được file doanh số/hoa hồng.");
+    }
+  };
+
+  const importCommission = async () => {
+    if (!canImportCommission || !commissionRows.length) return;
+    setCommissionImporting(true);
+    try {
+      const res = await fetch("/api/payroll/import-commission", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeader },
+        body: JSON.stringify({
+          period,
+          rows: commissionRows.map((row) => ({ ...row, period })),
+          logContext: { fileName: commissionFileName, rowCount: commissionRows.length },
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || (data?.success === false && !data?.updated)) {
+        const detail = data?.errors?.[0]?.message ? `: ${data.errors[0].message}` : "";
+        throw new Error((data?.message || "Import doanh số/hoa hồng thất bại") + detail);
+      }
+      setCommissionResult(data);
+      setCommissionRows([]);
+      setCommissionFileName("");
+      if (!commissionOnlyMode) setShowCommissionImport(false);
+      setMessage(`Đã import doanh số/hoa hồng cho ${data.updated || 0} nhân viên${data.errors?.length ? `, ${data.errors.length} dòng lỗi/bỏ qua` : ""}.`);
+      if (canViewPayroll) await fetchPayroll();
+    } catch (error) {
+      console.error(error);
+      setMessage(error.message || "Import doanh số/hoa hồng thất bại");
+    } finally {
+      setCommissionImporting(false);
+    }
+  };
+
   const clonePayroll = async () => {
     if (!canCreate) return;
     if (!period) {
@@ -1926,7 +2077,12 @@ export default function PayrollManager() {
       const res = await fetch("/api/payroll/attendance-import", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeader },
-        body: JSON.stringify({ period, hoursPerDay: toNumber(attendanceHoursPerDay || 8), rows: payloadRows }),
+        body: JSON.stringify({
+          period,
+          hoursPerDay: toNumber(attendanceHoursPerDay || 8),
+          rows: payloadRows,
+          logContext: getAttendanceLogContext(attendanceSources),
+        }),
       });
       const data = await res.json();
       if (!res.ok || data?.success === false) {
@@ -1989,6 +2145,7 @@ export default function PayrollManager() {
           period,
           hoursPerDay: toNumber(attendanceHoursPerDay || 8),
           mode: "apply",
+          logContext: { source: "attendance-manager", previewMatched: validAttendanceSyncRows.length },
         }),
       });
       const data = await res.json();
@@ -2158,6 +2315,121 @@ export default function PayrollManager() {
   }
 
   const dirtyRows = rows.filter((row) => dirtyIds.has(row.__clientId));
+  const commissionImportPanel = (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <input type="month" value={period} onChange={(event) => setPeriod(event.target.value)} className="rounded-xl border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-sky-100" />
+        <button disabled={commissionTemplateLoading} onClick={downloadCommissionTemplateFromPayroll} className="inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-50 disabled:opacity-50">
+          {commissionTemplateLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+          Tải mẫu tháng này
+        </button>
+        <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl bg-sky-600 px-3 py-2 text-sm font-semibold text-white hover:bg-sky-700">
+          <UploadCloud className="h-4 w-4" />
+          Chọn file Excel
+          <input type="file" accept=".xlsx,.xls" onChange={handleCommissionExcelUpload} className="hidden" />
+        </label>
+      </div>
+      <div className="rounded-xl border bg-slate-50 px-3 py-2 text-sm text-slate-600">
+        File chỉ cần các cột `period`, `maNhanVien` hoặc `tenNhanVien`, `doanhSo`, và `hoaHong`. Hệ thống chỉ cập nhật doanh số/hoa hồng, không đọc hoặc hiển thị dữ liệu lương.
+      </div>
+      {commissionRows.length > 0 ? (
+        <div className="overflow-hidden rounded-xl border">
+          <div className="border-b bg-slate-50 px-3 py-2 text-sm font-semibold">Preview {Math.min(commissionRows.length, 10)} / {commissionRows.length} dòng {commissionFileName ? `- ${commissionFileName}` : ""}</div>
+          <div className="max-h-80 overflow-auto">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-slate-100">
+                <tr>
+                  <th className="px-3 py-2">Kỳ</th>
+                  <th className="px-3 py-2">Mã NV</th>
+                  <th className="px-3 py-2">Tên</th>
+                  <th className="px-3 py-2 text-right">Doanh số</th>
+                  <th className="px-3 py-2 text-right">Hoa hồng</th>
+                </tr>
+              </thead>
+              <tbody>
+                {commissionRows.slice(0, 10).map((row, index) => (
+                  <tr key={`${row.maNhanVien || row.tenNhanVien}-${index}`} className="border-t">
+                    <td className="px-3 py-2">{row.period}</td>
+                    <td className="px-3 py-2 font-mono">{row.maNhanVien || "-"}</td>
+                    <td className="px-3 py-2">{row.tenNhanVien || "-"}</td>
+                    <td className="px-3 py-2 text-right font-semibold">{formatPayrollNumber(row.doanhSo)}</td>
+                    <td className="px-3 py-2 text-right font-semibold">{formatPayrollNumber(row.hoaHong)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : null}
+      {commissionResult?.data?.length ? (
+        <div className="overflow-hidden rounded-xl border border-emerald-100">
+          <div className="border-b bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-800">Đã cập nhật {commissionResult.updated || 0} nhân viên</div>
+          <div className="max-h-72 overflow-auto">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-emerald-50/60">
+                <tr>
+                  <th className="px-3 py-2">Mã NV</th>
+                  <th className="px-3 py-2">Tên</th>
+                  <th className="px-3 py-2 text-right">Doanh số trước</th>
+                  <th className="px-3 py-2 text-right">Doanh số sau</th>
+                  <th className="px-3 py-2 text-right">Hoa hồng trước</th>
+                  <th className="px-3 py-2 text-right">Hoa hồng sau</th>
+                </tr>
+              </thead>
+              <tbody>
+                {commissionResult.data.slice(0, 20).map((row, index) => (
+                  <tr key={`${row.maNhanVien}-${index}`} className="border-t">
+                    <td className="px-3 py-2 font-mono">{row.maNhanVien}</td>
+                    <td className="px-3 py-2">{row.tenNhanVien}</td>
+                    <td className="px-3 py-2 text-right">{formatPayrollNumber(row.before?.doanhSo)}</td>
+                    <td className="px-3 py-2 text-right font-semibold">{formatPayrollNumber(row.after?.doanhSo)}</td>
+                    <td className="px-3 py-2 text-right">{formatPayrollNumber(row.before?.hoaHong)}</td>
+                    <td className="px-3 py-2 text-right font-semibold">{formatPayrollNumber(row.after?.hoaHong)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : null}
+      {commissionResult?.errors?.length ? (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          Có {commissionResult.errors.length} dòng lỗi/bỏ qua. Dòng đầu: {commissionResult.errors[0]?.message}
+        </div>
+      ) : null}
+      <div className="flex justify-end gap-2">
+        {!commissionOnlyMode && (
+          <button onClick={() => setShowCommissionImport(false)} className="rounded-xl border bg-white px-4 py-2 text-sm font-semibold hover:bg-slate-50">Đóng</button>
+        )}
+        <button disabled={!commissionRows.length || commissionImporting} onClick={importCommission} className="inline-flex items-center gap-2 rounded-xl bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700 disabled:opacity-50">
+          {commissionImporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}
+          Import doanh số/hoa hồng
+        </button>
+      </div>
+    </div>
+  );
+
+  if (commissionOnlyMode) {
+    return (
+      <div className="h-full min-h-screen bg-slate-50 p-4 text-slate-800 md:p-6">
+        <div className="mb-4 rounded-2xl border bg-white p-4 shadow-sm">
+          <div className="flex items-center gap-2">
+            <span className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-sky-50 text-sky-700">
+              <Wallet className="h-5 w-5" />
+            </span>
+            <div>
+              <h1 className="text-xl font-semibold tracking-tight">Import doanh số/hoa hồng</h1>
+              <p className="text-sm text-slate-500">Cập nhật doanh số và hoa hồng theo Excel, không hiển thị dữ liệu lương nhân viên.</p>
+            </div>
+          </div>
+          {message ? <div className="mt-3 rounded-xl bg-slate-50 px-3 py-2 text-sm text-slate-600">{message}</div> : null}
+        </div>
+        <div className="rounded-2xl border bg-white p-4 shadow-sm">
+          {commissionImportPanel}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="h-full min-h-screen bg-slate-50 p-4 text-slate-800 md:p-6">
@@ -2216,6 +2488,12 @@ export default function PayrollManager() {
               <button onClick={() => setShowImport(true)} className="inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-50">
                 <UploadCloud className="h-4 w-4" />
                 Import
+              </button>
+            )}
+            {canImportCommission && (
+              <button onClick={() => setShowCommissionImport(true)} className="inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-50">
+                <UploadCloud className="h-4 w-4" />
+                Import doanh số/hoa hồng
               </button>
             )}
             {canEdit && (
@@ -2562,7 +2840,7 @@ export default function PayrollManager() {
             </label>
           </div>
           <div className="rounded-xl border bg-slate-50 px-3 py-2 text-sm text-slate-600">
-            File mẫu dùng đúng tên cột theo model, ví dụ `dataTinhLuong.luongCoBan`, `khauTru.bhxh`, `luongThucLinh`.
+            File mẫu dùng đúng tên cột theo m odel, ví dụ `dataTinhLuong.luongCoBan`, `khauTru.bhxh`, `luongThucLinh`.
           </div>
           {importColumns.length > 0 ? (
             <div className="rounded-xl border p-3">
@@ -2632,6 +2910,10 @@ export default function PayrollManager() {
             </button>
           </div>
         </div>
+      </Modal>
+
+      <Modal open={showCommissionImport} onClose={() => setShowCommissionImport(false)} title="Import doanh số/hoa hồng">
+        {commissionImportPanel}
       </Modal>
 
       <Modal open={showAttendanceSync} onClose={() => setShowAttendanceSync(false)} title="Lấy dữ liệu chấm công">

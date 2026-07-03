@@ -32,7 +32,7 @@ const TONE = {
   violet: "border-violet-200 bg-violet-50 text-violet-700",
 };
 
-const HIST_LIMIT = 10;
+const HIST_LIMIT = 100;
 const ADMIN_CONFIRM_FAILURE_LIMIT = 1;
 const ATTENDANCE_TABS = [
   { id: "attendance", label: "Chấm công", Icon: Clock },
@@ -119,6 +119,94 @@ function valueAt(source, path) {
   return path.split(".").reduce((cursor, key) => cursor?.[key], source);
 }
 
+function monthPeriod(date = new Date()) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function periodBounds(period) {
+  if (!period || !/^\d{4}-\d{2}$/.test(period)) {
+    return periodBounds(monthPeriod());
+  }
+  const [year, month] = period.split("-").map(Number);
+  const lastDay = new Date(year, month, 0).getDate();
+  return {
+    from: `${period}-01`,
+    to: `${period}-${String(lastDay).padStart(2, "0")}`,
+    year,
+    month,
+    lastDay,
+  };
+}
+
+function dateKey(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function monthDateKeys(period) {
+  const { year, month, lastDay } = periodBounds(period);
+  return Array.from({ length: lastDay }, (_, index) => dateKey(new Date(year, month - 1, index + 1)));
+}
+
+function monthCalendarCells(period) {
+  const { year, month, lastDay } = periodBounds(period);
+  const firstWeekday = new Date(year, month - 1, 1).getDay();
+  const leading = firstWeekday === 0 ? 6 : firstWeekday - 1;
+  const cells = Array.from({ length: leading }, (_, index) => ({ key: `blank-${index}`, blank: true }));
+  for (let day = 1; day <= lastDay; day += 1) {
+    const date = dateKey(new Date(year, month - 1, day));
+    cells.push({ key: date, date, day });
+  }
+  return cells;
+}
+
+function todayKey() {
+  return dateKey(new Date());
+}
+
+function shiftHasInvalidPunch(shift) {
+  return shift?.checkIn?.isValid === false || shift?.checkOut?.isValid === false || shift?.status === "invalid";
+}
+
+function attendanceDayMeta(record, date, today = todayKey()) {
+  if (!record) {
+    if (date > today) {
+      return {
+        label: "Chưa tới",
+        dot: "bg-slate-300",
+        border: "border-slate-100",
+        bg: "bg-slate-50",
+        text: "text-slate-300",
+      };
+    }
+    return {
+      label: date === today ? "Chưa chấm" : "Không làm",
+      dot: date === today ? "bg-amber-500" : "bg-rose-500",
+      border: date === today ? "border-amber-300" : "border-rose-300",
+      bg: date === today ? "bg-amber-50" : "bg-rose-50",
+      text: date === today ? "text-amber-700" : "text-rose-700",
+    };
+  }
+
+  const shifts = getRecordShifts(record);
+  const hasInvalid = record.status === "invalid" || shifts.some(shiftHasInvalidPunch);
+  if (hasInvalid || record.status === "incomplete" || !hasAttendancePunch(record)) {
+    return {
+      label: hasInvalid ? "Cần xem lại" : "Chưa đủ ca",
+      dot: "bg-amber-500",
+      border: "border-amber-300",
+      bg: "bg-amber-50",
+      text: "text-amber-700",
+    };
+  }
+
+  return {
+    label: "Có làm",
+    dot: "bg-emerald-500",
+    border: "border-emerald-300",
+    bg: "bg-emerald-50",
+    text: "text-emerald-700",
+  };
+}
 function prevMonthPeriod() {
   const now = new Date();
   const year = now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear();
@@ -859,8 +947,8 @@ export default function AttendancePage() {
   const [todayRecords, setTodayRecords] = useState([]);
   const [todayLoading, setTodayLoading] = useState(false);
   const [history, setHistory] = useState([]);
-  const [histPage, setHistPage] = useState(1);
   const [histTotal, setHistTotal] = useState(0);
+  const [historyPeriod, setHistoryPeriod] = useState(() => monthPeriod());
   const [actionLoading, setActionLoading] = useState(false);
   const [actionMsg, setActionMsg] = useState(null);
   const [noteInput, setNoteInput] = useState("");
@@ -1119,9 +1207,11 @@ export default function AttendancePage() {
     }
   }, [api]);
 
-  const loadHistory = useCallback(async (page = 1) => {
+  const loadHistory = useCallback(async (period = monthPeriod()) => {
     try {
-      const res = await api.get(`/attendance/my?page=${page}&limit=${HIST_LIMIT}`);
+      const { from, to } = periodBounds(period);
+      const params = new URLSearchParams({ from, to, page: "1", limit: String(HIST_LIMIT) });
+      const res = await api.get(`/attendance/my?${params.toString()}`);
       setHistory(res.data?.data || []);
       setHistTotal(res.data?.total || 0);
     } catch {
@@ -1160,8 +1250,8 @@ export default function AttendancePage() {
     loadLocations();
     loadShiftSetup();
     loadToday();
-    loadHistory(1);
-  }, [loadLocations, loadShiftSetup, loadToday, loadHistory]);
+    loadHistory(historyPeriod);
+  }, [historyPeriod, loadLocations, loadShiftSetup, loadToday, loadHistory]);
 
   useEffect(() => {
     if (activeTab === "payroll") loadPayroll();
@@ -1284,7 +1374,29 @@ export default function AttendancePage() {
     const shift = todayShifts.find((item) => Number(item.shiftNo) === Number(plannedShift.shiftNo));
     return !!shift?.checkIn?.time && !!shift?.checkOut?.time;
   });
-  const totalPages = Math.ceil(histTotal / HIST_LIMIT);
+  const historyRecordsByDate = useMemo(() => {
+    const map = new Map();
+    history.forEach((record) => {
+      if (!map.has(record.date)) map.set(record.date, record);
+    });
+    return map;
+  }, [history]);
+  const historyCalendarCells = useMemo(() => monthCalendarCells(historyPeriod), [historyPeriod]);
+  const historyMonthDates = useMemo(() => monthDateKeys(historyPeriod), [historyPeriod]);
+  const historySummary = useMemo(() => {
+    const today = todayKey();
+    return historyMonthDates.reduce((summary, date) => {
+      const record = historyRecordsByDate.get(date);
+      if (record && hasAttendancePunch(record) && record.status !== "incomplete" && record.status !== "invalid") {
+        summary.present += 1;
+      } else if (record || date === today) {
+        summary.partial += 1;
+      } else if (date < today) {
+        summary.absent += 1;
+      }
+      return summary;
+    }, { present: 0, partial: 0, absent: 0 });
+  }, [historyMonthDates, historyRecordsByDate]);
 
   useEffect(() => {
     if ((!retryInvalidShift || !canEditRetryLocation) && isFixingInvalidLocation) {
@@ -1319,7 +1431,7 @@ export default function AttendancePage() {
   }
 
   async function refreshAttendance() {
-    await Promise.all([loadLocations(), loadShiftSetup(), loadToday(), loadHistory(histPage)]);
+    await Promise.all([loadLocations(), loadShiftSetup(), loadToday(), loadHistory(historyPeriod)]);
   }
 
   async function refreshCurrentTab() {
@@ -1469,11 +1581,15 @@ export default function AttendancePage() {
     handleCheckOut({ retryInvalid: true, shift: retryCheckOutShift });
   }
 
-  function goHistPage(page) {
-    setHistPage(page);
-    loadHistory(page);
+  function changeHistoryMonth(nextPeriod) {
+    setHistoryPeriod(nextPeriod);
   }
 
+  function moveHistoryMonth(delta) {
+    const [year, month] = historyPeriod.split("-").map(Number);
+    const next = new Date(year, month - 1 + delta, 1);
+    changeHistoryMonth(monthPeriod(next));
+  }
   function changeTab(tabId) {
     const nextTab = getValidAttendanceTab(tabId);
     setActiveTab(nextTab);
@@ -1839,98 +1955,167 @@ export default function AttendancePage() {
           )}
 
           {activeTab === "history" && (
-            <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
-              <div className="flex items-center gap-2 border-b border-slate-100 px-5 py-4">
-                <CalendarDays size={16} className="text-violet-500" />
-                <h2 className="text-sm font-semibold text-slate-700">Lịch sử chấm công</h2>
-                <span className="ml-auto rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 text-xs text-slate-500">
-                  {histTotal} bản ghi
-                </span>
-              </div>
+            <div className="space-y-4">
+              <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+                <div className="flex flex-col gap-3 border-b border-slate-100 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex items-center gap-2">
+                    <CalendarDays size={16} className="text-violet-500" />
+                    <div>
+                      <h2 className="text-sm font-semibold text-slate-700">Lịch sử chấm công</h2>
+                      <p className="text-xs text-slate-400">{formatPeriod(historyPeriod)} · {histTotal} bản ghi</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => moveHistoryMonth(-1)}
+                      className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 text-slate-500 hover:bg-slate-50"
+                      title="Tháng trước"
+                    >
+                      <ChevronLeft size={16} />
+                    </button>
+                    <input
+                      type="month"
+                      value={historyPeriod}
+                      onChange={(event) => changeHistoryMonth(event.target.value)}
+                      className="h-9 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 outline-none focus:border-violet-300 focus:ring-2 focus:ring-violet-100"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => moveHistoryMonth(1)}
+                      className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 text-slate-500 hover:bg-slate-50"
+                      title="Tháng sau"
+                    >
+                      <ChevronRight size={16} />
+                    </button>
+                  </div>
+                </div>
 
-              {history.length === 0 ? (
-                <div className="px-5 py-8 text-center text-sm text-slate-400">Chưa có dữ liệu chấm công.</div>
-              ) : (
-                <div className="divide-y divide-slate-100">
-                  {history.map((record) => {
-                    const sl = statusLabel(record.status);
-                    const shifts = getRecordShifts(record);
-                    const dateParts = fmtShortDate(record.date).split("/");
-                    return (
-                      <div key={record._id} className="flex items-start gap-3 px-4 py-3 sm:px-5">
-                        {/* Thẻ ngày */}
-                        <div className="flex w-14 shrink-0 flex-col items-center rounded-xl border border-slate-200 bg-slate-50 py-1.5">
-                          <span className="text-[10px] font-medium text-slate-400">{weekdayVN(record.date)}</span>
-                          <span className="text-lg font-black leading-tight text-slate-800">{dateParts[0]}</span>
-                          <span className="text-[10px] text-slate-400">/{dateParts[1]}/{dateParts[2]}</span>
-                        </div>
+                <div className="grid grid-cols-3 divide-x divide-slate-100 border-b border-slate-100 bg-slate-50/80">
+                  <div className="px-3 py-3 text-center">
+                    <div className="text-lg font-black tabular-nums text-emerald-700">{historySummary.present}</div>
+                    <div className="text-[11px] font-medium text-slate-400">Có làm</div>
+                  </div>
+                  <div className="px-3 py-3 text-center">
+                    <div className="text-lg font-black tabular-nums text-amber-700">{historySummary.partial}</div>
+                    <div className="text-[11px] font-medium text-slate-400">Thiếu / cần xem</div>
+                  </div>
+                  <div className="px-3 py-3 text-center">
+                    <div className="text-lg font-black tabular-nums text-rose-700">{historySummary.absent}</div>
+                    <div className="text-[11px] font-medium text-slate-400">Không làm</div>
+                  </div>
+                </div>
 
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-start justify-between gap-2">
-                            <p className="truncate text-sm font-semibold text-slate-800">{record.locationName || "—"}</p>
-                            <Badge tone={sl.tone}>{sl.text}</Badge>
-                          </div>
+                <div className="px-4 py-4 sm:px-5">
+                  <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs font-medium text-slate-500">
+                    <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-emerald-500" /> Có làm</span>
+                    <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-amber-500" /> Thiếu ca / hôm nay</span>
+                    <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-rose-500" /> Không làm</span>
+                  </div>
 
-                          <div className="mt-2 space-y-1.5">
-                            {shifts.map((shift) => (
-                              <div key={shift.shiftNo || shift.name} className="flex flex-wrap items-center gap-1.5 text-xs">
-                                <span className="rounded bg-slate-100 px-1.5 py-0.5 font-semibold text-slate-600">
-                                  {shift.name || `Ca ${shift.shiftNo}`}
-                                </span>
-                                <span className="font-bold text-sky-700">{fmtTime(shift.checkIn?.time)}</span>
-                                <span className="text-slate-300">→</span>
-                                <span className="font-bold text-emerald-700">{fmtTime(shift.checkOut?.time)}</span>
-                                {shift.workHours != null && (
-                                  <span className="rounded-full border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 font-semibold text-emerald-700">
-                                    {shift.workHours}h
-                                  </span>
-                                )}
-                                {Number(shift.overtimeMinutes || 0) > 0 && (
-                                  <span className="rounded-full border border-violet-200 bg-violet-50 px-1.5 py-0.5 font-semibold text-violet-700">
-                                    TC {shift.overtimeMinutes}p
-                                  </span>
-                                )}
-                              </div>
-                            ))}
-                          </div>
+                  <div className="grid grid-cols-7 gap-1.5 text-center text-[11px] font-bold uppercase text-slate-400 sm:gap-2">
+                    {["T2", "T3", "T4", "T5", "T6", "T7", "CN"].map((day) => (
+                      <div key={day} className="py-1">{day}</div>
+                    ))}
+                  </div>
 
-                          {record.workHours != null && (
-                            <div className="mt-2 flex items-center gap-2">
-                              <span className="text-xs font-semibold text-emerald-700">Tổng: {record.workHours}h</span>
-                              {Number(record.overtimeMinutes || 0) > 0 && (
-                                <span className="text-xs font-semibold text-violet-700">Tăng ca: {record.overtimeMinutes}p</span>
-                              )}
-                            </div>
+                  <div className="mt-1.5 grid grid-cols-7 gap-1.5 sm:gap-2">
+                    {historyCalendarCells.map((cell) => {
+                      if (cell.blank) return <div key={cell.key} className="aspect-square" />;
+                      const record = historyRecordsByDate.get(cell.date);
+                      const meta = attendanceDayMeta(record, cell.date);
+                      const shifts = record ? getRecordShifts(record) : [];
+                      const firstShift = shifts[0];
+                      return (
+                        <div
+                          key={cell.key}
+                          title={`${fmtShortDate(cell.date)} - ${meta.label}`}
+                          className={`flex aspect-square min-h-[46px] flex-col items-center justify-center rounded-xl border ${meta.border} ${meta.bg} px-1 text-center transition hover:shadow-sm`}
+                        >
+                          <span className={`text-sm font-black leading-none tabular-nums ${meta.text}`}>{cell.day}</span>
+                          <span className={`mt-1 h-2 w-2 rounded-full ${meta.dot}`} />
+                          {firstShift?.checkIn?.time && (
+                            <span className="mt-0.5 hidden text-[10px] font-semibold tabular-nums text-slate-500 sm:block">
+                              {fmtTime(firstShift.checkIn.time)}
+                            </span>
                           )}
                         </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    })}
+                  </div>
                 </div>
-              )}
+              </div>
 
-              {totalPages > 1 && (
-                <div className="flex items-center justify-between border-t border-slate-100 px-5 py-3">
-                  <button
-                    disabled={histPage <= 1}
-                    onClick={() => goHistPage(histPage - 1)}
-                    className="flex items-center gap-1 rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40"
-                  >
-                    <ChevronLeft size={13} /> Trước
-                  </button>
-                  <span className="text-xs text-slate-500">Trang {histPage}/{totalPages}</span>
-                  <button
-                    disabled={histPage >= totalPages}
-                    onClick={() => goHistPage(histPage + 1)}
-                    className="flex items-center gap-1 rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40"
-                  >
-                    Sau <ChevronRight size={13} />
-                  </button>
+              <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+                <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-5 py-3.5">
+                  <h3 className="text-sm font-semibold text-slate-700">Chi tiết trong tháng</h3>
+                  <span className="rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 text-xs text-slate-500">
+                    {history.length} ngày có bản ghi
+                  </span>
                 </div>
-              )}
+
+                {history.length === 0 ? (
+                  <div className="px-5 py-8 text-center text-sm text-slate-400">Chưa có dữ liệu chấm công trong tháng này.</div>
+                ) : (
+                  <div className="divide-y divide-slate-100">
+                    {history.map((record) => {
+                      const sl = statusLabel(record.status);
+                      const shifts = getRecordShifts(record);
+                      const dateParts = fmtShortDate(record.date).split("/");
+                      return (
+                        <div key={record._id || record.date} className="flex items-start gap-3 px-4 py-3 sm:px-5">
+                          <div className="flex w-14 shrink-0 flex-col items-center rounded-xl border border-slate-200 bg-slate-50 py-1.5">
+                            <span className="text-[10px] font-medium text-slate-400">{weekdayVN(record.date)}</span>
+                            <span className="text-lg font-black leading-tight text-slate-800">{dateParts[0]}</span>
+                            <span className="text-[10px] text-slate-400">/{dateParts[1]}/{dateParts[2]}</span>
+                          </div>
+
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-start justify-between gap-2">
+                              <p className="truncate text-sm font-semibold text-slate-800">{record.locationName || "—"}</p>
+                              <Badge tone={sl.tone}>{sl.text}</Badge>
+                            </div>
+
+                            <div className="mt-2 space-y-1.5">
+                              {shifts.map((shift) => (
+                                <div key={shift.shiftNo || shift.name} className="flex flex-wrap items-center gap-1.5 text-xs">
+                                  <span className="rounded bg-slate-100 px-1.5 py-0.5 font-semibold text-slate-600">
+                                    {shift.name || `Ca ${shift.shiftNo}`}
+                                  </span>
+                                  <span className="font-bold text-sky-700">{fmtTime(shift.checkIn?.time)}</span>
+                                  <span className="text-slate-300">→</span>
+                                  <span className="font-bold text-emerald-700">{fmtTime(shift.checkOut?.time)}</span>
+                                  {shift.workHours != null && (
+                                    <span className="rounded-full border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 font-semibold text-emerald-700">
+                                      {shift.workHours}h
+                                    </span>
+                                  )}
+                                  {Number(shift.overtimeMinutes || 0) > 0 && (
+                                    <span className="rounded-full border border-violet-200 bg-violet-50 px-1.5 py-0.5 font-semibold text-violet-700">
+                                      TC {shift.overtimeMinutes}p
+                                    </span>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+
+                            {record.workHours != null && (
+                              <div className="mt-2 flex items-center gap-2">
+                                <span className="text-xs font-semibold text-emerald-700">Tổng: {record.workHours}h</span>
+                                {Number(record.overtimeMinutes || 0) > 0 && (
+                                  <span className="text-xs font-semibold text-violet-700">Tăng ca: {record.overtimeMinutes}p</span>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
             </div>
           )}
-
           {activeTab === "payroll" && (
             <div className="space-y-4">
               <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">

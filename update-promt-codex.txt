@@ -1,0 +1,193 @@
+```text
+PHUONG AN CHAM CONG GAN VOI 1 TRINH DUYET DIEN THOAI
+
+Muc tieu:
+- Cho phep user dang nhap nhieu noi de lam viec.
+- Chi gioi han rieng thao tac cham cong.
+- Moi user chi co 1 trinh duyet dien thoai duoc phep cham cong.
+- Khong ho tro cham cong tren nhieu trinh duyet cung 1 thiet bi trong giai doan 1.
+
+Nguyen tac:
+- Dang nhap tren may tinh van duoc.
+- Dang nhap tren dien thoai/trinh duyet khac van duoc.
+- Cac chuc nang khac nhu xem don hang, khach hang, bao cao, sale... van hoat dong theo quyen.
+- Rieng check-in/check-out phai dung trinh duyet dien thoai da lien ket.
+- Neu doi dien thoai, doi trinh duyet, xoa cache/localStorage/cookie lam mat token thi xem nhu thiet bi moi va can yeu cau doi thiet bi.
+
+Chuc nang can lam:
+
+1. Lien ket trinh duyet cham cong
+- Khi user cham cong lan dau tren dien thoai, neu chua co thiet bi cham cong active, he thong hoi xac nhan dang ky trinh duyet hien tai.
+- Backend tao attendance_device_token ngau nhien, dai, kho doan.
+- Frontend luu token nay trong trinh duyet dien thoai.
+- Backend luu hash cua token, khong luu token tho.
+- Thiet bi/trinh duyet nay tro thanh attendance device active cua user.
+
+2. Kiem tra khi cham cong
+- Moi request check-in/check-out phai gui kem attendance_device_token.
+- Backend kiem tra:
+  + user da dang nhap hop le;
+  + user co quyen cham cong;
+  + request den tu mobile browser;
+  + user co attendance device active;
+  + token gui len khop voi hash token dang active.
+- Neu hop le thi cho cham cong.
+- Neu khong hop le thi chan.
+
+3. Khong anh huong cac chuc nang khac
+- Cac API khac khong kiem tra attendance_device_token.
+- User sale van dang nhap may tinh de xem don hang va thao tac cong viec.
+- User van co the dang nhap trinh duyet khac de dung he thong, nhung khong duoc check-in/check-out tu do.
+
+4. Chan cham cong sai thiet bi
+- Neu cham cong tu desktop browser: chan.
+- Neu cham cong tu mobile browser khac: chan.
+- Neu thieu token: chan.
+- Neu token sai/khong khop: chan.
+- Tra loi loi ro rang, vi du:
+  + ATTENDANCE_DEVICE_REQUIRED
+  + ATTENDANCE_DEVICE_MISMATCH
+  + ATTENDANCE_MOBILE_BROWSER_REQUIRED
+
+5. Yeu cau doi thiet bi/trinh duyet cham cong
+- Khi user muon doi dien thoai hoac doi trinh duyet, user gui yeu cau doi thiet bi.
+- Truong hop mat token do xoa cache/localStorage/cookie cung phai gui yeu cau doi.
+- Yeu cau doi thiet bi co trang thai:
+  + pending
+  + approved
+  + rejected
+- Admin/HR duyet thi:
+  + vo hieu hoa thiet bi/token cu;
+  + ghi nhan thiet bi/token moi;
+  + thiet bi moi tro thanh active.
+- Neu tu choi thi giu nguyen thiet bi cu.
+
+6. Man hinh admin/HR
+- Xem danh sach user va thiet bi cham cong dang lien ket.
+- Xem thong tin:
+  + user;
+  + thoi gian dang ky;
+  + lan su dung gan nhat;
+  + browser;
+  + platform;
+  + user agent;
+  + IP gan nhat neu co;
+  + trang thai active/revoked.
+- Xem danh sach yeu cau doi thiet bi.
+- Duyet yeu cau doi thiet bi.
+- Tu choi yeu cau doi thiet bi.
+- Khoa/go thiet bi cham cong khi can.
+- Xem lich su doi thiet bi.
+
+7. Du lieu can luu
+
+Bang/collection attendance_devices:
+- id
+- user_id
+- token_hash
+- status: active/revoked
+- browser_name
+- platform
+- user_agent
+- registered_ip
+- last_used_ip
+- registered_at
+- last_used_at
+- revoked_at
+- revoked_by
+- created_at
+- updated_at
+
+Bang/collection attendance_device_change_requests:
+- id
+- user_id
+- old_device_id
+- new_token_hash hoac pending_token_hash
+- new_browser_name
+- new_platform
+- new_user_agent
+- requested_ip
+- reason
+- status: pending/approved/rejected
+- requested_at
+- reviewed_by
+- reviewed_at
+- review_note
+- created_at
+- updated_at
+
+Co the them bang attendance_device_logs:
+- id
+- user_id
+- device_id
+- action:
+  + registered
+  + checkin_allowed
+  + checkout_allowed
+  + blocked_missing_token
+  + blocked_mismatch
+  + change_requested
+  + change_approved
+  + change_rejected
+  + revoked
+- ip
+- user_agent
+- metadata
+- created_at
+
+8. Luong lan dau cham cong
+- User dang nhap tren dien thoai.
+- User bam cham cong.
+- Backend thay user chua co attendance device active.
+- Frontend hien xac nhan: Dang ky trinh duyet nay lam thiet bi cham cong?
+- User xac nhan.
+- Backend tao token.
+- Frontend luu token.
+- Backend luu token_hash va thong tin trinh duyet.
+- Cho phep cham cong.
+
+9. Luong cham cong binh thuong
+- User dang nhap tren trinh duyet dien thoai da dang ky.
+- Frontend doc attendance_device_token da luu.
+- Gui request check-in/check-out kem token.
+- Backend so khop token_hash.
+- Neu dung thi ghi nhan cham cong.
+- Cap nhat last_used_at, last_used_ip.
+
+10. Luong sai thiet bi
+- User dang nhap tren may tinh hoac trinh duyet dien thoai khac.
+- User bam cham cong.
+- Frontend khong co token hoac token khac.
+- Backend chan request.
+- Hien thong bao: Tai khoan nay da lien ket voi trinh duyet cham cong khac. Neu ban doi dien thoai hoac doi trinh duyet, vui long gui yeu cau doi thiet bi.
+
+11. Luong doi thiet bi
+- User dang nhap tren thiet bi/trinh duyet moi.
+- User bam gui yeu cau doi thiet bi.
+- Backend tao change request trang thai pending.
+- Admin/HR xem thong tin thiet bi cu va moi.
+- Admin/HR approved:
+  + revoke device cu;
+  + active device moi;
+  + ghi log.
+- Admin/HR rejected:
+  + khong thay doi device active;
+  + ghi ly do neu co.
+
+12. Luu y bao mat
+- Token phai du dai va sinh bang crypto random.
+- Backend chi luu hash token.
+- Token thiet bi cham cong khong thay the access token dang nhap.
+- Access token dung de xac thuc user.
+- Attendance device token chi dung de xac nhan dung trinh duyet cham cong.
+- Dang xuat khong xoa lien ket thiet bi.
+- Neu user xoa du lieu trinh duyet thi phai xin doi thiet bi.
+- Khong nen dung user agent/screen size/IP lam khoa chinh, chi dung de hien thi/log/canh bao.
+
+Tom tat:
+- Mot user co the dang nhap nhieu noi.
+- Mot user chi co 1 trinh duyet dien thoai active de cham cong.
+- Chi API check-in/check-out moi bi khoa theo attendance device token.
+- Cac chuc nang khac van chay binh thuong theo quyen.
+- Doi dien thoai hoac doi trinh duyet phai qua yeu cau va admin/HR duyet.
+```
