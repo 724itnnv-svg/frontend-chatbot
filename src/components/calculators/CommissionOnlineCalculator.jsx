@@ -9,27 +9,30 @@ import {
 } from "lucide-react";
 import { useRef } from "react";
 import * as XLSX from "xlsx";
-
-const UNIT_CONVERSION = {
-  "20KG": 1,
-  "17KG": 1,
-  "22KG": 1,
-  "25KG": 1,
-  "15KG": 2, //=60k
-  "10KG": 2,
-  "5KG": 4,
-  "5 LÍT": 6,
-  "5 LIT": 6,
-  "1KG": 20,
-  "1 LÍT": 24,
-  "1 LIT": 24,
-  "500G": 30,
-  "500ML": 40,
-  "250ML": 72,
-  "250G": 100,
-  "200G": 100,
-  "100G": 200,
-};
+import {
+  normalizeText,
+  normalizeHeader,
+  normalizeUnit,
+  parseNumber,
+  getCell,
+  getCellAlt,
+  ensureHeaders,
+  readWorkbook,
+  readSheetRows,
+  createSectionPusher,
+  createCommissionWorkbook,
+  sanitizeEmployeeSheetName,
+  makeShouldProcess,
+  makeGetEmployeeType,
+  AD_COST_HEADERS,
+  calculateAdCostDeduction,
+  VN_LOCALE,
+  formatMoney,
+  EMPLOYEE_TYPES,
+  UNIT_CONVERSION,
+} from "../../utils/commissionExcelUtils";
+import { getStoredManualPrices, saveAllManualPrices } from "../../utils/manualPriceStorage";
+import Modal from "./CommissionModal";
 
 const FILE_DEFS = [
   {
@@ -61,14 +64,7 @@ const FILE_DEFS = [
   {
     key: "adcost",
     label: "File Thống Kê Chi Phí Quảng Cáo (Ad Cost)",
-    headers: [
-      "Nhân viên",
-      "Sản phẩm chạy quảng cáo",
-      "TỔNG CHI",
-      "Doanh thu",
-      "ROAS",
-    ],
-    sheet: "CHI TIẾT CHIẾN DỊCH",
+    headers: AD_COST_HEADERS,
   },
 ];
 
@@ -80,28 +76,8 @@ const BASE_STATS = {
   Retail_NoCommission: 0,
 };
 
-const EMPLOYEE_TYPES = [
-  { value: "online", label: "Online" },
-  // { value: "market", label: "Thị trường" },
-  { value: "admin", label: "Sale Admin" },
-  { value: "mkt", label: "Marketing" },
-];
-
-const VN_LOCALE = "vi-VN";
-
-const STORAGE_KEY_RETURN_PRICES = "commission_return_prices_v1";
 const STORAGE_KEY_AMBIGUOUS = "commission_ambiguous_v1";
 
-const loadStoredReturnPrices = () => {
-  try { return JSON.parse(localStorage.getItem(STORAGE_KEY_RETURN_PRICES) || "{}"); }
-  catch { return {}; }
-};
-const saveStoredReturnPrices = (prices) => {
-  try {
-    const merged = { ...loadStoredReturnPrices(), ...prices };
-    localStorage.setItem(STORAGE_KEY_RETURN_PRICES, JSON.stringify(merged));
-  } catch { /* ignore */ }
-};
 const loadStoredAmbiguous = () => {
   try { return JSON.parse(localStorage.getItem(STORAGE_KEY_AMBIGUOUS) || "{}"); }
   catch { return {}; }
@@ -113,100 +89,6 @@ const saveStoredAmbiguous = (choices) => {
   } catch { /* ignore */ }
 };
 
-const formatMoney = (n) =>
-  Number(n || 0).toLocaleString(VN_LOCALE, { maximumFractionDigits: 0 });
-
-const normalizeText = (v) => String(v ?? "").trim();
-
-const normalizeHeader = (h) => normalizeText(h).toLowerCase();
-
-const normalizeUnit = (v) =>
-  normalizeText(v)
-    .toUpperCase()
-    .replace(/\s+/g, " ");
-
-const parseNumber = (v) => {
-  if (typeof v === "number") return Number.isFinite(v) ? v : 0;
-  let s = String(v ?? "").trim();
-  if (!s) return 0;
-  s = s.replace(/\s+/g, "");
-  s = s.replace(/[,\.](?=\d{3}(\D|$))/g, "");
-  s = s.replace(/,/g, ".");
-  const n = Number(s);
-  return Number.isFinite(n) ? n : 0;
-};
-
-const parseBaoValue = (name) => {
-  const text = normalizeText(name);
-  if (!text) return 0;
-  const matches = text.match(/(\d[\d.,]*)/g);
-  if (!matches || matches.length === 0) return 0;
-  return parseNumber(matches[matches.length - 1]);
-};
-
-const getHeaderIndex = (headers) => {
-  const map = new Map();
-  headers.forEach((h, idx) => {
-    const key = normalizeHeader(h);
-    if (key && !map.has(key)) map.set(key, idx);
-  });
-  return map;
-};
-
-const getCell = (row, headerMap, headerName) => {
-  const idx = headerMap.get(normalizeHeader(headerName));
-  if (idx == null) return undefined;
-  return row[idx];
-};
-
-const getCellAlt = (row, headerMap, primary, secondary) => {
-  const primaryIdx = headerMap.get(normalizeHeader(primary));
-  if (primaryIdx != null) return row[primaryIdx];
-  const secondaryIdx = headerMap.get(normalizeHeader(secondary));
-  if (secondaryIdx != null) return row[secondaryIdx];
-  return undefined;
-};
-
-const readWorkbook = (file) =>
-  new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(new Error("Không đọc được file."));
-    reader.onload = () => {
-      try {
-        const data = reader.result;
-        const wb = XLSX.read(data, { type: "array", cellDates: false });
-        resolve(wb);
-      } catch (err) {
-        reject(err);
-      }
-    };
-    reader.readAsArrayBuffer(file);
-  });
-
-const readSheetRows = (workbook, sheetName) => {
-  const name = sheetName || workbook.SheetNames[0];
-  const sheet = workbook.Sheets[name];
-  if (!sheet) {
-    return { rows: [], headers: [], sheetMissing: true, sheetName: name };
-  }
-  const data = XLSX.utils.sheet_to_json(sheet, {
-    header: 1,
-    raw: false,
-    defval: "",
-  });
-  const headers = data[0] || [];
-  const rows = data.slice(1);
-  return { rows, headers, sheetMissing: false, sheetName: name };
-};
-
-const ensureHeaders = (headers, required) => {
-  const headerMap = getHeaderIndex(headers);
-  const missing = required.filter(
-    (h) => !headerMap.has(normalizeHeader(h))
-  );
-  return { headerMap, missing };
-};
-
 const getStats = (map, name) => {
   if (!map.has(name)) {
     map.set(name, { ...BASE_STATS });
@@ -215,24 +97,13 @@ const getStats = (map, name) => {
 };
 
 const exportResultsXLSX = (summaryRows, logRows, detailsByEmployee) => {
-  const wb = XLSX.utils.book_new();
-  const summarySheet = XLSX.utils.json_to_sheet(summaryRows);
-  XLSX.utils.book_append_sheet(wb, summarySheet, "Tổng hợp");
-  const logSheet = XLSX.utils.json_to_sheet(logRows);
-  XLSX.utils.book_append_sheet(wb, logSheet, "Chi tiết");
+  const wb = createCommissionWorkbook(summaryRows, logRows);
   Object.entries(detailsByEmployee || {}).forEach(([name, details]) => {
-    const baseName = name.replace(/[\[\]\:\*\?\/\\]/g, " ");
-    const maxNameLen = 31 - "ChiTiet - ".length;
-    const safeName = baseName.slice(0, Math.max(maxNameLen, 0));
+    const safeName = sanitizeEmployeeSheetName(name);
     const rows = [];
     rows.push([`Chi tiết nhân viên: ${name}`]);
     rows.push([]);
-    const pushSection = (title, header, data) => {
-      rows.push([title]);
-      rows.push(header);
-      data.forEach((row) => rows.push(row));
-      rows.push([]);
-    };
+    const pushSection = createSectionPusher(rows);
     pushSection(
       "Trừ hàng tặng Lẻ",
       [
@@ -322,11 +193,15 @@ const exportResultsXLSX = (summaryRows, logRows, detailsByEmployee) => {
     pushSection(
       "Trừ chi phí quảng cáo",
       [
-        "Sản phẩm chạy quảng cáo",
-        "Ghi chú",
-        "ROAS",
+        "TEAM",
+        "ROAS THỰC TẾ",
+        "ROAS ĐÁNH GIÁ",
         "TỔNG CHI",
-        "Doanh thu",
+        "DOANH THU",
+        "CPQC TÍNH HH",
+        "CP CHƯA TĂNG",
+        "CP TĂNG TN",
+        "MỨC HƯỞNG DT",
         "Số tiền trừ",
         "Trạng thái",
       ],
@@ -337,40 +212,6 @@ const exportResultsXLSX = (summaryRows, logRows, detailsByEmployee) => {
   });
   XLSX.writeFile(wb, `hoa-hong_${new Date().toISOString().slice(0, 10)}.xlsx`);
 };
-
-function Modal({ open, title, subtitle, children, onClose, showClose = true }) {
-  if (!open) return null;
-  return (
-    <div className="fixed inset-0 z-[70] grid place-items-center px-4">
-      <div
-        className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
-        onClick={showClose ? onClose : undefined}
-      />
-      <div className="relative w-full max-w-4xl overflow-hidden rounded-3xl border border-white/60 bg-white/90 shadow-[0_30px_80px_-40px_rgba(15,23,42,0.45)] backdrop-blur-xl">
-        <div className="flex items-start justify-between gap-3 border-b border-white/60 bg-gradient-to-r from-white/70 to-emerald-50/70 p-5">
-          <div className="min-w-0">
-            <h3 className="truncate text-lg font-semibold tracking-tight text-slate-900">
-              {title}
-            </h3>
-            {subtitle ? (
-              <p className="mt-0.5 text-sm text-slate-500">{subtitle}</p>
-            ) : null}
-          </div>
-          {showClose ? (
-            <button
-              onClick={onClose}
-              className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border bg-white/70 text-slate-600 shadow-sm transition hover:bg-white active:scale-[0.98]"
-              title="Đóng"
-            >
-              <X className="h-5 w-5" />
-            </button>
-          ) : null}
-        </div>
-        <div className="max-h-[80vh] overflow-y-auto p-5">{children}</div>
-      </div>
-    </div>
-  );
-}
 
 export default function CommissionOnlineCalculator() {
   const fileDataCacheRef = useRef({});
@@ -756,7 +597,7 @@ export default function CommissionOnlineCalculator() {
       overrideReturnsPrices = {},
     } = options;
 
-    const storedReturnPrices = loadStoredReturnPrices();
+    const storedReturnPrices = await getStoredManualPrices("online");
 
     const excludedGiftSet = new Set(excludedGiftCodes.map((c) => normalizeText(c).toUpperCase()));
     const excludedReturnSet = new Set(excludedReturnCodes.map((c) => normalizeText(c).toUpperCase()));
@@ -770,10 +611,8 @@ export default function CommissionOnlineCalculator() {
       setProcessing(false);
       return;
     }
-    const selectedSet = new Set(selectedEmployees);
-    const shouldProcess = (name) =>
-      selectedSet.size === 0 || selectedSet.has(name);
-    const getEmployeeType = (name) => employeeTypes[name] || "online";
+    const shouldProcess = makeShouldProcess(selectedEmployees);
+    const getEmployeeType = makeGetEmployeeType(employeeTypes);
     const mergeMap = {};
     const mergeTypeMap = {};
     employeeMerges.forEach((mg) => {
@@ -1246,49 +1085,34 @@ export default function CommissionOnlineCalculator() {
               const stats = getStats(employeeMap, effectiveName);
               const log = getLog(effectiveName);
               const details = getDetails(effectiveName);
-              const campaignName = normalizeText(
-                getCell(row, headerMap, "Sản phẩm chạy quảng cáo")
-              );
-              const adNote = normalizeText(getCell(row, headerMap, "Ghi chú"));
-              const isTcpAd = adNote.toUpperCase() === "TCP";
-              const cost = parseNumber(
-                getCell(row, headerMap, "TỔNG CHI")
-              );
-              const roas = parseNumber(getCell(row, headerMap, "ROAS"));
-              const revenue = parseNumber(getCell(row, headerMap, "Doanh thu"));
-              let deductValue = 0;
-              let status = "ROAS >= 8: Trừ chi phí quảng cáo";
 
-              if (!Number.isFinite(roas) || roas < 0 || roas >= 8) {
-                deductValue = cost;
-                stats.Retail_Normal -= deductValue;
-                log.adCostDeduction += deductValue;
-              } else if (roas > 2) {
-                if (isTcpAd) {
-                  deductValue = Math.max(0, revenue - cost) * 0.5;
-                  stats.Retail_Normal -= deductValue;
-                  log.adCostDeduction += deductValue;
-                } else {
-                  deductValue = Math.max(0, revenue);
-                  stats.Retail_Normal -= deductValue;
-                  log.adCostDeduction += deductValue;
-                }
-                status = isTcpAd
-                  ? "2 < ROAS < 8 + TCP: Trừ 50% chênh lệch doanh thu - chi phí"
-                  : "2 < ROAS < 8: Ghi nhận doanh thu không hưởng hoa hồng";
-              } else {
-                deductValue = Math.abs(revenue - cost);
-                stats.Retail_Normal -= deductValue;
-                log.adCostDeduction += deductValue;
-                status = "ROAS <= 2: Trừ phần chênh lệch |Doanh thu - Chi phí|";
-              }
+              const {
+                team,
+                cpChuaTang,
+                cpTangTN,
+                mucHuongDT,
+                tongChi,
+                doanhThu,
+                cpqcTinhHH,
+                roasThucTe,
+                roasDanhGia,
+                deductValue,
+                status,
+              } = calculateAdCostDeduction(row, headerMap);
+
+              stats.Retail_Normal -= deductValue;
+              log.adCostDeduction += deductValue;
 
               details.adCosts.push([
-                campaignName,
-                adNote,
-                roas,
-                cost,
-                revenue,
+                team,
+                roasThucTe,
+                roasDanhGia,
+                tongChi,
+                doanhThu,
+                cpqcTinhHH,
+                cpChuaTang,
+                cpTangTN,
+                mucHuongDT,
                 deductValue,
                 status,
               ]);
@@ -1492,7 +1316,7 @@ export default function CommissionOnlineCalculator() {
     }
   };
 
-  const handleConfirmMissingPrices = () => {
+  const handleConfirmMissingPrices = async () => {
     const returnsPriceMap = {};
     const giftPriceMap = {};
     let invalid = false;
@@ -1518,7 +1342,8 @@ export default function CommissionOnlineCalculator() {
       return;
     }
 
-    saveStoredReturnPrices(returnsPriceMap);
+    const existing = await getStoredManualPrices("online");
+    await saveAllManualPrices("online", { ...existing, ...returnsPriceMap });
     setMissingPriceModalOpen(false);
     runCalculation({
       overrideReturnsPrices: returnsPriceMap,
@@ -1579,12 +1404,12 @@ export default function CommissionOnlineCalculator() {
               </button>
               <button
                 type="button"
-                onClick={() => {
-                  localStorage.removeItem(STORAGE_KEY_RETURN_PRICES);
+                onClick={async () => {
+                  await saveAllManualPrices("online", {});
                   localStorage.removeItem(STORAGE_KEY_AMBIGUOUS);
                 }}
                 className="inline-flex items-center gap-2 rounded-2xl border border-rose-200/70 bg-white/75 px-4 py-2.5 text-sm font-semibold text-rose-600 shadow-sm transition hover:bg-rose-50 active:scale-[0.98]"
-                title="Xóa toàn bộ giá và lựa chọn đã lưu trong trình duyệt"
+                title="Xóa toàn bộ giá và lựa chọn đã lưu (cả trên máy chủ)"
               >
                 Xóa giá đã lưu
               </button>

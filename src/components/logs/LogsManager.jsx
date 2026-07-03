@@ -43,11 +43,77 @@ const LevelStatus = ({ status }) => {
     );
 };
 
+const getLogMetadata = (log) => log?.metadata || log?.info_them || {};
+
+const isPayrollAttendanceLog = (metadata = {}) =>
+    metadata.service === 'PAYROLL_ATTENDANCE' || String(metadata.action || '').includes('ATTENDANCE');
+
+const isPayrollUpdateLog = (metadata = {}) =>
+    metadata.service === 'PAYROLL_UPDATE' || String(metadata.action || '').includes('PAYROLL_STATUS');
+
+const isPayrollCommissionLog = (metadata = {}) =>
+    metadata.service === 'PAYROLL_COMMISSION' || metadata.action === 'IMPORT_PAYROLL_COMMISSION';
+
+const formatPayrollEmployeeDetail = (employee = {}) => {
+    const after = employee.after || {};
+    const before = employee.before || {};
+    const name = employee.tenNhanVien || employee.sourceTenNhanVien || employee.attendanceName || 'N/A';
+    const code = employee.maNhanVien || employee.sourceMaNhanVien || 'N/A';
+    const changes = [
+        `ngày công ${before.ngayCong ?? '-'} -> ${after.ngayCong ?? '-'}`,
+        `giờ làm ${before.tongGioLam ?? '-'} -> ${after.tongGioLam ?? '-'}`,
+        `đi muộn ${before.tongGioDiMuon ?? '-'} -> ${after.tongGioDiMuon ?? '-'}`,
+        `tăng ca ${before.tangCaThuong ?? '-'} -> ${after.tangCaThuong ?? after.tongGioLamThem ?? '-'}`,
+    ];
+    return `${code} - ${name}: ${changes.join(', ')}`;
+};
+
+const formatPayrollCommissionDetail = (employee = {}) => {
+    const name = employee.tenNhanVien || 'N/A';
+    const code = employee.maNhanVien || 'N/A';
+    return `${code} - ${name}: Doanh số ${employee.before?.doanhSo ?? '-'} -> ${employee.after?.doanhSo ?? '-'}, Hoa hồng ${employee.before?.hoaHong ?? '-'} -> ${employee.after?.hoaHong ?? '-'}`;
+};
+
+const formatPayrollUpdateDetail = (employee = {}) => {
+    const name = employee.tenNhanVien || 'N/A';
+    const code = employee.maNhanVien || 'N/A';
+    const changes = Array.isArray(employee.changes) ? employee.changes : [];
+    const changeText = changes.length
+        ? changes.map((change) => `${change.label || change.field}: ${change.before ?? '-'} -> ${change.after ?? '-'}`).join(', ')
+        : 'Không có thay đổi';
+    return `${code} - ${name}: ${changeText}`;
+};
+
+const buildPayrollLogDetailText = (metadata = {}) => {
+    if (!isPayrollAttendanceLog(metadata) && !isPayrollUpdateLog(metadata) && !isPayrollCommissionLog(metadata)) return '';
+    const summary = metadata.summary || {};
+    const employees = Array.isArray(metadata.employees) ? metadata.employees : [];
+    const sourceFiles = summary.logContext?.sourceFiles || [];
+    const parts = [
+        `Kỳ: ${metadata.period || '-'}`,
+        `Nguồn: ${metadata.source || '-'}`,
+        `Cập nhật: ${summary.updated ?? employees.length}`,
+    ];
+    if (sourceFiles.length) {
+        parts.push(`File: ${sourceFiles.map((file) => `${file.fileName || '-'} (${file.rowCount || 0} dòng)`).join('; ')}`);
+    }
+    if (employees.length) {
+        const formatter = isPayrollCommissionLog(metadata)
+            ? formatPayrollCommissionDetail
+            : isPayrollUpdateLog(metadata)
+                ? formatPayrollUpdateDetail
+                : formatPayrollEmployeeDetail;
+        parts.push(`Nhân viên: ${employees.map(formatter).join(' | ')}`);
+    }
+    return parts.join(' | ');
+};
+
 const AdvancedLogManager = () => {
     const { token } = useAuth();
     const [logs, setLogs] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
+    const [expandedLogId, setExpandedLogId] = useState(null);
 
     // State filters
     const [page, setPage] = useState(1);
@@ -97,16 +163,20 @@ const AdvancedLogManager = () => {
     const exportToCSV = () => {
         if (logs.length === 0) return;
 
-        const headers = ["Time", "User", "Method", "Level", "Status", "IP", "Message"];
-        const rows = logs.map(log => [
-            format(new Date(log.timestamp), 'yyyy-MM-dd HH:mm:ss'),
-            log.metadata?.username || 'System',
-            log.metadata?.method || 'N/A',
-            log.level,
-            log.metadata?.status || 'N/A',
-            log.metadata?.ip || '0.0.0.0',
-            `"${log.message.replace(/"/g, '""')}"` // Escape dấu nháy kép
-        ]);
+        const headers = ["Time", "User", "Method", "Level", "Status", "IP", "Message", "Details"];
+        const rows = logs.map(log => {
+            const metadata = getLogMetadata(log);
+            return [
+                format(new Date(log.timestamp), 'yyyy-MM-dd HH:mm:ss'),
+                metadata.username || 'System',
+                metadata.method || 'N/A',
+                log.level,
+                metadata.status || 'N/A',
+                metadata.ip || '0.0.0.0',
+                `"${String(log.message || '').replace(/"/g, '""')}"`,
+                `"${buildPayrollLogDetailText(metadata).replace(/"/g, '""')}"`
+            ];
+        });
 
         const csvContent = [headers, ...rows].map(e => e.join(",")).join("\n");
         const blob = new Blob(["\ufeff" + csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -223,24 +293,98 @@ const AdvancedLogManager = () => {
                                 <tbody className="divide-y divide-gray-100">
                                     {loading && logs.length === 0 ? (
                                         <tr><td colSpan="8" className="p-20 text-center text-blue-500 animate-pulse">Đang tải dữ liệu...</td></tr>
-                                    ) : logs.length > 0 ? logs.map((log, idx) => (
-                                        <tr key={log._id || idx} className="hover:bg-blue-50/30 text-sm transition-colors group">
-                                            <td className="p-4 text-gray-600 tabular-nums font-medium">
-                                                {log.timestamp ? format(new Date(log.timestamp), 'dd/MM HH:mm:ss') : 'N/A'}
-                                            </td>
-                                            <td className="p-4 font-semibold text-gray-900 truncate">
-                                                {log.metadata?.username || 'System'}
-                                            </td>
-                                            <td className="p-4 text-center"><LevelBadge type="method" value={log.metadata?.method} /></td>
-                                            <td className="p-4 text-center"><LevelBadge type="log" value={log.level == 'info' ? 'success' : log.level} /></td>
-                                            <td className="p-4 text-center"><LevelStatus status={log.metadata?.status} /></td>
-                                            <td className="p-4 text-gray-500 font-mono text-xs">{log.metadata?.ip || '0.0.0.0'}</td>
-                                            <td className="p-4 text-gray-600 font-mono text-xs truncate" title={log.message}>{log.message}</td>
-                                            <td className="p-4 text-center">
-                                                <button className="p-1 hover:bg-gray-200 rounded-full transition-colors"><MoreHorizontal size={18} className="text-gray-400" /></button>
-                                            </td>
-                                        </tr>
-                                    )) : (
+                                    ) : logs.length > 0 ? logs.map((log, idx) => {
+                                        const metadata = getLogMetadata(log);
+                                        const employees = Array.isArray(metadata.employees) ? metadata.employees : [];
+                                        const errors = Array.isArray(metadata.errors) ? metadata.errors : [];
+                                        const sourceFiles = metadata.summary?.logContext?.sourceFiles || [];
+                                        const rowKey = log._id || idx;
+                                        const expanded = expandedLogId === rowKey;
+                                        return (
+                                            <React.Fragment key={rowKey}>
+                                                <tr className="hover:bg-blue-50/30 text-sm transition-colors group">
+                                                    <td className="p-4 text-gray-600 tabular-nums font-medium">
+                                                        {log.timestamp ? format(new Date(log.timestamp), 'dd/MM HH:mm:ss') : 'N/A'}
+                                                    </td>
+                                                    <td className="p-4 font-semibold text-gray-900 truncate">
+                                                        {metadata.username || 'System'}
+                                                    </td>
+                                                    <td className="p-4 text-center"><LevelBadge type="method" value={metadata.method} /></td>
+                                                    <td className="p-4 text-center"><LevelBadge type="log" value={log.level == 'info' ? 'success' : log.level} /></td>
+                                                    <td className="p-4 text-center"><LevelStatus status={metadata.status} /></td>
+                                                    <td className="p-4 text-gray-500 font-mono text-xs">{metadata.ip || '0.0.0.0'}</td>
+                                                    <td className="p-4 text-gray-600 font-mono text-xs truncate" title={log.message}>{log.message}</td>
+                                                    <td className="p-4 text-center">
+                                                        <button
+                                                            className="p-1 hover:bg-gray-200 rounded-full transition-colors"
+                                                            onClick={() => setExpandedLogId(expanded ? null : rowKey)}
+                                                            title="Xem chi tiết"
+                                                        >
+                                                            <MoreHorizontal size={18} className={expanded ? 'text-blue-600' : 'text-gray-400'} />
+                                                        </button>
+                                                    </td>
+                                                </tr>
+                                                {expanded && (
+                                                    <tr className="bg-slate-50/80">
+                                                        <td colSpan="8" className="px-4 pb-4">
+                                                            <div className="rounded-lg border border-slate-200 bg-white p-4 text-xs text-slate-700">
+                                                                {isPayrollAttendanceLog(metadata) || isPayrollUpdateLog(metadata) || isPayrollCommissionLog(metadata) ? (
+                                                                    <div className="space-y-3">
+                                                                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                                                                            <div><span className="font-bold text-slate-500">Action:</span> {metadata.action || '-'}</div>
+                                                                            <div><span className="font-bold text-slate-500">Kỳ:</span> {metadata.period || '-'}</div>
+                                                                            <div><span className="font-bold text-slate-500">Nguồn:</span> {metadata.source || '-'}</div>
+                                                                            <div><span className="font-bold text-slate-500">Cập nhật:</span> {metadata.summary?.updated ?? employees.length}</div>
+                                                                        </div>
+                                                                        {sourceFiles.length > 0 && (
+                                                                            <div>
+                                                                                <p className="mb-1 font-bold text-slate-500">File nguồn</p>
+                                                                                <div className="flex flex-wrap gap-2">
+                                                                                    {sourceFiles.map((file, fileIdx) => (
+                                                                                        <span key={fileIdx} className="rounded border bg-slate-50 px-2 py-1 font-mono">
+                                                                                            {file.fileName || '-'} • {file.sheetName || '-'} • {file.rowCount || 0} dòng
+                                                                                        </span>
+                                                                                    ))}
+                                                                                </div>
+                                                                            </div>
+                                                                        )}
+                                                                        <div>
+                                                                            <p className="mb-1 font-bold text-slate-500">
+                                                                                {isPayrollCommissionLog(metadata) ? 'Thay đổi doanh số/hoa hồng' : isPayrollUpdateLog(metadata) ? 'Thay đổi trạng thái' : 'Nhân viên đã cập nhật'} ({employees.length})
+                                                                            </p>
+                                                                            <div className="max-h-72 overflow-auto rounded border border-slate-100">
+                                                                                {employees.length > 0 ? employees.map((employee, employeeIdx) => (
+                                                                                    <div key={employeeIdx} className="border-b border-slate-100 px-3 py-2 font-mono last:border-b-0">
+                                                                                        {isPayrollCommissionLog(metadata) ? formatPayrollCommissionDetail(employee) : isPayrollUpdateLog(metadata) ? formatPayrollUpdateDetail(employee) : formatPayrollEmployeeDetail(employee)}
+                                                                                    </div>
+                                                                                )) : <div className="px-3 py-2 text-slate-400">Không có chi tiết nhân viên.</div>}
+                                                                            </div>
+                                                                        </div>
+                                                                        {errors.length > 0 && (
+                                                                            <div>
+                                                                                <p className="mb-1 font-bold text-amber-600">Dòng lỗi/bỏ qua ({errors.length})</p>
+                                                                                <div className="max-h-40 overflow-auto rounded border border-amber-100 bg-amber-50/40">
+                                                                                    {errors.map((item, errorIdx) => (
+                                                                                        <div key={errorIdx} className="border-b border-amber-100 px-3 py-2 font-mono last:border-b-0">
+                                                                                            {(item.maNhanVien || '-')} - {(item.tenNhanVien || '-')} • {item.message || item.statusText || '-'}
+                                                                                        </div>
+                                                                                    ))}
+                                                                                </div>
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
+                                                                ) : (
+                                                                    <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words font-mono">
+                                                                        {JSON.stringify(metadata, null, 2)}
+                                                                    </pre>
+                                                                )}
+                                                            </div>
+                                                        </td>
+                                                    </tr>
+                                                )}
+                                            </React.Fragment>
+                                        );
+                                    }) : (
                                         <tr><td colSpan="8" className="p-20 text-center text-gray-400 italic">Không có dữ liệu.</td></tr>
                                     )}
                                 </tbody>

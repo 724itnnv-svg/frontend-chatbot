@@ -45,6 +45,7 @@ const TONE = {
 const TABS = [
   { id: "overview", label: "Tổng quan", icon: LayoutGrid },
   { id: "list", label: "Danh sách", icon: CalendarDays },
+  { id: "auto", label: "Tự động", icon: Zap },
   { id: "pending", label: "Cần duyệt", icon: AlertCircle },
   { id: "report", label: "Báo cáo", icon: BarChart3 },
 ];
@@ -417,6 +418,10 @@ function getRecordUserKey(record) {
   return record?.userId?._id || record?.userId || record?.user?._id || record?.userName || record?._id;
 }
 
+function getAutoSettingUserKey(setting) {
+  return setting?.userId?._id || setting?.userId || setting?.user?._id || setting?.userId || "";
+}
+
 function normalizeTeam(value) {
   return String(value || "").trim().toUpperCase();
 }
@@ -460,6 +465,19 @@ function createBulkStampForm() {
   };
 }
 
+function createAutoAttendanceForm() {
+  return {
+    locationId: "",
+    checkInTime: "07:30",
+    checkOutTime: "17:00",
+    saturdayOff: false,
+    saturdayHalfDay: false,
+    saturdayCheckOutTime: "11:30",
+    excludedDate: "",
+    excludedDates: [],
+    note: "",
+  };
+}
 function recordToForm(record) {
   const shifts = getRecordShifts(record);
   return {
@@ -604,6 +622,12 @@ export default function AttendanceManager() {
   const [bulkDeleteUserIds, setBulkDeleteUserIds] = useState(new Set());
   const [bulkDeleteUserSearch, setBulkDeleteUserSearch] = useState("");
   const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [autoSettings, setAutoSettings] = useState([]);
+  const [autoLoading, setAutoLoading] = useState(false);
+  const [autoSaving, setAutoSaving] = useState(false);
+  const [autoUserIds, setAutoUserIds] = useState(new Set());
+  const [autoUserSearch, setAutoUserSearch] = useState("");
+  const [autoForm, setAutoForm] = useState(createAutoAttendanceForm);
 
   function showFlash(ok, text) {
     setFlash({ ok, text });
@@ -699,6 +723,155 @@ export default function AttendanceManager() {
     }
   }, [api, from, to, teamFilter]);
 
+  const loadAutoSettings = useCallback(async () => {
+    setAutoLoading(true);
+    try {
+      const res = await api.get("/auto-attendance");
+      setAutoSettings(res.data?.data || []);
+    } catch {
+      showFlash(false, "Không thể tải cấu hình chấm công tự động.");
+    } finally {
+      setAutoLoading(false);
+    }
+  }, [api]);
+
+  function toggleAutoUser(userId) {
+    const id = String(userId);
+    setAutoUserIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function selectFilteredAutoUsers() {
+    setAutoUserIds((current) => {
+      const next = new Set(current);
+      filteredAutoUsers.forEach((employee) => next.add(String(employee._id)));
+      return next;
+    });
+  }
+
+  function clearAutoUsers() {
+    setAutoUserIds(new Set());
+  }
+
+  function addAutoExcludedDate() {
+    if (!autoForm.excludedDate) return;
+    setAutoForm((current) => {
+      const excludedDates = new Set(current.excludedDates || []);
+      excludedDates.add(current.excludedDate);
+      return { ...current, excludedDates: [...excludedDates].sort(), excludedDate: "" };
+    });
+  }
+
+  function removeAutoExcludedDate(date) {
+    setAutoForm((current) => ({
+      ...current,
+      excludedDates: (current.excludedDates || []).filter((item) => item !== date),
+    }));
+  }
+
+  async function saveAutoAttendanceSettings() {
+    if (autoUserIds.size === 0) return showFlash(false, "Chọn ít nhất một nhân viên để chấm công tự động.");
+    if (!autoForm.locationId) return showFlash(false, "Chọn vị trí chấm công tự động.");
+
+    setAutoSaving(true);
+    try {
+      const existingByUser = new Map(autoSettings.map((setting) => [String(setting.userId), setting]));
+      const userIds = [...autoUserIds];
+      await Promise.all(userIds.map((userId) => {
+        const existing = existingByUser.get(String(userId));
+        const excludedDates = new Set(Array.isArray(existing?.excludedDates) ? existing.excludedDates : []);
+        const datesToExclude = [...(autoForm.excludedDates || [])];
+        if (autoForm.excludedDate) datesToExclude.push(autoForm.excludedDate);
+        datesToExclude.forEach((date) => excludedDates.add(date));
+        return api.post("/auto-attendance", {
+          userId,
+          locationId: autoForm.locationId,
+          isEnabled: true,
+          checkInTime: autoForm.checkInTime || "07:30",
+          checkOutTime: autoForm.checkOutTime || "17:00",
+          saturdayOff: autoForm.saturdayOff,
+          saturdayHalfDay: autoForm.saturdayOff ? false : autoForm.saturdayHalfDay,
+          saturdayCheckOutTime: autoForm.saturdayCheckOutTime || "11:30",
+          excludedDates: [...excludedDates].sort(),
+          note: autoForm.note,
+        });
+      }));
+      showFlash(true, `Đã lưu tự động chấm công cho ${userIds.length} nhân viên.`);
+      setAutoUserIds(new Set());
+      setAutoForm(createAutoAttendanceForm());
+      await loadAutoSettings();
+    } catch (err) {
+      showFlash(false, err.response?.data?.message || "Không thể lưu cấu hình chấm công tự động.");
+    } finally {
+      setAutoSaving(false);
+    }
+  }
+
+  function editAutoSetting(setting) {
+    const userId = String(setting.userId?._id || setting.userId || setting.user?._id || "");
+    setAutoUserIds(userId ? new Set([userId]) : new Set());
+    setAutoForm({
+      ...createAutoAttendanceForm(),
+      locationId: String(setting.locationId?._id || setting.locationId || setting.location?._id || ""),
+      checkInTime: setting.checkInTime || "07:30",
+      checkOutTime: setting.checkOutTime || "17:00",
+      saturdayOff: setting.saturdayOff === true,
+      saturdayHalfDay: setting.saturdayOff === true ? false : setting.saturdayHalfDay === true,
+      saturdayCheckOutTime: setting.saturdayCheckOutTime || "11:30",
+      excludedDates: Array.isArray(setting.excludedDates) ? [...setting.excludedDates].sort() : [],
+      excludedDate: "",
+      note: setting.note || "",
+    });
+    setAutoUserSearch("");
+    showFlash(true, "Đã đưa cấu hình lên form để sửa.");
+  }
+
+  async function toggleAutoSetting(setting) {
+    setAutoSaving(true);
+    try {
+      await api.put(`/auto-attendance/${setting._id}`, { isEnabled: !setting.isEnabled });
+      await loadAutoSettings();
+    } catch (err) {
+      showFlash(false, err.response?.data?.message || "Không thể đổi trạng thái tự động chấm công.");
+    } finally {
+      setAutoSaving(false);
+    }
+  }
+
+  async function removeAutoSetting(setting) {
+    if (!window.confirm(`Xóa tự động chấm công của ${setting.user?.fullName || "nhân viên này"}?`)) return;
+    setAutoSaving(true);
+    try {
+      await api.delete(`/auto-attendance/${setting._id}`);
+      await loadAutoSettings();
+      showFlash(true, "Đã xóa cấu hình tự động chấm công.");
+    } catch (err) {
+      showFlash(false, err.response?.data?.message || "Không thể xóa cấu hình tự động chấm công.");
+    } finally {
+      setAutoSaving(false);
+    }
+  }
+
+  async function runAutoAttendanceNow(type) {
+    setAutoSaving(true);
+    try {
+      const time = type === "checkOut"
+        ? (autoForm.saturdayOff ? autoForm.checkOutTime : (autoForm.saturdayHalfDay ? autoForm.saturdayCheckOutTime : autoForm.checkOutTime))
+        : autoForm.checkInTime;
+      const res = await api.post("/auto-attendance/run-now", { type, time });
+      const data = res.data?.data || {};
+      showFlash(true, `Đã chạy thử: tạo ${data.created || 0}, cập nhật ${data.updated || 0}, bỏ qua ${data.skipped || 0}.`);
+      refreshCurrentTab();
+    } catch (err) {
+      showFlash(false, err.response?.data?.message || "Không thể chạy thử chấm công tự động.");
+    } finally {
+      setAutoSaving(false);
+    }
+  }
   useEffect(() => {
     loadFormOptions();
   }, [loadFormOptions]);
@@ -706,6 +879,7 @@ export default function AttendanceManager() {
   useEffect(() => {
     if (tab === "overview") {
       loadOverview();
+      loadAutoSettings();
     } else if (tab === "list") {
       setPage(1);
       loadList(1);
@@ -713,15 +887,21 @@ export default function AttendanceManager() {
       setPendingPage(1);
       setSelectedPendingIds(new Set());
       loadPending(1);
+    } else if (tab === "auto") {
+      loadAutoSettings();
     } else {
       loadReport();
     }
-  }, [tab, from, to, statusFilter, teamFilter, loadList, loadOverview, loadReport, loadPending]);
+  }, [tab, from, to, statusFilter, teamFilter, loadList, loadOverview, loadReport, loadPending, loadAutoSettings]);
 
   function refreshCurrentTab() {
-    if (tab === "overview") loadOverview();
+    if (tab === "overview") {
+      loadOverview();
+      loadAutoSettings();
+    }
     if (tab === "list") loadList(page);
     if (tab === "pending") loadPending(pendingPage);
+    if (tab === "auto") loadAutoSettings();
     if (tab === "report") loadReport();
   }
 
@@ -1189,11 +1369,23 @@ export default function AttendanceManager() {
     return employees.sort((a, b) => a.name.localeCompare(b.name, "vi"));
   }, [overviewRecords, searchUser, teamFilter, users]);
 
+  const autoSettingsByUser = useMemo(() => {
+    const map = new Map();
+    autoSettings.forEach((setting) => {
+      const userKey = getAutoSettingUserKey(setting);
+      if (userKey) map.set(String(userKey), setting);
+      const userName = setting.user?.fullName || setting.user?.name || setting.user?.email;
+      if (userName) map.set(userName, setting);
+    });
+    return map;
+  }, [autoSettings]);
+
   const overviewStats = useMemo(() => {
     let present = 0;
     let incomplete = 0;
     let invalid = 0;
     let missingPast = 0;
+    let autoEnabled = 0;
     const today = todayVN();
     const visibleEmployeeIds = new Set(overviewEmployees.map((e) => e.id));
     overviewRecords.forEach((record) => {
@@ -1204,20 +1396,30 @@ export default function AttendanceManager() {
       if (record.status === "invalid") invalid += 1;
     });
     overviewEmployees.forEach((employee) => {
+      const autoSetting = autoSettingsByUser.get(String(employee.id)) || autoSettingsByUser.get(employee.name);
+      if (autoSetting && autoSetting.isEnabled !== false) autoEnabled += 1;
       overviewDates.forEach((date) => {
         if (isSundayDate(date)) return;
         const record = overviewByUserDate.get(`${employee.id}-${date}`) || overviewByUserDate.get(`${employee.name}-${date}`);
         if (!record && isPastAttendanceDate(date, today)) missingPast += 1;
       });
     });
-    return { present, incomplete, invalid, missingPast };
-  }, [overviewByUserDate, overviewDates, overviewEmployees, overviewRecords]);
+    return { present, incomplete, invalid, missingPast, autoEnabled };
+  }, [autoSettingsByUser, overviewByUserDate, overviewDates, overviewEmployees, overviewRecords]);
 
   const teamOptions = useMemo(() => {
     const teams = new Set();
     users.forEach((u) => { if (u.teamId) teams.add(normalizeTeam(u.teamId)); });
     return [...teams].sort();
   }, [users]);
+
+
+  const filteredAutoUsers = useMemo(() => {
+    const keyword = autoUserSearch.trim().toLowerCase();
+    if (!keyword) return users;
+    return users.filter((employee) => [employee.fullName, employee.code, employee.teamId, employee.email]
+      .some((value) => String(value || "").toLowerCase().includes(keyword)));
+  }, [autoUserSearch, users]);
 
   const totalPages = Math.ceil(total / PAGE_LIMIT);
 
@@ -1881,9 +2083,10 @@ export default function AttendanceManager() {
         {tab === "overview" && (() => {
           const isWeek = weekMode;
           const colTemplate = isWeek
-            ? "220px repeat(7, 1fr)"
+            ? "220px repeat(7, minmax(0, 1fr))"
             : `220px repeat(${overviewDates.length}, minmax(138px, 1fr))`;
-          const rowClass = isWeek ? "grid" : "grid min-w-max";
+          const gridMinWidth = isWeek ? "100%" : `${220 + overviewDates.length * 138}px`;
+          const overviewGridStyle = { gridTemplateColumns: colTemplate, minWidth: gridMinWidth, width: "100%" };
           const today = todayVN();
 
           return (
@@ -1934,6 +2137,7 @@ export default function AttendanceManager() {
                   <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-emerald-700">Đủ công {overviewStats.present}</span>
                   <span className="rounded-full bg-amber-50 px-2.5 py-1 text-amber-700">Thiếu ca {overviewStats.incomplete}</span>
                   <span className="rounded-full bg-sky-50 px-2.5 py-1 text-sky-700">Sai vị trí {overviewStats.invalid}</span>
+                  <span className="rounded-full bg-violet-50 px-2.5 py-1 text-violet-700">Auto {overviewStats.autoEnabled}</span>
                   <span className="rounded-full bg-rose-50 px-2.5 py-1 text-rose-700">Chưa chấm ngày cũ {overviewStats.missingPast}</span>
                 </div>
               </div>
@@ -1946,11 +2150,11 @@ export default function AttendanceManager() {
               ) : overviewEmployees.length === 0 ? (
                 <div className="py-12 text-center text-sm text-slate-400">Không có nhân viên phù hợp.</div>
               ) : (
-                <div className={isWeek ? "overflow-y-auto" : "max-h-[68vh] overflow-auto"}>
+                <div className={isWeek ? "overflow-x-auto overflow-y-auto" : "max-h-[68vh] overflow-auto"}>
                   {/* Header row */}
                   <div
-                    className={`${rowClass} border-b border-slate-100 bg-slate-50 text-xs font-semibold text-slate-500`}
-                    style={{ gridTemplateColumns: colTemplate }}
+                    className="grid border-b border-slate-100 bg-slate-50 text-xs font-semibold text-slate-500"
+                    style={overviewGridStyle}
                   >
                     <div className="sticky left-0 z-20 border-r border-slate-200 bg-slate-50 px-4 py-3">
                       Nhân viên ({overviewEmployees.length})
@@ -1974,65 +2178,76 @@ export default function AttendanceManager() {
                   </div>
 
                   {/* Employee rows */}
-                  {overviewEmployees.map((employee) => (
-                    <div
-                      key={employee.id}
-                      className={`${rowClass} border-b border-slate-100 last:border-b-0`}
-                      style={{ gridTemplateColumns: colTemplate }}
-                    >
-                      <div className="sticky left-0 z-10 border-r border-slate-200 bg-white px-4 py-3">
-                        <p className="truncate text-sm font-semibold text-slate-800">{employee.name}</p>
-                        {employee.teamId && <p className="truncate text-xs text-slate-400">{employee.teamId}</p>}
-                      </div>
-
-                      {overviewDates.map((date) => {
-                        const record = overviewByUserDate.get(`${employee.id}-${date}`) || overviewByUserDate.get(`${employee.name}-${date}`);
-                        const shifts = getRecordShifts(record);
-                        const isToday = date === today;
-                        const dayStyle = getAttendanceDayStyle(record, date, today);
-
-                        return (
-                          <div key={`${employee.id}-${date}`} className={`border-r border-slate-100 p-2 last:border-r-0 ${isToday && !record ? "bg-violet-50/30" : ""}`}>
-                            <button
-                              type="button"
-                              onClick={() => record && openEditForm(record)}
-                              onDoubleClick={(event) => {
-                                if (record || isSundayDate(date)) return;
-                                event.preventDefault();
-                                openCreateFormFromOverviewCell(employee, date);
-                              }}
-                              className={`w-full rounded-lg border px-2 py-2 text-left transition ${isWeek ? "min-h-[100px]" : "min-h-[92px]"} ${dayStyle.bg} ${dayStyle.border} ${record ? "hover:shadow-sm" : `${dayStyle.text} hover:bg-violet-50/50`}`}
-                              title={record ? "Sửa bản ghi" : "Chưa chấm công - click đúp chuột vào để chấm"}
-                            >
-                              {record ? (
-                                <div className="space-y-1.5">
-                                  <div className="flex items-center gap-1.5">
-                                    <span className={`h-2 w-2 shrink-0 rounded-full ${dayStyle.dot}`} />
-                                    <span className="truncate text-[11px] font-semibold text-slate-500">{record.locationName || "Chưa có vị trí"}</span>
-                                  </div>
-                                  {shifts.length === 0 ? (
-                                    <p className="text-xs font-medium text-slate-500">Chưa có lượt chấm</p>
-                                  ) : shifts.map((shift) => (
-                                    <div key={shift.shiftNo || shift.name} className="rounded-md bg-white/70 px-2 py-1">
-                                      <p className="truncate text-[11px] font-bold text-slate-700">{shift.name || `Ca ${shift.shiftNo}`}</p>
-                                      <p className="text-xs font-semibold text-slate-800">{fmtTime(shift.checkIn?.time)} – {fmtTime(shift.checkOut?.time)}</p>
-
-                                    </div>
-                                  ))}
-                                  {dayStyle.label && record.status !== "present" && (
-                                    <p className={`text-[11px] font-bold ${dayStyle.text}`}>{dayStyle.label}</p>
-                                  )}
-                                  {record.workHours != null && <p className="text-[11px] font-bold text-emerald-700">Tổng {record.workHours}h</p>}
-                                </div>
-                              ) : (
-                                <div className={`flex h-full min-h-[74px] items-center justify-center text-xs font-semibold ${dayStyle.text}`}>{dayStyle.label}</div>
-                              )}
-                            </button>
+                  {overviewEmployees.map((employee) => {
+                    const autoSetting = autoSettingsByUser.get(String(employee.id)) || autoSettingsByUser.get(employee.name);
+                    const isAutoEmployee = Boolean(autoSetting && autoSetting.isEnabled !== false);
+                    return (
+                      <div
+                        key={employee.id}
+                        className={`grid border-b border-slate-100 last:border-b-0 ${isAutoEmployee ? "bg-violet-50/20" : ""}`}
+                        style={overviewGridStyle}
+                      >
+                        <div className={`sticky left-0 z-10 border-r px-4 py-3 ${isAutoEmployee ? "border-violet-200 bg-violet-50/95" : "border-slate-200 bg-white"}`}>
+                          <div className="flex min-w-0 items-center gap-2">
+                            <p className={`truncate text-sm font-semibold ${isAutoEmployee ? "text-violet-900" : "text-slate-800"}`}>{employee.name}</p>
+                            {isAutoEmployee && (
+                              <span className="shrink-0 rounded-full border border-violet-200 bg-white px-2 py-0.5 text-[10px] font-bold text-violet-700">
+                                AUTO
+                              </span>
+                            )}
                           </div>
-                        );
-                      })}
-                    </div>
-                  ))}
+                          {employee.teamId && <p className={`truncate text-xs ${isAutoEmployee ? "text-violet-500" : "text-slate-400"}`}>{employee.teamId}</p>}
+                        </div>
+
+                        {overviewDates.map((date) => {
+                          const record = overviewByUserDate.get(`${employee.id}-${date}`) || overviewByUserDate.get(`${employee.name}-${date}`);
+                          const shifts = getRecordShifts(record);
+                          const isToday = date === today;
+                          const dayStyle = getAttendanceDayStyle(record, date, today);
+
+                          return (
+                            <div key={`${employee.id}-${date}`} className={`border-r border-slate-100 p-2 last:border-r-0 ${isToday && !record ? "bg-violet-50/30" : ""}`}>
+                              <button
+                                type="button"
+                                onClick={() => record && openEditForm(record)}
+                                onDoubleClick={(event) => {
+                                  if (record || isSundayDate(date)) return;
+                                  event.preventDefault();
+                                  openCreateFormFromOverviewCell(employee, date);
+                                }}
+                                className={`w-full rounded-lg border px-2 py-2 text-left transition ${isWeek ? "min-h-[100px]" : "min-h-[92px]"} ${dayStyle.bg} ${dayStyle.border} ${record ? "hover:shadow-sm" : `${dayStyle.text} hover:bg-violet-50/50`}`}
+                                title={record ? "Sửa bản ghi" : "Chưa chấm công - click đúp chuột vào để chấm"}
+                              >
+                                {record ? (
+                                  <div className="space-y-1.5">
+                                    <div className="flex items-center gap-1.5">
+                                      <span className={`h-2 w-2 shrink-0 rounded-full ${dayStyle.dot}`} />
+                                      <span className="truncate text-[11px] font-semibold text-slate-500">{record.locationName || "Chưa có vị trí"}</span>
+                                    </div>
+                                    {shifts.length === 0 ? (
+                                      <p className="text-xs font-medium text-slate-500">Chưa có lượt chấm</p>
+                                    ) : shifts.map((shift) => (
+                                      <div key={shift.shiftNo || shift.name} className="rounded-md bg-white/70 px-2 py-1">
+                                        <p className="truncate text-[11px] font-bold text-slate-700">{shift.name || `Ca ${shift.shiftNo}`}</p>
+                                        <p className="text-xs font-semibold text-slate-800">{fmtTime(shift.checkIn?.time)} – {fmtTime(shift.checkOut?.time)}</p>
+
+                                      </div>
+                                    ))}
+                                    {dayStyle.label && record.status !== "present" && (
+                                      <p className={`text-[11px] font-bold ${dayStyle.text}`}>{dayStyle.label}</p>
+                                    )}
+                                    {record.workHours != null && <p className="text-[11px] font-bold text-emerald-700">Tổng {record.workHours}h</p>}
+                                  </div>
+                                ) : (
+                                  <div className={`flex h-full min-h-[74px] items-center justify-center text-xs font-semibold ${dayStyle.text}`}>{dayStyle.label}</div>
+                                )}
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -2122,6 +2337,226 @@ export default function AttendanceManager() {
                 )}
               </>
             )}
+          </div>
+        )}
+
+
+        {tab === "auto" && (
+          <div className="grid gap-5 xl:grid-cols-[minmax(360px,0.95fr)_minmax(0,1.55fr)]">
+            <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="mb-4 flex items-start justify-between gap-3">
+                <div>
+                  <h2 className="text-base font-bold text-slate-900">Chấm công tự động</h2>
+                  <p className="text-xs text-slate-500">Chọn nhân viên cần tự chấm nguyên ngày. Đến ngày nghỉ đã chọn thì hệ thống bỏ qua.</p>
+                </div>
+                <Badge tone="violet">07:30 - 17:00</Badge>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="text-xs font-semibold text-slate-500">
+                  GIỜ VÀO
+                  <input
+                    type="time"
+                    value={autoForm.checkInTime}
+                    onChange={(e) => setAutoForm((prev) => ({ ...prev, checkInTime: e.target.value }))}
+                    className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
+                  />
+                </label>
+                <label className="text-xs font-semibold text-slate-500">
+                  GIỜ RA
+                  <input
+                    type="time"
+                    value={autoForm.checkOutTime}
+                    onChange={(e) => setAutoForm((prev) => ({ ...prev, checkOutTime: e.target.value }))}
+                    className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
+                  />                <label className="flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700">
+                    <input
+                      type="checkbox"
+                      checked={autoForm.saturdayOff}
+                      onChange={(e) => setAutoForm((prev) => ({ ...prev, saturdayOff: e.target.checked, saturdayHalfDay: e.target.checked ? false : prev.saturdayHalfDay }))}
+                      className="h-4 w-4 rounded border-slate-300 accent-amber-600"
+                    />
+                    NGHỈ CẢ NGÀY THỨ 7
+                  </label>
+                  <label className="flex items-center gap-2 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs font-semibold text-sky-700">
+                    <input
+                      type="checkbox"
+                      checked={autoForm.saturdayHalfDay}
+                      onChange={(e) => setAutoForm((prev) => ({ ...prev, saturdayHalfDay: e.target.checked }))}
+                      disabled={autoForm.saturdayOff}
+                      className="h-4 w-4 rounded border-slate-300 accent-sky-600 disabled:opacity-50"
+                    />
+                    THỨ 7 NỬA NGÀY
+                  </label>
+                  <label className="text-xs font-semibold text-slate-500">
+                    GIỜ RA THỨ 7
+                    <input
+                      type="time"
+                      value={autoForm.saturdayCheckOutTime}
+                      onChange={(e) => setAutoForm((prev) => ({ ...prev, saturdayCheckOutTime: e.target.value }))}
+                      disabled={autoForm.saturdayOff || !autoForm.saturdayHalfDay}
+                      className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none focus:border-sky-400 focus:ring-2 focus:ring-sky-100 disabled:opacity-50"
+                    />
+                  </label>
+
+                </label>
+                <label className="text-xs font-semibold text-slate-500 sm:col-span-2">
+                  VỊ TRÍ CHẤM CÔNG
+                  <select
+                    value={autoForm.locationId}
+                    onChange={(e) => setAutoForm((prev) => ({ ...prev, locationId: e.target.value }))}
+                    className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
+                  >
+                    <option value="">Chọn vị trí</option>
+                    {locations.map((location) => (
+                      <option key={location._id} value={location._id}>{location.name}{location.teamId ? ` (${location.teamId})` : ""}</option>
+                    ))}
+                  </select>
+                </label>
+                <div className="text-xs font-semibold text-slate-500">
+                  NGÀY NGHỈ TRONG THÁNG
+                  <div className="mt-1.5 flex gap-2">
+                    <input
+                      type="date"
+                      value={autoForm.excludedDate}
+                      onChange={(e) => setAutoForm((prev) => ({ ...prev, excludedDate: e.target.value }))}
+                      className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
+                    />
+                    <button
+                      type="button"
+                      onClick={addAutoExcludedDate}
+                      disabled={!autoForm.excludedDate}
+                      className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-700 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Thêm
+                    </button>
+                  </div>
+                  {(autoForm.excludedDates || []).length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {(autoForm.excludedDates || []).map((date) => (
+                        <button
+                          type="button"
+                          key={date}
+                          onClick={() => removeAutoExcludedDate(date)}
+                          className="inline-flex items-center gap-1 rounded-lg border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-700 hover:bg-amber-100"
+                          title="Bấm để bỏ ngày nghỉ này"
+                        >
+                          {fmtShortDate(date)} <X size={11} />
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <label className="text-xs font-semibold text-slate-500">
+                  GHI CHÚ
+                  <input
+                    value={autoForm.note}
+                    onChange={(e) => setAutoForm((prev) => ({ ...prev, note: e.target.value }))}
+                    placeholder="VD: Auto công văn phòng"
+                    className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
+                  />
+                </label>
+              </div>
+
+              <div className="mt-4 rounded-xl border border-slate-200">
+                <div className="flex items-center gap-2 border-b border-slate-100 bg-slate-50 px-3 py-2">
+                  <Search size={14} className="text-slate-400" />
+                  <input
+                    value={autoUserSearch}
+                    onChange={(e) => setAutoUserSearch(e.target.value)}
+                    placeholder="Tìm nhân viên cần tự động chấm..."
+                    className="min-w-0 flex-1 bg-transparent text-sm outline-none"
+                  />
+                </div>
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-3 py-2">
+                  <span className="text-xs font-semibold text-slate-500">Đã chọn {autoUserIds.size}/{filteredAutoUsers.length}</span>
+                  <div className="flex flex-wrap gap-2">
+                    <button type="button" onClick={selectFilteredAutoUsers} className="rounded-lg border border-violet-200 bg-violet-50 px-2.5 py-1 text-xs font-bold text-violet-700 hover:bg-violet-100">Chọn tất cả</button>
+                    <button type="button" onClick={clearAutoUsers} className="rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-bold text-slate-600 hover:bg-slate-50">Bỏ chọn</button>
+                  </div>
+                </div>
+                <div className="max-h-72 overflow-y-auto p-2">
+                  {filteredAutoUsers.length === 0 ? (
+                    <div className="px-3 py-6 text-center text-sm text-slate-400">Không tìm thấy nhân viên.</div>
+                  ) : filteredAutoUsers.map((employee) => {
+                    const checked = autoUserIds.has(String(employee._id));
+                    const currentSetting = autoSettingsByUser.get(String(employee._id));
+                    return (
+                      <label key={employee._id} className={`flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-sm hover:bg-violet-50 ${checked ? "bg-violet-50 text-violet-800" : "text-slate-700"}`}>
+                        <input type="checkbox" checked={checked} onChange={() => toggleAutoUser(employee._id)} className="h-4 w-4 rounded border-slate-300 accent-violet-600" />
+                        <span className="min-w-0 flex-1 truncate">{employee.code ? `${employee.code} - ` : ""}{employee.fullName || employee.email || employee._id}{employee.teamId ? ` (${employee.teamId})` : ""}</span>
+                        {currentSetting && <Badge tone={currentSetting.isEnabled ? "emerald" : "slate"}>{currentSetting.isEnabled ? "Đang auto" : "Tạm tắt"}</Badge>}
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-wrap gap-2">
+                  <button type="button" onClick={() => runAutoAttendanceNow("checkIn")} disabled={autoSaving} className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700 hover:bg-emerald-100 disabled:opacity-50">
+                    <Clock size={13} /> Chạy vào thử
+                  </button>
+                  <button type="button" onClick={() => runAutoAttendanceNow("checkOut")} disabled={autoSaving} className="inline-flex items-center gap-1.5 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs font-bold text-sky-700 hover:bg-sky-100 disabled:opacity-50">
+                    <Clock size={13} /> Chạy ra thử
+                  </button>
+                </div>
+                <button type="button" onClick={saveAutoAttendanceSettings} disabled={autoSaving} className="inline-flex items-center gap-2 rounded-xl bg-violet-600 px-4 py-2 text-sm font-bold text-white shadow-sm hover:bg-violet-700 disabled:opacity-50">
+                  {autoSaving ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />}
+                  Lưu tự động
+                </button>
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+              <div className="flex items-center justify-between gap-2 border-b border-slate-100 px-4 py-3">
+                <span className="text-sm font-semibold text-slate-700">Danh sách tự động chấm</span>
+                <Badge tone="violet">{autoSettings.length} cấu hình</Badge>
+              </div>
+              {autoLoading ? (
+                <div className="flex justify-center py-12"><Loader2 size={22} className="animate-spin text-slate-400" /></div>
+              ) : autoSettings.length === 0 ? (
+                <div className="py-12 text-center text-sm text-slate-400">Chưa có nhân viên nào được bật tự động chấm công.</div>
+              ) : (
+                <div className="divide-y divide-slate-100">
+                  {autoSettings.map((setting) => (
+                    <div key={setting._id} className="grid gap-3 px-4 py-3 md:grid-cols-[1.4fr_1fr_1.2fr_170px] md:items-start">
+                      <div>
+                        <p className="text-sm font-semibold text-slate-800">{setting.user?.fullName || "-"}</p>
+                        <p className="text-xs text-slate-400">{setting.user?.code || ""}{setting.user?.teamId ? ` · ${setting.user.teamId}` : ""}</p>
+                      </div>
+                      <div className="text-sm text-slate-600">
+                        <p className="font-semibold">{setting.checkInTime || "07:30"} - {setting.checkOutTime || "17:00"}</p>
+                        {setting.saturdayOff ? (
+                          <p className="text-xs font-semibold text-amber-600">T7: nghỉ cả ngày</p>
+                        ) : setting.saturdayHalfDay && (
+                          <p className="text-xs font-semibold text-sky-600">T7: {setting.checkInTime || "07:30"} - {setting.saturdayCheckOutTime || "11:30"}</p>
+                        )}
+                        <p className="text-xs text-slate-400">{setting.location?.name || "Chưa chọn vị trí"}</p>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {(setting.excludedDates || []).length === 0 ? (
+                          <span className="text-xs text-slate-400">Không có ngày nghỉ riêng</span>
+                        ) : (setting.excludedDates || []).map((date) => (
+                          <span key={date} className="rounded-lg border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-700">{fmtShortDate(date)}</span>
+                        ))}
+                      </div>
+                      <div className="flex gap-1.5 md:justify-end">
+                        <button type="button" onClick={() => editAutoSetting(setting)} disabled={autoSaving} title="Sửa cấu hình tự động" className="rounded-xl border border-slate-200 p-1.5 text-slate-500 hover:bg-slate-50 disabled:opacity-50">
+                          <Pencil size={14} />
+                        </button>
+                        <button type="button" onClick={() => toggleAutoSetting(setting)} disabled={autoSaving} className={`rounded-xl border px-3 py-1.5 text-xs font-bold ${setting.isEnabled ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-slate-200 bg-slate-50 text-slate-500"}`}>
+                          {setting.isEnabled ? "Đang bật" : "Đã tắt"}
+                        </button>
+                        <button type="button" onClick={() => removeAutoSetting(setting)} disabled={autoSaving} title="Xóa cấu hình" className="rounded-xl border border-rose-200 p-1.5 text-rose-500 hover:bg-rose-50 disabled:opacity-50">
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         )}
 

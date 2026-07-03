@@ -6,6 +6,30 @@ import {
   getStoredManualPrices,
   saveAllManualPrices,
 } from "../../utils/manualPriceStorage";
+import {
+  normalizeText,
+  normalizeHeader,
+  normalizeUnit,
+  parseNumber,
+  parseBaoValue,
+  getCell,
+  getCellAlt,
+  ensureHeaders,
+  readWorkbook,
+  readSheetRows,
+  createSectionPusher,
+  createCommissionWorkbook,
+  sanitizeEmployeeSheetName,
+  makeShouldProcess,
+  makeGetEmployeeType,
+  AD_COST_HEADERS,
+  calculateAdCostDeduction,
+  VN_LOCALE,
+  formatMoney,
+  EMPLOYEE_TYPES,
+  UNIT_CONVERSION,
+} from "../../utils/commissionExcelUtils";
+import Modal from "./CommissionModal";
 
 const FILE_DEFS_ABC = [
   {
@@ -44,36 +68,9 @@ const FILE_DEFS_ABC = [
   {
     key: "adcost",
     label: "File chi phí quảng cáo",
-    headers: [
-      "Nhân viên",
-      "Sản phẩm chạy quảng cáo",
-      "TỔNG CHI",
-      "Doanh thu",
-      "ROAS",
-    ],
-    sheet: "CHI TIẾT CHIẾN DỊCH",
+    headers: [...AD_COST_HEADERS, "Sản phẩm chạy quảng cáo", "Ghi chú"],
   },
 ];
-
-const UNIT_CONVERSION = {
-  "20KG": 1,
-  "22KG": 1,
-  "25KG": 1,
-  "15KG": 2,
-  "10KG": 2,
-  "5KG": 4,
-  "5 LÍT": 6,
-  "5 LIT": 6,
-  "1KG": 20,
-  "1 LÍT": 24,
-  "1 LIT": 24,
-  "500G": 30,
-  "500ML": 40,
-  "250ML": 72,
-  "250G": 100,
-  "200G": 100,
-  "100G": 200,
-};
 
 const CG_SKUS = new Set([
   "NNVCB1",
@@ -180,16 +177,9 @@ const DEFAULT_SPECIAL_GIFT_PRICES = [
   { itemCode: "NNV22-DS2", price: "99000" },
 ];
 
-const VN_LOCALE = "vi-VN";
 const STORAGE_PREFIX_ABC = "commission-abc";
 const CASHFLOW_NOTE_OVERRIDES_STORAGE_KEY = `${STORAGE_PREFIX_ABC}:cashflow-note-overrides`;
 const AD_COST_OVERRIDES_STORAGE_KEY = `${STORAGE_PREFIX_ABC}:ad-cost-overrides`;
-
-const EMPLOYEE_TYPES = [
-  { value: "online", label: "Online" },
-  { value: "admin", label: "Sale Admin" },
-  { value: "mkt", label: "Marketing" },
-];
 
 const DEFAULT_AD_COST_TYPE = "PB";
 
@@ -212,12 +202,6 @@ const CASHFLOW_NOTE_CLASS_OPTIONS = [
   { value: "DG", label: "DG - Dừa giống" },
   { value: "DST", label: "DST" },
 ];
-
-const formatMoney = (n) =>
-  Number(n || 0).toLocaleString(VN_LOCALE, { maximumFractionDigits: 0 });
-
-const normalizeText = (v) => String(v ?? "").trim();
-const normalizeHeader = (h) => normalizeText(h).toLowerCase();
 
 const readStoredObject = (key) => {
   try {
@@ -244,20 +228,6 @@ const normalizeNote = (v) =>
 const normalizeNotePlain = (v) =>
   normalizeText(v).toUpperCase().replace(/\s+/g, " ");
 
-const normalizeUnit = (v) =>
-  normalizeText(v).toUpperCase().replace(/\s+/g, " ");
-
-const parseNumber = (v) => {
-  if (typeof v === "number") return Number.isFinite(v) ? v : 0;
-  let s = String(v ?? "").trim();
-  if (!s) return 0;
-  s = s.replace(/\s+/g, "");
-  s = s.replace(/[,\.](?=\d{3}(\D|$))/g, "");
-  s = s.replace(/,/g, ".");
-  const n = Number(s);
-  return Number.isFinite(n) ? n : 0;
-};
-
 const parseNoteValue = (note) => {
   const text = normalizeNote(note);
   if (!text) return 0;
@@ -273,14 +243,6 @@ const parseProgramPrice = (text) => {
   if (!matches || matches.length === 0) return 0;
   const values = matches.map(parseNumber).filter((value) => value >= 100000);
   return values.length ? values[values.length - 1] : 0;
-};
-
-const parseBaoValue = (name) => {
-  const text = normalizeText(name);
-  if (!text) return 0;
-  const matches = text.match(/(\d[\d.,]*)/g);
-  if (!matches || matches.length === 0) return 0;
-  return parseNumber(matches[matches.length - 1]);
 };
 
 const classifyDSCP1ByPrice = (price) => {
@@ -342,24 +304,13 @@ const classifyDSCP2ByPrice = (price) => {
 };
 
 const exportResultsXLSX = (summaryRows, logRows, detailsByEmployee) => {
-  const wb = XLSX.utils.book_new();
-  const summarySheet = XLSX.utils.json_to_sheet(summaryRows || []);
-  XLSX.utils.book_append_sheet(wb, summarySheet, "Tổng hợp");
-  const logSheet = XLSX.utils.json_to_sheet(logRows || []);
-  XLSX.utils.book_append_sheet(wb, logSheet, "Chi tiết");
+  const wb = createCommissionWorkbook(summaryRows, logRows);
   Object.entries(detailsByEmployee || {}).forEach(([name, details]) => {
-    const baseName = name.replace(/[\[\]\:\*\?\/\\]/g, " ");
-    const maxNameLen = 31 - "ChiTiet - ".length;
-    const safeName = baseName.slice(0, Math.max(maxNameLen, 0));
+    const safeName = sanitizeEmployeeSheetName(name);
     const rows = [];
     rows.push([`Chi tiết nhân viên: ${name}`]);
     rows.push([]);
-    const pushSection = (title, header, data) => {
-      rows.push([title]);
-      rows.push(header);
-      data.forEach((row) => rows.push(row));
-      rows.push([]);
-    };
+    const pushSection = createSectionPusher(rows);
     pushSection(
       "Trừ hàng tặng PB",
       [
@@ -461,9 +412,15 @@ const exportResultsXLSX = (summaryRows, logRows, detailsByEmployee) => {
       [
         "Sản phẩm chạy quảng cáo",
         "Ghi chú",
-        "ROAS",
+        "TEAM",
+        "ROAS THỰC TẾ",
+        "ROAS ĐÁNH GIÁ",
         "TỔNG CHI",
-        "Doanh thu",
+        "DOANH THU",
+        "CPQC TÍNH HH",
+        "CP CHƯA TĂNG",
+        "CP TĂNG TN",
+        "MỨC HƯỞNG DT",
         "Số tiền trừ",
         "Nhóm",
         "Trạng thái",
@@ -477,67 +434,6 @@ const exportResultsXLSX = (summaryRows, logRows, detailsByEmployee) => {
     wb,
     `hoa-hong_abc_${new Date().toISOString().slice(0, 10)}.xlsx`,
   );
-};
-
-const getHeaderIndex = (headers) => {
-  const map = new Map();
-  headers.forEach((h, idx) => {
-    const key = normalizeHeader(h);
-    if (key && !map.has(key)) map.set(key, idx);
-  });
-  return map;
-};
-
-const getCell = (row, headerMap, headerName) => {
-  const idx = headerMap.get(normalizeHeader(headerName));
-  if (idx == null) return undefined;
-  return row[idx];
-};
-
-const getCellAlt = (row, headerMap, primary, secondary) => {
-  const primaryIdx = headerMap.get(normalizeHeader(primary));
-  if (primaryIdx != null) return row[primaryIdx];
-  const secondaryIdx = headerMap.get(normalizeHeader(secondary));
-  if (secondaryIdx != null) return row[secondaryIdx];
-  return undefined;
-};
-
-const ensureHeaders = (headers, required) => {
-  const headerMap = getHeaderIndex(headers);
-  const missing = required.filter((h) => !headerMap.has(normalizeHeader(h)));
-  return { headerMap, missing };
-};
-
-const readWorkbook = (file) =>
-  new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(new Error("Không đọc được file."));
-    reader.onload = () => {
-      try {
-        const data = reader.result;
-        const wb = XLSX.read(data, { type: "array", cellDates: false });
-        resolve(wb);
-      } catch (err) {
-        reject(err);
-      }
-    };
-    reader.readAsArrayBuffer(file);
-  });
-
-const readSheetRows = (workbook, sheetName) => {
-  const name = sheetName || workbook.SheetNames[0];
-  const sheet = workbook.Sheets[name];
-  if (!sheet) {
-    return { rows: [], headers: [], sheetMissing: true, sheetName: name };
-  }
-  const data = XLSX.utils.sheet_to_json(sheet, {
-    header: 1,
-    raw: false,
-    defval: "",
-  });
-  const headers = data[0] || [];
-  const rows = data.slice(1);
-  return { rows, headers, sheetMissing: false, sheetName: name };
 };
 
 const EMPTY_STATS = () => ({
@@ -944,40 +840,6 @@ const calculateOtherCommission = (stats = {}) => {
     seedling_comm,
   };
 };
-
-function Modal({ open, title, subtitle, children, onClose, showClose = true }) {
-  if (!open) return null;
-  return (
-    <div className="fixed inset-0 z-[70] grid place-items-center px-4">
-      <div
-        className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
-        onClick={showClose ? onClose : undefined}
-      />
-      <div className="relative w-full max-w-4xl overflow-hidden rounded-3xl border border-white/60 bg-white/90 shadow-[0_30px_80px_-40px_rgba(15,23,42,0.45)] backdrop-blur-xl">
-        <div className="flex items-start justify-between gap-3 border-b border-white/60 bg-gradient-to-r from-white/70 to-amber-50/70 p-5">
-          <div className="min-w-0">
-            <h3 className="truncate text-lg font-semibold tracking-tight text-slate-900">
-              {title}
-            </h3>
-            {subtitle ? (
-              <p className="mt-0.5 text-sm text-slate-500">{subtitle}</p>
-            ) : null}
-          </div>
-          {showClose ? (
-            <button
-              onClick={onClose}
-              className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border bg-white/70 text-slate-600 shadow-sm transition hover:bg-white active:scale-[0.98]"
-              title="Đóng"
-            >
-              <X className="h-5 w-5" />
-            </button>
-          ) : null}
-        </div>
-        <div className="max-h-[80vh] overflow-y-auto p-5">{children}</div>
-      </div>
-    </div>
-  );
-}
 
 export default function CommissionABCCalculator() {
   const [files, setFiles] = useState(
@@ -1705,10 +1567,8 @@ export default function CommissionABCCalculator() {
     const pendingCgShipFeeMap = new Map();
     const cgShipFeeKeyCounter = new Map();
 
-    const selectedSet = new Set(selectedEmployees);
-    const shouldProcess = (name) =>
-      selectedSet.size === 0 || selectedSet.has(name);
-    const getEmployeeType = (name) => employeeTypes[name] || "online";
+    const shouldProcess = makeShouldProcess(selectedEmployees);
+    const getEmployeeType = makeGetEmployeeType(employeeTypes);
 
     if (cashflowEmployees.length > 0 && selectedEmployees.length === 0) {
       setErrors(["Vui lòng chọn ít nhất một nhân viên để tính toán."]);
@@ -2586,23 +2446,28 @@ export default function CommissionABCCalculator() {
                 if (!shouldProcess(employee)) return;
                 const stats = getStats(employee);
                 const details = getDetails(employee);
-                const cost = parseNumber(
-                  getCell(row, headerMap, "TỔNG CHI"),
-                );
-                const revenue = parseNumber(
-                  getCell(row, headerMap, "Doanh thu"),
-                );
-                const roas = parseNumber(getCell(row, headerMap, "ROAS"));
                 const campaignName = normalizeText(
                   getCell(row, headerMap, "Sản phẩm chạy quảng cáo"),
                 );
                 const adNote = normalizeText(getCell(row, headerMap, "Ghi chú"));
                 const adTypeFromNote = classifyAdCostTypeFromNote(adNote);
                 const adTypeFromCampaign = classifyAdCostTypeFromCampaign(campaignName);
-                const isTcpAd = normalizeNotePlain(adNote) === "TCP";
                 const adKey = `${employee}||${campaignName || "(trống)"}`;
                 const selectedAdType = adTypeFromNote || adTypeFromCampaign || overrideAdCosts[adKey];
                 const shouldReviewAdCost = reviewAdCosts || !selectedAdType;
+                const {
+                  team,
+                  cpChuaTang,
+                  cpTangTN,
+                  mucHuongDT,
+                  tongChi: cost,
+                  doanhThu: revenue,
+                  cpqcTinhHH,
+                  roasThucTe,
+                  roasDanhGia,
+                  deductValue,
+                  status,
+                } = calculateAdCostDeduction(row, headerMap);
                 if (shouldReviewAdCost) {
                   const prev = pendingAdCostMap.get(adKey);
                   if (prev) {
@@ -2624,34 +2489,19 @@ export default function CommissionABCCalculator() {
                   return;
                 }
                 const cls = classifyAdCostType(selectedAdType);
-                let deductValue = 0;
-                let status = "ROAS >= 8: Trừ chi phí quảng cáo";
-
-                if (!Number.isFinite(roas) || roas < 0 || roas >= 8) {
-                  deductValue = cost;
-                  if (deductValue) applyDelta(stats, cls, -deductValue);
-                } else if (roas > 2) {
-                  if (isTcpAd) {
-                    deductValue = Math.max(0, revenue - cost) * 0.5;
-                    if (deductValue) applyDelta(stats, cls, -deductValue);
-                  } else {
-                    deductValue = Math.max(0, revenue);
-                    if (deductValue) applyDelta(stats, cls, -deductValue);
-                  }
-                  status = isTcpAd
-                    ? "2 < ROAS < 8 + TCP: Trừ 50% chênh lệch doanh thu - chi phí"
-                    : "2 < ROAS < 8: Trừ doanh thu";
-                } else {
-                  deductValue = Math.abs(revenue - cost);
-                  if (deductValue) applyDelta(stats, cls, -deductValue);
-                  status = "ROAS <= 2: Trừ phần chênh lệch |Doanh thu - Chi phí|";
-                }
+                if (deductValue) applyDelta(stats, cls, -deductValue);
                 details.adCosts.push([
                   campaignName,
                   adNote,
-                  roas,
+                  team,
+                  roasThucTe,
+                  roasDanhGia,
                   cost,
                   revenue,
+                  cpqcTinhHH,
+                  cpChuaTang,
+                  cpTangTN,
+                  mucHuongDT,
                   deductValue,
                   getClassLabel(cls),
                   status,
@@ -3201,7 +3051,7 @@ export default function CommissionABCCalculator() {
           </div>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             {FILE_DEFS_ABC.map((def) => (
-              <div
+              <label
                 key={def.key}
                 className="flex flex-col gap-2 rounded-2xl border border-dashed border-slate-200 bg-white/70 p-4 text-sm shadow-sm"
               >
@@ -3226,7 +3076,7 @@ export default function CommissionABCCalculator() {
                 <span className="text-xs text-slate-500">
                   {files[def.key]?.name || "Chưa chọn file"}
                 </span>
-              </div>
+              </label>
             ))}
           </div>
         </div>
@@ -3652,6 +3502,7 @@ export default function CommissionABCCalculator() {
       </div>
 
       <Modal
+        accentClass="to-amber-50/70"
         open={cashflowNoteModalOpen}
         onClose={() => setCashflowNoteModalOpen(false)}
         title="Xác nhận ghi chú sổ quỹ"
@@ -3732,6 +3583,7 @@ export default function CommissionABCCalculator() {
       </Modal>
 
       <Modal
+        accentClass="to-amber-50/70"
         open={returnPriceReviewModalOpen}
         onClose={() => setReturnPriceReviewModalOpen(false)}
         title="Kiểm tra giá hàng trả về"
@@ -3824,6 +3676,7 @@ export default function CommissionABCCalculator() {
       </Modal>
 
       <Modal
+        accentClass="to-amber-50/70"
         open={adCostModalOpen}
         onClose={() => setAdCostModalOpen(false)}
         title="Xác nhận loại quảng cáo"
@@ -3907,6 +3760,7 @@ export default function CommissionABCCalculator() {
       </Modal>
 
       <Modal
+        accentClass="to-amber-50/70"
         open={cgShipFeeModalOpen}
         onClose={() => setCgShipFeeModalOpen(false)}
         title="Phí xe công ty — Cây giống"
@@ -4068,6 +3922,7 @@ export default function CommissionABCCalculator() {
       </Modal>
 
       <Modal
+        accentClass="to-amber-50/70"
         open={missingPriceModalOpen}
         onClose={() => {
           setMissingPriceModalOpen(false);
