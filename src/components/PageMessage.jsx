@@ -898,7 +898,8 @@ function PageMessage() {
         )
       );
 
-      setTimeout(() => refreshThreadMessages(selectedChat), 800);
+      // The chat_webhook echo event is now the source of truth for persisted
+      // manual replies; realtime will reconcile this optimistic message.
     } catch (err) {
       setCurrentMessages((prev) =>
         prev.map((message) =>

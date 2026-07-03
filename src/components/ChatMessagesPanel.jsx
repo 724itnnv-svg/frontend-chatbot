@@ -97,7 +97,7 @@ export default function ChatMessagesPanel({
     const out = [];
 
     for (const m of sorted) {
-      const role = m?.role;
+      const role = String(m?.role || "").toLowerCase();
       const rawText =
         (typeof m?.text === "string" ? m.text : "") ||
         m?.content?.[0]?.text?.value ||
@@ -105,7 +105,15 @@ export default function ChatMessagesPanel({
 
       const { text: cleanedText, imageUrl } = extractCleanTextAndImage(rawText);
 
-      if (cleanedText && /^\s*admin\s*:/i.test(cleanedText)) {
+      const isAdminMessage =
+        role === "human" ||
+        role === "human_admin" ||
+        role === "admin" ||
+        role.includes("human") ||
+        role.includes("admin") ||
+        (cleanedText && /^\s*admin\s*:/i.test(cleanedText));
+
+      if (isAdminMessage) {
         const adminText = cleanedText.replace(/^\s*admin\s*:\s*/i, "").trim();
         if (adminText) {
           out.push({
