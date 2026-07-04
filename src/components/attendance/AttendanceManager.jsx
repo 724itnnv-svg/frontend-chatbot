@@ -1424,7 +1424,7 @@ export default function AttendanceManager() {
   const totalPages = Math.ceil(total / PAGE_LIMIT);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-violet-50/20 p-4 md:p-6">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-violet-50/20 p-3 sm:p-4 md:p-6">
       <div className="mx-auto max-w-[1600px] space-y-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -2017,7 +2017,7 @@ export default function AttendanceManager() {
           );
         })()}
 
-        <div className="flex flex-wrap gap-2 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex flex-wrap gap-2 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
           <div className="flex min-w-[220px] flex-1 flex-col gap-1">
             <label className="text-xs font-semibold text-slate-500">TÌM NHÂN VIÊN</label>
             <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 focus-within:border-violet-400 focus-within:ring-2 focus-within:ring-violet-100">
@@ -2059,7 +2059,7 @@ export default function AttendanceManager() {
           )}
         </div>
 
-        <div className="flex gap-1 rounded-2xl border border-slate-200 bg-white p-1 shadow-sm">
+        <div className="flex gap-1 overflow-x-auto rounded-2xl border border-slate-200 bg-white p-1 shadow-sm">
           {TABS.map((item) => {
             const Icon = item.icon;
             const isPending = item.id === "pending";
@@ -2067,7 +2067,7 @@ export default function AttendanceManager() {
               <button
                 key={item.id}
                 onClick={() => setTab(item.id)}
-                className={`relative flex flex-1 items-center justify-center gap-2 rounded-xl py-2 text-sm font-semibold transition ${tab === item.id ? "bg-violet-600 text-white shadow" : "text-slate-600 hover:bg-slate-50"}`}
+                className={`relative flex min-w-max flex-none items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold transition sm:flex-1 sm:gap-2 sm:text-sm ${tab === item.id ? "bg-violet-600 text-white shadow" : "text-slate-600 hover:bg-slate-50"}`}
               >
                 <Icon size={15} /> {item.label}
                 {isPending && pendingTotal > 0 && (
@@ -2090,10 +2090,10 @@ export default function AttendanceManager() {
           const today = todayVN();
 
           return (
-            <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+            <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm sm:rounded-2xl">
               {/* Header */}
-              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-4 py-3">
-                <div className="flex flex-wrap items-center gap-3">
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-3 py-3 sm:px-4">
+                <div className="flex min-w-0 flex-1 flex-wrap items-center gap-3">
                   {/* Mode toggle */}
                   <div className="flex rounded-xl border border-slate-200 bg-slate-50 p-0.5">
                     <button
@@ -2112,11 +2112,11 @@ export default function AttendanceManager() {
 
                   {/* Week navigation */}
                   {weekMode ? (
-                    <div className="flex items-center gap-1">
+                    <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
                       <button onClick={prevWeek} className="rounded-lg border border-slate-200 bg-white p-1.5 text-slate-600 hover:bg-slate-50">
                         <ChevronLeft size={14} />
                       </button>
-                      <span className="min-w-[220px] text-center text-sm font-semibold text-slate-700">
+                      <span className="min-w-0 flex-1 px-2 text-center text-sm font-semibold text-slate-700">
                         {formatWeekLabel(weekStart)}
                       </span>
                       <button onClick={nextWeek} className="rounded-lg border border-slate-200 bg-white p-1.5 text-slate-600 hover:bg-slate-50">
@@ -2133,7 +2133,7 @@ export default function AttendanceManager() {
                   )}
                 </div>
 
-                <div className="flex flex-wrap gap-2 text-xs font-semibold">
+                <div className="flex w-full flex-wrap gap-2 text-xs font-semibold lg:w-auto">
                   <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-emerald-700">Đủ công {overviewStats.present}</span>
                   <span className="rounded-full bg-amber-50 px-2.5 py-1 text-amber-700">Thiếu ca {overviewStats.incomplete}</span>
                   <span className="rounded-full bg-sky-50 px-2.5 py-1 text-sky-700">Sai vị trí {overviewStats.invalid}</span>
@@ -2150,105 +2150,182 @@ export default function AttendanceManager() {
               ) : overviewEmployees.length === 0 ? (
                 <div className="py-12 text-center text-sm text-slate-400">Không có nhân viên phù hợp.</div>
               ) : (
-                <div className={isWeek ? "overflow-x-auto overflow-y-auto" : "max-h-[68vh] overflow-auto"}>
-                  {/* Header row */}
-                  <div
-                    className="grid border-b border-slate-100 bg-slate-50 text-xs font-semibold text-slate-500"
-                    style={overviewGridStyle}
-                  >
-                    <div className="sticky left-0 z-20 border-r border-slate-200 bg-slate-50 px-4 py-3">
-                      Nhân viên ({overviewEmployees.length})
-                    </div>
-                    {overviewDates.map((date) => {
-                      const isToday = date === today;
+                <>
+                  <div className="space-y-3 p-3 md:hidden">
+                    {overviewEmployees.map((employee) => {
+                      const autoSetting = autoSettingsByUser.get(String(employee.id)) || autoSettingsByUser.get(employee.name);
+                      const isAutoEmployee = Boolean(autoSetting && autoSetting.isEnabled !== false);
                       return (
                         <div
-                          key={date}
-                          className={`border-r border-slate-100 px-3 py-3 text-center last:border-r-0 ${isToday ? "bg-violet-50" : ""}`}
+                          key={`mobile-${employee.id}`}
+                          className={`rounded-xl border ${isAutoEmployee ? "border-violet-200 bg-violet-50/40" : "border-slate-200 bg-white"}`}
                         >
-                          <span className={`block font-bold capitalize ${isToday ? "text-violet-600" : "text-slate-600"}`}>
-                            {weekdayLabel(date)}
-                          </span>
-                          <span className={`text-sm font-bold ${isToday ? "text-violet-700" : "text-slate-800"}`}>
-                            {fmtShortDate(date).slice(0, 5)}
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
-
-                  {/* Employee rows */}
-                  {overviewEmployees.map((employee) => {
-                    const autoSetting = autoSettingsByUser.get(String(employee.id)) || autoSettingsByUser.get(employee.name);
-                    const isAutoEmployee = Boolean(autoSetting && autoSetting.isEnabled !== false);
-                    return (
-                      <div
-                        key={employee.id}
-                        className={`grid border-b border-slate-100 last:border-b-0 ${isAutoEmployee ? "bg-violet-50/20" : ""}`}
-                        style={overviewGridStyle}
-                      >
-                        <div className={`sticky left-0 z-10 border-r px-4 py-3 ${isAutoEmployee ? "border-violet-200 bg-violet-50/95" : "border-slate-200 bg-white"}`}>
-                          <div className="flex min-w-0 items-center gap-2">
-                            <p className={`truncate text-sm font-semibold ${isAutoEmployee ? "text-violet-900" : "text-slate-800"}`}>{employee.name}</p>
+                          <div className="flex items-start justify-between gap-2 border-b border-slate-100 px-3 py-2.5">
+                            <div className="min-w-0">
+                              <p className={`truncate text-sm font-bold ${isAutoEmployee ? "text-violet-900" : "text-slate-800"}`}>{employee.name}</p>
+                              {employee.teamId && <p className={`truncate text-xs ${isAutoEmployee ? "text-violet-500" : "text-slate-400"}`}>{employee.teamId}</p>}
+                            </div>
                             {isAutoEmployee && (
                               <span className="shrink-0 rounded-full border border-violet-200 bg-white px-2 py-0.5 text-[10px] font-bold text-violet-700">
                                 AUTO
                               </span>
                             )}
                           </div>
-                          {employee.teamId && <p className={`truncate text-xs ${isAutoEmployee ? "text-violet-500" : "text-slate-400"}`}>{employee.teamId}</p>}
-                        </div>
+                          <div className="grid grid-cols-2 gap-2 p-2">
+                            {overviewDates.map((date) => {
+                              const record = overviewByUserDate.get(`${employee.id}-${date}`) || overviewByUserDate.get(`${employee.name}-${date}`);
+                              const shifts = getRecordShifts(record);
+                              const isToday = date === today;
+                              const dayStyle = getAttendanceDayStyle(record, date, today);
 
-                        {overviewDates.map((date) => {
-                          const record = overviewByUserDate.get(`${employee.id}-${date}`) || overviewByUserDate.get(`${employee.name}-${date}`);
-                          const shifts = getRecordShifts(record);
-                          const isToday = date === today;
-                          const dayStyle = getAttendanceDayStyle(record, date, today);
-
-                          return (
-                            <div key={`${employee.id}-${date}`} className={`border-r border-slate-100 p-2 last:border-r-0 ${isToday && !record ? "bg-violet-50/30" : ""}`}>
-                              <button
-                                type="button"
-                                onClick={() => record && openEditForm(record)}
-                                onDoubleClick={(event) => {
-                                  if (record || isSundayDate(date)) return;
-                                  event.preventDefault();
-                                  openCreateFormFromOverviewCell(employee, date);
-                                }}
-                                className={`w-full rounded-lg border px-2 py-2 text-left transition ${isWeek ? "min-h-[100px]" : "min-h-[92px]"} ${dayStyle.bg} ${dayStyle.border} ${record ? "hover:shadow-sm" : `${dayStyle.text} hover:bg-violet-50/50`}`}
-                                title={record ? "Sửa bản ghi" : "Chưa chấm công - click đúp chuột vào để chấm"}
-                              >
-                                {record ? (
-                                  <div className="space-y-1.5">
-                                    <div className="flex items-center gap-1.5">
-                                      <span className={`h-2 w-2 shrink-0 rounded-full ${dayStyle.dot}`} />
-                                      <span className="truncate text-[11px] font-semibold text-slate-500">{record.locationName || "Chưa có vị trí"}</span>
+                              return (
+                                <button
+                                  key={`mobile-${employee.id}-${date}`}
+                                  type="button"
+                                  onClick={() => record && openEditForm(record)}
+                                  onDoubleClick={(event) => {
+                                    if (record || isSundayDate(date)) return;
+                                    event.preventDefault();
+                                    openCreateFormFromOverviewCell(employee, date);
+                                  }}
+                                  className={`min-h-[112px] rounded-lg border px-2.5 py-2 text-left transition ${dayStyle.bg} ${dayStyle.border} ${record ? "hover:shadow-sm" : `${dayStyle.text} hover:bg-violet-50/50`} ${isToday ? "ring-2 ring-violet-100" : ""}`}
+                                  title={record ? "Sửa bản ghi" : "Chưa chấm công - chạm đúp để chấm"}
+                                >
+                                  <div className="mb-2 flex items-start justify-between gap-2">
+                                    <div>
+                                      <span className={`block text-[11px] font-bold capitalize ${isToday ? "text-violet-600" : "text-slate-500"}`}>{weekdayLabel(date)}</span>
+                                      <span className={`text-sm font-extrabold ${isToday ? "text-violet-700" : "text-slate-800"}`}>{fmtShortDate(date).slice(0, 5)}</span>
                                     </div>
-                                    {shifts.length === 0 ? (
-                                      <p className="text-xs font-medium text-slate-500">Chưa có lượt chấm</p>
-                                    ) : shifts.map((shift) => (
-                                      <div key={shift.shiftNo || shift.name} className="rounded-md bg-white/70 px-2 py-1">
-                                        <p className="truncate text-[11px] font-bold text-slate-700">{shift.name || `Ca ${shift.shiftNo}`}</p>
-                                        <p className="text-xs font-semibold text-slate-800">{fmtTime(shift.checkIn?.time)} – {fmtTime(shift.checkOut?.time)}</p>
-
-                                      </div>
-                                    ))}
-                                    {dayStyle.label && record.status !== "present" && (
-                                      <p className={`text-[11px] font-bold ${dayStyle.text}`}>{dayStyle.label}</p>
-                                    )}
-                                    {record.workHours != null && <p className="text-[11px] font-bold text-emerald-700">Tổng {record.workHours}h</p>}
+                                    <span className={`mt-1 h-2.5 w-2.5 shrink-0 rounded-full ${dayStyle.dot}`} />
                                   </div>
-                                ) : (
-                                  <div className={`flex h-full min-h-[74px] items-center justify-center text-xs font-semibold ${dayStyle.text}`}>{dayStyle.label}</div>
-                                )}
-                              </button>
-                            </div>
-                          );
-                        })}
+                                  {record ? (
+                                    <div className="space-y-1.5">
+                                      <p className="truncate text-[11px] font-semibold text-slate-500">{record.locationName || "Chưa có vị trí"}</p>
+                                      {shifts.length === 0 ? (
+                                        <p className="text-xs font-semibold text-slate-500">Chưa có lượt chấm</p>
+                                      ) : shifts.map((shift) => (
+                                        <div key={shift.shiftNo || shift.name} className="rounded-md bg-white/75 px-2 py-1">
+                                          <p className="truncate text-[11px] font-bold text-slate-700">{shift.name || `Ca ${shift.shiftNo}`}</p>
+                                          <p className="text-xs font-semibold text-slate-800">{fmtTime(shift.checkIn?.time)} - {fmtTime(shift.checkOut?.time)}</p>
+                                        </div>
+                                      ))}
+                                      {dayStyle.label && record.status !== "present" && (
+                                        <p className={`text-[11px] font-bold ${dayStyle.text}`}>{dayStyle.label}</p>
+                                      )}
+                                      {record.workHours != null && <p className="text-[11px] font-bold text-emerald-700">Tổng {record.workHours}h</p>}
+                                    </div>
+                                  ) : (
+                                    <div className={`flex min-h-[58px] items-center justify-center text-center text-xs font-bold leading-snug ${dayStyle.text}`}>{dayStyle.label}</div>
+                                  )}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <div className={isWeek ? "hidden overflow-x-auto overflow-y-auto md:block" : "hidden max-h-[68vh] overflow-auto md:block"}>
+                    {/* Header row */}
+                    <div
+                      className="grid border-b border-slate-100 bg-slate-50 text-xs font-semibold text-slate-500"
+                      style={overviewGridStyle}
+                    >
+                      <div className="sticky left-0 z-20 border-r border-slate-200 bg-slate-50 px-4 py-3">
+                        Nhân viên ({overviewEmployees.length})
                       </div>
-                    );
-                  })}
-                </div>
+                      {overviewDates.map((date) => {
+                        const isToday = date === today;
+                        return (
+                          <div
+                            key={date}
+                            className={`border-r border-slate-100 px-3 py-3 text-center last:border-r-0 ${isToday ? "bg-violet-50" : ""}`}
+                          >
+                            <span className={`block font-bold capitalize ${isToday ? "text-violet-600" : "text-slate-600"}`}>
+                              {weekdayLabel(date)}
+                            </span>
+                            <span className={`text-sm font-bold ${isToday ? "text-violet-700" : "text-slate-800"}`}>
+                              {fmtShortDate(date).slice(0, 5)}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {/* Employee rows */}
+                    {overviewEmployees.map((employee) => {
+                      const autoSetting = autoSettingsByUser.get(String(employee.id)) || autoSettingsByUser.get(employee.name);
+                      const isAutoEmployee = Boolean(autoSetting && autoSetting.isEnabled !== false);
+                      return (
+                        <div
+                          key={employee.id}
+                          className={`grid border-b border-slate-100 last:border-b-0 ${isAutoEmployee ? "bg-violet-50/20" : ""}`}
+                          style={overviewGridStyle}
+                        >
+                          <div className={`sticky left-0 z-10 border-r px-4 py-3 ${isAutoEmployee ? "border-violet-200 bg-violet-50/95" : "border-slate-200 bg-white"}`}>
+                            <div className="flex min-w-0 items-center gap-2">
+                              <p className={`truncate text-sm font-semibold ${isAutoEmployee ? "text-violet-900" : "text-slate-800"}`}>{employee.name}</p>
+                              {isAutoEmployee && (
+                                <span className="shrink-0 rounded-full border border-violet-200 bg-white px-2 py-0.5 text-[10px] font-bold text-violet-700">
+                                  AUTO
+                                </span>
+                              )}
+                            </div>
+                            {employee.teamId && <p className={`truncate text-xs ${isAutoEmployee ? "text-violet-500" : "text-slate-400"}`}>{employee.teamId}</p>}
+                          </div>
+
+                          {overviewDates.map((date) => {
+                            const record = overviewByUserDate.get(`${employee.id}-${date}`) || overviewByUserDate.get(`${employee.name}-${date}`);
+                            const shifts = getRecordShifts(record);
+                            const isToday = date === today;
+                            const dayStyle = getAttendanceDayStyle(record, date, today);
+
+                            return (
+                              <div key={`${employee.id}-${date}`} className={`border-r border-slate-100 p-2 last:border-r-0 ${isToday && !record ? "bg-violet-50/30" : ""}`}>
+                                <button
+                                  type="button"
+                                  onClick={() => record && openEditForm(record)}
+                                  onDoubleClick={(event) => {
+                                    if (record || isSundayDate(date)) return;
+                                    event.preventDefault();
+                                    openCreateFormFromOverviewCell(employee, date);
+                                  }}
+                                  className={`w-full rounded-lg border px-2 py-2 text-left transition ${isWeek ? "min-h-[100px]" : "min-h-[92px]"} ${dayStyle.bg} ${dayStyle.border} ${record ? "hover:shadow-sm" : `${dayStyle.text} hover:bg-violet-50/50`}`}
+                                  title={record ? "Sửa bản ghi" : "Chưa chấm công - click đúp chuột vào để chấm"}
+                                >
+                                  {record ? (
+                                    <div className="space-y-1.5">
+                                      <div className="flex items-center gap-1.5">
+                                        <span className={`h-2 w-2 shrink-0 rounded-full ${dayStyle.dot}`} />
+                                        <span className="truncate text-[11px] font-semibold text-slate-500">{record.locationName || "Chưa có vị trí"}</span>
+                                      </div>
+                                      {shifts.length === 0 ? (
+                                        <p className="text-xs font-medium text-slate-500">Chưa có lượt chấm</p>
+                                      ) : shifts.map((shift) => (
+                                        <div key={shift.shiftNo || shift.name} className="rounded-md bg-white/70 px-2 py-1">
+                                          <p className="truncate text-[11px] font-bold text-slate-700">{shift.name || `Ca ${shift.shiftNo}`}</p>
+                                          <p className="text-xs font-semibold text-slate-800">{fmtTime(shift.checkIn?.time)} – {fmtTime(shift.checkOut?.time)}</p>
+
+                                        </div>
+                                      ))}
+                                      {dayStyle.label && record.status !== "present" && (
+                                        <p className={`text-[11px] font-bold ${dayStyle.text}`}>{dayStyle.label}</p>
+                                      )}
+                                      {record.workHours != null && <p className="text-[11px] font-bold text-emerald-700">Tổng {record.workHours}h</p>}
+                                    </div>
+                                  ) : (
+                                    <div className={`flex h-full min-h-[74px] items-center justify-center text-xs font-semibold ${dayStyle.text}`}>{dayStyle.label}</div>
+                                  )}
+                                </button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
               )}
             </div>
           );
