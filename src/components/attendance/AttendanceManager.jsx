@@ -588,6 +588,7 @@ export default function AttendanceManager() {
   const [searchUser, setSearchUser] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [teamFilter, setTeamFilter] = useState("");
+  const [overviewAutoFilter, setOverviewAutoFilter] = useState("all");
   const [records, setRecords] = useState([]);
   const [overviewRecords, setOverviewRecords] = useState([]);
   const [total, setTotal] = useState(0);
@@ -1339,36 +1340,6 @@ export default function AttendanceManager() {
     return map;
   }, [overviewRecords]);
 
-  const overviewEmployees = useMemo(() => {
-    const keyword = searchUser.trim().toLowerCase();
-    const selectedTeam = normalizeTeam(teamFilter);
-    const employees = [];
-    const seen = new Set();
-
-    users.forEach((user) => {
-      const id = user._id || getUserName(user);
-      const name = getUserName(user);
-      const teamId = normalizeTeam(user.teamId || user.team);
-      if (selectedTeam && teamId !== selectedTeam) return;
-      if (keyword && !`${name} ${teamId}`.toLowerCase().includes(keyword)) return;
-      seen.add(id);
-      employees.push({ id, name, teamId });
-    });
-
-    overviewRecords.forEach((record) => {
-      const id = getRecordUserKey(record);
-      if (!id || seen.has(id)) return;
-      const name = record.userName || "-";
-      const teamId = normalizeTeam(record.teamId);
-      if (selectedTeam && teamId !== selectedTeam) return;
-      if (keyword && !`${name} ${teamId}`.toLowerCase().includes(keyword)) return;
-      seen.add(id);
-      employees.push({ id, name, teamId });
-    });
-
-    return employees.sort((a, b) => a.name.localeCompare(b.name, "vi"));
-  }, [overviewRecords, searchUser, teamFilter, users]);
-
   const autoSettingsByUser = useMemo(() => {
     const map = new Map();
     autoSettings.forEach((setting) => {
@@ -1379,6 +1350,46 @@ export default function AttendanceManager() {
     });
     return map;
   }, [autoSettings]);
+
+  const overviewEmployees = useMemo(() => {
+    const keyword = searchUser.trim().toLowerCase();
+    const selectedTeam = normalizeTeam(teamFilter);
+    const employees = [];
+    const seen = new Set();
+    const matchesAutoFilter = (employee) => {
+      if (overviewAutoFilter === "all") return true;
+      const autoSetting = autoSettingsByUser.get(String(employee.id)) || autoSettingsByUser.get(employee.name);
+      const isAutoEmployee = Boolean(autoSetting && autoSetting.isEnabled !== false);
+      return overviewAutoFilter === "auto" ? isAutoEmployee : !isAutoEmployee;
+    };
+
+    users.forEach((user) => {
+      const id = user._id || getUserName(user);
+      const name = getUserName(user);
+      const teamId = normalizeTeam(user.teamId || user.team);
+      if (selectedTeam && teamId !== selectedTeam) return;
+      if (keyword && !`${name} ${teamId}`.toLowerCase().includes(keyword)) return;
+      const employee = { id, name, teamId };
+      if (!matchesAutoFilter(employee)) return;
+      seen.add(id);
+      employees.push(employee);
+    });
+
+    overviewRecords.forEach((record) => {
+      const id = getRecordUserKey(record);
+      if (!id || seen.has(id)) return;
+      const name = record.userName || "-";
+      const teamId = normalizeTeam(record.teamId);
+      if (selectedTeam && teamId !== selectedTeam) return;
+      if (keyword && !`${name} ${teamId}`.toLowerCase().includes(keyword)) return;
+      const employee = { id, name, teamId };
+      if (!matchesAutoFilter(employee)) return;
+      seen.add(id);
+      employees.push(employee);
+    });
+
+    return employees.sort((a, b) => a.name.localeCompare(b.name, "vi"));
+  }, [autoSettingsByUser, overviewAutoFilter, overviewRecords, searchUser, teamFilter, users]);
 
   const overviewStats = useMemo(() => {
     let present = 0;
@@ -2046,6 +2057,20 @@ export default function AttendanceManager() {
               ))}
             </select>
           </div>
+          {tab === "overview" && (
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-semibold text-slate-500">AUTO</label>
+              <select
+                value={overviewAutoFilter}
+                onChange={(e) => setOverviewAutoFilter(e.target.value)}
+                className="w-36 rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
+              >
+                <option value="all">Tất cả</option>
+                <option value="auto">Đã auto</option>
+                <option value="manual">Chưa auto</option>
+              </select>
+            </div>
+          )}
           {tab === "list" && (
             <div className="flex flex-col gap-1">
               <label className="text-xs font-semibold text-slate-500">TRẠNG THÁI</label>
