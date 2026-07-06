@@ -151,6 +151,8 @@ function PageMessage() {
   const realtimeSocketRef = useRef(null);
   const selectedPageRef = useRef(null);
   const selectedChatRef = useRef(null);
+  const pageLoadSeqRef = useRef(0);
+  const chatLoadSeqRef = useRef(0);
 
   const [orderedCustomerSet, setOrderedCustomerSet] = useState(() => new Set());
   const [ordersByCustomer, setOrdersByCustomer] = useState(() => new Map());
@@ -259,7 +261,7 @@ function PageMessage() {
   }, [isAdmin, isUser]);
 
   // ✅ Lấy info người dùng từ FB (participants)
-  const fetchUserInfo = async (page, localUserIds, currentInfo = {}) => {
+  const fetchUserInfo = async (page, localUserIds, currentInfo = {}, { loadSeq = null } = {}) => {
     const updatedInfo = { ...currentInfo };
 
     try {
@@ -285,14 +287,16 @@ function PageMessage() {
         };
       });
 
-      setUserInfo((prev) => ({ ...prev, ...updatedInfo }));
+      if (loadSeq === null || pageLoadSeqRef.current === loadSeq) {
+        setUserInfo((prev) => ({ ...prev, ...updatedInfo }));
+      }
     } catch (err) {
       console.error("Lỗi khi lấy thông tin người dùng:", err);
     }
   };
 
   // ✅ Chọn Page → load chats local + load userInfo từ FB
-  const refreshChatsForPage = async (page, { updateUserNames = false } = {}) => {
+  const refreshChatsForPage = async (page, { updateUserNames = false, loadSeq = null } = {}) => {
     if (!page?.facebookId || !token) return [];
 
     const chatRes = await fetch("/api/chat/recent", {
@@ -305,7 +309,9 @@ function PageMessage() {
       (c) => String(c.page) === String(page.facebookId) && c.conversationId,
     );
 
-    setChats(filteredChats);
+    if (loadSeq === null || pageLoadSeqRef.current === loadSeq) {
+      setChats(filteredChats);
+    }
 
     if (updateUserNames) {
       const localUserIds = [...new Set(filteredChats.map((chat) => chat.user))];
@@ -317,8 +323,10 @@ function PageMessage() {
           picture: chat.userPicture || defaultAvatar,
         };
       });
-      setUserInfo(tempUserInfo);
-      fetchUserInfo(page, localUserIds, tempUserInfo);
+      if (loadSeq === null || pageLoadSeqRef.current === loadSeq) {
+        setUserInfo(tempUserInfo);
+        fetchUserInfo(page, localUserIds, tempUserInfo, { loadSeq });
+      }
     }
 
     return filteredChats;
@@ -330,8 +338,15 @@ function PageMessage() {
       return;
     }
 
+    const loadSeq = pageLoadSeqRef.current + 1;
+    pageLoadSeqRef.current = loadSeq;
+    chatLoadSeqRef.current += 1;
+    selectedPageRef.current = page;
+    selectedChatRef.current = null;
+
+    if (messageFetchRef.current) messageFetchRef.current.abort();
+
     setSelectedPage(page);
-    fetchOrdersAndBuildSet(page);
 
     setChats([]);
     setUserInfo({});
@@ -345,6 +360,7 @@ function PageMessage() {
     setChatReplyState({ mode: "bot", loading: false });
     setChatSearch("");
     setOrdersByCustomer(new Map());
+    setOrderDrafts({});
     setIsOrderPopupOpen(false);
     setIsReportMode(false);
     setSelectedReportMessages({});
@@ -354,19 +370,25 @@ function PageMessage() {
     setMessageReports([]);
     setIsMessageReportListOpen(false);
     setMobileTab("customers");
+    setLoadingMessages(false);
 
     try {
       setLoadingChats(true);
 
-      const filteredChats = await refreshChatsForPage(page, { updateUserNames: true });
+      const [filteredChats] = await Promise.all([
+        refreshChatsForPage(page, { updateUserNames: true, loadSeq }),
+        fetchOrdersAndBuildSet(page, { loadSeq }),
+      ]);
+      if (pageLoadSeqRef.current !== loadSeq) return;
       
 
       // fetch tên/avatar thật từ Facebook
       // auto chọn khách đầu tiên
       setTimeout(() => {
+        if (pageLoadSeqRef.current !== loadSeq) return;
         if (filteredChats.length > 0) {
           checkOnlyForViewing(filteredChats[0].user); // ✅ auto check khách đầu tiên
-          handleSelectChat(filteredChats[0]);         // ✅ auto mở chat khách đầu tiên
+          handleSelectChat(filteredChats[0], { pageOverride: page, pageLoadSeq: loadSeq });         // ✅ auto mở chat khách đầu tiên
         }
       }, 0);
 
@@ -374,7 +396,7 @@ function PageMessage() {
       console.error("Lỗi khi load page:", err);
       alert("Lỗi khi tải dữ liệu page");
     } finally {
-      setLoadingChats(false);
+      if (pageLoadSeqRef.current === loadSeq) setLoadingChats(false);
     }
   };
 
@@ -406,12 +428,18 @@ function PageMessage() {
   }, [chats, chatSearch, userInfo]);
 
   // ✅ Chọn khách → load lịch sử theo threadId
-  const handleSelectChat = async (chat) => {   
+  const handleSelectChat = async (chat, { pageOverride = null, pageLoadSeq = null } = {}) => {
     if (!chat?.threadId && !chat?.conversationId) {
       alert("⚠️ Chat này chưa có threadId để xem lịch sử");
       return;
     }
 
+    if (pageLoadSeq !== null && pageLoadSeqRef.current !== pageLoadSeq) return;
+
+    const chatLoadSeq = chatLoadSeqRef.current + 1;
+    chatLoadSeqRef.current = chatLoadSeq;
+
+    selectedChatRef.current = chat;
     setSelectedChat(chat);   
     if(!chat.conversationId){
       setActiveThreadId(chat.threadId);
@@ -459,15 +487,16 @@ function PageMessage() {
       if (Array.isArray(data)) msgs = data;
       else if (data && Array.isArray(data.messages)) msgs = data.messages;
 
+      if (chatLoadSeqRef.current !== chatLoadSeq) return;
       setCurrentMessages(msgs);
-      fetchChatReplyState(chat);
-      fetchMessageReports({ chatOverride: chat, open: false });
+      fetchChatReplyState(chat, { chatLoadSeq });
+      fetchMessageReports({ chatOverride: chat, pageOverride, chatLoadSeq, open: false });
     } catch (err) {
       if (err.name === "AbortError") return;
       console.error("Lỗi lấy lịch sử chat:", err);
       alert("Lỗi khi tải lịch sử hội thoại");
     } finally {
-      setLoadingMessages(false);
+      if (chatLoadSeqRef.current === chatLoadSeq) setLoadingMessages(false);
     }
   };
 
@@ -486,7 +515,7 @@ function PageMessage() {
     return "";
   };
 
-  const fetchChatReplyState = async (chat) => {
+  const fetchChatReplyState = async (chat, { chatLoadSeq = null } = {}) => {
     if (!chat?.user || !chat?.page || !token) return;
 
     try {
@@ -504,14 +533,18 @@ function PageMessage() {
       if (!res.ok || data?.ok === false) {
         throw new Error(data?.message || "Không lấy được trạng thái trả lời");
       }
-      setChatReplyState({
-        mode: data.mode === "human" ? "human" : "bot",
-        loading: false,
-        humanPausedAt: data.humanPausedAt || null,
-      });
+      if (chatLoadSeq === null || chatLoadSeqRef.current === chatLoadSeq) {
+        setChatReplyState({
+          mode: data.mode === "human" ? "human" : "bot",
+          loading: false,
+          humanPausedAt: data.humanPausedAt || null,
+        });
+      }
     } catch (err) {
       console.error("fetchChatReplyState error:", err);
-      setChatReplyState((prev) => ({ ...prev, loading: false }));
+      if (chatLoadSeq === null || chatLoadSeqRef.current === chatLoadSeq) {
+        setChatReplyState((prev) => ({ ...prev, loading: false }));
+      }
     }
   };
 
@@ -1127,7 +1160,7 @@ function PageMessage() {
     return `${yyyy}-${mm}-${dd}`;
   };
 
-  const fetchOrdersAndBuildSet = async (page) => {
+  const fetchOrdersAndBuildSet = async (page, { loadSeq = null } = {}) => {
     try {
       setLoadingOrders(true);
 
@@ -1176,14 +1209,18 @@ function PageMessage() {
         groupedOrders.set(customerId, [...current, order]);
       });
 
-      setOrderedCustomerSet(setIds);
-      setOrdersByCustomer(groupedOrders);
+      if (loadSeq === null || pageLoadSeqRef.current === loadSeq) {
+        setOrderedCustomerSet(setIds);
+        setOrdersByCustomer(groupedOrders);
+      }
     } catch (err) {
       console.error("❌ Lỗi load orders:", err);
-      setOrderedCustomerSet(new Set());
-      setOrdersByCustomer(new Map());
+      if (loadSeq === null || pageLoadSeqRef.current === loadSeq) {
+        setOrderedCustomerSet(new Set());
+        setOrdersByCustomer(new Map());
+      }
     } finally {
-      setLoadingOrders(false);
+      if (loadSeq === null || pageLoadSeqRef.current === loadSeq) setLoadingOrders(false);
     }
   };
 
@@ -1231,12 +1268,13 @@ function PageMessage() {
     });
   };
 
-  const fetchMessageReports = async ({ open = false, chatOverride = null } = {}) => {
-    if (!selectedPage?.facebookId || !token) return;
+  const fetchMessageReports = async ({ open = false, chatOverride = null, pageOverride = null, chatLoadSeq = null } = {}) => {
+    const reportPage = pageOverride || selectedPage;
+    if (!reportPage?.facebookId || !token) return;
     const targetChat = chatOverride || selectedChat;
     try {
       setLoadingMessageReports(true);
-      const params = new URLSearchParams({ pageId: selectedPage.facebookId });
+      const params = new URLSearchParams({ pageId: reportPage.facebookId });
       if (targetChat?.user) params.set("userId", targetChat.user);
       if (targetChat?.conversationId) params.set("conversationId", targetChat.conversationId);
       if (targetChat?.threadId) params.set("threadId", targetChat.threadId);
@@ -1248,12 +1286,18 @@ function PageMessage() {
       if (!res.ok || data?.ok === false) {
         throw new Error(data?.message || "Không tải được danh sách báo lỗi");
       }
-      setMessageReports(Array.isArray(data.reports) ? data.reports : []);
-      if (open) setIsMessageReportListOpen(true);
+      if (chatLoadSeq === null || chatLoadSeqRef.current === chatLoadSeq) {
+        setMessageReports(Array.isArray(data.reports) ? data.reports : []);
+        if (open) setIsMessageReportListOpen(true);
+      }
     } catch (err) {
-      alert(err?.message || "Lỗi khi tải danh sách báo lỗi");
+      if (chatLoadSeq === null || chatLoadSeqRef.current === chatLoadSeq) {
+        alert(err?.message || "Lỗi khi tải danh sách báo lỗi");
+      }
     } finally {
-      setLoadingMessageReports(false);
+      if (chatLoadSeq === null || chatLoadSeqRef.current === chatLoadSeq) {
+        setLoadingMessageReports(false);
+      }
     }
   };
 
@@ -1316,8 +1360,8 @@ function PageMessage() {
       const next = { ...current };
       selectedCustomerOrders.forEach((order) => {
         const id = String(order?._id || "");
-        if (!id || next[id]) return;
-        next[id] = {
+        if (!id) return;
+        const draftFromOrder = {
           customerName: order.customerName || "",
           phoneNumber: order.phoneNumber || "",
           address: order.address || "",
@@ -1334,6 +1378,19 @@ function PageMessage() {
             }))
             : [],
         };
+        if (!next[id]) {
+          next[id] = draftFromOrder;
+          return;
+        }
+
+        const currentItems = Array.isArray(next[id].items) ? next[id].items : [];
+        const freshItems = Array.isArray(draftFromOrder.items) ? draftFromOrder.items : [];
+        if (currentItems.length === 0 && freshItems.length > 0) {
+          next[id] = {
+            ...next[id],
+            items: freshItems,
+          };
+        }
       });
       return next;
     });
