@@ -18,6 +18,18 @@ const TINH_TRANG_CONFIG = {
   II: { label: "Cấp II", cls: "bg-yellow-100 text-yellow-700 border-yellow-200" },
   III: { label: "Cấp III", cls: "bg-orange-100 text-orange-700 border-orange-200" },
   IV: { label: "Cấp IV", cls: "bg-red-100 text-red-700 border-red-200" },
+  vo_mau: { label: "Vô mẫu", cls: "bg-sky-100 text-sky-700 border-sky-200" },
+  tach_choi: { label: "Tách chồi", cls: "bg-cyan-100 text-cyan-700 border-cyan-200" },
+  cay_truyen_1: { label: "Cấy truyền lần 1", cls: "bg-indigo-100 text-indigo-700 border-indigo-200" },
+  cay_truyen_2: { label: "Cấy truyền lần 2", cls: "bg-violet-100 text-violet-700 border-violet-200" },
+  ra_cay: { label: "Ra cây", cls: "bg-emerald-100 text-emerald-700 border-emerald-200" },
+  bi_nhiem: { label: "Bị nhiễm", cls: "bg-red-100 text-red-700 border-red-200" },
+  xu_ly_nhiem: { label: "Xử lý nhiễm", cls: "bg-amber-100 text-amber-700 border-amber-200" },
+  mau_huy: { label: "Mẫu huỷ", cls: "bg-gray-100 text-gray-600 border-gray-200" },
+  dang_theo_doi: { label: "Đang theo dõi", cls: "bg-emerald-100 text-emerald-700 border-emerald-200" },
+  da_thu_hoach: { label: "Đã thu hoạch", cls: "bg-blue-100 text-blue-700 border-blue-200" },
+  chet: { label: "Đã chết", cls: "bg-red-100 text-red-700 border-red-200" },
+  ngung_theo_doi: { label: "Ngừng theo dõi", cls: "bg-gray-100 text-gray-600 border-gray-200" },
 };
 
 const GIONG = { dua_sap: "Dừa sáp", dua_thuong: "Dừa thường", khac: "Khác" };
@@ -992,7 +1004,10 @@ export default function DuaSapDetailPage() {
 
   const records = data?.records || [];
   const isOngNghiem = data.loai === "ong_nghiem";
-  const tinh = records.length > 0 ? TINH_TRANG_CONFIG[records[0]?.tinhTrangCay] : null;
+  const statusKey = records[0]?.tinhTrangCay || data.trangThai;
+  const tinh = statusKey
+    ? TINH_TRANG_CONFIG[statusKey] || { label: statusKey, cls: "bg-white/15 text-white border-white/30" }
+    : null;
 
   // Tổng sản lượng
   const sanLuongDuKien = records.reduce((items, r) => items.concat(Array.isArray(r?.sanLuongDuKien) ? r.sanLuongDuKien : []), []);
@@ -1021,11 +1036,6 @@ export default function DuaSapDetailPage() {
             <div className="flex-1">
               <div className="flex items-center gap-3 mb-1">
                 <span className="text-4xl font-black text-white tracking-tight">{data.maCay}</span>
-                {tinh && (
-                  <span className={`text-xs font-semibold px-2.5 py-1 rounded-full border ${tinh.cls}`}>
-                    {tinh.label}
-                  </span>
-                )}
               </div>
               <div className="flex flex-wrap gap-4 text-emerald-100 text-sm mt-1">
                 {data.viTri && (
@@ -1040,7 +1050,12 @@ export default function DuaSapDetailPage() {
                 </span>
                 {data.ngayTrong && (
                   <span className="flex items-center gap-1.5">
-                    <Calendar size={13} /> Trồng: {fmt(data.ngayTrong)}
+                    <Calendar size={13} /> {data.loai === "ong_nghiem" ? "Ngày cấy" : "Ngày trồng"}: {fmt(data.ngayTrong)}
+                    {tinh && (
+                      <span className={`ml-1 text-[11px] font-semibold px-2 py-0.5 rounded-full border ${tinh.cls}`}>
+                        {tinh.label}
+                      </span>
+                    )}
                   </span>
                 )}
               </div>

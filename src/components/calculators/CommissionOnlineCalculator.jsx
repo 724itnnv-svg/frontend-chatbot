@@ -1454,7 +1454,7 @@ export default function CommissionOnlineCalculator() {
             ))}
           </div>
 
-          <div className="mt-4 rounded-2xl border border-slate-200 bg-white/60 p-4">
+          {/* <div className="mt-4 rounded-2xl border border-slate-200 bg-white/60 p-4">
             <div className="text-sm font-semibold text-slate-800">
               Mã sản phẩm hàng tặng không trừ doanh thu
             </div>
@@ -1509,7 +1509,7 @@ export default function CommissionOnlineCalculator() {
                 Thêm
               </button>
             </div>
-          </div>
+          </div> */}
 
           {files.invoice && invoiceGiftItems.length > 0 && (
             <div className="mt-4 rounded-2xl border border-slate-200 bg-white/60 p-4">
@@ -1564,7 +1564,7 @@ export default function CommissionOnlineCalculator() {
             </div>
           )}
 
-          <div className="mt-4 rounded-2xl border border-slate-200 bg-white/60 p-4">
+          {/* <div className="mt-4 rounded-2xl border border-slate-200 bg-white/60 p-4">
             <div className="text-sm font-semibold text-slate-800">
               Mã trả hàng không trừ doanh thu
             </div>
@@ -1622,7 +1622,7 @@ export default function CommissionOnlineCalculator() {
                 Thêm
               </button>
             </div>
-          </div>
+          </div> */}
         </div>
 
         {cashflowEmployees.length > 0 && (
@@ -1689,7 +1689,7 @@ export default function CommissionOnlineCalculator() {
           </div>
         )}
 
-        {cashflowEmployees.length > 0 && (
+        {/* {cashflowEmployees.length > 0 && (
           <div className="rounded-3xl border border-white/50 bg-white/70 p-4 shadow-sm backdrop-blur-xl">
             <div className="mb-3 text-sm font-semibold text-slate-800">Gộp nhân viên</div>
             {employeeMerges.length > 0 && (
@@ -1754,7 +1754,7 @@ export default function CommissionOnlineCalculator() {
               </button>
             </div>
           </div>
-        )}
+        )} */}
 
         {errors.length > 0 && (
           <div className="rounded-3xl border border-rose-200 bg-rose-50/70 p-4 text-sm text-rose-700 shadow-sm">

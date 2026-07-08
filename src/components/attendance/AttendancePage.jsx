@@ -1892,7 +1892,6 @@ export default function AttendancePage() {
                   </div>
                 )}
 
-
                 {(canCheckIn || canCheckOut || canEditRetryLocation) && (
                   <input
                     value={noteInput}
@@ -1942,7 +1941,6 @@ export default function AttendancePage() {
                   )}
 
                 </div>
-
 
                 {!gps && !gpsError && !gpsLoading && (
                   <p className="mt-2 flex items-center gap-1.5 text-xs text-amber-600">

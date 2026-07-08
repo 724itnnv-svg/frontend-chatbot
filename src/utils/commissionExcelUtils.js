@@ -170,11 +170,12 @@ export const AD_COST_HEADERS = [
 
 /**
  * Công thức trừ chi phí quảng cáo dùng chung cho các calculator hoa hồng.
- * Ưu tiên ROAS ĐÁNH GIÁ nếu có dữ liệu, không thì lấy ROAS THỰC TẾ.
- *  - effectiveRoas > 8                              → trừ CPQC TÍNH HH
- *  - có ROAS đánh giá và 5 <= effectiveRoas <= 8     → trừ (DOANH THU x 50% - CPQC TÍNH HH)
- *  - còn lại, TỔNG CHI > DOANH THU                   → trừ (TỔNG CHI - DOANH THU)
- *  - còn lại                                         → trừ DOANH THU
+ * Luôn dùng ROAS THỰC TẾ để tính điều kiện chính.
+ * ROAS ĐÁNH GIÁ chỉ dùng để bật nhánh xử lý 50% doanh thu khi có dữ liệu.
+ *  - ROAS THỰC TẾ > 8                                      → trừ CPQC TÍNH HH
+ *  - có ROAS đánh giá và 5 <= ROAS THỰC TẾ <= 8             → trừ (DOANH THU x 50% - CPQC TÍNH HH)
+ *  - còn lại, TỔNG CHI > DOANH THU                          → trừ (TỔNG CHI - DOANH THU)
+ *  - còn lại                                                → trừ DOANH THU
  */
 export const calculateAdCostDeduction = (row, headerMap) => {
   const team = normalizeText(getCell(row, headerMap, "TEAM"));
@@ -188,25 +189,24 @@ export const calculateAdCostDeduction = (row, headerMap) => {
   const roasDanhGiaRaw = normalizeText(getCell(row, headerMap, "ROAS ĐÁNH GIÁ"));
   const hasRoasDanhGia = roasDanhGiaRaw !== "";
   const roasDanhGia = parseNumber(roasDanhGiaRaw);
-  const effectiveRoas = hasRoasDanhGia ? roasDanhGia : roasThucTe;
-  const roasLabel = hasRoasDanhGia ? "ROAS đánh giá" : "ROAS thực tế";
 
-  let deductValue = 0;
+  // let deductValue = 0;
+  const deductValue = tongChi;
   let status = "";
 
-  if (effectiveRoas > 8) {
-    deductValue = cpqcTinhHH;
-    status = `${roasLabel} > 8: Trừ CPQC tính HH`;
-  } else if (hasRoasDanhGia && effectiveRoas >= 5 && effectiveRoas <= 8) {
-    deductValue = doanhThu * 0.5 - cpqcTinhHH;
-    status = "5 <= ROAS đánh giá <= 8: Trừ (Doanh thu x 50% - CPQC tính HH)";
-  } else if (tongChi > doanhThu) {
-    deductValue = tongChi - doanhThu;
-    status = `${roasLabel} <= 8, Tổng chi > Doanh thu: Trừ chênh lệch (Tổng chi - Doanh thu)`;
-  } else {
-    deductValue = doanhThu;
-    status = `${roasLabel} <= 8, Doanh thu >= Tổng chi: Trừ Doanh thu`;
-  }
+  // if (roasThucTe > 8) {
+  //   deductValue = cpqcTinhHH;
+  //   status = "ROAS thực tế > 8: Trừ CPQC tính HH";
+  // } else if (hasRoasDanhGia && roasThucTe >= 5 && roasThucTe <= 8) {
+  //   deductValue = doanhThu * 0.5 - cpqcTinhHH;
+  //   status = "Có ROAS đánh giá và 5 <= ROAS thực tế <= 8: Trừ (Doanh thu x 50% - CPQC tính HH)";
+  // } else if (tongChi > doanhThu) {
+  //   deductValue = tongChi - doanhThu;
+  //   status = "ROAS thực tế <= 8, Tổng chi > Doanh thu: Trừ chênh lệch (Tổng chi - Doanh thu)";
+  // } else {
+  //   deductValue = doanhThu;
+  //   status = "ROAS thực tế <= 8, Doanh thu >= Tổng chi: Trừ Doanh thu";
+  // }
 
   return {
     team,

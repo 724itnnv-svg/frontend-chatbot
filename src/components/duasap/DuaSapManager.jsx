@@ -2938,228 +2938,230 @@ export default function DuaSapManager() {
             <p className="text-sm">Không có cây nào.</p>
           </div>
         ) : (
-          <table className="w-full">
-            <thead>
-              <tr className="bg-gray-50 border-b border-gray-100">
-                <th className="w-10 px-4 py-3" onClick={(e) => e.stopPropagation()}>
-                  <input
-                    ref={selectAllRef}
-                    type="checkbox"
-                    checked={allSelected}
-                    onChange={toggleSelectAll}
-                    className="w-4 h-4 rounded accent-emerald-600 cursor-pointer"
-                    title="Chọn tất cả"
-                  />
-                </th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500">Ảnh</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500">Mã cây/ống nghiệm</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500">Vị trí</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 hidden sm:table-cell">Giống</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500">Trạng thái</th>
-                <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500">Hành động</th>
-              </tr>
-            </thead>
-            <tbody>
-              {trees.map((tree) => (
-                <React.Fragment key={tree.maCay}>
-                  <tr
-                    ref={(el) => { if (el) rowRefs.current[tree.maCay] = el; }}
-                    className={`border-b border-gray-50 hover:bg-emerald-50/40 transition cursor-pointer ${expandedMaCay === tree.maCay ? "bg-emerald-50/60" : ""} ${selectedTrees.has(tree.maCay) ? "bg-emerald-50" : ""}`}
-                    onClick={() => toggleExpand(tree.maCay)}
-                  >
-                    <td className="w-10 px-4 py-3" onClick={(e) => e.stopPropagation()}>
-                      <input
-                        type="checkbox"
-                        checked={selectedTrees.has(tree.maCay)}
-                        onChange={(e) => toggleSelectTree(tree.maCay, e)}
-                        className="w-4 h-4 rounded accent-emerald-600 cursor-pointer"
-                      />
-                    </td>
-                    <td className="px-4 py-3">
-                      <TreeImageCell tree={tree} />
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        {expandedMaCay === tree.maCay
-                          ? <ChevronUp size={14} className="text-emerald-500 shrink-0" />
-                          : <ChevronDown size={14} className="text-gray-300 shrink-0" />}
-                        <span className="font-bold text-emerald-700 tracking-wide">{tree.maCay}</span>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 text-sm text-gray-600">
-                      <div className="flex items-center gap-1">
-                        <MapPin size={12} className="text-gray-300 shrink-0" />
-                        {tree.viTri || "—"}
-                        {tree.khuVuc && <span className="text-gray-400 text-xs"> / {tree.khuVuc}</span>}
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 text-sm text-gray-500 hidden sm:table-cell">
-                      {tree.giong || "—"}
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${TRANG_THAI_CLS[tree.trangThai] || "bg-gray-100 text-gray-500"}`}>
-                        {(TRANG_THAI_OPTIONS.find((t) => t.value === tree.trangThai) || TRANG_THAI_ONG_NGHIEM_OPTIONS.find((t) => t.value === tree.trangThai))?.label || tree.trangThai}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
-                      <div className="flex items-center justify-end gap-1">
-                        <button
-                          onClick={() => setQrTree(tree)}
-                          className="p-1.5 text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition"
-                          title="Xuất mã QR"
-                        >
-                          <QrCode size={14} />
-                        </button>
-                        <button
-                          onClick={() => { setEditingTree(tree); setShowTreeForm(true); }}
-                          className="p-1.5 text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition"
-                          title="Chỉnh sửa"
-                        >
-                          <Edit2 size={14} />
-                        </button>
-                        <button
-                          onClick={() => setConfirmDelete(tree.maCay)}
-                          className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition"
-                          title="Xóa"
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-
-                  {/* Expanded: Records panel */}
-                  {expandedMaCay === tree.maCay && (
-                    <tr>
-                      <td colSpan={7} className="bg-emerald-50/40 px-4 py-4 border-b border-emerald-100">
-                        <div className="max-w-3xl">
-                          <div className="flex items-center justify-between mb-3">
-                            <h4 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
-                              <ClipboardList size={15} className="text-emerald-500" />
-                              Bản ghi theo dõi — {tree.maCay}
-                            </h4>
-                            <button
-                              onClick={() => { setEditingRecord(null); setShowRecordForm(true); }}
-                              className="flex items-center gap-1.5 text-xs bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg transition"
-                            >
-                              <Plus size={12} /> Thêm kỳ
-                            </button>
-                          </div>
-
-                          {loadingRecords ? (
-                            <div className="flex items-center gap-2 text-gray-400 text-sm py-4">
-                              <Loader2 size={16} className="animate-spin text-emerald-400" />
-                              Đang tải bản ghi...
-                            </div>
-                          ) : records.length === 0 ? (
-                            <p className="text-sm text-gray-400 py-2">Chưa có bản ghi nào. Nhấn "+ Thêm kỳ" để bắt đầu.</p>
-                          ) : (
-                            <div className="space-y-2">
-                              {records.map((rec) => (
-                                <div key={rec._id} className="bg-white rounded-xl border border-gray-100 shadow-sm px-4 py-3">
-                                  <div className="flex items-start justify-between gap-3">
-                                    <div className="flex-1 min-w-0">
-                                      <div className="flex items-center gap-2 flex-wrap">
-                                        <span className="font-semibold text-sm text-gray-800">
-                                          {rec.kyTheoDoiNhan || `T${rec.thangBatDau}–T${rec.thangKetThuc}/${rec.nam}`}
-                                        </span>
-                                        {rec.tinhTrangCay && (
-                                          <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${TINH_TRANG_CLS[rec.tinhTrangCay] || "bg-gray-100 text-gray-500"}`}>
-                                            {getTinhTrangLabel(rec.tinhTrangCay)}
-                                          </span>
-                                        )}
-                                      </div>
-                                      <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1.5 text-xs text-gray-400">
-                                        {/* cây giống */}
-                                        {tree.loai !== "ong_nghiem" && rec.sanLuongDuKien?.length > 0 && (
-                                          <span className="flex items-center gap-1">
-                                            <Leaf size={11} className="text-blue-400" />
-                                            DK: {rec.sanLuongDuKien.map((x) => `T${x.thang}: ${x.soLuong}`).join(", ")}
-                                          </span>
-                                        )}
-                                        {tree.loai !== "ong_nghiem" && rec.sanLuongThucTe?.length > 0 && (
-                                          <span className="flex items-center gap-1">
-                                            <Leaf size={11} className="text-emerald-400" />
-                                            TT: {rec.sanLuongThucTe.map((x) => `T${x.thang}: ${x.soLuong}`).join(", ")}
-                                          </span>
-                                        )}
-                                        {tree.loai !== "ong_nghiem" && rec.soTau != null && (
-                                          <span className="flex items-center gap-1">
-                                            <TreePine size={11} className="text-emerald-500" />
-                                            {rec.soTau} tàu
-                                          </span>
-                                        )}
-                                        {tree.loai !== "ong_nghiem" && rec.soHoa != null && (
-                                          <span className="flex items-center gap-1">
-                                            <Leaf size={11} className="text-pink-400" />
-                                            {rec.soHoa} hoa
-                                          </span>
-                                        )}
-                                        {/* ống nghiệm */}
-                                        {tree.loai === "ong_nghiem" && rec.ngayRaCayDuKien && (
-                                          <span className="flex items-center gap-1">
-                                            <Sprout size={11} className="text-blue-400" />
-                                            DK ra cây: {fmt(rec.ngayRaCayDuKien)}
-                                          </span>
-                                        )}
-                                        {tree.loai === "ong_nghiem" && rec.ngayRaCayThucTe && (
-                                          <span className="flex items-center gap-1">
-                                            <Sprout size={11} className="text-emerald-500" />
-                                            TT ra cây: {fmt(rec.ngayRaCayThucTe)}
-                                          </span>
-                                        )}
-                                        {tree.loai === "ong_nghiem" && rec.yeuCauDeXuat && (
-                                          <span className="flex items-center gap-1 max-w-xs truncate text-violet-500">
-                                            <StickyNote size={11} /> {rec.yeuCauDeXuat}
-                                          </span>
-                                        )}
-                                        {/* dùng chung */}
-                                        {rec.lichPhunThuoc?.length > 0 && (
-                                          <span className="flex items-center gap-1">
-                                            <Droplets size={11} className="text-blue-300" />
-                                            {rec.lichPhunThuoc.length} lần phun
-                                          </span>
-                                        )}
-                                        {rec.lichBonPhan?.length > 0 && (
-                                          <span className="flex items-center gap-1">
-                                            <Sprout size={11} className="text-amber-400" />
-                                            {rec.lichBonPhan.length} lần bón
-                                          </span>
-                                        )}
-                                        {rec.ghiChu && (
-                                          <span className="flex items-center gap-1 max-w-xs truncate">
-                                            <StickyNote size={11} /> {rec.ghiChu}
-                                          </span>
-                                        )}
-                                      </div>
-                                    </div>
-                                    <div className="flex items-center gap-1 shrink-0">
-                                      <button
-                                        onClick={() => { setEditingRecord(rec); setShowRecordForm(true); }}
-                                        className="p-1.5 text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition"
-                                      >
-                                        <Edit2 size={13} />
-                                      </button>
-                                      <button
-                                        onClick={() => deleteRecord(rec._id)}
-                                        className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition"
-                                      >
-                                        <Trash2 size={13} />
-                                      </button>
-                                    </div>
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          )}
+          <div className="overflow-x-auto [-webkit-overflow-scrolling:touch]">
+            <table className="w-full min-w-[760px] sm:min-w-0">
+              <thead>
+                <tr className="bg-gray-50 border-b border-gray-100">
+                  <th className="w-10 px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                    <input
+                      ref={selectAllRef}
+                      type="checkbox"
+                      checked={allSelected}
+                      onChange={toggleSelectAll}
+                      className="w-4 h-4 rounded accent-emerald-600 cursor-pointer"
+                      title="Chọn tất cả"
+                    />
+                  </th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500">Ảnh</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500">Mã cây/ống nghiệm</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500">Vị trí</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 hidden sm:table-cell">Giống</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500">Trạng thái</th>
+                  <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500">Hành động</th>
+                </tr>
+              </thead>
+              <tbody>
+                {trees.map((tree) => (
+                  <React.Fragment key={tree.maCay}>
+                    <tr
+                      ref={(el) => { if (el) rowRefs.current[tree.maCay] = el; }}
+                      className={`border-b border-gray-50 hover:bg-emerald-50/40 transition cursor-pointer ${expandedMaCay === tree.maCay ? "bg-emerald-50/60" : ""} ${selectedTrees.has(tree.maCay) ? "bg-emerald-50" : ""}`}
+                      onClick={() => toggleExpand(tree.maCay)}
+                    >
+                      <td className="w-10 px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                        <input
+                          type="checkbox"
+                          checked={selectedTrees.has(tree.maCay)}
+                          onChange={(e) => toggleSelectTree(tree.maCay, e)}
+                          className="w-4 h-4 rounded accent-emerald-600 cursor-pointer"
+                        />
+                      </td>
+                      <td className="px-4 py-3">
+                        <TreeImageCell tree={tree} />
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          {expandedMaCay === tree.maCay
+                            ? <ChevronUp size={14} className="text-emerald-500 shrink-0" />
+                            : <ChevronDown size={14} className="text-gray-300 shrink-0" />}
+                          <span className="font-bold text-emerald-700 tracking-wide">{tree.maCay}</span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-600">
+                        <div className="flex items-center gap-1">
+                          <MapPin size={12} className="text-gray-300 shrink-0" />
+                          {tree.viTri || "—"}
+                          {tree.khuVuc && <span className="text-gray-400 text-xs"> / {tree.khuVuc}</span>}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-500 hidden sm:table-cell">
+                        {tree.giong || "—"}
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${TRANG_THAI_CLS[tree.trangThai] || "bg-gray-100 text-gray-500"}`}>
+                          {(TRANG_THAI_OPTIONS.find((t) => t.value === tree.trangThai) || TRANG_THAI_ONG_NGHIEM_OPTIONS.find((t) => t.value === tree.trangThai))?.label || tree.trangThai}
+                        </span>
+                      </td>
+                      <td className="w-32 px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center justify-end gap-1">
+                          <button
+                            onClick={() => setQrTree(tree)}
+                            className="p-1.5 text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition"
+                            title="Xuất mã QR"
+                          >
+                            <QrCode size={14} />
+                          </button>
+                          <button
+                            onClick={() => { setEditingTree(tree); setShowTreeForm(true); }}
+                            className="p-1.5 text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition"
+                            title="Chỉnh sửa"
+                          >
+                            <Edit2 size={14} />
+                          </button>
+                          <button
+                            onClick={() => setConfirmDelete(tree.maCay)}
+                            className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition"
+                            title="Xóa"
+                          >
+                            <Trash2 size={14} />
+                          </button>
                         </div>
                       </td>
                     </tr>
-                  )}
-                </React.Fragment>
-              ))}
-            </tbody>
-          </table>
+
+                    {/* Expanded: Records panel */}
+                    {expandedMaCay === tree.maCay && (
+                      <tr>
+                        <td colSpan={7} className="bg-emerald-50/40 px-4 py-4 border-b border-emerald-100">
+                          <div className="max-w-3xl">
+                            <div className="flex items-center justify-between mb-3">
+                              <h4 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                                <ClipboardList size={15} className="text-emerald-500" />
+                                Bản ghi theo dõi — {tree.maCay}
+                              </h4>
+                              <button
+                                onClick={() => { setEditingRecord(null); setShowRecordForm(true); }}
+                                className="flex items-center gap-1.5 text-xs bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg transition"
+                              >
+                                <Plus size={12} /> Thêm kỳ
+                              </button>
+                            </div>
+
+                            {loadingRecords ? (
+                              <div className="flex items-center gap-2 text-gray-400 text-sm py-4">
+                                <Loader2 size={16} className="animate-spin text-emerald-400" />
+                                Đang tải bản ghi...
+                              </div>
+                            ) : records.length === 0 ? (
+                              <p className="text-sm text-gray-400 py-2">Chưa có bản ghi nào. Nhấn "+ Thêm kỳ" để bắt đầu.</p>
+                            ) : (
+                              <div className="space-y-2">
+                                {records.map((rec) => (
+                                  <div key={rec._id} className="bg-white rounded-xl border border-gray-100 shadow-sm px-4 py-3">
+                                    <div className="flex items-start justify-between gap-3">
+                                      <div className="flex-1 min-w-0">
+                                        <div className="flex items-center gap-2 flex-wrap">
+                                          <span className="font-semibold text-sm text-gray-800">
+                                            {rec.kyTheoDoiNhan || `T${rec.thangBatDau}–T${rec.thangKetThuc}/${rec.nam}`}
+                                          </span>
+                                          {rec.tinhTrangCay && (
+                                            <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${TINH_TRANG_CLS[rec.tinhTrangCay] || "bg-gray-100 text-gray-500"}`}>
+                                              {getTinhTrangLabel(rec.tinhTrangCay)}
+                                            </span>
+                                          )}
+                                        </div>
+                                        <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1.5 text-xs text-gray-400">
+                                          {/* cây giống */}
+                                          {tree.loai !== "ong_nghiem" && rec.sanLuongDuKien?.length > 0 && (
+                                            <span className="flex items-center gap-1">
+                                              <Leaf size={11} className="text-blue-400" />
+                                              DK: {rec.sanLuongDuKien.map((x) => `T${x.thang}: ${x.soLuong}`).join(", ")}
+                                            </span>
+                                          )}
+                                          {tree.loai !== "ong_nghiem" && rec.sanLuongThucTe?.length > 0 && (
+                                            <span className="flex items-center gap-1">
+                                              <Leaf size={11} className="text-emerald-400" />
+                                              TT: {rec.sanLuongThucTe.map((x) => `T${x.thang}: ${x.soLuong}`).join(", ")}
+                                            </span>
+                                          )}
+                                          {tree.loai !== "ong_nghiem" && rec.soTau != null && (
+                                            <span className="flex items-center gap-1">
+                                              <TreePine size={11} className="text-emerald-500" />
+                                              {rec.soTau} tàu
+                                            </span>
+                                          )}
+                                          {tree.loai !== "ong_nghiem" && rec.soHoa != null && (
+                                            <span className="flex items-center gap-1">
+                                              <Leaf size={11} className="text-pink-400" />
+                                              {rec.soHoa} hoa
+                                            </span>
+                                          )}
+                                          {/* ống nghiệm */}
+                                          {tree.loai === "ong_nghiem" && rec.ngayRaCayDuKien && (
+                                            <span className="flex items-center gap-1">
+                                              <Sprout size={11} className="text-blue-400" />
+                                              DK ra cây: {fmt(rec.ngayRaCayDuKien)}
+                                            </span>
+                                          )}
+                                          {tree.loai === "ong_nghiem" && rec.ngayRaCayThucTe && (
+                                            <span className="flex items-center gap-1">
+                                              <Sprout size={11} className="text-emerald-500" />
+                                              TT ra cây: {fmt(rec.ngayRaCayThucTe)}
+                                            </span>
+                                          )}
+                                          {tree.loai === "ong_nghiem" && rec.yeuCauDeXuat && (
+                                            <span className="flex items-center gap-1 max-w-xs truncate text-violet-500">
+                                              <StickyNote size={11} /> {rec.yeuCauDeXuat}
+                                            </span>
+                                          )}
+                                          {/* dùng chung */}
+                                          {rec.lichPhunThuoc?.length > 0 && (
+                                            <span className="flex items-center gap-1">
+                                              <Droplets size={11} className="text-blue-300" />
+                                              {rec.lichPhunThuoc.length} lần phun
+                                            </span>
+                                          )}
+                                          {rec.lichBonPhan?.length > 0 && (
+                                            <span className="flex items-center gap-1">
+                                              <Sprout size={11} className="text-amber-400" />
+                                              {rec.lichBonPhan.length} lần bón
+                                            </span>
+                                          )}
+                                          {rec.ghiChu && (
+                                            <span className="flex items-center gap-1 max-w-xs truncate">
+                                              <StickyNote size={11} /> {rec.ghiChu}
+                                            </span>
+                                          )}
+                                        </div>
+                                      </div>
+                                      <div className="flex items-center gap-1 shrink-0">
+                                        <button
+                                          onClick={() => { setEditingRecord(rec); setShowRecordForm(true); }}
+                                          className="p-1.5 text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition"
+                                        >
+                                          <Edit2 size={13} />
+                                        </button>
+                                        <button
+                                          onClick={() => deleteRecord(rec._id)}
+                                          className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition"
+                                        >
+                                          <Trash2 size={13} />
+                                        </button>
+                                      </div>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
 
         {!loading && totalTrees > 0 && (
