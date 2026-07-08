@@ -49,6 +49,24 @@ function statusClass(status) {
   return "bg-slate-100 text-slate-600 ring-slate-200";
 }
 
+function deliverySignal(log = {}) {
+  if (log.status === "sent" || log.sentAt) {
+    return {
+      label: "đã gửi khách",
+      className: "bg-emerald-50 text-emerald-700 ring-emerald-100",
+    };
+  }
+
+  if (log.status === "dry_run") {
+    return {
+      label: "chưa gửi khách",
+      className: "bg-amber-50 text-amber-700 ring-amber-100",
+    };
+  }
+
+  return null;
+}
+
 function messageRoleLabel(role = "") {
   const value = String(role || "").toLowerCase();
   if (value === "customer" || value === "user") return "Khách";
@@ -96,6 +114,7 @@ export default function CustomerCareManager() {
   const [running, setRunning] = useState("");
   const [message, setMessage] = useState("");
   const [selectedCandidate, setSelectedCandidate] = useState(null);
+  const [pageSearch, setPageSearch] = useState("");
 
   const headers = useMemo(() => ({
     "Content-Type": "application/json",
@@ -195,6 +214,16 @@ export default function CustomerCareManager() {
 
   const selectedPageCount = Array.isArray(config.pageIds) ? config.pageIds.length : 0;
   const allPagesMode = selectedPageCount === 0;
+  const filteredPages = useMemo(() => {
+    const keyword = pageSearch.trim().toLowerCase();
+    if (!keyword) return pages;
+
+    return pages.filter((page) => {
+      const name = String(page.name || "").toLowerCase();
+      const facebookId = String(page.facebookId || "").toLowerCase();
+      return name.includes(keyword) || facebookId.includes(keyword);
+    });
+  }, [pages, pageSearch]);
 
   return (
     <div className="flex h-full min-h-screen flex-col bg-slate-50 text-slate-900">
@@ -269,9 +298,17 @@ export default function CustomerCareManager() {
                 <span className="text-xs font-bold text-slate-600">Page áp dụng</span>
                 <button type="button" onClick={() => updateField("pageIds", [])} className="text-xs font-bold text-cyan-700 hover:underline">Tất cả</button>
               </div>
+              <input
+                value={pageSearch}
+                onChange={(event) => setPageSearch(event.target.value)}
+                className="mb-2 h-9 w-full rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold outline-none focus:border-cyan-300 focus:ring-2 focus:ring-cyan-50"
+                placeholder="Tìm page theo tên hoặc ID..."
+              />
               <div className="max-h-60 space-y-2 overflow-y-auto rounded-md border border-slate-200 bg-slate-50 p-2">
                 <div className={`rounded-md px-2 py-2 text-xs font-bold ${allPagesMode ? "bg-cyan-100 text-cyan-800" : "bg-white text-slate-500"}`}>Đang áp dụng: {allPagesMode ? "Tất cả Page" : `${selectedPageCount} Page đã chọn`}</div>
-                {pages.map((page) => {
+                {filteredPages.length === 0 ? (
+                  <div className="rounded-md bg-white px-2 py-3 text-center text-xs font-semibold text-slate-400">Không tìm thấy page phù hợp.</div>
+                ) : filteredPages.map((page) => {
                   const pageId = String(page.facebookId || "");
                   const checked = config.pageIds?.includes(pageId);
                   return (
@@ -351,23 +388,29 @@ export default function CustomerCareManager() {
               <div className="max-h-[calc(100vh-250px)] space-y-3 overflow-y-auto p-4">
                 {logs.length === 0 ? (
                   <div className="rounded-md border border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-center text-sm text-slate-500">Chưa có log chăm sóc.</div>
-                ) : logs.map((log) => (
-                  <div key={log._id} className="rounded-md border border-slate-200 bg-white p-3 shadow-sm">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="truncate text-sm font-extrabold">{log.userName || log.user}</div>
-                        <div className="mt-0.5 truncate text-xs text-slate-500">{log.pageName || log.page}</div>
+                ) : logs.map((log) => {
+                  const signal = deliverySignal(log);
+                  return (
+                    <div key={log._id} className="rounded-md border border-slate-200 bg-white p-3 shadow-sm">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="truncate text-sm font-extrabold">{log.userName || log.user}</div>
+                          <div className="mt-0.5 truncate text-xs text-slate-500">{log.pageName || log.page}</div>
+                        </div>
+                        <div className="flex shrink-0 flex-wrap justify-end gap-1">
+                          <span className={`rounded-full px-2 py-1 text-[11px] font-bold ring-1 ${statusClass(log.status)}`}>{log.status}</span>
+                          {signal ? <span className={`rounded-full px-2 py-1 text-[11px] font-bold ring-1 ${signal.className}`}>{signal.label}</span> : null}
+                        </div>
                       </div>
-                      <span className={`shrink-0 rounded-full px-2 py-1 text-[11px] font-bold ring-1 ${statusClass(log.status)}`}>{log.status}</span>
+                      {log.message ? <div className="mt-2 whitespace-pre-wrap rounded-md bg-slate-50 px-2 py-2 text-sm leading-5 text-slate-700">{log.message}</div> : null}
+                      <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-400">
+                        <Clock3 size={13} />
+                        <span>{formatDateTime(log.createdAt)}</span>
+                        {log.reason ? <span className="font-semibold text-slate-500">· {log.reason}</span> : null}
+                      </div>
                     </div>
-                    {log.message ? <div className="mt-2 whitespace-pre-wrap rounded-md bg-slate-50 px-2 py-2 text-sm leading-5 text-slate-700">{log.message}</div> : null}
-                    <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-400">
-                      <Clock3 size={13} />
-                      <span>{formatDateTime(log.createdAt)}</span>
-                      {log.reason ? <span className="font-semibold text-slate-500">· {log.reason}</span> : null}
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           </div>
