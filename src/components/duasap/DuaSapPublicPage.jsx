@@ -65,6 +65,11 @@ const GIONG_LABEL = {
   khac: "Khác",
 };
 
+const LOAI_LABEL = {
+  cay_giong: "Cây giống",
+  ong_nghiem: "Trong ống nghiệm",
+};
+
 const PAGE_SIZE = 12;
 const SESSION_KEY = "duaSapListState";
 
@@ -98,6 +103,7 @@ export default function DuaSapPublicPage() {
   const [searchInput, setSearchInput] = useState(() => restoredState?.searchInput ?? "");
   const [viTri, setViTri] = useState(() => restoredState?.viTri ?? "");
   const [khuVuc, setKhuVuc] = useState(() => restoredState?.khuVuc ?? "");
+  const [loai, setLoai] = useState(() => restoredState?.loai ?? "");
   const [distinctViTri, setDistinctViTri] = useState([]);
   const [distinctKhuVuc, setDistinctKhuVuc] = useState([]);
   const [imageTree, setImageTree] = useState(null);
@@ -152,6 +158,7 @@ export default function DuaSapPublicPage() {
           ...(search ? { search } : {}),
           ...(viTri ? { viTri } : {}),
           ...(khuVuc ? { khuVuc } : {}),
+          ...(loai ? { loai } : {}),
           page,
           limit: PAGE_SIZE,
         },
@@ -173,7 +180,7 @@ export default function DuaSapPublicPage() {
         setLoadingMore(false);
       });
     return () => controller.abort();
-  }, [page, search, viTri, khuVuc]);
+  }, [page, search, viTri, khuVuc, loai]);
 
   // IntersectionObserver: khi sentinel vào viewport thì tải trang tiếp
   useEffect(() => {
@@ -217,6 +224,12 @@ export default function DuaSapPublicPage() {
     setKhuVuc(val);
   }
 
+  function handleLoaiChange(val) {
+    setPage(1);
+    setHasMore(true);
+    setLoai(val);
+  }
+
   function handleTreeClick(maCay) {
     try {
       sessionStorage.setItem(SESSION_KEY, JSON.stringify({
@@ -229,6 +242,7 @@ export default function DuaSapPublicPage() {
         searchInput,
         viTri,
         khuVuc,
+        loai,
       }));
     } catch { /* sessionStorage có thể bị tắt */ }
     navigate(`/dua-sap/${maCay}`);
@@ -323,37 +337,45 @@ export default function DuaSapPublicPage() {
             </button>
           </form>
 
-          {/* Dropdown lọc vị trí & khu vực */}
-          {(distinctViTri.length > 0 || distinctKhuVuc.length > 0) && (
-            <div className="mt-3 flex justify-center gap-2 flex-wrap">
-              {distinctViTri.length > 0 && (
-                <select
-                  value={viTri}
-                  onChange={(e) => handleViTriChange(e.target.value)}
-                  className="bg-white/20 text-white text-sm rounded-xl px-4 py-2 border border-white/30 focus:outline-none focus:ring-2 focus:ring-white/50 cursor-pointer appearance-none pr-8"
-                  style={{ backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.5'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E\")", backgroundRepeat: "no-repeat", backgroundPosition: "right 12px center" }}
-                >
-                  <option value="" className="text-gray-800 bg-white">Tất cả vị trí</option>
-                  {distinctViTri.map((v) => (
-                    <option key={v} value={v} className="text-gray-800 bg-white">{v}</option>
-                  ))}
-                </select>
-              )}
-              {distinctKhuVuc.length > 0 && (
-                <select
-                  value={khuVuc}
-                  onChange={(e) => handleKhuVucChange(e.target.value)}
-                  className="bg-white/20 text-white text-sm rounded-xl px-4 py-2 border border-white/30 focus:outline-none focus:ring-2 focus:ring-white/50 cursor-pointer appearance-none pr-8"
-                  style={{ backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.5'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E\")", backgroundRepeat: "no-repeat", backgroundPosition: "right 12px center" }}
-                >
-                  <option value="" className="text-gray-800 bg-white">Tất cả khu / lô</option>
-                  {distinctKhuVuc.map((kv) => (
-                    <option key={kv} value={kv} className="text-gray-800 bg-white">{kv}</option>
-                  ))}
-                </select>
-              )}
-            </div>
-          )}
+          {/* Dropdown lọc vị trí, khu vực & loại */}
+          <div className="mt-3 flex justify-center gap-2 flex-wrap">
+            <select
+              value={loai}
+              onChange={(e) => handleLoaiChange(e.target.value)}
+              className="bg-white/20 text-white text-sm rounded-xl px-4 py-2 border border-white/30 focus:outline-none focus:ring-2 focus:ring-white/50 cursor-pointer appearance-none pr-8"
+              style={{ backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.5'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E\")", backgroundRepeat: "no-repeat", backgroundPosition: "right 12px center" }}
+            >
+              <option value="" className="text-gray-800 bg-white">Tất cả loại</option>
+              <option value="cay_giong" className="text-gray-800 bg-white">Cây giống</option>
+              <option value="ong_nghiem" className="text-gray-800 bg-white">Trong ống nghiệm</option>
+            </select>
+            {distinctViTri.length > 0 && (
+              <select
+                value={viTri}
+                onChange={(e) => handleViTriChange(e.target.value)}
+                className="bg-white/20 text-white text-sm rounded-xl px-4 py-2 border border-white/30 focus:outline-none focus:ring-2 focus:ring-white/50 cursor-pointer appearance-none pr-8"
+                style={{ backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.5'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E\")", backgroundRepeat: "no-repeat", backgroundPosition: "right 12px center" }}
+              >
+                <option value="" className="text-gray-800 bg-white">Tất cả vị trí</option>
+                {distinctViTri.map((v) => (
+                  <option key={v} value={v} className="text-gray-800 bg-white">{v}</option>
+                ))}
+              </select>
+            )}
+            {distinctKhuVuc.length > 0 && (
+              <select
+                value={khuVuc}
+                onChange={(e) => handleKhuVucChange(e.target.value)}
+                className="bg-white/20 text-white text-sm rounded-xl px-4 py-2 border border-white/30 focus:outline-none focus:ring-2 focus:ring-white/50 cursor-pointer appearance-none pr-8"
+                style={{ backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.5'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E\")", backgroundRepeat: "no-repeat", backgroundPosition: "right 12px center" }}
+              >
+                <option value="" className="text-gray-800 bg-white">Tất cả khu / lô</option>
+                {distinctKhuVuc.map((kv) => (
+                  <option key={kv} value={kv} className="text-gray-800 bg-white">{kv}</option>
+                ))}
+              </select>
+            )}
+          </div>
         </div>
       </header>
 
@@ -389,6 +411,19 @@ export default function DuaSapPublicPage() {
                   onClick={() => handleKhuVucChange("")}
                   className="ml-0.5 hover:text-emerald-900 leading-none"
                   aria-label="Bỏ lọc khu vực"
+                >
+                  ×
+                </button>
+              </span>
+            )}
+            {loai && (
+              <span className="inline-flex items-center gap-1 bg-emerald-100 text-emerald-700 text-xs font-medium px-2.5 py-0.5 rounded-full">
+                <TreePine size={11} />
+                {LOAI_LABEL[loai] || loai}
+                <button
+                  onClick={() => handleLoaiChange("")}
+                  className="ml-0.5 hover:text-emerald-900 leading-none"
+                  aria-label="Bỏ lọc loại"
                 >
                   ×
                 </button>
