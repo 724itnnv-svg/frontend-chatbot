@@ -3,6 +3,7 @@ import {
   Activity,
   BotMessageSquare,
   Clock3,
+  X,
   Loader2,
   Play,
   RefreshCw,
@@ -18,6 +19,7 @@ const DEFAULT_CONFIG = {
   cronExpression: "0 9,15 * * *",
   timezone: "Asia/Ho_Chi_Minh",
   silentHours: 24,
+  maxSilentHours: 720,
   minMessages: 2,
   historyLimit: 10,
   maxPerRun: 20,
@@ -45,6 +47,22 @@ function statusClass(status) {
   if (status === "dry_run") return "bg-sky-50 text-sky-700 ring-sky-100";
   if (status === "error") return "bg-rose-50 text-rose-700 ring-rose-100";
   return "bg-slate-100 text-slate-600 ring-slate-200";
+}
+
+function messageRoleLabel(role = "") {
+  const value = String(role || "").toLowerCase();
+  if (value === "customer" || value === "user") return "Khách";
+  if (value === "human_admin" || value === "human" || value === "admin") return "Nhân viên";
+  if (value === "assistant" || value === "bot") return "Bot";
+  return "Khác";
+}
+
+function messageBubbleClass(role = "") {
+  const value = String(role || "").toLowerCase();
+  if (value === "customer" || value === "user") return "border-slate-200 bg-white text-slate-800";
+  if (value === "human_admin" || value === "human" || value === "admin") return "border-emerald-100 bg-emerald-50 text-emerald-900";
+  if (value === "assistant" || value === "bot") return "border-cyan-100 bg-cyan-50 text-cyan-950";
+  return "border-slate-200 bg-slate-50 text-slate-700";
 }
 
 function NumberInput({ label, value, min, max, unit, onChange }) {
@@ -77,6 +95,7 @@ export default function CustomerCareManager() {
   const [saving, setSaving] = useState(false);
   const [running, setRunning] = useState("");
   const [message, setMessage] = useState("");
+  const [selectedCandidate, setSelectedCandidate] = useState(null);
 
   const headers = useMemo(() => ({
     "Content-Type": "application/json",
@@ -234,6 +253,7 @@ export default function CustomerCareManager() {
 
             <div className="grid grid-cols-2 gap-3">
               <NumberInput label="Im lặng tối thiểu" value={config.silentHours} min={1} max={720} unit="giờ" onChange={(event) => updateField("silentHours", Number(event.target.value))} />
+              <NumberInput label="Im lặng tối đa" value={config.maxSilentHours} min={1} max={2160} unit="giờ" onChange={(event) => updateField("maxSilentHours", Number(event.target.value))} />
               <NumberInput label="Cooldown" value={config.cooldownHours} min={1} max={2160} unit="giờ" onChange={(event) => updateField("cooldownHours", Number(event.target.value))} />
               <NumberInput label="Tin gần nhất" value={config.historyLimit} min={3} max={30} unit="tin" onChange={(event) => updateField("historyLimit", Number(event.target.value))} />
               <NumberInput label="Tối đa mỗi lượt" value={config.maxPerRun} min={1} max={200} unit="khách" onChange={(event) => updateField("maxPerRun", Number(event.target.value))} />
@@ -303,7 +323,12 @@ export default function CustomerCareManager() {
                 {candidates.length === 0 ? (
                   <div className="rounded-md border border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-center text-sm text-slate-500">Chưa có hội thoại đủ điều kiện theo cấu hình hiện tại.</div>
                 ) : candidates.map((item) => (
-                  <div key={item.id} className="rounded-md border border-slate-200 bg-white p-3 shadow-sm">
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => setSelectedCandidate(item)}
+                    className="block w-full rounded-md border border-slate-200 bg-white p-3 text-left shadow-sm transition hover:border-cyan-200 hover:bg-cyan-50/40 focus:outline-none focus:ring-2 focus:ring-cyan-200"
+                  >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <div className="truncate text-sm font-extrabold">{item.userName || item.user}</div>
@@ -313,7 +338,7 @@ export default function CustomerCareManager() {
                     </div>
                     {item.adName || item.activeProductName ? <div className="mt-2 truncate rounded-md bg-slate-50 px-2 py-1 text-xs font-semibold text-slate-600">{item.adName || item.activeProductName}</div> : null}
                     <div className="mt-2 text-xs text-slate-400">Tin cuối: {formatDateTime(item.lastMessageAt)}</div>
-                  </div>
+                  </button>
                 ))}
               </div>
             </div>
@@ -348,6 +373,68 @@ export default function CustomerCareManager() {
           </div>
         </section>
       </main>
+
+      {selectedCandidate ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4">
+          <div className="flex max-h-[86vh] w-full max-w-3xl flex-col overflow-hidden rounded-md border border-slate-200 bg-white shadow-2xl">
+            <div className="flex items-start justify-between gap-4 border-b border-slate-100 px-5 py-4">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <BotMessageSquare size={18} className="text-cyan-600" />
+                  <h3 className="truncate text-base font-extrabold">Lịch sử đoạn chat</h3>
+                </div>
+                <div className="mt-1 truncate text-sm font-bold text-slate-800">{selectedCandidate.userName || selectedCandidate.user}</div>
+                <div className="mt-0.5 truncate text-xs text-slate-500">{selectedCandidate.pageName || selectedCandidate.page}</div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedCandidate(null)}
+                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+                aria-label="Đóng"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="border-b border-slate-100 px-5 py-3">
+              <div className="flex flex-wrap gap-2 text-xs">
+                <span className="rounded-full bg-amber-50 px-2 py-1 font-bold text-amber-700 ring-1 ring-amber-100">
+                  Im lặng {formatHours(selectedCandidate.silentHours)}
+                </span>
+                <span className="rounded-full bg-slate-50 px-2 py-1 font-semibold text-slate-500 ring-1 ring-slate-200">
+                  Tin cuối {formatDateTime(selectedCandidate.lastMessageAt)}
+                </span>
+              </div>
+              {selectedCandidate.adName || selectedCandidate.activeProductName ? (
+                <div className="mt-2 truncate rounded-md bg-slate-50 px-2 py-1 text-xs font-semibold text-slate-600">
+                  {selectedCandidate.adName || selectedCandidate.activeProductName}
+                </div>
+              ) : null}
+            </div>
+
+            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto bg-slate-50 p-5">
+              {Array.isArray(selectedCandidate.recentMessages) && selectedCandidate.recentMessages.length ? (
+                selectedCandidate.recentMessages.map((chatMessage, index) => (
+                  <div
+                    key={`${chatMessage.role || "message"}-${chatMessage.createdAt || index}-${index}`}
+                    className={`rounded-md border px-3 py-2 shadow-sm ${messageBubbleClass(chatMessage.role)}`}
+                  >
+                    <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-xs font-extrabold">{messageRoleLabel(chatMessage.role)}</span>
+                      <span className="text-[11px] font-semibold opacity-70">{formatDateTime(chatMessage.createdAt)}</span>
+                    </div>
+                    <div className="whitespace-pre-wrap text-sm leading-5">{chatMessage.text}</div>
+                  </div>
+                ))
+              ) : (
+                <div className="rounded-md border border-dashed border-slate-300 bg-white px-4 py-8 text-center text-sm text-slate-500">
+                  Chưa có lịch sử đoạn chat để hiển thị.
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
