@@ -26,7 +26,6 @@ export default defineConfig({
           }
 
           if (id.includes("xlsx")) return "xlsx";
-          if (id.includes("exceljs")) return "exceljs";
           if (id.includes("jszip")) return "jszip";
           if (id.includes("qrcode")) return "qrcode";
           if (id.includes("sweetalert2")) return "sweetalert2";
