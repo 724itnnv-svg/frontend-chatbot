@@ -230,10 +230,9 @@ function ProductForm({ open, onClose, onSubmit, onSubmitCreate, productId, initi
     "w-full rounded-xl border bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 disabled:bg-slate-50 disabled:text-slate-500";
 
   const controlClass = (name) =>
-    `${baseInputClass} ${
-      errors[name]
-        ? "border-rose-400 bg-rose-50/40 focus:border-rose-500 focus:ring-4 focus:ring-rose-100"
-        : "border-slate-200 focus:border-cyan-400 focus:ring-4 focus:ring-cyan-100"
+    `${baseInputClass} ${errors[name]
+      ? "border-rose-400 bg-rose-50/40 focus:border-rose-500 focus:ring-4 focus:ring-rose-100"
+      : "border-slate-200 focus:border-cyan-400 focus:ring-4 focus:ring-cyan-100"
     }`;
 
   const labelClass = "text-xs font-bold uppercase tracking-wide text-slate-500";
@@ -481,18 +480,16 @@ function ProductForm({ open, onClose, onSubmit, onSubmitCreate, productId, initi
                     </label>
                   </div>
                   <label
-                    className={`mt-4 flex cursor-pointer items-center justify-between gap-4 rounded-2xl border px-4 py-3 transition ${
-                      form.isActive === false
-                        ? "border-rose-100 bg-rose-50"
-                        : "border-emerald-100 bg-emerald-50"
-                    }`}
+                    className={`mt-4 flex cursor-pointer items-center justify-between gap-4 rounded-2xl border px-4 py-3 transition ${form.isActive === false
+                      ? "border-rose-100 bg-rose-50"
+                      : "border-emerald-100 bg-emerald-50"
+                      }`}
                   >
                     <span>
                       <span className={labelClass}>Trạng thái</span>
                       <span
-                        className={`mt-1 block text-sm font-bold ${
-                          form.isActive === false ? "text-rose-700" : "text-emerald-700"
-                        }`}
+                        className={`mt-1 block text-sm font-bold ${form.isActive === false ? "text-rose-700" : "text-emerald-700"
+                          }`}
                       >
                         {form.isActive === false ? "Sản phẩm đang tắt" : "Sản phẩm đang bật"}
                       </span>
@@ -505,14 +502,12 @@ function ProductForm({ open, onClose, onSubmit, onSubmitCreate, productId, initi
                       className="sr-only"
                     />
                     <span
-                      className={`relative inline-flex h-7 w-12 shrink-0 items-center rounded-full transition ${
-                        form.isActive === false ? "bg-rose-300" : "bg-emerald-500"
-                      }`}
+                      className={`relative inline-flex h-7 w-12 shrink-0 items-center rounded-full transition ${form.isActive === false ? "bg-rose-300" : "bg-emerald-500"
+                        }`}
                     >
                       <span
-                        className={`h-5 w-5 rounded-full bg-white shadow transition ${
-                          form.isActive === false ? "translate-x-1" : "translate-x-6"
-                        }`}
+                        className={`h-5 w-5 rounded-full bg-white shadow transition ${form.isActive === false ? "translate-x-1" : "translate-x-6"
+                          }`}
                       />
                     </span>
                   </label>

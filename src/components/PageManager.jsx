@@ -11,6 +11,7 @@ import {
   Search,
   ShieldCheck,
   Trash2,
+  UsersRound,
 } from "lucide-react";
 
 function SummerBreezeLayer({ leafCount = 16 }) {
@@ -129,6 +130,47 @@ function StatusPill({ active }) {
     >
       {active ? "Đang bật" : "Đang tắt"}
     </span>
+  );
+}
+
+function getManagedUsers(page) {
+  const source =
+    page?.managedUsers ||
+    page?.managers ||
+    page?.managerUsers ||
+    page?.assignedUsers ||
+    page?.managedBy ||
+    [];
+  return (Array.isArray(source) ? source : source ? [source] : [])
+    .map((manager) => {
+      if (typeof manager === "string") return manager.trim();
+      return (
+        manager?.fullName ||
+        manager?.name ||
+        manager?.email ||
+        manager?.phone ||
+        manager?.code ||
+        ""
+      ).trim();
+    })
+    .filter(Boolean);
+}
+
+function ManagedUsersLine({ page, compact = false }) {
+  const managedUsers = getManagedUsers(page);
+  const label = managedUsers.length ? managedUsers.join(", ") : "Chua co user";
+
+  return (
+    <div
+      className={[
+        "mt-1 flex min-w-0 max-w-full items-center gap-1.5 text-cyan-700",
+        compact ? "text-[11px]" : "text-xs",
+      ].join(" ")}
+      title={`User quan ly: ${label}`}
+    >
+      <UsersRound className="h-3.5 w-3.5 shrink-0 text-cyan-600" />
+      <span className="min-w-0 truncate font-medium">{label}</span>
+    </div>
   );
 }
 
@@ -440,6 +482,7 @@ export default function PageManager() {
                       <div className="mt-0.5 truncate text-xs text-slate-500" title={page.facebookId}>
                         ID: {page.facebookId}
                       </div>
+                      <ManagedUsersLine page={page} />
                     </div>
                   </td>
 
@@ -524,8 +567,9 @@ export default function PageManager() {
                 />
 
                 <div className="min-w-0 flex-1">
-                  <div className="truncate font-semibold text-slate-900">{page.name}</div>
+                  <div className="truncate font-semibold text-slate-900" title={page.name}>{page.name}</div>
                   <div className="mt-0.5 break-all text-xs text-slate-500">{page.facebookId}</div>
+                  <ManagedUsersLine page={page} compact />
                   <div className="mt-2 inline-flex max-w-full rounded-full border border-sky-100 bg-sky-50/80 px-2 py-0.5 text-[11px] font-semibold text-sky-700">
                     <span className="truncate">Team: {page.teamId || "Chưa gán"}</span>
                   </div>
