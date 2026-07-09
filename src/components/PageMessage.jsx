@@ -300,14 +300,15 @@ function PageMessage() {
   const refreshChatsForPage = async (page, { updateUserNames = false, loadSeq = null } = {}) => {
     if (!page?.facebookId || !token) return [];
 
-    const chatRes = await fetch("/api/chat/recent", {
+    const params = new URLSearchParams({ page: page.facebookId });
+    const chatRes = await fetch(`/api/chat/recent?${params.toString()}`, {
       headers: {
         Authorization: `Bearer ${token}`,
       },
     });
     const allChats = await chatRes.json();
     const filteredChats = (Array.isArray(allChats) ? allChats : []).filter(
-      (c) => String(c.page) === String(page.facebookId) && c.conversationId,
+      (c) => String(c.page) === String(page.facebookId),
     );
 
     if (loadSeq === null || pageLoadSeqRef.current === loadSeq) {
@@ -430,7 +431,8 @@ function PageMessage() {
 
   // ✅ Chọn khách → load lịch sử theo threadId
   const handleSelectChat = async (chat, { pageOverride = null, pageLoadSeq = null } = {}) => {
-    if (!chat?.threadId && !chat?.conversationId) {
+    const endpoint = buildHistoryEndpoint(chat);
+    if (!endpoint) {
       alert("⚠️ Chat này chưa có threadId để xem lịch sử");
       return;
     }
@@ -443,7 +445,7 @@ function PageMessage() {
     selectedChatRef.current = chat;
     setSelectedChat(chat);   
     if(!chat.conversationId){
-      setActiveThreadId(chat.threadId);
+      setActiveThreadId(chat.threadId || chat.user);
     }else{
       setActiveThreadId(chat.conversationId);
     }
@@ -467,10 +469,6 @@ function PageMessage() {
 
     try {
       setLoadingMessages(true);
-      let endpoint = `${HISTORY_ENDPOINT}?threadId=${encodeURIComponent(chat.threadId)}`;
-      if(chat.conversationId){
-        endpoint = `${HISTORY_ENDPOINT}?conversationId=${encodeURIComponent(chat.conversationId)}`;
-      }
       const res = await fetch(
         endpoint,
         {
@@ -512,6 +510,13 @@ function PageMessage() {
     }
     if (threadId) {
       return `${HISTORY_ENDPOINT}?threadId=${encodeURIComponent(threadId)}`;
+    }
+    if (chatOrId?.page && chatOrId?.user) {
+      const params = new URLSearchParams({
+        pageId: chatOrId.page,
+        userId: chatOrId.user,
+      });
+      return `${HISTORY_ENDPOINT}?${params.toString()}`;
     }
     return "";
   };
@@ -995,7 +1000,13 @@ function PageMessage() {
     setSelectedUsers((prev) => ({ ...prev, [userId]: !prev[userId] }));
   };
 
-  const allSelected = chats.length > 0 && chats.every((c) => selectedUsers[c.user]);
+  const selectableFilteredChats = useMemo(
+    () => filteredChats.filter((chat) => chat.user),
+    [filteredChats],
+  );
+  const allSelected =
+    selectableFilteredChats.length > 0 &&
+    selectableFilteredChats.every((c) => selectedUsers[c.user]);
 
   const allQuickReplies = useMemo(
     () => [...DEFAULT_QUICK_REPLIES, ...quickReplies],
@@ -1074,7 +1085,7 @@ function PageMessage() {
       return;
     }
     const newSelected = {};
-    chats.forEach((c) => (newSelected[c.user] = true));
+    selectableFilteredChats.forEach((c) => (newSelected[c.user] = true));
     setSelectedUsers(newSelected);
   };
 
