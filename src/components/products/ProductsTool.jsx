@@ -74,6 +74,7 @@ export default function ProductManager() {
   const [showEditModal, setShowEditModal] = useState(false);
   const [showSyncDataModal, setShowSyncDataModal] = useState(false);
   const [showNameCheckModal, setShowNameCheckModal] = useState(false);
+  const [showProductActions, setShowProductActions] = useState(false);
   const [productCodeText, setProductCodeText] = useState("");
   const [productNameCheckResults, setProductNameCheckResults] = useState([]);
   const [productNameResultFormat, setProductNameResultFormat] = useState("card");
@@ -1511,60 +1512,74 @@ export default function ProductManager() {
         {importErrors[field]}
       </p>
     ) : null;
+  const actionButtonClass =
+    "flex min-h-9 items-center justify-center gap-1.5 rounded-lg px-2 py-2 text-xs font-semibold text-white shadow-sm transition sm:min-h-0 sm:w-auto sm:gap-2 sm:rounded-xl sm:px-4 sm:py-2.5 sm:text-sm sm:shadow-md";
 
   return (
-    <div className={`min-h-screen bg-gradient-to-b from-rose-50 via-white to-amber-50 p-6 ${pageBg}`}>
+    <div className={`min-h-screen bg-gradient-to-b from-rose-50 via-white to-amber-50 p-4 md:p-6 ${pageBg}`}>
       <div className="max-w-12xl mx-auto space-y-6">
-        <div className="flex flex-col gap-4 md:flex-row md:justify-between md:items-center sticky top-0 bg-white z-10 p-3">
-          <div className="flex flex-wrap gap-3 items-center">
-            <div className="w-10 h-10 bg-green-500 text-white rounded-xl flex items-center justify-center">
-              <Package />
+        <div className="flex flex-col gap-3 md:flex-row md:justify-between md:items-center sticky top-0 bg-white z-10 p-3">
+          <div className="flex flex-wrap gap-2.5 items-center">
+            <div className="w-9 h-9 md:w-10 md:h-10 bg-green-500 text-white rounded-xl flex items-center justify-center">
+              <Package size={20} />
             </div>
             <h1 className="font-bold text-lg md:text-xl">
               Quản lý sản phẩm
             </h1>
             <span className="text-sm md:text-base">Tổng: {total}</span>
+            <button
+              type="button"
+              onClick={() => setShowProductActions((value) => !value)}
+              className="ml-auto inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs font-bold text-slate-600 shadow-sm sm:hidden"
+            >
+              Tác vụ
+              {showProductActions ? (
+                <ChevronUp size={14} />
+              ) : (
+                <ChevronDown size={14} />
+              )}
+            </button>
           </div>
 
-          <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 w-full md:w-auto">
+          <div className={`${showProductActions ? "grid" : "hidden"} grid-cols-2 gap-2 sm:flex sm:flex-row sm:gap-3 w-full md:w-auto`}>
             <button
               onClick={() => setShowNameCheckModal(true)}
-              className="w-full sm:w-auto flex justify-center items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-white shadow-md bg-gradient-to-r from-violet-500 to-violet-400 hover:from-violet-400 hover:to-violet-300"
+              className={`${actionButtonClass} bg-gradient-to-r from-violet-500 to-violet-400 hover:from-violet-400 hover:to-violet-300`}
             >
-              <CheckCircle size={16} /> Check tên SP
+              <CheckCircle size={14} /> Check tên SP
             </button>
 
             <button
               onClick={handleSyncData}
-              className="w-full sm:w-auto flex justify-center items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-white shadow-md bg-gradient-to-r from-blue-500 to-blue-400 hover:from-blue-400 hover:to-blue-300"
+              className={`${actionButtonClass} bg-gradient-to-r from-blue-500 to-blue-400 hover:from-blue-400 hover:to-blue-300`}
             >
-              <BotMessageSquare size={16} /> Sync vector store
+              <BotMessageSquare size={14} /> Sync vector store
             </button>
 
             <button
               onClick={handleOpenImportModal}
-              className="w-full sm:w-auto flex justify-center items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-white shadow-md bg-gradient-to-r from-emerald-500 to-emerald-400 hover:from-emerald-400 hover:to-emerald-300"
+              className={`${actionButtonClass} bg-gradient-to-r from-emerald-500 to-emerald-400 hover:from-emerald-400 hover:to-emerald-300`}
             >
-              <UploadCloud size={16} /> Import file
+              <UploadCloud size={14} /> Import file
             </button>
 
             <button
               onClick={handleOpenBulkImageModal}
-              className="w-full sm:w-auto flex justify-center items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-white shadow-md bg-gradient-to-r from-cyan-500 to-sky-400 hover:from-cyan-400 hover:to-sky-300"
+              className={`${actionButtonClass} bg-gradient-to-r from-cyan-500 to-sky-400 hover:from-cyan-400 hover:to-sky-300`}
             >
-              <ImageUp size={16} /> Cập nhật ảnh
+              <ImageUp size={14} /> Cập nhật ảnh
             </button>
 
             <button
               onClick={handleOpenBulkUpdateModal}
-              className="w-full sm:w-auto flex justify-center items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-white shadow-md bg-gradient-to-r from-indigo-500 to-blue-500 hover:from-indigo-400 hover:to-blue-400"
+              className={`${actionButtonClass} bg-gradient-to-r from-indigo-500 to-blue-500 hover:from-indigo-400 hover:to-blue-400`}
             >
-              <Database size={16} /> Cập nhật dữ liệu
+              <Database size={14} /> Cập nhật dữ liệu
             </button>
 
             <button
               onClick={handleCreate}
-              className="w-full sm:w-auto flex justify-center items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-white shadow-md bg-gradient-to-r from-red-500 to-red-400 hover:from-red-400 hover:to-red-300"
+              className={`${actionButtonClass} bg-gradient-to-r from-red-500 to-red-400 hover:from-red-400 hover:to-red-300`}
             >
               Thêm mới
             </button>
