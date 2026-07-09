@@ -111,6 +111,7 @@ function PageMessage() {
   const [replyAttachmentFile, setReplyAttachmentFile] = useState(null);
   const [sendingReply, setSendingReply] = useState(false);
   const [chatReplyState, setChatReplyState] = useState({ mode: "bot", loading: false });
+  const [stoppingAutoReply, setStoppingAutoReply] = useState(false);
   const [releasingToBot, setReleasingToBot] = useState(false);
   const [, setRealtimeConnected] = useState(false);
   const [showComposerTools, setShowComposerTools] = useState(false);
@@ -535,9 +536,11 @@ function PageMessage() {
       }
       if (chatLoadSeq === null || chatLoadSeqRef.current === chatLoadSeq) {
         setChatReplyState({
-          mode: data.mode === "human" ? "human" : "bot",
+          mode: data.autoReplyStopped || data.mode === "stopped" ? "stopped" : data.mode === "human" ? "human" : "bot",
           loading: false,
           humanPausedAt: data.humanPausedAt || null,
+          autoReplyStopped: Boolean(data.autoReplyStopped),
+          autoReplyStoppedAt: data.autoReplyStoppedAt || null,
         });
       }
     } catch (err) {
@@ -568,11 +571,45 @@ function PageMessage() {
       if (!res.ok || data?.ok === false) {
         throw new Error(data?.message || "Không nhường lại BOT được");
       }
-      setChatReplyState({ mode: "bot", loading: false });
+      setChatReplyState({ mode: "bot", loading: false, autoReplyStopped: false });
     } catch (err) {
       alert(err?.message || "Lỗi khi nhường lại BOT");
     } finally {
       setReleasingToBot(false);
+    }
+  };
+
+  const handleStopAutoReply = async () => {
+    if (!selectedPage?.facebookId || !selectedChat?.user || stoppingAutoReply) return;
+
+    try {
+      setStoppingAutoReply(true);
+      const res = await fetch("/api/page-message/handoff/stop", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          pageId: selectedPage.facebookId,
+          userId: selectedChat.user,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data?.ok === false) {
+        throw new Error(data?.message || "KhÃ´ng dá»«ng tráº£ lá»i tá»± Ä‘á»™ng Ä‘Æ°á»£c");
+      }
+      setChatReplyState({
+        mode: "stopped",
+        loading: false,
+        autoReplyStopped: true,
+        autoReplyStoppedAt: data.autoReplyStoppedAt || new Date().toISOString(),
+        humanPausedAt: data.humanPausedAt || null,
+      });
+    } catch (err) {
+      alert(err?.message || "Lá»—i khi dá»«ng tráº£ lá»i tá»± Ä‘á»™ng");
+    } finally {
+      setStoppingAutoReply(false);
     }
   };
 
@@ -729,9 +766,15 @@ function PageMessage() {
       if (String(payload.user) !== String(selected.user)) return;
 
       setChatReplyState({
-        mode: payload.mode === "human" || payload.humanPausedAutoReply ? "human" : "bot",
+        mode: payload.autoReplyStopped || payload.mode === "stopped"
+          ? "stopped"
+          : payload.mode === "human" || payload.humanPausedAutoReply
+            ? "human"
+            : "bot",
         loading: false,
         humanPausedAt: payload.humanPausedAt || null,
+        autoReplyStopped: Boolean(payload.autoReplyStopped),
+        autoReplyStoppedAt: payload.autoReplyStoppedAt || null,
       });
     });
 
@@ -1482,7 +1525,7 @@ function PageMessage() {
       intent: selectedChat.lastIntent || selectedChat.intent || "",
       stage: selectedChat.consultationStage || "",
       summary: selectedChat.conversationSummary || selectedChat.summary || "",
-      replyMode: chatReplyState.mode === "human" ? "Người đang trả lời" : "BOT đang trả lời",
+      replyMode: chatReplyState.mode === "stopped" ? "Đã dừng tự động" : chatReplyState.mode === "human" ? "Người đang trả lời" : "BOT đang trả lời",
       updatedAt: formatDateTime(selectedChat.updatedAt),
       orderCount: selectedCustomerOrders.length,
       counts,
@@ -2066,9 +2109,11 @@ function PageMessage() {
                         <div
                           className={[
                             "inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium ring-1",
-                            chatReplyState.mode === "human"
-                              ? "bg-amber-50 text-amber-700 ring-amber-200"
-                              : "bg-emerald-50 text-emerald-700 ring-emerald-200",
+                            chatReplyState.mode === "stopped"
+                              ? "bg-rose-50 text-rose-700 ring-rose-200"
+                              : chatReplyState.mode === "human"
+                                ? "bg-amber-50 text-amber-700 ring-amber-200"
+                                : "bg-emerald-50 text-emerald-700 ring-emerald-200",
                           ].join(" ")}
                           title={chatReplyState.mode === "human" ? "Người đang trả lời" : "BOT đang trả lời"}
                         >
@@ -2077,27 +2122,47 @@ function PageMessage() {
                               "h-2 w-2 rounded-full",
                               chatReplyState.loading
                                 ? "bg-slate-300"
-                                : chatReplyState.mode === "human"
-                                  ? "bg-amber-500"
-                                  : "bg-emerald-500",
+                                : chatReplyState.mode === "stopped"
+                                  ? "bg-rose-500"
+                                  : chatReplyState.mode === "human"
+                                    ? "bg-amber-500"
+                                    : "bg-emerald-500",
                             ].join(" ")}
                           />
-                          {chatReplyState.loading
+                          {chatReplyState.mode === "stopped" ? "\u0110\u00e3 d\u1eebng t\u1ef1 \u0111\u1ed9ng" : chatReplyState.loading
                             ? "Đang kiểm tra"
                             : chatReplyState.mode === "human"
                               ? "Người đang trả lời"
                               : "BOT đang trả lời"}
                         </div>
 
-                        {chatReplyState.mode === "human" && (
+                        {chatReplyState.mode === "bot" && (
+                          <button
+                            type="button"
+                            onClick={handleStopAutoReply}
+                            disabled={stoppingAutoReply}
+                            className="rounded-full border border-rose-200 bg-white px-3 py-1 text-xs font-medium text-rose-700 shadow-sm hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60"
+                            title="D\u1eebng BOT t\u1ef1 \u0111\u1ed9ng tr\u1ea3 l\u1eddi h\u1ed9i tho\u1ea1i n\u00e0y"
+                          >
+                            {stoppingAutoReply ? "\u0110ang d\u1eebng..." : "D\u1eebng t\u1ef1 \u0111\u1ed9ng"}
+                          </button>
+                        )}
+
+                        {(chatReplyState.mode === "human" || chatReplyState.mode === "stopped") && (
                           <button
                             type="button"
                             onClick={handleReleaseToBot}
                             disabled={releasingToBot}
                             className="rounded-full border border-sky-200 bg-white px-3 py-1 text-xs font-medium text-sky-700 shadow-sm hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-60"
-                            title="Nhường lại cho BOT tự động trả lời"
+                            title={chatReplyState.mode === "stopped" ? "Bật lại BOT tự động trả lời" : "Nhường lại cho BOT tự động trả lời"}
                           >
-                            {releasingToBot ? "Đang nhường..." : "Nhường BOT"}
+                            {releasingToBot
+                              ? chatReplyState.mode === "stopped"
+                                ? "Đang bật..."
+                                : "Đang nhường..."
+                              : chatReplyState.mode === "stopped"
+                                ? "Bật BOT"
+                                : "Nhường BOT"}
                           </button>
                         )}
                       </div>
