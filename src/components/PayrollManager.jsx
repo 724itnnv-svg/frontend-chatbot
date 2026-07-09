@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import QRCode from "qrcode";
 import * as XLSX from "xlsx";
-import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
 import {
   ArrowDown,
@@ -845,7 +844,42 @@ const getExcelColumnLetter = (index) => {
   return letter;
 };
 
+let excelJsLoadPromise = null;
+
+function loadExcelJS() {
+  if (window.ExcelJS) return Promise.resolve(window.ExcelJS);
+
+  if (!excelJsLoadPromise) {
+    excelJsLoadPromise = new Promise((resolve, reject) => {
+      const existingScript = document.querySelector('script[data-exceljs-loader="true"]');
+      if (existingScript) {
+        existingScript.addEventListener("load", () => resolve(window.ExcelJS), { once: true });
+        existingScript.addEventListener("error", () => reject(new Error("Khong tai duoc ExcelJS.")), { once: true });
+        return;
+      }
+
+      const script = document.createElement("script");
+      script.src = "/assets/exceljs.min.js";
+      script.async = true;
+      script.defer = true;
+      script.dataset.exceljsLoader = "true";
+      script.onload = () => {
+        if (window.ExcelJS) {
+          resolve(window.ExcelJS);
+          return;
+        }
+        reject(new Error("ExcelJS khong san sang."));
+      };
+      script.onerror = () => reject(new Error("Khong tai duoc ExcelJS."));
+      document.head.appendChild(script);
+    });
+  }
+
+  return excelJsLoadPromise;
+}
+
 async function exportPayrollExcel(rows, columns) {
+  const ExcelJS = await loadExcelJS();
   const workbook = new ExcelJS.Workbook();
 
   const extraColumns = [

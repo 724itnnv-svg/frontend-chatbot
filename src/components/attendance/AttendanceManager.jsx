@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
+import { saveAs } from "file-saver";
 import {
   AlertCircle,
   BarChart3,
@@ -55,6 +56,26 @@ const DEFAULT_SHIFT_FORM = [
 ];
 
 const REGULAR_END_TIME = "17:00";
+
+function waitForNextFrame() {
+  return new Promise((resolve) => {
+    if (typeof requestAnimationFrame === "function") {
+      requestAnimationFrame(() => resolve());
+      return;
+    }
+    setTimeout(resolve, 0);
+  });
+}
+
+async function saveWorkbookAsync(workbook, filename) {
+  await waitForNextFrame();
+  const buffer = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
+  await waitForNextFrame();
+  saveAs(
+    new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }),
+    filename
+  );
+}
 
 const BULK_WEEK_DAYS = [
   { value: 1, label: "T2" },
@@ -1289,7 +1310,7 @@ export default function AttendanceManager() {
       XLSX.utils.book_append_sheet(wb, reportSheet, "Tong hop nhan vien");
 
       const suffix = `${from}_den_${to}${teamFilter ? `_team_${teamFilter}` : ""}`;
-      XLSX.writeFile(wb, `ChamCong_ChiTiet_${suffix}.xlsx`);
+      await saveWorkbookAsync(wb, `ChamCong_ChiTiet_${suffix}.xlsx`);
       showFlash(true, `Đã xuất ${exportRecords.length} bản ghi chấm công.`);
     } catch (err) {
       showFlash(false, err.response?.data?.message || "Không thể xuất Excel chấm công.");
