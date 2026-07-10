@@ -4,7 +4,7 @@ const APP_PERMISSIONS = {
       id: "business",
       name: "Kinh doanh",
       description: "Thống kê, Page, tin nhắn, chatbot và đơn hàng",
-      screenIds: ["business_stats", "pages", "pagesmessage", "customer_care", "chatweb", "donhang", "donhangWeb"],
+      screenIds: ["business_stats", "pages", "meta_pages", "pagesmessage", "customer_care", "chatweb", "donhang", "donhangWeb"],
     },
     {
       id: "attendance",
@@ -69,6 +69,7 @@ const APP_PERMISSIONS = {
   ],
   screens: [
     { id: "pages", name: "Quản Lý Page" },
+    { id: "meta_pages", name: "Kết nối Meta Page" },
     { id: "pagesmessage", name: "Tin Nhắn Page" },
     { id: "customer_care", name: "Chăm sóc khách hàng" },
     { id: "chatweb", name: "Chatbot Web" },

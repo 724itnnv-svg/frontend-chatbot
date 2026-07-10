@@ -1,8 +1,8 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Check, ChevronDown, Filter, Moon, RefreshCw, Search, SlidersHorizontal, Sun, TerminalSquare } from "lucide-react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ArrowDownWideNarrow, ArrowUpWideNarrow, Check, ChevronDown, Filter, Moon, RefreshCw, Search, SlidersHorizontal, Sun, TerminalSquare } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 
-const LIMIT_OPTIONS = [20, 30, 50, 100, 200];
+const LOG_PAGE_SIZE = 100;
 const LEVELS = ["ALL", "info", "warn", "error", "debug"];
 const STATUSES = ["ALL", "started", "success", "skipped", "failed"];
 const DEFAULT_EVENT_TYPES = ["echo", "message", "feed", "referral", "quick_reply", "postback", "unknown", "console"];
@@ -146,6 +146,8 @@ function PickerDropdown({
 
 export default function ChatWebhookLogs() {
   const { token } = useAuth();
+  const logListRef = useRef(null);
+  const logScrollLockRef = useRef(false);
   const [pages, setPages] = useState([]);
   const [conversations, setConversations] = useState([]);
   const [logs, setLogs] = useState([]);
@@ -160,6 +162,7 @@ export default function ChatWebhookLogs() {
   const [conversationSearch, setConversationSearch] = useState("");
   const [theme, setTheme] = useState(getStoredTheme);
   const [filtersOpen, setFiltersOpen] = useState(true);
+  const [sortOrder, setSortOrder] = useState("desc");
   const [filters, setFilters] = useState({
     search: "",
     pageId: "",
@@ -173,7 +176,7 @@ export default function ChatWebhookLogs() {
     status: "ALL",
     stage: "ALL",
     page: 1,
-    limit: 50,
+    limit: LOG_PAGE_SIZE,
   });
   const [pagination, setPagination] = useState({ total: 0, totalPages: 0 });
 
@@ -232,22 +235,26 @@ export default function ChatWebhookLogs() {
     Object.entries(filters).forEach(([key, value]) => {
       if (value !== "" && value !== "ALL") params.set(key, String(value));
     });
-    const hasUserFilter =
-      Boolean(filters.userId) ||
-      Boolean(filters.conversationKey) ||
-      Boolean(filters.conversationId) ||
-      Boolean(filters.sessionId) ||
-      Boolean(filters.traceId);
+    params.set("limit", String(LOG_PAGE_SIZE));
     params.set("sort", "createdAt");
-    params.set("order", hasUserFilter ? "asc" : "desc");
+    params.set("order", sortOrder);
     return params.toString();
-  }, [filters]);
+  }, [filters, sortOrder]);
 
   const updateFilter = (key, value) => {
     setFilters((current) => ({
       ...current,
       [key]: value,
       page: key === "page" ? value : 1,
+    }));
+  };
+
+  const toggleSortOrder = () => {
+    setSortOrder((current) => current === "desc" ? "asc" : "desc");
+    setFilters((current) => ({
+      ...current,
+      page: 1,
+      limit: LOG_PAGE_SIZE,
     }));
   };
 
@@ -336,6 +343,8 @@ export default function ChatWebhookLogs() {
 
   const fetchLogs = useCallback(async () => {
     setLoading(true);
+    setLogs([]);
+    setExpandedId(null);
     try {
       const response = await fetch(`/api/chat-webhook-logs?${queryString}`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -347,9 +356,13 @@ export default function ChatWebhookLogs() {
       setEventTypes(Array.isArray(data.eventTypes) ? data.eventTypes : DEFAULT_EVENT_TYPES);
       setPagination(data.pagination || { total: 0, totalPages: 0 });
       setError("");
+      requestAnimationFrame(() => {
+        if (logListRef.current) logListRef.current.scrollTop = 0;
+      });
     } catch (err) {
       setError(err.message);
     } finally {
+      logScrollLockRef.current = false;
       setLoading(false);
     }
   }, [queryString, token]);
@@ -367,6 +380,22 @@ export default function ChatWebhookLogs() {
     const timer = setTimeout(fetchLogs, 300);
     return () => clearTimeout(timer);
   }, [fetchLogs]);
+
+  const hasNextLogPage = filters.page < (pagination.totalPages || 1);
+
+  const handleLogScroll = useCallback((event) => {
+    if (loading || logScrollLockRef.current || !hasNextLogPage) return;
+    const element = event.currentTarget;
+    const distanceToBottom = element.scrollHeight - element.scrollTop - element.clientHeight;
+    if (distanceToBottom > 80) return;
+
+    logScrollLockRef.current = true;
+    setFilters((current) => ({
+      ...current,
+      page: current.page + 1,
+      limit: LOG_PAGE_SIZE,
+    }));
+  }, [hasNextLogPage, loading]);
 
   const toggleTheme = () => {
     setTheme((current) => {
@@ -435,16 +464,20 @@ export default function ChatWebhookLogs() {
                 </select>
               </CompactField>
 
+              <button
+                type="button"
+                onClick={toggleSortOrder}
+                className={`inline-flex h-8 items-center gap-2 rounded-lg border px-3 text-xs font-bold shadow-sm ${ui.button}`}
+                title={sortOrder === "desc" ? "Đang sort mới nhất trước" : "Đang sort cũ nhất trước"}
+              >
+                {sortOrder === "desc" ? <ArrowDownWideNarrow size={14} /> : <ArrowUpWideNarrow size={14} />}
+                {sortOrder === "desc" ? "Mới nhất" : "Cũ nhất"}
+              </button>
+
               <CompactField label="Event" isDark={isDark} className="h-8 w-[150px]">
                 <select value={filters.eventType} onChange={(event) => updateFilter("eventType", event.target.value)} className={`h-6 w-full rounded-md border px-2 text-xs font-semibold outline-none ${ui.input}`}>
                   <option value="ALL">Tất cả event</option>
                   {eventTypeOptions.map((item) => <option key={item} value={item}>{item}</option>)}
-                </select>
-              </CompactField>
-
-              <CompactField label="Dòng" isDark={isDark} className="h-8 w-[120px]">
-                <select value={filters.limit} onChange={(event) => updateFilter("limit", Number(event.target.value))} className={`h-6 w-full rounded-md border px-2 text-xs font-semibold outline-none ${ui.input}`}>
-                  {LIMIT_OPTIONS.map((item) => <option key={item} value={item}>{item}</option>)}
                 </select>
               </CompactField>
 
@@ -558,7 +591,11 @@ export default function ChatWebhookLogs() {
             {error && <span className="rounded-md bg-red-600 px-3 py-1 text-xs text-white">{error}</span>}
           </div>
 
-          <div className={`${filtersOpen ? "max-h-[calc(100vh-345px)]" : "max-h-[calc(100vh-210px)]"} min-h-[420px] overflow-auto divide-y font-mono ${ui.divider}`}>
+          <div
+            ref={logListRef}
+            onScroll={handleLogScroll}
+            className={`${filtersOpen ? "max-h-[calc(100vh-345px)]" : "max-h-[calc(100vh-210px)]"} min-h-[420px] overflow-auto divide-y font-mono ${ui.divider}`}
+          >
             {loading && !logs.length ? (
               <div className={`flex h-80 items-center justify-center text-xs ${ui.muted}`}>Loading logs...</div>
             ) : logs.length ? (
@@ -609,16 +646,12 @@ export default function ChatWebhookLogs() {
             )}
           </div>
 
-          <footer className="flex items-center justify-between border-t border-inherit px-4 py-3 text-xs">
-            <span>Page {filters.page}/{pagination.totalPages || 1}</span>
-            <div className="flex gap-2">
-              <button disabled={filters.page <= 1 || loading} onClick={() => updateFilter("page", Math.max(1, filters.page - 1))} className={`rounded-md border px-3 py-1.5 font-semibold disabled:opacity-50 ${ui.button}`}>
-                Trước
-              </button>
-              <button disabled={loading || filters.page >= (pagination.totalPages || 1)} onClick={() => updateFilter("page", filters.page + 1)} className={`rounded-md border px-3 py-1.5 font-semibold disabled:opacity-50 ${ui.button}`}>
-                Sau
-              </button>
-            </div>
+          <footer className={`flex items-center justify-between border-t border-inherit px-4 py-3 text-xs ${ui.muted}`}>
+            <span>
+              Đang xem {logs.length ? ((filters.page - 1) * LOG_PAGE_SIZE) + 1 : 0}
+              -{((filters.page - 1) * LOG_PAGE_SIZE) + logs.length} / {pagination.total || 0}
+            </span>
+            <span>{loading ? "Đang tải..." : hasNextLogPage ? "Kéo xuống cuối để tải 100 log tiếp theo" : "Đã hết log"}</span>
           </footer>
         </section>
       </main>
