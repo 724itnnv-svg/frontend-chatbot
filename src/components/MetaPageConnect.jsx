@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   CheckCircle2,
-  ExternalLink,
   Eye,
   EyeOff,
   KeyRound,
@@ -32,9 +31,10 @@ function parseStoredState(rawState) {
       facebookId: String(parsed?.facebookId || ""),
       pageName: String(parsed?.pageName || ""),
       sameTab: Boolean(parsed?.sameTab),
+      onlyAppSubscribed: Boolean(parsed?.onlyAppSubscribed),
     };
   } catch {
-    return { nonce: rawState, facebookId: "", pageName: "", sameTab: false };
+    return { nonce: rawState, facebookId: "", pageName: "", sameTab: false, onlyAppSubscribed: false };
   }
 }
 
@@ -165,6 +165,7 @@ export default function MetaPageConnect() {
   const [config, setConfig] = useState(null);
   const [appForm, setAppForm] = useState({
     appId: "",
+    appName: "",
     appSecret: "",
     graphVersion: "v22.0",
     redirectBaseUrl: "",
@@ -184,6 +185,15 @@ export default function MetaPageConnect() {
   const authHeaders = useCallback(
     () => ({ Authorization: `Bearer ${token}`, "Content-Type": "application/json" }),
     [token],
+  );
+
+  const savedMetaApps = useMemo(() => (Array.isArray(config?.apps) ? config.apps : []), [config]);
+  const selectedSavedApp = useMemo(
+    () => savedMetaApps.find((app) => String(app.appId || "") === String(appForm.appId || "")) || null,
+    [appForm.appId, savedMetaApps],
+  );
+  const canUseSavedSecret = Boolean(
+    selectedSavedApp?.hasAppSecret || (config?.appId === appForm.appId && config?.hasAppSecret),
   );
 
   const metaMappedPages = useMemo(() => {
@@ -256,12 +266,36 @@ export default function MetaPageConnect() {
     setConfig(data);
     setAppForm((prev) => ({
       appId: data.appId || "",
+      appName: data.appName || "",
       appSecret: prev.appSecret || "",
       graphVersion: data.graphVersion || "v22.0",
       redirectBaseUrl: data.redirectBaseUrl || "",
       scopes: Array.isArray(data.scopes) ? data.scopes.join(",") : "",
     }));
   }, [token]);
+
+  const selectSavedApp = (appId) => {
+    if (!appId) {
+      setAppForm((prev) => ({
+        ...prev,
+        appId: "",
+        appName: "",
+        appSecret: "",
+      }));
+      return;
+    }
+
+    const app = savedMetaApps.find((item) => String(item.appId || "") === String(appId));
+    if (!app) return;
+    setAppForm({
+      appId: app.appId || "",
+      appName: app.name || "",
+      appSecret: "",
+      graphVersion: app.graphVersion || "v22.0",
+      redirectBaseUrl: app.redirectBaseUrl || "",
+      scopes: Array.isArray(app.scopes) ? app.scopes.join(",") : "",
+    });
+  };
 
   const loadPages = useCallback(async () => {
     setLoading(true);
@@ -284,9 +318,13 @@ export default function MetaPageConnect() {
   const syncWithCode = useCallback(async (code, targetFacebookId = "", options = {}) => {
     setSyncing(true);
     setError("");
-    setMessage(targetFacebookId
-      ? "Đang đổi quyền Meta và cấp token cho page đã chọn..."
-      : "Đang đổi quyền Meta và cập nhật token Page..."
+    const bulkAppMode = Boolean(options.onlyAppSubscribed);
+    setMessage(
+      targetFacebookId
+        ? "Đang đổi quyền Meta và cấp token cho page đã chọn..."
+        : bulkAppMode
+          ? "Đang đổi quyền Meta và cập nhật token hàng loạt cho page đã add vào app..."
+          : "Đang đổi quyền Meta và cập nhật token Page..."
     );
     let shouldCloseWindow = false;
     try {
@@ -297,6 +335,7 @@ export default function MetaPageConnect() {
           code,
           redirectUri: getOAuthRedirectUri(config),
           facebookId: targetFacebookId || undefined,
+          onlyAppSubscribed: bulkAppMode,
         }),
       });
       const data = await response.json().catch(() => ({}));
@@ -306,14 +345,18 @@ export default function MetaPageConnect() {
       setManagedPages(Array.isArray(data.managedPages) ? data.managedPages : []);
       setMessage(targetFacebookId
         ? `Đã cập nhật token cho ${data.summary?.updated || 0} page đã chọn.`
-        : `Đã cập nhật token cho ${data.summary?.updated || 0} page.`
+        : bulkAppMode
+          ? `Đã cập nhật token cho ${data.summary?.updated || 0}/${data.summary?.appSubscribedPageCount || 0} page đã add vào app.`
+          : `Đã cập nhật token cho ${data.summary?.updated || 0} page.`
       );
       await loadPages();
       publishOAuthResult({
         ok: true,
         message: targetFacebookId
           ? `Đã cập nhật token cho ${data.summary?.updated || 0} page đã chọn.`
-          : `Đã cập nhật token cho ${data.summary?.updated || 0} page.`,
+          : bulkAppMode
+            ? `Đã cập nhật token cho ${data.summary?.updated || 0}/${data.summary?.appSubscribedPageCount || 0} page đã add vào app.`
+            : `Đã cập nhật token cho ${data.summary?.updated || 0} page.`,
       });
       shouldCloseWindow = Boolean(options.closeAfterSync);
     } catch (err) {
@@ -354,7 +397,10 @@ export default function MetaPageConnect() {
       return;
     }
 
-    syncWithCode(code, storedState.facebookId, { closeAfterSync: !storedState.sameTab });
+    syncWithCode(code, storedState.facebookId, {
+      closeAfterSync: !storedState.sameTab,
+      onlyAppSubscribed: storedState.onlyAppSubscribed,
+    });
   }, [syncWithCode]);
 
   useEffect(() => {
@@ -394,7 +440,7 @@ export default function MetaPageConnect() {
     };
   }, [loadPages, token]);
 
-  const startMetaLogin = (page = null) => {
+  const startMetaLogin = (page = null, options = {}) => {
     if (!config?.configured || !config?.appId) {
       setError("Backend chưa cấu hình META_APP_ID/META_APP_SECRET.");
       return;
@@ -410,6 +456,7 @@ export default function MetaPageConnect() {
       nonce: state,
       facebookId: page?.facebookId || "",
       pageName: page?.name || "",
+      onlyAppSubscribed: Boolean(options.onlyAppSubscribed),
       sameTab: false,
     };
     localStorage.setItem(STATE_KEY, JSON.stringify(statePayload));
@@ -426,7 +473,10 @@ export default function MetaPageConnect() {
     const popup = window.open(oauthUrl, "_blank", "popup=yes,width=980,height=760");
     if (popup) {
       popup.focus?.();
-      setMessage("Đã mở tab Meta để cấp quyền. Sau khi hoàn tất, tab này sẽ tự tải lại danh sách.");
+      setMessage(options.onlyAppSubscribed
+        ? "Đã mở tab Meta để cập nhật token hàng loạt cho page đã add vào app."
+        : "Đã mở tab Meta để cấp quyền. Sau khi hoàn tất, tab này sẽ tự tải lại danh sách."
+      );
       return;
     }
 
@@ -444,6 +494,7 @@ export default function MetaPageConnect() {
         headers: authHeaders(),
         body: JSON.stringify({
           appId: appForm.appId,
+          appName: appForm.appName,
           appSecret: appForm.appSecret,
           graphVersion: appForm.graphVersion,
           redirectBaseUrl: appForm.redirectBaseUrl,
@@ -490,12 +541,12 @@ export default function MetaPageConnect() {
           </button>
           <button
             type="button"
-            onClick={() => startMetaLogin()}
+            onClick={() => startMetaLogin(null, { onlyAppSubscribed: true })}
             disabled={syncing || !config?.configured}
-            className="inline-flex h-9 items-center gap-2 rounded-md bg-cyan-600 px-3 text-xs font-bold text-white hover:bg-cyan-700 disabled:bg-slate-300"
+            className="inline-flex h-9 items-center gap-2 rounded-md border border-cyan-200 bg-cyan-50 px-3 text-xs font-bold text-cyan-700 hover:bg-cyan-100 disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400"
           >
-            <ExternalLink size={14} />
-            Kết nối Meta
+            <KeyRound size={14} />
+            Cập nhật token hàng loạt
           </button>
         </div>
       </header>
@@ -520,7 +571,23 @@ export default function MetaPageConnect() {
           </span>
         </div>
 
-        <div className="grid gap-3 lg:grid-cols-[1fr_1fr_140px_1.5fr_2fr_auto]">
+        <div className="grid gap-3 lg:grid-cols-[1.2fr_1fr_1fr_140px_1.5fr_2fr_auto]">
+          <label className="block">
+            <span className="text-xs font-bold text-slate-600">App đã lưu</span>
+            <select
+              value={selectedSavedApp?.appId || ""}
+              onChange={(event) => selectSavedApp(event.target.value)}
+              className="mt-1 h-9 w-full rounded-md border border-slate-300 px-3 text-sm font-semibold outline-none focus:border-cyan-500"
+            >
+              <option value="">Thêm app mới</option>
+              {savedMetaApps.map((app) => (
+                <option key={app.appId} value={app.appId}>
+                  {app.name ? `${app.name} - ${app.appId}` : app.appId}
+                </option>
+              ))}
+            </select>
+          </label>
+
           <label className="block">
             <span className="text-xs font-bold text-slate-600">Meta App ID</span>
             <input
@@ -533,14 +600,14 @@ export default function MetaPageConnect() {
 
           <label className="block">
             <span className="text-xs font-bold text-slate-600">
-              App Secret {config?.hasAppSecret ? "(đã lưu)" : ""}
+              App Secret {canUseSavedSecret ? "(đã lưu)" : ""}
             </span>
             <span className="relative mt-1 block">
               <input
                 value={appForm.appSecret}
                 onChange={(event) => setAppForm((prev) => ({ ...prev, appSecret: event.target.value }))}
                 type={showSecret ? "text" : "password"}
-                placeholder={config?.hasAppSecret ? "Nhập secret mới nếu muốn thay" : "app secret"}
+                placeholder={canUseSavedSecret ? "Nhập secret mới nếu muốn thay" : "app secret"}
                 className="h-9 w-full rounded-md border border-slate-300 px-3 pr-9 text-sm font-semibold outline-none focus:border-cyan-500"
               />
               <button
@@ -587,7 +654,7 @@ export default function MetaPageConnect() {
           <button
             type="button"
             onClick={saveMetaApp}
-            disabled={savingApp || !appForm.appId || (!appForm.appSecret && !config?.hasAppSecret)}
+            disabled={savingApp || !appForm.appId || (!appForm.appSecret && !canUseSavedSecret)}
             className="mt-5 inline-flex h-9 items-center justify-center gap-2 rounded-md bg-cyan-600 px-3 text-xs font-bold text-white hover:bg-cyan-700 disabled:bg-slate-300 lg:mt-[22px]"
           >
             {savingApp ? <RefreshCw size={14} className="animate-spin" /> : <Save size={14} />}
@@ -798,7 +865,7 @@ export default function MetaPageConnect() {
 
           {!filteredPages.length && (
             <div className="grid h-80 place-items-center text-sm text-slate-500">
-              {managedPages.length ? "Không có page phù hợp." : "Chưa có page nào đã add vào Meta App. Hãy bấm Kết nối Meta để cấp quyền hoặc kiểm tra token/page webhook trên Meta."}
+              {managedPages.length ? "Không có page phù hợp." : "Chưa có page nào đã add vào Meta App. Hãy bấm Cập nhật token hàng loạt hoặc kiểm tra token/page webhook trên Meta."}
             </div>
           )}
         </div>
