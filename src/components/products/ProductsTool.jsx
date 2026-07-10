@@ -1671,32 +1671,32 @@ export default function ProductManager() {
 
         {error && <div className="text-center py-4 text-red-500">{error}</div>}
 
-        <div className="grid md:grid-cols-2 lg:grid-cols-5 gap-6 relative overflow-auto">
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-2 md:gap-6 lg:grid-cols-5 relative overflow-auto">
           {filteredProducts.map((product) => (
             <div
               key={product.id}
-              className={`bg-white rounded-2xl p-4 pb-16 shadow relative ${product.isActive === false ? "opacity-70" : ""}`}
+              className={`bg-white rounded-2xl p-2 pb-24 shadow relative md:p-4 md:pb-16 ${product.isActive === false ? "opacity-70" : ""}`}
             >
               <img
                 src={getImageSrc(product.IMAGE_URL)}
-                className="w-full h-60 object-cover rounded-xl mb-3"
+                className="w-full h-28 object-cover rounded-xl mb-2 md:h-60 md:mb-3"
                 onError={(e) => {
                   e.currentTarget.src = fallbackImage;
                 }}
               />
 
-              <div className="text-xs text-blue-600 font-semibold mb-1">
+              <div className="text-[11px] text-blue-600 font-semibold mb-1 md:text-xs">
                 #{product.PRODUCT_CODE}
               </div>
 
-              <h3 className="font-semibold">{product.PRODUCT_NAME}</h3>
+              <h3 className="line-clamp-2 text-sm font-semibold leading-snug md:text-base">{product.PRODUCT_NAME}</h3>
 
-              <div className="mt-2 flex flex-wrap gap-1 text-[11px] font-semibold">
-                <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-emerald-700">
+              <div className="mt-2 flex flex-wrap gap-1 text-[10px] font-semibold md:text-[11px]">
+                <span className="rounded-full bg-emerald-50 px-1.5 py-0.5 text-emerald-700 md:px-2">
                   {product.TYPE === "seedling" ? "Cây giống" : "Phân bón"}
                 </span>
                 <span
-                  className={`rounded-full px-2 py-0.5 ${
+                  className={`rounded-full px-1.5 py-0.5 md:px-2 ${
                     product.isActive === false
                       ? "bg-rose-50 text-rose-700"
                       : "bg-cyan-50 text-cyan-700"
@@ -1705,27 +1705,27 @@ export default function ProductManager() {
                   {product.isActive === false ? "Đã tắt" : "Đang bật"}
                 </span>
                 {product.UNIT_NAME && (
-                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-slate-600">
+                  <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-slate-600 md:px-2">
                     {product.UNIT_NAME}
                   </span>
                 )}
               </div>
 
-              <p className="text-sm mt-2">
+              <p className="text-xs mt-2 md:text-sm">
                 {Number(product.PRICE ?? product.PRICE_VND ?? 0).toLocaleString()} đ
               </p>
               {(product.COMPANY || product.COMPANY_ID) && (
-                <p className="text-xs mt-1 text-slate-500">
+                <p className="truncate text-[10px] mt-1 text-slate-500 md:text-xs">
                   COMPANY: {product.COMPANY || product.COMPANY_ID}
                 </p>
               )}
 
-              <div className="flex flex-wrap gap-1.5 justify-end absolute bottom-2 left-2 right-2">
+              <div className="flex flex-wrap gap-1 justify-end absolute bottom-2 left-2 right-2 md:gap-1.5">
                 <button
                   onClick={() => handleToggleActive(product)}
                   title={product.isActive === false ? "Bật sản phẩm" : "Tắt sản phẩm"}
                   disabled={togglingActiveId === (product._id || product.id)}
-                  className={`flex items-center gap-2 rounded-full border px-2.5 py-1 shadow-sm transition disabled:opacity-70 ${
+                  className={`flex items-center gap-1 rounded-full border px-1.5 py-1 shadow-sm transition disabled:opacity-70 md:gap-2 md:px-2.5 ${
                     product.isActive === false
                       ? "border-rose-100 bg-rose-50 text-rose-600 hover:bg-rose-100"
                       : "border-emerald-100 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
@@ -1752,7 +1752,7 @@ export default function ProductManager() {
                 <button
                   onClick={() => handleDelete(product._id || product.id)}
                   title="Xóa sản phẩm"
-                  className="flex items-center gap-1 text-red-500 hover:text-red-700 bg-red-50 hover:bg-red-100 px-2 py-1 rounded"
+                  className="flex items-center gap-1 text-red-500 hover:text-red-700 bg-red-50 hover:bg-red-100 px-1.5 py-1 rounded md:px-2"
                 >
                   {deletingId === (product._id || product.id) ? (
                     <Loader2 size={16} className="animate-spin" />
@@ -1765,7 +1765,7 @@ export default function ProductManager() {
                 <button
                   onClick={() => handleClone(product)}
                   title="Clone sản phẩm"
-                  className="flex items-center gap-1 text-violet-600 hover:text-violet-800 bg-violet-50 hover:bg-violet-100 px-2 py-1 rounded"
+                  className="flex items-center gap-1 text-violet-600 hover:text-violet-800 bg-violet-50 hover:bg-violet-100 px-1.5 py-1 rounded md:px-2"
                 >
                   <Copy size={16} />
                   <span className="text-xs font-medium">Clone</span>
@@ -1774,7 +1774,7 @@ export default function ProductManager() {
                 <button
                   onClick={() => handleEdit(product)}
                   title="Chỉnh sửa sản phẩm"
-                  className="flex items-center gap-1 text-blue-500 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 px-2 py-1 rounded"
+                  className="flex items-center gap-1 text-blue-500 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 px-1.5 py-1 rounded md:px-2"
                 >
                   <svg
                     xmlns="http://www.w3.org/2000/svg"

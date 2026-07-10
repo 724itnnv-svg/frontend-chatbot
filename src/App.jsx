@@ -67,6 +67,7 @@ const ChatV4FunctionCallsManager = lazy(() => import("./components/chatV4/ChatV4
 const ChatV4ContextManager = lazy(() => import("./components/chatV4/ChatV4ContextManager"));
 const ChatV4SettingsManager = lazy(() => import("./components/chatV4/ChatV4SettingsManager"));
 const ChatV4EventSimulator = lazy(() => import("./components/chatV4/ChatV4EventSimulator"));
+const ChatWebhookLogs = lazy(() => import("./components/chatWebhook/ChatWebhookLogs"));
 
 class ErrorBoundary extends Component {
   constructor(props) {
@@ -136,6 +137,7 @@ const ADMIN_ROUTE_BY_SCREEN = {
   admin_chat_v4_settings: "/admin/chat-v4-settings",
   admin_chat_v4_simulator: "/admin/chat-v4-simulator",
   admin_logs: "/admin/logs",
+  admin_chat_webhook_logs: "/admin/chat-webhook-logs",
   notifications: "/admin/notifications",
   attendance: "/admin/attendance",
   attendance_shifts: "/admin/attendance-shifts",
@@ -183,6 +185,7 @@ const adminRoutes = [
   { path: "chat-v4-settings", screenId: "admin_chat_v4_settings", element: <ChatV4SettingsManager /> },
   { path: "chat-v4-simulator", screenId: "admin_chat_v4_simulator", element: <ChatV4EventSimulator /> },
   { path: "logs", screenId: "admin_logs", element: <LogsManage /> },
+  { path: "chat-webhook-logs", screenId: "admin_chat_webhook_logs", element: <ChatWebhookLogs /> },
   { path: "notifications", screenId: "notifications", element: <NotificationManager /> },
   { path: "my-attendance", screenId: "attendance_self", element: <AttendancePage /> },
   { path: "attendance", screenId: "attendance", element: <AttendanceManager /> },
