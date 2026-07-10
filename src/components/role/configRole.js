@@ -43,6 +43,7 @@ const APP_PERMISSIONS = {
         "admin_chatbot_config",
         "admin_chat_v3_faq",
         "admin_logs",
+        "admin_chat_webhook_logs",
       ],
     },
     {
@@ -99,6 +100,7 @@ const APP_PERMISSIONS = {
     { id: "admin_chat_v4_settings", name: "Cài đặt Chat V4" },
     { id: "admin_chat_v4_simulator", name: "Giả lập Event Chat V4" },
     { id: "admin_logs", name: "Log Hệ Thống" },
+    { id: "admin_chat_webhook_logs", name: "Log Chat Webhook" },
     { id: "notifications", name: "Thông Báo Thiết Bị" },
     { id: "attendance_self", name: "Chấm công của tôi" },
     { id: "attendance", name: "Quản lý chấm công" },
