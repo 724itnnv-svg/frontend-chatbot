@@ -2050,9 +2050,9 @@ function PageMessage() {
                   mobileTab === "messages" ? "flex" : "hidden md:flex",
                 ].join(" ")}
               >
-                <div className="flex items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3">
+                <div className="relative flex items-start justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3">
                   {selectedChat ? (
-                    <div className="min-w-0">
+                    <div className="min-w-0 flex-1">
                       <div className="flex min-w-0 items-center gap-2 truncate font-bold text-slate-900">
                         <span className="truncate">
                           {selectedChat.userName ||
@@ -2068,7 +2068,7 @@ function PageMessage() {
                       </div>
 
                       {/* Dòng 3: Ad name */}
-                      <div className="mt-0.5 truncate text-xs text-slate-500">
+                      <div className="mt-0.5 w-full truncate whitespace-nowrap text-xs leading-5 text-slate-500">
                         {selectedChat.adName ? `QC: ${selectedChat.adName}` : "Không rõ QC"}
                       </div>
                     </div>
@@ -2077,9 +2077,9 @@ function PageMessage() {
                     <div className="text-sm text-slate-500">Chọn một khách để xem tin nhắn</div>
                   )}
 
-                  <div className="flex items-center gap-2">
+                  <div className="flex shrink-0 items-center gap-2 md:absolute md:right-4 md:top-3">
                     {selectedChat && (
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-wrap items-center justify-end gap-2">
                         <button
                           type="button"
                           onClick={() => {
