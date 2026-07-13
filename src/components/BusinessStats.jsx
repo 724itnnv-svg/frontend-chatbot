@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import JSZip from "jszip";
 import { saveAs } from "file-saver";
 import {
@@ -99,6 +99,307 @@ const COMPANY_FILTERS = [
 
 function normalizeTeamId(value) {
   return String(value || "").trim().toUpperCase();
+}
+
+function normalizeProvinceName(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d")
+    .replace(/Đ/g, "D")
+    .toLowerCase()
+    .replace(/^(tinh|tp|thanh pho)\s+/, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+const VIETNAM_PROVINCE_COORDS = {
+  "ha giang": [105.0, 22.75],
+  "cao bang": [106.26, 22.67],
+  "lao cai": [103.97, 22.48],
+  "lai chau": [103.45, 22.39],
+  "dien bien": [103.02, 21.38],
+  "son la": [103.91, 21.33],
+  "yen bai": [104.87, 21.7],
+  "tuyen quang": [105.22, 21.82],
+  "bac kan": [105.83, 22.15],
+  "lang son": [106.76, 21.85],
+  "thai nguyen": [105.84, 21.59],
+  "phu tho": [105.22, 21.32],
+  "vinh phuc": [105.6, 21.31],
+  "bac giang": [106.2, 21.28],
+  "bac ninh": [106.08, 21.19],
+  "ha noi": [105.85, 21.03],
+  "hai duong": [106.33, 20.94],
+  "hai phong": [106.68, 20.86],
+  "hung yen": [106.06, 20.65],
+  "hoa binh": [105.34, 20.82],
+  "ha nam": [105.92, 20.54],
+  "thai binh": [106.34, 20.45],
+  "nam dinh": [106.17, 20.43],
+  "ninh binh": [105.98, 20.25],
+  "thanh hoa": [105.78, 19.8],
+  "nghe an": [104.92, 19.23],
+  "ha tinh": [105.9, 18.35],
+  "quang binh": [106.62, 17.48],
+  "quang tri": [107.18, 16.75],
+  "hue": [107.59, 16.46],
+  "thua thien hue": [107.59, 16.46],
+  "da nang": [108.22, 16.07],
+  "quang nam": [108.02, 15.57],
+  "quang ngai": [108.8, 15.12],
+  "binh dinh": [109.22, 13.77],
+  "phu yen": [109.3, 13.09],
+  "khanh hoa": [109.2, 12.25],
+  "ninh thuan": [108.99, 11.75],
+  "binh thuan": [108.1, 10.93],
+  "kon tum": [107.99, 14.35],
+  "gia lai": [108.0, 13.98],
+  "dak lak": [108.04, 12.67],
+  "dak nong": [107.69, 12.26],
+  "lam dong": [108.44, 11.94],
+  "binh phuoc": [106.89, 11.75],
+  "tay ninh": [106.11, 11.31],
+  "binh duong": [106.65, 11.16],
+  "dong nai": [107.19, 10.95],
+  "ba ria vung tau": [107.24, 10.54],
+  "ho chi minh": [106.7, 10.78],
+  "tp ho chi minh": [106.7, 10.78],
+  "long an": [106.17, 10.7],
+  "tien giang": [106.35, 10.36],
+  "ben tre": [106.37, 10.24],
+  "tra vinh": [106.34, 9.95],
+  "vinh long": [105.97, 10.25],
+  "dong thap": [105.63, 10.49],
+  "an giang": [105.12, 10.52],
+  "kien giang": [105.08, 10.0],
+  "can tho": [105.78, 10.05],
+  "hau giang": [105.64, 9.78],
+  "soc trang": [105.97, 9.6],
+  "bac lieu": [105.72, 9.29],
+  "ca mau": [105.15, 9.18],
+};
+
+function getProvinceLngLat(name, index = 0, total = 1) {
+  const direct = VIETNAM_PROVINCE_COORDS[normalizeProvinceName(name)];
+  if (direct) return direct;
+  const t = total <= 1 ? 0.5 : index / Math.max(1, total - 1);
+  return [105.6 + Math.sin(t * Math.PI * 4) * 1.3, 22.4 - t * 13.2];
+}
+
+function getDemandColor(quantity, maxQuantity) {
+  const ratio = maxQuantity > 0 ? quantity / maxQuantity : 0;
+  if (ratio >= 0.8) return "#dc2626";
+  if (ratio >= 0.55) return "#f97316";
+  if (ratio >= 0.35) return "#facc15";
+  if (ratio >= 0.18) return "#38bdf8";
+  return "#2563eb";
+}
+
+function loadECharts() {
+  if (typeof window === "undefined") return Promise.reject(new Error("Chart only runs in browser"));
+  if (window.echarts) return Promise.resolve(window.echarts);
+  return new Promise((resolve, reject) => {
+    const existing = document.querySelector('script[data-echarts-js="true"]');
+    if (existing) {
+      existing.addEventListener("load", () => resolve(window.echarts), { once: true });
+      existing.addEventListener("error", reject, { once: true });
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = "https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js";
+    script.async = true;
+    script.dataset.echartsJs = "true";
+    script.onload = () => resolve(window.echarts);
+    script.onerror = () => reject(new Error("Không tải được thư viện ECharts"));
+    document.head.appendChild(script);
+  });
+}
+
+function loadVietnamGeoJson() {
+  const geoJsonUrl = import.meta.env.VITE_VIETNAM_GEOJSON_URL
+    || "https://code.highcharts.com/mapdata/countries/vn/vn-all.geo.json";
+  return fetch(geoJsonUrl).then((response) => {
+    if (!response.ok) throw new Error("Không tải được GeoJSON Việt Nam");
+    return response.json();
+  });
+}
+
+const PROVINCE_NAME_ALIASES = {
+  "ba ria vung tau": ["ba ria vung tau", "ba ria-vung tau"],
+  "can tho": ["can tho"],
+  "da nang": ["da nang"],
+  "dak lak": ["dak lak", "dac lac"],
+  "dak nong": ["dak nong", "dac nong"],
+  "ho chi minh": ["ho chi minh", "ho chi minh city", "tp ho chi minh"],
+  "hue": ["hue", "thua thien hue"],
+  "ha noi": ["ha noi", "hanoi"],
+  "hai phong": ["hai phong", "haiphong"],
+  "quang ninh": ["quang ninh"],
+};
+
+function getFeatureName(feature) {
+  const properties = feature?.properties || {};
+  return properties.name || properties.NAME_1 || properties.Name || properties.woe_name || properties["hc-a2"] || "";
+}
+
+function findDemandForFeature(feature, demandMap) {
+  const featureName = normalizeProvinceName(getFeatureName(feature));
+  if (demandMap.has(featureName)) return demandMap.get(featureName);
+  for (const [sourceName, aliases] of Object.entries(PROVINCE_NAME_ALIASES)) {
+    if (aliases.includes(featureName) && demandMap.has(sourceName)) return demandMap.get(sourceName);
+    if (demandMap.has(featureName) && aliases.includes(sourceName)) return demandMap.get(featureName);
+  }
+  for (const [key, value] of demandMap.entries()) {
+    if (featureName.includes(key) || key.includes(featureName)) return value;
+  }
+  return null;
+}
+
+function VietnamDemandMap({ provinces = [], formatNumber }) {
+  const containerRef = useRef(null);
+  const chartRef = useRef(null);
+  const [chartError, setChartError] = useState("");
+  const maxQuantity = Math.max(...provinces.map((province) => Number(province.quantity) || 0), 0);
+
+  useEffect(() => {
+    if (!containerRef.current) return undefined;
+    let disposed = false;
+    let resizeHandler = null;
+
+    Promise.all([loadECharts(), loadVietnamGeoJson()])
+      .then(([echarts, geoJson]) => {
+        if (disposed || !containerRef.current) return;
+        echarts.registerMap("vietnam-demand", geoJson);
+        const demandMap = new Map(
+          provinces.map((province) => [
+            normalizeProvinceName(province.province),
+            {
+              name: province.province,
+              value: Number(province.quantity) || 0,
+            },
+          ]),
+        );
+        const chartData = (geoJson.features || []).map((feature) => {
+          const demand = findDemandForFeature(feature, demandMap);
+          const name = getFeatureName(feature);
+          return {
+            name,
+            value: demand?.value || 0,
+            demandName: demand?.name || name,
+          };
+        });
+        const chart = chartRef.current || echarts.init(containerRef.current, null, { renderer: "canvas" });
+        chartRef.current = chart;
+        chart.setOption({
+          backgroundColor: "#ffffff",
+          title: {
+            text: "Phân bố nhu cầu theo tỉnh",
+            subtext: "Số lượng sản phẩm đã chốt theo địa chỉ đơn hàng",
+            left: "center",
+            top: 12,
+            textStyle: { fontSize: 16, fontWeight: 800, color: "#0f172a" },
+            subtextStyle: { color: "#64748b", fontSize: 12 },
+          },
+          tooltip: {
+            trigger: "item",
+            formatter: (params) => {
+              const value = Number(params.value) || 0;
+              return `<div style="font-weight:800;color:#0f172a;margin-bottom:4px">${params.data?.demandName || params.name}</div><div style="color:#0369a1">${formatNumber(value)} sản phẩm đã chốt</div>`;
+            },
+          },
+          visualMap: {
+            min: 0,
+            max: Math.max(maxQuantity, 1),
+            left: 18,
+            bottom: 16,
+            text: ["Cao", "Thấp"],
+            realtime: false,
+            calculable: true,
+            inRange: {
+              color: ["#dbeafe", "#7dd3fc", "#fde047", "#fb923c", "#dc2626"],
+            },
+            textStyle: { color: "#475569", fontWeight: 700 },
+          },
+          toolbox: {
+            show: true,
+            right: 18,
+            top: 18,
+            feature: {
+              restore: { title: "Khôi phục" },
+              saveAsImage: { title: "Lưu ảnh", pixelRatio: 2 },
+            },
+          },
+          series: [
+            {
+              name: "Nhu cầu",
+              type: "map",
+              map: "vietnam-demand",
+              roam: true,
+              selectedMode: false,
+              data: chartData,
+              nameProperty: "name",
+              zoom: 1,
+              aspectScale: 0.95,
+              layoutCenter: ["52%", "54%"],
+              layoutSize: "132%",
+              scaleLimit: { min: 0.8, max: 8 },
+              itemStyle: {
+                borderColor: "#ffffff",
+                borderWidth: 1,
+                areaColor: "#e2e8f0",
+              },
+              emphasis: {
+                label: { show: true, color: "#0f172a", fontWeight: 800 },
+                itemStyle: { areaColor: "#f97316" },
+              },
+              label: {
+                show: true,
+                color: "#0f172a",
+                fontSize: 8,
+                fontWeight: 700,
+                formatter: (params) => {
+                  const value = Number(params.value) || 0;
+                  return value > 0 ? `${params.data?.demandName || params.name}\n${formatNumber(value)}` : "";
+                },
+              },
+            },
+          ],
+        }, true);
+        resizeHandler = () => chart.resize();
+        window.addEventListener("resize", resizeHandler);
+        setChartError("");
+      })
+      .catch((error) => {
+        if (!disposed) setChartError(error.message || "Không tải được bản đồ ECharts");
+      });
+
+    return () => {
+      disposed = true;
+      if (resizeHandler) window.removeEventListener("resize", resizeHandler);
+    };
+  }, [provinces, maxQuantity, formatNumber]);
+
+  useEffect(() => () => {
+    if (chartRef.current) {
+      chartRef.current.dispose();
+      chartRef.current = null;
+    }
+  }, []);
+
+  return (
+    <div className="relative overflow-hidden rounded-2xl border border-slate-200 bg-slate-50">
+      <div className="absolute left-4 top-4 z-10 rounded-full border border-white/80 bg-white/90 px-3 py-1 text-xs font-bold text-slate-700 shadow-sm">
+        ECharts map nhu cầu theo tỉnh
+      </div>
+      <div ref={containerRef} className="h-[420px] w-full" />
+      {chartError && (
+        <div className="absolute inset-0 z-20 flex items-center justify-center bg-white/85 p-6 text-center text-sm font-semibold text-rose-600">
+          {chartError}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function formatWaitingTime(value) {
@@ -1197,8 +1498,7 @@ export default function BusinessStats() {
   const productProvinceStats = dailyStats?.productProvinceStats || {};
   const demandProducts = Array.isArray(productProvinceStats.products) ? productProvinceStats.products : [];
   const demandProvinces = Array.isArray(productProvinceStats.provinces) ? productProvinceStats.provinces : [];
-  const demandCells = Array.isArray(productProvinceStats.cells) ? productProvinceStats.cells : [];
-  const maxDemandQuantity = Number(productProvinceStats.maxQuantity || 0);
+  const maxDemandProvinceQuantity = Math.max(...demandProvinces.map((item) => Number(item.quantity) || 0), 0);
   const frequentQuestions = Array.isArray(dailyStats?.frequentQuestions) ? dailyStats.frequentQuestions : [];
   const orderHourlyStats = dailyStats?.orderHourlyStats || {};
   const hourlyOrderRows = Array.isArray(orderHourlyStats.hours) ? orderHourlyStats.hours : [];
@@ -1206,7 +1506,6 @@ export default function BusinessStats() {
   const maxHourlyOrderCount = Number(orderHourlyStats.maxOrderCount || 0);
   const previewOrderHour = hoveredOrderHour || peakOrderHour;
   const isPreviewingHoveredHour = Boolean(hoveredOrderHour);
-  const demandCellMap = new Map(demandCells.map((cell) => [`${cell.productKey}::${cell.province}`, cell]));
   const conversationCount = Number(dailyStats?.conversationCount || 0);
   const totalOrderAmount = Number(dailyStats?.totalOrderAmount || 0);
   const orderCount = Number(dailyStats?.orderCount || 0);
@@ -1875,85 +2174,69 @@ export default function BusinessStats() {
 
           {isLoadingStats ? (
             <div className="mt-5 rounded-xl border border-slate-100 bg-slate-50 p-6 text-center text-sm text-slate-500">
-              Đang tải biểu đồ nhu cầu...
+              Đang tải bản đồ nhu cầu...
             </div>
-          ) : demandProducts.length === 0 || demandProvinces.length === 0 ? (
+          ) : demandProvinces.length === 0 ? (
             <div className="mt-5 rounded-xl border border-slate-100 bg-slate-50 p-6 text-center text-sm text-slate-500">
               Chưa đủ dữ liệu địa chỉ để thống kê nhu cầu theo tỉnh.
             </div>
           ) : (
-            <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
-              <div className="overflow-x-auto rounded-xl border border-slate-200">
-                <div className="min-w-[920px]">
-                  <div
-                    className="grid border-b border-slate-200 bg-slate-50 text-xs font-bold uppercase text-slate-500"
-                    style={{ gridTemplateColumns: `minmax(220px,1.35fr) repeat(${demandProvinces.length}, minmax(92px,1fr))` }}
-                  >
-                    <div className="px-3 py-3">Sản phẩm</div>
-                    {demandProvinces.map((province) => (
-                      <div key={province.province} className="px-2 py-3 text-center" title={`${province.province}: ${formatNumber(province.quantity)} sản phẩm`}>
-                        <div className="truncate">{province.province}</div>
-                        <div className="mt-0.5 text-[11px] font-semibold normal-case text-slate-400">{formatNumber(province.quantity)}</div>
-                      </div>
-                    ))}
-                  </div>
+            <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
+              <VietnamDemandMap provinces={demandProvinces} formatNumber={formatNumber} />
 
-                  {demandProducts.map((product) => (
-                    <div
-                      key={product.productKey}
-                      className="grid border-b border-slate-100 last:border-b-0"
-                      style={{ gridTemplateColumns: `minmax(220px,1.35fr) repeat(${demandProvinces.length}, minmax(92px,1fr))` }}
-                    >
-                      <div className="min-w-0 px-3 py-3">
-                        <div className="truncate text-sm font-semibold text-slate-800" title={product.productName}>
-                          {product.productName || "Không tên"}
+              <div className="space-y-5">
+                <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="text-sm font-bold text-slate-900">Tỉnh/thành mua nhiều</div>
+                    <div className="rounded-full bg-white px-2.5 py-1 text-xs font-bold text-slate-500 ring-1 ring-slate-200">
+                      Top {formatNumber(Math.min(demandProvinces.length, 10))}
+                    </div>
+                  </div>
+                  <div className="mt-4 space-y-3">
+                    {demandProvinces.slice(0, 10).map((province, index) => {
+                      const quantity = Number(province.quantity) || 0;
+                      const color = getDemandColor(quantity, maxDemandProvinceQuantity);
+                      const percent = maxDemandProvinceQuantity > 0 ? Math.max(6, (quantity / maxDemandProvinceQuantity) * 100) : 0;
+                      return (
+                        <div key={province.province} className="rounded-xl bg-white p-3 ring-1 ring-slate-100">
+                          <div className="flex items-center justify-between gap-3 text-xs">
+                            <span className="flex min-w-0 items-center gap-2">
+                              <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: color }} />
+                              <span className="truncate font-semibold text-slate-700">{index + 1}. {province.province}</span>
+                            </span>
+                            <span className="shrink-0 font-bold text-slate-900">{formatNumber(quantity)}</span>
+                          </div>
+                          <div className="mt-2 h-2 rounded-full bg-slate-100 shadow-inner">
+                            <div className="h-full rounded-full" style={{ width: `${percent}%`, backgroundColor: color }} />
+                          </div>
                         </div>
-                        <div className="mt-0.5 text-xs text-slate-400">
-                          {formatNumber(product.quantity)} sản phẩm
-                        </div>
-                      </div>
-                      {demandProvinces.map((province) => {
-                        const cell = demandCellMap.get(`${product.productKey}::${province.province}`);
-                        const quantity = Number(cell?.quantity || 0);
-                        const opacity = maxDemandQuantity > 0 ? 0.12 + (quantity / maxDemandQuantity) * 0.78 : 0.12;
-                        return (
-                          <div key={`${product.productKey}-${province.province}`} className="flex items-center justify-center border-l border-slate-100 px-2 py-3">
-                            <div
-                              className="flex h-10 w-full items-center justify-center rounded-lg text-sm font-bold text-slate-900 ring-1 ring-sky-100"
-                              style={{
-                                backgroundColor: quantity > 0 ? `rgba(14, 165, 233, ${opacity})` : "rgba(248, 250, 252, 1)",
-                              }}
-                              title={`${product.productName} tại ${province.province}: ${formatNumber(quantity)}`}
-                            >
-                              {quantity > 0 ? formatNumber(quantity) : "-"}
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {demandProducts.length > 0 && (
+                  <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                    <div className="text-sm font-bold text-slate-900">Sản phẩm có nhu cầu</div>
+                    <div className="mt-4 space-y-2">
+                      {demandProducts.slice(0, 8).map((product) => (
+                        <div key={product.productKey} className="flex items-center justify-between gap-3 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
+                          <div className="min-w-0">
+                            <div className="truncate text-xs font-bold text-slate-800" title={product.productName}>
+                              {product.productName || "Không tên"}
+                            </div>
+                            <div className="mt-0.5 text-[11px] text-slate-400">
+                              Tổng sản phẩm đã chốt
                             </div>
                           </div>
-                        );
-                      })}
+                          <div className="shrink-0 rounded-full bg-sky-100 px-2.5 py-1 text-xs font-bold text-sky-700">
+                            {formatNumber(product.quantity)}
+                          </div>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
-              </div>
-
-              <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4">
-                <div className="text-sm font-bold text-slate-900">Tỉnh/thành mua nhiều</div>
-                <div className="mt-4 space-y-3">
-                  {demandProvinces.map((province, index) => {
-                    const maxProvinceQuantity = Math.max(...demandProvinces.map((item) => Number(item.quantity) || 0), 0);
-                    const percent = maxProvinceQuantity > 0 ? Math.max(6, (province.quantity / maxProvinceQuantity) * 100) : 0;
-                    return (
-                      <div key={province.province}>
-                        <div className="flex items-center justify-between gap-3 text-xs">
-                          <span className="truncate font-semibold text-slate-700">{index + 1}. {province.province}</span>
-                          <span className="shrink-0 font-bold text-slate-900">{formatNumber(province.quantity)}</span>
-                        </div>
-                        <div className="mt-1 h-2 rounded-full bg-white shadow-inner">
-                          <div className="h-full rounded-full bg-sky-500" style={{ width: `${percent}%` }} />
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
+                  </div>
+                )}
               </div>
             </div>
           )}
