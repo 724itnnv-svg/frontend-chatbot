@@ -266,6 +266,7 @@ function VietnamDemandMap({ provinces = [], formatNumber }) {
     if (!containerRef.current) return undefined;
     let disposed = false;
     let resizeHandler = null;
+    let resizeObserver = null;
 
     Promise.all([loadECharts(), loadVietnamGeoJson()])
       .then(([echarts, geoJson]) => {
@@ -277,6 +278,7 @@ function VietnamDemandMap({ provinces = [], formatNumber }) {
             {
               name: province.province,
               value: Number(province.quantity) || 0,
+              products: Array.isArray(province.products) ? province.products : [],
             },
           ]),
         );
@@ -287,10 +289,15 @@ function VietnamDemandMap({ provinces = [], formatNumber }) {
             name,
             value: demand?.value || 0,
             demandName: demand?.name || name,
+            products: demand?.products || [],
           };
         });
         const chart = chartRef.current || echarts.init(containerRef.current, null, { renderer: "canvas" });
         chartRef.current = chart;
+        chart.resize({
+          width: containerRef.current.clientWidth,
+          height: containerRef.current.clientHeight,
+        });
         chart.setOption({
           backgroundColor: "#ffffff",
           title: {
@@ -305,7 +312,24 @@ function VietnamDemandMap({ provinces = [], formatNumber }) {
             trigger: "item",
             formatter: (params) => {
               const value = Number(params.value) || 0;
-              return `<div style="font-weight:800;color:#0f172a;margin-bottom:4px">${params.data?.demandName || params.name}</div><div style="color:#0369a1">${formatNumber(value)} sản phẩm đã chốt</div>`;
+              const products = Array.isArray(params.data?.products) ? params.data.products : [];
+              const productHtml = products.length
+                ? `<div style="margin-top:8px;border-top:1px solid #e2e8f0;padding-top:7px">
+                    ${products.slice(0, 6).map((product) => {
+                      const productName = String(product.productName || product.sku || "Không tên");
+                      const quantity = Number(product.quantity) || 0;
+                      return `<div style="display:flex;justify-content:space-between;gap:14px;margin-top:4px;color:#334155">
+                        <span style="max-width:230px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${productName}</span>
+                        <b style="color:#0f172a">${formatNumber(quantity)}</b>
+                      </div>`;
+                    }).join("")}
+                  </div>`
+                : `<div style="margin-top:8px;color:#94a3b8">Chưa có sản phẩm bán tại tỉnh này</div>`;
+              return `<div style="min-width:260px">
+                <div style="font-weight:800;color:#0f172a;margin-bottom:4px">${params.data?.demandName || params.name}</div>
+                <div style="color:#0369a1">${formatNumber(value)} sản phẩm đã chốt</div>
+                ${productHtml}
+              </div>`;
             },
           },
           visualMap: {
@@ -340,9 +364,9 @@ function VietnamDemandMap({ provinces = [], formatNumber }) {
               data: chartData,
               nameProperty: "name",
               zoom: 1,
-              aspectScale: 0.95,
-              layoutCenter: ["52%", "54%"],
-              layoutSize: "132%",
+              aspectScale: 1,
+              layoutCenter: ["52%", "53%"],
+              layoutSize: "86%",
               scaleLimit: { min: 0.8, max: 8 },
               itemStyle: {
                 borderColor: "#ffffff",
@@ -366,8 +390,15 @@ function VietnamDemandMap({ provinces = [], formatNumber }) {
             },
           ],
         }, true);
-        resizeHandler = () => chart.resize();
+        resizeHandler = () => chart.resize({
+          width: containerRef.current?.clientWidth,
+          height: containerRef.current?.clientHeight,
+        });
         window.addEventListener("resize", resizeHandler);
+        if (typeof ResizeObserver !== "undefined") {
+          resizeObserver = new ResizeObserver(resizeHandler);
+          resizeObserver.observe(containerRef.current);
+        }
         setChartError("");
       })
       .catch((error) => {
@@ -377,6 +408,7 @@ function VietnamDemandMap({ provinces = [], formatNumber }) {
     return () => {
       disposed = true;
       if (resizeHandler) window.removeEventListener("resize", resizeHandler);
+      if (resizeObserver) resizeObserver.disconnect();
     };
   }, [provinces, maxQuantity, formatNumber]);
 
@@ -388,11 +420,11 @@ function VietnamDemandMap({ provinces = [], formatNumber }) {
   }, []);
 
   return (
-    <div className="relative overflow-hidden rounded-2xl border border-slate-200 bg-slate-50">
+    <div className="relative self-start overflow-hidden rounded-2xl border border-slate-200 bg-slate-50">
       <div className="absolute left-4 top-4 z-10 rounded-full border border-white/80 bg-white/90 px-3 py-1 text-xs font-bold text-slate-700 shadow-sm">
         ECharts map nhu cầu theo tỉnh
       </div>
-      <div ref={containerRef} className="h-[420px] w-full" />
+      <div ref={containerRef} className="h-[clamp(560px,68vh,760px)] w-full min-w-0" />
       {chartError && (
         <div className="absolute inset-0 z-20 flex items-center justify-center bg-white/85 p-6 text-center text-sm font-semibold text-rose-600">
           {chartError}
@@ -2181,7 +2213,7 @@ export default function BusinessStats() {
               Chưa đủ dữ liệu địa chỉ để thống kê nhu cầu theo tỉnh.
             </div>
           ) : (
-            <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
+            <div className="mt-5 grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
               <VietnamDemandMap provinces={demandProvinces} formatNumber={formatNumber} />
 
               <div className="space-y-5">

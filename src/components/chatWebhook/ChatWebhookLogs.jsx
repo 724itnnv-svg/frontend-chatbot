@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowDownWideNarrow, ArrowUpWideNarrow, Check, ChevronDown, Filter, Moon, RefreshCw, Search, SlidersHorizontal, Sun, TerminalSquare } from "lucide-react";
+import { ArrowDownWideNarrow, ArrowUpWideNarrow, Check, ChevronDown, Download, Filter, Moon, RefreshCw, Search, SlidersHorizontal, Sun, TerminalSquare } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 
 const LOG_PAGE_SIZE = 100;
@@ -155,6 +155,7 @@ export default function ChatWebhookLogs() {
   const [eventTypes, setEventTypes] = useState(DEFAULT_EVENT_TYPES);
   const [loading, setLoading] = useState(false);
   const [loadingConversations, setLoadingConversations] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [error, setError] = useState("");
   const [expandedId, setExpandedId] = useState(null);
   const [activePicker, setActivePicker] = useState("");
@@ -367,6 +368,40 @@ export default function ChatWebhookLogs() {
     }
   }, [queryString, token]);
 
+  const exportJsonLogs = useCallback(async () => {
+    setExporting(true);
+    setError("");
+    try {
+      const params = new URLSearchParams(queryString);
+      params.delete("page");
+      params.set("limit", "10000");
+      const response = await fetch(`/api/chat-webhook-logs/export?${params.toString()}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || !payload?.success) {
+        throw new Error(payload?.message || "Cannot export chat_webhook logs.");
+      }
+
+      const blob = new Blob([JSON.stringify(payload, null, 2)], {
+        type: "application/json;charset=utf-8",
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+      link.href = url;
+      link.download = `chat-webhook-logs-${stamp}.json`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(err.message || "Không thể xuất JSON log.");
+    } finally {
+      setExporting(false);
+    }
+  }, [queryString, token]);
+
   useEffect(() => {
     fetchPages();
   }, [fetchPages]);
@@ -427,6 +462,15 @@ export default function ChatWebhookLogs() {
             <button type="button" onClick={toggleTheme} className={`inline-flex items-center gap-2 rounded-md border px-3 py-2 text-xs font-bold ${ui.button}`}>
               {isDark ? <Sun size={15} /> : <Moon size={15} />}
               {isDark ? "Light" : "Dark"}
+            </button>
+            <button
+              type="button"
+              onClick={exportJsonLogs}
+              disabled={exporting}
+              className={`inline-flex items-center gap-2 rounded-md border px-3 py-2 text-xs font-bold disabled:opacity-60 ${ui.button}`}
+            >
+              <Download size={15} className={exporting ? "animate-pulse" : ""} />
+              {exporting ? "Đang xuất" : "Xuất JSON"}
             </button>
             <button
               type="button"
