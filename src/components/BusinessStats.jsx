@@ -196,6 +196,85 @@ function getDemandColor(quantity, maxQuantity) {
   return "#2563eb";
 }
 
+function normalizeDemandProduct(item = {}) {
+  const productName = String(
+    item.productName ||
+    item.name ||
+    item.product_name ||
+    item.PRODUCT_NAME ||
+    item.sku ||
+    item.SKU ||
+    "",
+  ).trim();
+  const sku = String(item.sku || item.SKU || item.productCode || item.PRODUCT_CODE || "").trim();
+  const quantity = Number(item.quantity ?? item.qty ?? item.totalQuantity ?? item.count ?? 0) || 0;
+
+  if (!productName && !sku && quantity <= 0) return null;
+
+  return {
+    ...item,
+    productName: productName || sku || "Không tên",
+    sku,
+    quantity,
+  };
+}
+
+function getDemandProductList(value) {
+  const list =
+    Array.isArray(value?.products) ? value.products :
+      Array.isArray(value?.items) ? value.items :
+        Array.isArray(value?.productStats) ? value.productStats :
+          Array.isArray(value?.soldProducts) ? value.soldProducts :
+            [];
+
+  return list
+    .map(normalizeDemandProduct)
+    .filter((item) => item && item.quantity > 0)
+    .sort((a, b) => b.quantity - a.quantity || a.productName.localeCompare(b.productName, "vi"));
+}
+
+function buildDemandProvinces(productProvinceStats = {}) {
+  const rawProvinces = Array.isArray(productProvinceStats.provinces)
+    ? productProvinceStats.provinces
+    : [];
+  const rawCells = Array.isArray(productProvinceStats.cells)
+    ? productProvinceStats.cells
+    : [];
+  const cellsByProvince = new Map();
+
+  rawCells.forEach((cell) => {
+    const provinceKey = normalizeProvinceName(cell?.province || cell?.provinceName || cell?.tinh || "");
+    const product = normalizeDemandProduct(cell);
+    if (!provinceKey || !product || product.quantity <= 0) return;
+
+    const current = cellsByProvince.get(provinceKey) || [];
+    current.push(product);
+    cellsByProvince.set(provinceKey, current);
+  });
+
+  const provinces = rawProvinces.map((province) => {
+    const provinceKey = normalizeProvinceName(province?.province || province?.provinceName || province?.tinh || "");
+    const existingProducts = getDemandProductList(province);
+    const fallbackProducts = (cellsByProvince.get(provinceKey) || [])
+      .sort((a, b) => b.quantity - a.quantity || a.productName.localeCompare(b.productName, "vi"));
+
+    return {
+      ...province,
+      products: existingProducts.length ? existingProducts : fallbackProducts,
+    };
+  });
+
+  if (provinces.length > 0) return provinces;
+
+  return Array.from(cellsByProvince.entries())
+    .map(([provinceKey, products]) => ({
+      province: products[0]?.province || provinceKey,
+      quantity: products.reduce((sum, product) => sum + (Number(product.quantity) || 0), 0),
+      products,
+    }))
+    .sort((a, b) => b.quantity - a.quantity || a.province.localeCompare(b.province, "vi"));
+}
+
 function loadECharts() {
   if (typeof window === "undefined") return Promise.reject(new Error("Chart only runs in browser"));
   if (window.echarts) return Promise.resolve(window.echarts);
@@ -1529,7 +1608,7 @@ export default function BusinessStats() {
   const maxProductQuantity = Math.max(...topProducts.map((product) => Number(product.quantity) || 0), 0);
   const productProvinceStats = dailyStats?.productProvinceStats || {};
   const demandProducts = Array.isArray(productProvinceStats.products) ? productProvinceStats.products : [];
-  const demandProvinces = Array.isArray(productProvinceStats.provinces) ? productProvinceStats.provinces : [];
+  const demandProvinces = buildDemandProvinces(productProvinceStats);
   const maxDemandProvinceQuantity = Math.max(...demandProvinces.map((item) => Number(item.quantity) || 0), 0);
   const frequentQuestions = Array.isArray(dailyStats?.frequentQuestions) ? dailyStats.frequentQuestions : [];
   const orderHourlyStats = dailyStats?.orderHourlyStats || {};
