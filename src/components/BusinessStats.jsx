@@ -3,6 +3,7 @@ import JSZip from "jszip";
 import { saveAs } from "file-saver";
 import {
   AlertTriangle,
+  BarChart3,
   Calendar,
   CircleDollarSign,
   Clock,
@@ -16,6 +17,7 @@ import {
   MessageSquare,
   Moon,
   Phone,
+  PieChart,
   RefreshCw,
   Search,
   SlidersHorizontal,
@@ -497,6 +499,39 @@ function getFeatureName(feature) {
   return properties.name || properties.NAME_1 || properties.Name || properties.woe_name || properties["hc-a2"] || "";
 }
 
+function collectLngLatPairs(coordinates, pairs = []) {
+  if (!Array.isArray(coordinates)) return pairs;
+  if (
+    coordinates.length >= 2
+    && typeof coordinates[0] === "number"
+    && typeof coordinates[1] === "number"
+  ) {
+    pairs.push([coordinates[0], coordinates[1]]);
+    return pairs;
+  }
+  coordinates.forEach((item) => collectLngLatPairs(item, pairs));
+  return pairs;
+}
+
+function getFeatureCenter(feature) {
+  const pairs = collectLngLatPairs(feature?.geometry?.coordinates);
+  if (!pairs.length) return null;
+
+  let minLng = Infinity;
+  let maxLng = -Infinity;
+  let minLat = Infinity;
+  let maxLat = -Infinity;
+  pairs.forEach(([lng, lat]) => {
+    minLng = Math.min(minLng, lng);
+    maxLng = Math.max(maxLng, lng);
+    minLat = Math.min(minLat, lat);
+    maxLat = Math.max(maxLat, lat);
+  });
+
+  if (![minLng, maxLng, minLat, maxLat].every(Number.isFinite)) return null;
+  return [(minLng + maxLng) / 2, (minLat + maxLat) / 2];
+}
+
 function findDemandForFeature(feature, demandMap) {
   const featureName = normalizeProvinceName(getFeatureName(feature));
   if (demandMap.has(featureName)) return demandMap.get(featureName);
@@ -556,7 +591,8 @@ function VietnamDemandMap({ provinces = [], formatNumber, onFullScreen, compact 
             },
           ]),
         );
-        const chartData = (geoJson.features || []).map((feature) => {
+        const geoFeatures = geoJson.features || [];
+        const chartData = geoFeatures.map((feature) => {
           const demand = findDemandForFeature(feature, demandMap);
           const name = getFeatureName(feature);
           return {
@@ -566,6 +602,16 @@ function VietnamDemandMap({ provinces = [], formatNumber, onFullScreen, compact 
             products: demand?.products || [],
           };
         });
+        const focusIndex = chartData.reduce((bestIndex, item, index) => {
+          const currentValue = Number(item.value) || 0;
+          const bestValue = bestIndex >= 0 ? Number(chartData[bestIndex]?.value) || 0 : 0;
+          return currentValue > bestValue ? index : bestIndex;
+        }, -1);
+        const focusData = focusIndex >= 0 ? chartData[focusIndex] : null;
+        const focusFeature = focusIndex >= 0 ? geoFeatures[focusIndex] : null;
+        const focusCenter = Number(focusData?.value || 0) > 0
+          ? (getFeatureCenter(focusFeature) || getProvinceLngLat(focusData?.demandName || focusData?.name))
+          : null;
         const chart = chartRef.current || echarts.init(containerRef.current, null, { renderer: "canvas" });
         chartRef.current = chart;
         const chartBackground = isDarkMode ? "#0f172a" : "#ffffff";
@@ -630,10 +676,11 @@ function VietnamDemandMap({ provinces = [], formatNumber, onFullScreen, compact 
               selectedMode: false,
               data: chartData,
               nameProperty: "name",
-              zoom: 1,
+              center: focusCenter || undefined,
+              zoom: focusCenter ? 3.35 : 1,
               aspectScale: 1,
-              layoutCenter: ["52%", "53%"],
-              layoutSize: "86%",
+              layoutCenter: focusCenter ? undefined : ["52%", "53%"],
+              layoutSize: focusCenter ? undefined : "86%",
               scaleLimit: { min: 0.8, max: 8 },
               itemStyle: {
                 borderColor: isDarkMode ? "#1e293b" : "#ffffff",
@@ -726,6 +773,276 @@ function VietnamDemandMap({ provinces = [], formatNumber, onFullScreen, compact 
   );
 }
 
+function ProvinceDemandBarChart({ provinces = [], formatNumber, compact = false, isDarkMode = false }) {
+  const containerRef = useRef(null);
+  const chartRef = useRef(null);
+  const [chartError, setChartError] = useState("");
+  const rows = useMemo(() => {
+    return [...provinces]
+      .sort((a, b) => (Number(b.quantity) || 0) - (Number(a.quantity) || 0))
+      .slice(0, 20);
+  }, [provinces]);
+
+  useEffect(() => {
+    if (!containerRef.current) return undefined;
+    let disposed = false;
+    let resizeHandler = null;
+    let resizeObserver = null;
+
+    loadECharts()
+      .then((echarts) => {
+        if (disposed || !containerRef.current) return;
+        const chart = chartRef.current || echarts.init(containerRef.current, null, { renderer: "canvas" });
+        chartRef.current = chart;
+        const chartBackground = isDarkMode ? "#0f172a" : "#ffffff";
+        const strongTextColor = isDarkMode ? "#f8fafc" : "#0f172a";
+        const mutedTextColor = isDarkMode ? "#94a3b8" : "#64748b";
+        const gridLineColor = isDarkMode ? "#1e293b" : "#e2e8f0";
+        chart.resize({
+          width: containerRef.current.clientWidth,
+          height: containerRef.current.clientHeight,
+        });
+        chart.setOption({
+          backgroundColor: chartBackground,
+          animationDuration: 420,
+          animationDurationUpdate: 360,
+          animationEasing: "cubicOut",
+          animationEasingUpdate: "cubicOut",
+          tooltip: {
+            trigger: "axis",
+            axisPointer: { type: "shadow" },
+            backgroundColor: isDarkMode ? "rgba(15,23,42,0.96)" : "#ffffff",
+            borderColor: isDarkMode ? "#334155" : "#e2e8f0",
+            textStyle: { color: strongTextColor, fontSize: 12 },
+            formatter: (params) => {
+              const item = params?.[0];
+              const row = rows[item?.dataIndex] || {};
+              return `<div style="min-width:180px;font-size:12px;line-height:1.35">
+                <div style="font-weight:800;margin-bottom:5px">${row.province || item?.name || ""}</div>
+                <div style="color:${isDarkMode ? "#7dd3fc" : "#0369a1"}">${formatNumber(row.quantity || 0)} sản phẩm đã chốt</div>
+              </div>`;
+            },
+          },
+          grid: { left: 46, right: 24, top: 78, bottom: 92 },
+          xAxis: {
+            type: "category",
+            data: rows.map((row) => row.province),
+            axisLabel: {
+              color: mutedTextColor,
+              fontSize: 10,
+              rotate: 38,
+              width: 76,
+              overflow: "truncate",
+            },
+            axisTick: { show: false },
+            axisLine: { lineStyle: { color: gridLineColor } },
+          },
+          yAxis: {
+            type: "value",
+            axisLabel: { color: mutedTextColor, fontSize: 10 },
+            splitLine: { lineStyle: { color: gridLineColor } },
+          },
+          series: [
+            {
+              name: "Nhu cầu",
+              type: "bar",
+              data: rows.map((row) => Number(row.quantity) || 0),
+              barMaxWidth: 24,
+              itemStyle: {
+                borderRadius: [8, 8, 0, 0],
+                color: {
+                  type: "linear",
+                  x: 0,
+                  y: 1,
+                  x2: 0,
+                  y2: 0,
+                  colorStops: [
+                    { offset: 0, color: "#10b981" },
+                    { offset: 1, color: "#0ea5e9" },
+                  ],
+                },
+              },
+              label: {
+                show: true,
+                position: "top",
+                color: strongTextColor,
+                fontSize: 10,
+                fontWeight: 800,
+                formatter: (params) => formatNumber(params.value),
+              },
+            },
+          ],
+        }, true);
+        resizeHandler = () => chart.resize({
+          width: containerRef.current?.clientWidth,
+          height: containerRef.current?.clientHeight,
+        });
+        window.addEventListener("resize", resizeHandler);
+        if (typeof ResizeObserver !== "undefined") {
+          resizeObserver = new ResizeObserver(resizeHandler);
+          resizeObserver.observe(containerRef.current);
+        }
+        setChartError("");
+      })
+      .catch((error) => {
+        if (!disposed) setChartError(error.message || "Không tải được biểu đồ ECharts");
+      });
+
+    return () => {
+      disposed = true;
+      if (resizeHandler) window.removeEventListener("resize", resizeHandler);
+      if (resizeObserver) resizeObserver.disconnect();
+    };
+  }, [rows, formatNumber, isDarkMode]);
+
+  useEffect(() => () => {
+    if (chartRef.current) {
+      chartRef.current.dispose();
+      chartRef.current = null;
+    }
+  }, []);
+
+  return (
+    <div className="relative overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
+      <div ref={containerRef} className={`${compact ? "h-[480px]" : "h-[78vh]"} w-full min-w-0`} />
+      {chartError && (
+        <div className="absolute inset-0 z-20 flex items-center justify-center bg-white/85 p-6 text-center text-sm font-semibold text-rose-600">
+          {chartError}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ProvinceDemandPieChart({ provinces = [], formatNumber, compact = false, isDarkMode = false }) {
+  const containerRef = useRef(null);
+  const chartRef = useRef(null);
+  const [chartError, setChartError] = useState("");
+  const rows = useMemo(() => {
+    const sorted = [...provinces]
+      .filter((province) => Number(province.quantity) > 0)
+      .sort((a, b) => (Number(b.quantity) || 0) - (Number(a.quantity) || 0));
+    const top = sorted.slice(0, 8);
+    const otherQuantity = sorted.slice(8).reduce((sum, province) => sum + (Number(province.quantity) || 0), 0);
+    return otherQuantity > 0
+      ? [...top, { province: "Khác", quantity: otherQuantity }]
+      : top;
+  }, [provinces]);
+
+  useEffect(() => {
+    if (!containerRef.current) return undefined;
+    let disposed = false;
+    let resizeHandler = null;
+    let resizeObserver = null;
+
+    loadECharts()
+      .then((echarts) => {
+        if (disposed || !containerRef.current) return;
+        const chart = chartRef.current || echarts.init(containerRef.current, null, { renderer: "canvas" });
+        chartRef.current = chart;
+        const chartBackground = isDarkMode ? "#0f172a" : "#ffffff";
+        const strongTextColor = isDarkMode ? "#f8fafc" : "#0f172a";
+        const mutedTextColor = isDarkMode ? "#94a3b8" : "#64748b";
+        const palette = ["#ef4444", "#f97316", "#eab308", "#22c55e", "#06b6d4", "#3b82f6", "#8b5cf6", "#ec4899", "#94a3b8"];
+        chart.resize({
+          width: containerRef.current.clientWidth,
+          height: containerRef.current.clientHeight,
+        });
+        chart.setOption({
+          backgroundColor: chartBackground,
+          animationDuration: 420,
+          animationDurationUpdate: 360,
+          animationEasing: "cubicOut",
+          animationEasingUpdate: "cubicOut",
+          color: palette,
+          tooltip: {
+            trigger: "item",
+            backgroundColor: isDarkMode ? "rgba(15,23,42,0.96)" : "#ffffff",
+            borderColor: isDarkMode ? "#334155" : "#e2e8f0",
+            textStyle: { color: strongTextColor, fontSize: 12 },
+            formatter: (params) => `<div style="min-width:170px;font-size:12px;line-height:1.35">
+              <div style="font-weight:800;margin-bottom:5px">${params.name}</div>
+              <div style="color:${isDarkMode ? "#7dd3fc" : "#0369a1"}">${formatNumber(params.value)} sản phẩm đã chốt</div>
+              <div style="color:${mutedTextColor};margin-top:2px">${Number(params.percent || 0).toFixed(1)}%</div>
+            </div>`,
+          },
+          legend: {
+            type: "scroll",
+            orient: "vertical",
+            right: 16,
+            top: 36,
+            bottom: 24,
+            textStyle: { color: mutedTextColor, fontSize: 10 },
+          },
+          series: [
+            {
+              name: "Nhu cầu",
+              type: "pie",
+              radius: ["42%", "70%"],
+              center: ["40%", "52%"],
+              minAngle: 4,
+              avoidLabelOverlap: true,
+              itemStyle: {
+                borderColor: chartBackground,
+                borderWidth: 2,
+              },
+              label: {
+                color: strongTextColor,
+                fontSize: 10,
+                fontWeight: 700,
+                formatter: "{b}\n{d}%",
+              },
+              labelLine: {
+                lineStyle: { color: mutedTextColor },
+              },
+              data: rows.map((row) => ({
+                name: row.province,
+                value: Number(row.quantity) || 0,
+              })),
+            },
+          ],
+        }, true);
+        resizeHandler = () => chart.resize({
+          width: containerRef.current?.clientWidth,
+          height: containerRef.current?.clientHeight,
+        });
+        window.addEventListener("resize", resizeHandler);
+        if (typeof ResizeObserver !== "undefined") {
+          resizeObserver = new ResizeObserver(resizeHandler);
+          resizeObserver.observe(containerRef.current);
+        }
+        setChartError("");
+      })
+      .catch((error) => {
+        if (!disposed) setChartError(error.message || "Không tải được biểu đồ ECharts");
+      });
+
+    return () => {
+      disposed = true;
+      if (resizeHandler) window.removeEventListener("resize", resizeHandler);
+      if (resizeObserver) resizeObserver.disconnect();
+    };
+  }, [rows, formatNumber, isDarkMode]);
+
+  useEffect(() => () => {
+    if (chartRef.current) {
+      chartRef.current.dispose();
+      chartRef.current = null;
+    }
+  }, []);
+
+  return (
+    <div className="relative overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
+      <div ref={containerRef} className={`${compact ? "h-[480px]" : "h-[78vh]"} w-full min-w-0`} />
+      {chartError && (
+        <div className="absolute inset-0 z-20 flex items-center justify-center bg-white/85 p-6 text-center text-sm font-semibold text-rose-600">
+          {chartError}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function formatWaitingTime(value) {
   if (!value) return "N/A";
   const date = new Date(value);
@@ -774,7 +1091,7 @@ function buildOrderText(order, index) {
 
   return [
     `DON HANG #${index + 1}`,
-    `ID: ${order._id || ""}`,
+    `ID: ${order._id || order.id || ""}`,
     `Ngay tao: ${formatDateTime(order.createdAt)}`,
     `Page: ${order.pageName || ""} (${order.pageId || ""})`,
     `Khach hang: ${order.customerName || ""} (${order.customerId || ""})`,
@@ -855,13 +1172,13 @@ function buildConversationText(conversation, index) {
     `HOI THOAI #${index + 1}`,
     "============================================================",
     `ID: ${conversation._id || ""}`,
-    `Khach hang: ${getConversationCustomerName(conversation)} (${conversation.user || ""})`,
+    `Khach hang: ${getConversationCustomerName(conversation)} (${conversation.user || conversation.customer?.id || ""})`,
     `Page: ${conversation.page || ""}`,
     `Conversation ID: ${conversation.conversationId || ""}`,
     `Thread ID: ${conversation.threadId || ""}`,
     `Cap nhat: ${formatDateTime(conversation.updatedAt)}`,
-    `So dien thoai: ${conversation.phoneNumber || ""}`,
-    `Dia chi: ${conversation.address || ""}`,
+    `So dien thoai: ${conversation.phoneNumber || conversation.customer?.phoneNumber || ""}`,
+    `Dia chi: ${conversation.address || conversation.customer?.address || ""}`,
     `San pham dang tu van: ${conversation.activeProductName || conversation.activeSku || ""}`,
     `Intent cuoi: ${conversation.lastIntent || ""}`,
     `Tom tat: ${conversation.conversationSummary || ""}`,
@@ -894,6 +1211,71 @@ function buildConversationJson(conversation, index) {
     chatHistory: conversation.chatHistory || null,
     raw: conversation,
   };
+}
+
+const ORDER_EXPORT_FIELDS = [
+  ["id", "ID đơn"],
+  ["createdAt", "Ngày tạo"],
+  ["pageName", "Page"],
+  ["pageId", "Page ID"],
+  ["customerName", "Khách hàng"],
+  ["customerId", "Customer ID"],
+  ["phoneNumber", "Điện thoại"],
+  ["address", "Địa chỉ"],
+  ["status", "Trạng thái"],
+  ["total", "Tổng tiền"],
+  ["shippingFee", "Phí ship"],
+  ["note", "Ghi chú"],
+  ["items", "Sản phẩm"],
+];
+
+const CONVERSATION_EXPORT_FIELDS = [
+  ["id", "ID hội thoại"],
+  ["customer", "Khách hàng"],
+  ["page", "Page"],
+  ["conversationId", "Conversation ID"],
+  ["threadId", "Thread ID"],
+  ["updatedAt", "Cập nhật"],
+  ["activeProductName", "Sản phẩm tư vấn"],
+  ["activeSku", "SKU"],
+  ["lastIntent", "Intent cuối"],
+  ["summary", "Tóm tắt"],
+  ["chatHistory", "Lịch sử chat"],
+];
+
+const DEFAULT_ORDER_EXPORT_FIELDS = ORDER_EXPORT_FIELDS.map(([key]) => key);
+const DEFAULT_CONVERSATION_EXPORT_FIELDS = CONVERSATION_EXPORT_FIELDS
+  .map(([key]) => key)
+  .filter((key) => key !== "chatHistory");
+
+function pickExportFields(source, fields) {
+  const result = {};
+  fields.forEach((field) => {
+    if (field === "id") {
+      result.id = source.id ?? source._id ?? null;
+      return;
+    }
+    if (field in source) result[field] = source[field];
+  });
+  return result;
+}
+
+function filterOrderForExport(order, fields) {
+  return pickExportFields({
+    id: order._id || order.id || null,
+    createdAt: order.createdAt,
+    pageName: order.pageName,
+    pageId: order.pageId,
+    customerName: order.customerName,
+    customerId: order.customerId,
+    phoneNumber: order.phoneNumber,
+    address: order.address,
+    status: order.status || "active",
+    total: order.total,
+    shippingFee: order.shippingFee,
+    note: order.note,
+    items: order.items,
+  }, fields);
 }
 
 function buildTextExport(data) {
@@ -1369,6 +1751,7 @@ export default function BusinessStats() {
     const today = formatDateInput();
     return { from: today, to: today };
   });
+  const [statsTimeRange, setStatsTimeRange] = useState({ fromTime: "00:00", toTime: "23:59" });
   const [statsPages, setStatsPages] = useState([]);
   const [companyFilter, setCompanyFilter] = useState("all");
   const [pageSelectionMode, setPageSelectionMode] = useState("all");
@@ -1383,6 +1766,12 @@ export default function BusinessStats() {
     format: "json",
     packageMode: "single",
     includeHistory: false,
+    orderFields: DEFAULT_ORDER_EXPORT_FIELDS,
+    conversationFields: DEFAULT_CONVERSATION_EXPORT_FIELDS,
+  });
+  const [exportRange, setExportRange] = useState(() => {
+    const today = formatDateInput();
+    return { from: today, fromTime: "00:00", to: today, toTime: "23:59" };
   });
   const [isExporting, setIsExporting] = useState(false);
   const [exportError, setExportError] = useState("");
@@ -1417,6 +1806,7 @@ export default function BusinessStats() {
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [isMapFullOpen, setIsMapFullOpen] = useState(false);
   const [mapProvinceMode, setMapProvinceMode] = useState("new");
+  const [demandChartType, setDemandChartType] = useState("map");
   const [convertedOrdersTab, setConvertedOrdersTab] = useState("official");
   const [isFrequentQuestionsOpen, setIsFrequentQuestionsOpen] = useState(false);
 
@@ -1463,6 +1853,51 @@ export default function BusinessStats() {
     return selectedPageIds.filter((pageId) => companyPageIdSet.has(String(pageId)));
   }
 
+  const syncExportRangeFromStats = () => {
+    if (statsMode === "range") {
+      setExportRange((current) => ({
+        ...current,
+        from: statsRange.from,
+        to: statsRange.to,
+        fromTime: statsTimeRange.fromTime,
+        toTime: statsTimeRange.toTime,
+      }));
+      return;
+    }
+    setExportRange((current) => ({
+      ...current,
+      from: statsDate,
+      to: statsDate,
+      fromTime: statsTimeRange.fromTime,
+      toTime: statsTimeRange.toTime,
+    }));
+  };
+
+  const openExportDialog = () => {
+    syncExportRangeFromStats();
+    setExportError("");
+    setIsExportOpen(true);
+  };
+
+  const toggleExportField = (group, field) => {
+    setExportOptions((current) => {
+      const key = group === "orders" ? "orderFields" : "conversationFields";
+      const nextFields = new Set(current[key] || []);
+      if (nextFields.has(field)) nextFields.delete(field);
+      else nextFields.add(field);
+      return { ...current, [key]: Array.from(nextFields) };
+    });
+  };
+
+  const setAllExportFields = (group, checked) => {
+    setExportOptions((current) => ({
+      ...current,
+      [group === "orders" ? "orderFields" : "conversationFields"]: checked
+        ? (group === "orders" ? DEFAULT_ORDER_EXPORT_FIELDS : CONVERSATION_EXPORT_FIELDS.map(([key]) => key))
+        : [],
+    }));
+  };
+
   const buildStatsQuery = () => {
     const timezoneOffset = -new Date().getTimezoneOffset();
     const queryParams = new URLSearchParams({ timezoneOffset: String(timezoneOffset) });
@@ -1472,8 +1907,11 @@ export default function BusinessStats() {
       queryParams.set("from", statsRange.from);
       queryParams.set("to", statsRange.to);
     } else {
-      queryParams.set("date", statsDate);
+      queryParams.set("from", statsDate);
+      queryParams.set("to", statsDate);
     }
+    queryParams.set("fromTime", statsTimeRange.fromTime || "00:00");
+    queryParams.set("toTime", statsTimeRange.toTime || "23:59");
 
     if (pageIds.length === 0) {
       queryParams.set("pageScope", "none");
@@ -1488,6 +1926,10 @@ export default function BusinessStats() {
     if (!token) return;
     if (statsMode === "day" && !statsDate) return;
     if (statsMode === "range" && (!statsRange.from || !statsRange.to)) return;
+    if ((statsTimeRange.fromTime || "") > (statsTimeRange.toTime || "") && (statsMode === "day" || statsRange.from === statsRange.to)) {
+      setStatsError("Giờ kết thúc phải lớn hơn giờ bắt đầu");
+      return;
+    }
 
     setIsLoadingStats(true);
     setStatsError("");
@@ -1511,10 +1953,28 @@ export default function BusinessStats() {
 
   const fetchExportData = async () => {
     if (!token) return null;
-    if (statsMode === "day" && !statsDate) return null;
-    if (statsMode === "range" && (!statsRange.from || !statsRange.to)) return null;
+    if (!exportRange.from || !exportRange.to) return null;
+    if (exportRange.from > exportRange.to) {
+      throw new Error("Ngày kết thúc phải lớn hơn hoặc bằng ngày bắt đầu");
+    }
+    if ((exportRange.fromTime || "") > (exportRange.toTime || "") && exportRange.from === exportRange.to) {
+      throw new Error("Giờ kết thúc phải lớn hơn giờ bắt đầu");
+    }
 
-    const queryParams = buildStatsQuery();
+    const timezoneOffset = -new Date().getTimezoneOffset();
+    const queryParams = new URLSearchParams({
+      timezoneOffset: String(timezoneOffset),
+      from: exportRange.from,
+      to: exportRange.to,
+      fromTime: exportRange.fromTime || "00:00",
+      toTime: exportRange.toTime || "23:59",
+    });
+    const pageIds = getEffectiveStatsPageIds();
+    if (pageIds.length === 0) {
+      queryParams.set("pageScope", "none");
+    } else {
+      queryParams.set("pages", pageIds.join(","));
+    }
     queryParams.set("type", exportOptions.type);
     const shouldIncludeHistory = exportOptions.type !== "orders"
       && (exportOptions.includeHistory || exportOptions.format === "pdf");
@@ -1713,9 +2173,13 @@ export default function BusinessStats() {
 
   const buildExportPayload = (data) => {
     const payload = { meta: data.meta };
-    if (exportOptions.type === "all" || exportOptions.type === "orders") payload.orders = data.orders || [];
+    if (exportOptions.type === "all" || exportOptions.type === "orders") {
+      payload.orders = (data.orders || []).map((order) => filterOrderForExport(order, exportOptions.orderFields || []));
+    }
     if (exportOptions.type === "all" || exportOptions.type === "conversations") {
-      payload.conversations = (data.conversations || []).map(buildConversationJson);
+      payload.conversations = (data.conversations || [])
+        .map(buildConversationJson)
+        .map((conversation) => pickExportFields(conversation, exportOptions.conversationFields || []));
     }
     return payload;
   };
@@ -1737,6 +2201,7 @@ export default function BusinessStats() {
     setStatsMode(range.mode);
     setStatsDate(range.date || range.from);
     setStatsRange({ from: range.from, to: range.to });
+    setStatsTimeRange({ fromTime: "00:00", toTime: "23:59" });
   };
 
   const handleExportData = async () => {
@@ -1745,33 +2210,48 @@ export default function BusinessStats() {
     try {
       const data = await fetchExportData();
       if (!data) throw new Error("Vui long chon moc thoi gian hop le");
+      const wantsOrders = exportOptions.type === "all" || exportOptions.type === "orders";
+      const wantsConversations = exportOptions.type === "all" || exportOptions.type === "conversations";
+      if (wantsOrders && !(exportOptions.orderFields || []).length) {
+        throw new Error("Vui lòng chọn ít nhất 1 field đơn hàng");
+      }
+      if (wantsConversations && !(exportOptions.conversationFields || []).length) {
+        throw new Error("Vui lòng chọn ít nhất 1 field hội thoại");
+      }
 
       const format = exportOptions.format;
       const extension = format === "json" ? "json" : format === "pdf" ? "pdf" : "txt";
+      const timePart = `${String(data.meta?.fromTime || "").slice(0, 5).replace(":", "")}-${String(data.meta?.toTime || "").slice(0, 5).replace(":", "")}`;
       const datePart = data.meta?.fromDate === data.meta?.toDate
         ? data.meta?.fromDate
         : `${data.meta?.fromDate}_to_${data.meta?.toDate}`;
-      const baseName = `thong-ke-kinh-doanh-${datePart}`;
+      const baseName = `thong-ke-kinh-doanh-${datePart}-${timePart}`;
       const payload = buildExportPayload(data);
 
       if (exportOptions.packageMode === "zip") {
         const zip = new JSZip();
-        if (exportOptions.type === "all" || exportOptions.type === "orders") {
-          const orderPayload = { meta: data.meta, orders: data.orders || [] };
+        if (wantsOrders) {
+          const orderPayload = {
+            meta: data.meta,
+            orders: (data.orders || []).map((order) => filterOrderForExport(order, exportOptions.orderFields || [])),
+          };
           zip.file(`don-hang-${datePart}.${extension}`, buildZipFileContent(orderPayload, format));
         }
-        if (exportOptions.type === "all" || exportOptions.type === "conversations") {
-          const conversations = data.conversations || [];
+        if (wantsConversations) {
+          const conversations = (data.conversations || []).map((conversation, index) => ({
+            raw: conversation,
+            filtered: pickExportFields(buildConversationJson(conversation, index), exportOptions.conversationFields || []),
+          }));
           const conversationIndex = conversations.map((conversation, index) => ({
             index: index + 1,
-            file: buildConversationFileName(conversation, index, extension),
-            customerName: getConversationCustomerName(conversation),
-            customerId: conversation.user || null,
-            page: conversation.page || null,
-            conversationId: conversation.conversationId || null,
-            updatedAt: conversation.updatedAt || null,
-            messageCount: Array.isArray(conversation.chatHistory?.messages)
-              ? conversation.chatHistory.messages.length
+            file: buildConversationFileName(conversation.raw, index, extension),
+            customerName: conversation.filtered.customer?.name || getConversationCustomerName(conversation.raw),
+            customerId: conversation.filtered.customer?.id || conversation.raw.user || null,
+            page: conversation.filtered.page || conversation.raw.page || null,
+            conversationId: conversation.filtered.conversationId || conversation.raw.conversationId || null,
+            updatedAt: conversation.filtered.updatedAt || conversation.raw.updatedAt || null,
+            messageCount: Array.isArray(conversation.filtered.chatHistory?.messages)
+              ? conversation.filtered.chatHistory.messages.length
               : null,
           }));
 
@@ -1783,15 +2263,15 @@ export default function BusinessStats() {
           conversations.forEach((conversation, index) => {
             const conversationPayload = {
               meta: data.meta,
-              conversation: buildConversationJson(conversation, index),
+              conversation: conversation.filtered,
             };
             zip.file(
-              buildConversationFileName(conversation, index, extension),
+              buildConversationFileName(conversation.raw, index, extension),
               format === "json"
                 ? JSON.stringify(conversationPayload, null, 2)
                 : format === "pdf"
                   ? makeBlob(conversationPayload, "pdf")
-                  : buildConversationText(conversation, index),
+                  : buildConversationText(conversation.filtered, index),
             );
           });
         }
@@ -1813,7 +2293,7 @@ export default function BusinessStats() {
   useEffect(() => {
     fetchDailyStats();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, statsMode, statsDate, statsRange.from, statsRange.to, pageSelectionMode, selectedPageIds, companyFilter, statsPages]);
+  }, [token, statsMode, statsDate, statsRange.from, statsRange.to, statsTimeRange.fromTime, statsTimeRange.toTime, pageSelectionMode, selectedPageIds, companyFilter, statsPages]);
 
   const statsLabel = dailyStats?.fromDate && dailyStats?.toDate
     ? dailyStats.fromDate === dailyStats.toDate
@@ -1822,7 +2302,9 @@ export default function BusinessStats() {
     : statsMode === "range"
       ? `${statsRange.from} đến ${statsRange.to}`
       : statsDate;
-  const displayStatsLabel = formatStatsDateLabel(statsLabel);
+  const statsTimeLabel = `${String(dailyStats?.fromTime || statsTimeRange.fromTime || "00:00").slice(0, 5)} - ${String(dailyStats?.toTime || statsTimeRange.toTime || "23:59").slice(0, 5)}`;
+  const isFullDayStatsTime = statsTimeLabel === "00:00 - 23:59";
+  const displayStatsLabel = `${formatStatsDateLabel(statsLabel)}${isFullDayStatsTime ? "" : ` · ${statsTimeLabel}`}`;
 
   const productStats = Array.isArray(dailyStats?.productStats) ? dailyStats.productStats : [];
   const topProducts = productStats.slice(0, 10);
@@ -2007,7 +2489,7 @@ export default function BusinessStats() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setIsExportOpen(true)}
+                  onClick={openExportDialog}
                   className="inline-flex h-8 items-center justify-center gap-2 rounded-lg bg-emerald-600 px-3 text-xs font-black text-white shadow-sm transition hover:bg-emerald-700"
                 >
                   <FileDown size={14} />
@@ -2077,6 +2559,14 @@ export default function BusinessStats() {
                       </label>
                     </>
                   )}
+                  <label className="space-y-1">
+                    <span className="font-black uppercase text-slate-500">Từ giờ</span>
+                    <input type="time" value={statsTimeRange.fromTime} onChange={(e) => setStatsTimeRange((current) => ({ ...current, fromTime: e.target.value }))} className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 font-bold text-slate-800 outline-none" />
+                  </label>
+                  <label className="space-y-1">
+                    <span className="font-black uppercase text-slate-500">Đến giờ</span>
+                    <input type="time" value={statsTimeRange.toTime} onChange={(e) => setStatsTimeRange((current) => ({ ...current, toTime: e.target.value }))} className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 font-bold text-slate-800 outline-none" />
+                  </label>
                 </div>
 
                 <div className="flex flex-wrap gap-2">
@@ -2129,7 +2619,7 @@ export default function BusinessStats() {
 
         {isExportOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-3 backdrop-blur-sm">
-            <div className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
+            <div className="flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
               <div className="flex items-start justify-between gap-3 border-b border-slate-100 px-4 py-3">
                 <div>
                   <h3 className="text-[13px] font-black text-slate-950">Công cụ xuất dữ liệu</h3>
@@ -2139,7 +2629,7 @@ export default function BusinessStats() {
                   <X size={17} />
                 </button>
               </div>
-              <div className="grid gap-3 p-4 text-xs sm:grid-cols-2">
+              <div className="grid min-h-0 gap-3 overflow-auto p-4 text-xs sm:grid-cols-2">
                 <label className="space-y-1">
                   <span className="font-black uppercase text-slate-500">Dữ liệu</span>
                   <select value={exportOptions.type} onChange={(e) => setExportOptions((current) => ({ ...current, type: e.target.value, includeHistory: e.target.value === "orders" ? false : current.includeHistory }))} className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 font-bold text-slate-800 outline-none">
@@ -2169,6 +2659,72 @@ export default function BusinessStats() {
                     {exportOptions.format === "pdf" && exportOptions.type !== "orders" ? "PDF tự kèm lịch sử chat" : "Kèm lịch sử chat"}
                   </span>
                 </label>
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 sm:col-span-2">
+                  <div className="mb-2 flex items-center justify-between gap-3">
+                    <span className="font-black uppercase text-slate-500">Thời gian xuất</span>
+                    <button
+                      type="button"
+                      onClick={syncExportRangeFromStats}
+                      className="rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-bold text-slate-600 hover:bg-slate-50"
+                    >
+                      Theo bộ lọc
+                    </button>
+                  </div>
+                  <div className="grid gap-2 sm:grid-cols-4">
+                    <label className="space-y-1">
+                      <span className="text-[10px] font-black uppercase text-slate-400">Từ ngày</span>
+                      <input type="date" value={exportRange.from} onChange={(e) => setExportRange((current) => ({ ...current, from: e.target.value }))} className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2 font-bold text-slate-800 outline-none" />
+                    </label>
+                    <label className="space-y-1">
+                      <span className="text-[10px] font-black uppercase text-slate-400">Từ giờ</span>
+                      <input type="time" value={exportRange.fromTime} onChange={(e) => setExportRange((current) => ({ ...current, fromTime: e.target.value }))} className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2 font-bold text-slate-800 outline-none" />
+                    </label>
+                    <label className="space-y-1">
+                      <span className="text-[10px] font-black uppercase text-slate-400">Đến ngày</span>
+                      <input type="date" value={exportRange.to} onChange={(e) => setExportRange((current) => ({ ...current, to: e.target.value }))} className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2 font-bold text-slate-800 outline-none" />
+                    </label>
+                    <label className="space-y-1">
+                      <span className="text-[10px] font-black uppercase text-slate-400">Đến giờ</span>
+                      <input type="time" value={exportRange.toTime} onChange={(e) => setExportRange((current) => ({ ...current, toTime: e.target.value }))} className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2 font-bold text-slate-800 outline-none" />
+                    </label>
+                  </div>
+                </div>
+                {(exportOptions.type === "all" || exportOptions.type === "orders") && (
+                  <div className="rounded-xl border border-slate-200 bg-white p-3">
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <span className="font-black uppercase text-slate-500">Field đơn hàng</span>
+                      <button type="button" onClick={() => setAllExportFields("orders", (exportOptions.orderFields || []).length !== ORDER_EXPORT_FIELDS.length)} className="text-[11px] font-bold text-sky-700">
+                        {(exportOptions.orderFields || []).length === ORDER_EXPORT_FIELDS.length ? "Bỏ chọn" : "Chọn hết"}
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {ORDER_EXPORT_FIELDS.map(([key, label]) => (
+                        <label key={key} className="flex items-center gap-1.5 rounded-lg bg-slate-50 px-2 py-1.5 font-semibold text-slate-700">
+                          <input type="checkbox" checked={(exportOptions.orderFields || []).includes(key)} onChange={() => toggleExportField("orders", key)} className="h-3.5 w-3.5 accent-slate-900" />
+                          <span className="truncate">{label}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {(exportOptions.type === "all" || exportOptions.type === "conversations") && (
+                  <div className="rounded-xl border border-slate-200 bg-white p-3">
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <span className="font-black uppercase text-slate-500">Field hội thoại</span>
+                      <button type="button" onClick={() => setAllExportFields("conversations", (exportOptions.conversationFields || []).length !== CONVERSATION_EXPORT_FIELDS.length)} className="text-[11px] font-bold text-sky-700">
+                        {(exportOptions.conversationFields || []).length === CONVERSATION_EXPORT_FIELDS.length ? "Bỏ chọn" : "Chọn hết"}
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {CONVERSATION_EXPORT_FIELDS.map(([key, label]) => (
+                        <label key={key} className="flex items-center gap-1.5 rounded-lg bg-slate-50 px-2 py-1.5 font-semibold text-slate-700">
+                          <input type="checkbox" checked={(exportOptions.conversationFields || []).includes(key)} onChange={() => toggleExportField("conversations", key)} className="h-3.5 w-3.5 accent-slate-900" />
+                          <span className="truncate">{label}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 {exportError && (
                   <div className="sm:col-span-2 flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
                     <AlertTriangle size={15} />
@@ -2342,11 +2898,49 @@ export default function BusinessStats() {
           ) : (
             <div className="mt-3 grid min-w-0 items-stretch gap-3 xl:grid-cols-[minmax(0,1fr)_300px] 2xl:grid-cols-[minmax(0,1fr)_320px]">
               <div className="relative min-w-0 overflow-hidden">
-                <div className="absolute left-4 top-4 z-10 flex rounded-full border border-slate-200 bg-white/95 p-1 text-[11px] font-black shadow-sm">
-                  <button type="button" onClick={() => setMapProvinceMode("old")} className={`rounded-full px-2.5 py-1 ${mapProvinceMode === "old" ? "bg-slate-950 text-white" : "text-slate-500"}`}>Tỉnh cũ</button>
-                  <button type="button" onClick={() => setMapProvinceMode("new")} className={`rounded-full px-2.5 py-1 ${mapProvinceMode === "new" ? "bg-slate-950 text-white" : "text-slate-500"}`}>Tỉnh mới</button>
+                <div className="absolute left-4 top-4 z-10 flex max-w-[calc(100%-8rem)] flex-wrap items-center gap-2 text-[11px] font-black">
+                  <div className="flex rounded-full border border-slate-200 bg-white/95 p-1 shadow-sm">
+                    <button
+                      type="button"
+                      onClick={() => setDemandChartType("map")}
+                      className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 ${demandChartType === "map" ? "bg-slate-950 text-white" : "text-slate-500"}`}
+                    >
+                      <MapPin size={12} />
+                      Bản đồ
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDemandChartType("bar")}
+                      className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 ${demandChartType === "bar" ? "bg-slate-950 text-white" : "text-slate-500"}`}
+                    >
+                      <BarChart3 size={12} />
+                      Cột
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDemandChartType("pie")}
+                      className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 ${demandChartType === "pie" ? "bg-slate-950 text-white" : "text-slate-500"}`}
+                    >
+                      <PieChart size={12} />
+                      Tròn
+                    </button>
+                  </div>
+                  {demandChartType === "map" && (
+                    <div className="business-chart-swap flex rounded-full border border-slate-200 bg-white/95 p-1 shadow-sm">
+                      <button type="button" onClick={() => setMapProvinceMode("old")} className={`rounded-full px-2.5 py-1 ${mapProvinceMode === "old" ? "bg-slate-950 text-white" : "text-slate-500"}`}>Tỉnh cũ</button>
+                      <button type="button" onClick={() => setMapProvinceMode("new")} className={`rounded-full px-2.5 py-1 ${mapProvinceMode === "new" ? "bg-slate-950 text-white" : "text-slate-500"}`}>Tỉnh mới</button>
+                    </div>
+                  )}
                 </div>
-                <VietnamDemandMap provinces={demandProvinces} formatNumber={formatNumber} onFullScreen={() => setIsMapFullOpen(true)} compact provinceMode={mapProvinceMode} isDarkMode={isDarkMode} />
+                <div key={demandChartType} className="business-chart-swap">
+                  {demandChartType === "bar" ? (
+                    <ProvinceDemandBarChart provinces={demandProvinces} formatNumber={formatNumber} compact isDarkMode={isDarkMode} />
+                  ) : demandChartType === "pie" ? (
+                    <ProvinceDemandPieChart provinces={demandProvinces} formatNumber={formatNumber} compact isDarkMode={isDarkMode} />
+                  ) : (
+                    <VietnamDemandMap provinces={demandProvinces} formatNumber={formatNumber} onFullScreen={() => setIsMapFullOpen(true)} compact provinceMode={mapProvinceMode} isDarkMode={isDarkMode} />
+                  )}
+                </div>
               </div>
 
               <div className="grid h-[480px] min-h-0 min-w-0 grid-rows-2 gap-3 overflow-hidden">
