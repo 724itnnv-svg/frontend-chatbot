@@ -31,6 +31,8 @@ import {
   BrainCircuit,
   Code2,
   MousePointerClick,
+  PackageSearch,
+  UserRound,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { canAccessScreen, hasFullAccess } from "../utils/screenAccess";
@@ -46,6 +48,8 @@ const MENU_CONFIG = [
   { id: "donhang", path: "/admin/orders", label: "Đơn hàng", icon: ClipboardList },
   { id: "donhangWeb", path: "/admin/orders-web", label: "Đơn hàng Web", icon: ClipboardList },
   { id: "business_stats", path: "/admin/business-stats", label: "Thống kê kinh doanh", icon: TrendingUp },
+  { id: "employee_profiles", path: "/admin/employee-profiles", label: "Hồ sơ nhân sự", icon: UserRound },
+  { id: "employee_assets", path: "/admin/employee-assets", label: "Kho tài sản & vật tư", icon: PackageSearch },
   { id: "users", path: "/admin/users", label: "Người dùng", icon: Users },
   { id: "roles", path: "/admin/roles", label: "Phân quyền", icon: Users },
   { id: "commission_online", path: "/admin/commission-online", label: "Tính hoa hồng Online", icon: Calculator },
@@ -99,7 +103,7 @@ const MENU_GROUPS = [
     id: "people",
     label: "Nhân sự",
     icon: Users,
-    items: ["users", "roles"],
+    items: ["employee_profiles", "employee_assets", "users", "roles"],
   },
   {
     id: "finance",
