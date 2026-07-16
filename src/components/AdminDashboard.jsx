@@ -32,7 +32,8 @@ import ExcelComparer from "./ExcelComparer";
 // ===== Định nghĩa các field có thể xuất =====ds
 const EXPORT_FIELDS = [
     { key: "stt", label: "STT", getValue: (o, i) => i + 1 },
-    { key: "createdAt", label: "Ngày tạo", getValue: (o) => o.createdAt ? new Date(o.createdAt).toLocaleDateString("vi-VN") : "" },
+    { key: "createdAt", label: "Ngày tạo đơn", getValue: (o) => o.createdAt ? new Date(o.createdAt).toLocaleString("vi-VN") : "" },
+    { key: "updatedAt", label: "Ngày cập nhật", getValue: (o) => o.updatedAt ? new Date(o.updatedAt).toLocaleString("vi-VN") : "" },
     { key: "teamId", label: "Team", getValue: (o) => o.teamId || "—" },
     { key: "pageName", label: "Tên Page", getValue: (o) => o.pageName || "" },
     { key: "customerName", label: "Tên khách", getValue: (o) => o.customerName || "" },
@@ -45,7 +46,7 @@ const EXPORT_FIELDS = [
     { key: "note", label: "Ghi chú", getValue: (o) => o.note || "" },
 ];
 
-const DEFAULT_FIELDS = new Set(["stt", "createdAt", "teamId", "pageName", "customerName", "adName", "items", "total", "note"]);
+const DEFAULT_FIELDS = new Set(["stt", "createdAt", "updatedAt", "teamId", "pageName", "customerName", "adName", "items", "total", "note"]);
 
 // Các field chứa thông tin nhạy cảm — chỉ admin mới được chọn
 const SENSITIVE_FIELDS = new Set(["phoneNumber", "address"]);

@@ -238,7 +238,7 @@ function ContractDocumentEditorModal({ contracts, value, defaults, saving, onCha
   </div>;
 }
 
-export default function EmployeeProfileManager({ users = [], onClose, standalone = false }) {
+export default function EmployeeProfileManager({ users, onClose, standalone = false }) {
   const { token, user } = useAuth();
   const [profiles, setProfiles] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -263,7 +263,7 @@ export default function EmployeeProfileManager({ users = [], onClose, standalone
   const [alertFilter, setAlertFilter] = useState("all");
   const [auditHistory, setAuditHistory] = useState({ items: [], total: 0 });
   const [auditLoading, setAuditLoading] = useState(false);
-  const [profileUsers, setProfileUsers] = useState(users);
+  const [profileUsers, setProfileUsers] = useState(users || []);
   const canProfileAction = (action) => String(user?.role || "").toLowerCase() === "superadmin" || Number(user?.allpage) === 1 || user?.action?.employee_profiles?.[action] === true;
 
   useEffect(() => {
@@ -282,7 +282,7 @@ export default function EmployeeProfileManager({ users = [], onClose, standalone
     return data;
   };
   useEffect(() => {
-    if (users.length) {
+    if (users?.length) {
       setProfileUsers(users);
       return;
     }

@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { Download, History, Laptop, Package, Pencil, Plus, RefreshCcw, RotateCcw, Save, Search, Shirt, Smartphone, Trash2, Upload, UserPlus, X } from "lucide-react";
+import { Download, History, KeyRound, Laptop, Package, Pencil, Plus, RefreshCcw, RotateCcw, Save, Search, Shirt, Smartphone, Trash2, Upload, UserPlus, X } from "lucide-react";
 import * as XLSX from "xlsx";
 import { useAuth } from "../context/AuthContext";
 import EmployeeSupplyManager from "./EmployeeSupplyManager";
+import EmployeeDigitalAssetManager from "./EmployeeDigitalAssetManager";
 import EmployeeSearchSelect from "./EmployeeSearchSelect";
 
 export const ASSET_CATEGORIES = [
@@ -309,8 +310,11 @@ export default function EmployeeAssetManager({ onClose, standalone = false }) {
     <div className="sticky top-0 z-[150] mx-auto flex max-w-[1500px] items-center gap-2 rounded-t-2xl border-b bg-white px-4 py-3 shadow-sm">
       <button onClick={() => setActiveTab("assets")} className={`flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-bold ${activeTab === "assets" ? "bg-teal-600 text-white" : "bg-slate-100 text-slate-600"}`}><Package size={17} /> Thiết bị/tài sản</button>
       <button onClick={() => setActiveTab("supplies")} className={`flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-bold ${activeTab === "supplies" ? "bg-violet-600 text-white" : "bg-slate-100 text-slate-600"}`}><Shirt size={17} /> Đồng phục/vật tư</button>
+      <button onClick={() => setActiveTab("digital")} className={`flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-bold ${activeTab === "digital" ? "bg-cyan-600 text-white" : "bg-slate-100 text-slate-600"}`}><KeyRound size={17} /> Tài sản số</button>
       {!standalone && <button onClick={onClose} className="ml-auto rounded-xl p-2 text-slate-400 hover:bg-slate-100"><X /></button>}
     </div>
-    {activeTab === "assets" ? <EmployeeDeviceManager standalone onClose={onClose} /> : <EmployeeSupplyManager standalone onClose={onClose} />}
+    {activeTab === "assets" && <EmployeeDeviceManager standalone onClose={onClose} />}
+    {activeTab === "supplies" && <EmployeeSupplyManager standalone onClose={onClose} />}
+    {activeTab === "digital" && <EmployeeDigitalAssetManager standalone />}
   </div>;
 }
