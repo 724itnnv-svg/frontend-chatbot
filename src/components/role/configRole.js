@@ -15,8 +15,8 @@ const APP_PERMISSIONS = {
     {
       id: "people",
       name: "Nhân sự",
-      description: "Người dùng và vai trò phân quyền",
-      screenIds: ["users", "roles"],
+      description: "Hồ sơ nhân sự, kho thiết bị, người dùng và vai trò phân quyền",
+      screenIds: ["employee_profiles", "employee_assets", "users", "roles"],
     },
     {
       id: "finance",
@@ -76,6 +76,8 @@ const APP_PERMISSIONS = {
     { id: "donhang", name: "Đơn Hàng" },
     { id: "donhangWeb", name: "Đơn Hàng Web" },
     { id: "business_stats", name: "Thống kê kinh doanh" },
+    { id: "employee_profiles", name: "Hồ Sơ Nhân Sự" },
+    { id: "employee_assets", name: "Kho Tài Sản & Vật Tư" },
     { id: "users", name: "Người Dùng" },
     { id: "roles", name: "Phân quyền" },
     { id: "commission_online", name: "Tính Hoa Hồng Online" },

@@ -110,6 +110,7 @@ export default function CustomerCareManager() {
   const [candidates, setCandidates] = useState([]);
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(false);
+
   const [saving, setSaving] = useState(false);
   const [running, setRunning] = useState("");
   const [message, setMessage] = useState("");

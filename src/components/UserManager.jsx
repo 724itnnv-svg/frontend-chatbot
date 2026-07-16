@@ -50,6 +50,8 @@ export default function UsersPage() {
   const [pages, setPages] = useState([]);
   const [loadingPages, setLoadingPages] = useState(false);
   const [importingCodes, setImportingCodes] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importDragActive, setImportDragActive] = useState(false);
   const [linkLoadingId, setLinkLoadingId] = useState(null);
   const [bulkQrLoading, setBulkQrLoading] = useState(false);
   const [workLocations, setWorkLocations] = useState([]);
@@ -363,10 +365,13 @@ export default function UsersPage() {
     return "";
   };
 
-  const handleImportEmployeeCodes = async (event) => {
-    const file = event.target.files?.[0];
-    event.target.value = "";
+  const importEmployeeCodesFile = async (file) => {
     if (!file) return;
+
+    if (!/\.(xlsx|xls|csv)$/i.test(file.name)) {
+      alert("Vui lòng chọn file Excel hoặc CSV (.xlsx, .xls, .csv).");
+      return;
+    }
 
     try {
       setImportingCodes(true);
@@ -444,12 +449,26 @@ export default function UsersPage() {
       setImportSummary(summary);
       await fetchUsers();
       alert(`Import xong: cập nhật ${summary.updated || 0}, tạo mới ${summary.created || 0}/${summary.total || rows.length} dòng.`);
+      setShowImportModal(false);
     } catch (err) {
       console.error("Lỗi import mã nhân viên:", err);
       alert(err.message || "Không đọc được file Excel");
     } finally {
       setImportingCodes(false);
     }
+  };
+
+  const handleImportEmployeeCodes = (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    importEmployeeCodesFile(file);
+  };
+
+  const handleImportDrop = (event) => {
+    event.preventDefault();
+    setImportDragActive(false);
+    if (importingCodes) return;
+    importEmployeeCodesFile(event.dataTransfer.files?.[0]);
   };
 
   // ✅ Theme sáng cố định
@@ -736,15 +755,7 @@ export default function UsersPage() {
               <RefreshCcw size={16} className={loadingList ? "animate-spin" : ""} />
               Tải lại
             </button>
-            <button
-              type="button"
-              onClick={handleDownloadImportTemplate}
-              className="inline-flex items-center justify-center gap-2 rounded-xl border border-cyan-100 bg-white/90 px-4 py-2 text-sm font-semibold text-cyan-800 shadow-sm transition hover:bg-cyan-50"
-            >
-              <FileSpreadsheet size={16} />
-              Mẫu import
-            </button>
-            <button
+            {/* <button
               type="button"
               onClick={handleExportQrBulk}
               disabled={bulkQrLoading || !filteredUsers.length}
@@ -753,7 +764,7 @@ export default function UsersPage() {
             >
               <QrCode size={16} />
               {bulkQrLoading ? "Đang xuất QR..." : "Xuất QR hàng loạt"}
-            </button>
+            </button> */}
             <button
               type="button"
               onClick={handleExportFilteredUsers}
@@ -762,17 +773,14 @@ export default function UsersPage() {
               <Download size={16} />
               Xuất Excel
             </button>
-            <label className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-cyan-100 bg-white/90 px-4 py-2 text-sm font-semibold text-cyan-800 shadow-sm transition hover:bg-cyan-50">
+            <button
+              type="button"
+              onClick={() => setShowImportModal(true)}
+              className="inline-flex items-center justify-center gap-2 rounded-xl border border-cyan-100 bg-white/90 px-4 py-2 text-sm font-semibold text-cyan-800 shadow-sm transition hover:bg-cyan-50"
+            >
               <Upload size={16} />
-              {importingCodes ? "Đang import..." : "Import user"}
-              <input
-                type="file"
-                accept=".xlsx,.xls,.csv"
-                className="hidden"
-                disabled={importingCodes}
-                onChange={handleImportEmployeeCodes}
-              />
-            </label>
+              Import user
+            </button>
             <button
               onClick={handleAdd}
               className="px-4 py-2 text-sm rounded-xl font-semibold text-white border transition shadow-[0_12px_30px_rgba(6,182,212,0.28)] bg-gradient-to-r from-cyan-500 via-sky-400 to-teal-300 border-cyan-200 hover:from-cyan-400 hover:via-sky-300 hover:to-teal-200"
@@ -1122,6 +1130,94 @@ export default function UsersPage() {
           />
         )}
       </div>
+
+      {/* Modal import user */}
+      {showImportModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4 backdrop-blur-sm"
+          onClick={(event) => {
+            if (event.target === event.currentTarget && !importingCodes) setShowImportModal(false);
+          }}
+        >
+          <div className="w-full max-w-lg rounded-3xl border border-cyan-100 bg-white p-6 shadow-[0_24px_70px_rgba(8,145,178,0.22)]">
+            <div className="mb-5 flex items-start justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-cyan-500 to-sky-400 text-white shadow-sm">
+                  <Upload size={20} />
+                </span>
+                <div>
+                  <h2 className="font-bold text-slate-900">Import user</h2>
+                  <p className="mt-0.5 text-xs text-slate-500">Nhập danh sách user từ file Excel hoặc CSV</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowImportModal(false)}
+                disabled={importingCodes}
+                className="rounded-xl p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 disabled:cursor-not-allowed disabled:opacity-40"
+                aria-label="Đóng modal import user"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div
+              onDragEnter={(event) => {
+                event.preventDefault();
+                if (!importingCodes) setImportDragActive(true);
+              }}
+              onDragOver={(event) => event.preventDefault()}
+              onDragLeave={(event) => {
+                event.preventDefault();
+                if (!event.currentTarget.contains(event.relatedTarget)) setImportDragActive(false);
+              }}
+              onDrop={handleImportDrop}
+              className={`rounded-2xl border-2 border-dashed px-6 py-10 text-center transition ${importDragActive
+                ? "border-cyan-400 bg-cyan-50"
+                : "border-cyan-200 bg-gradient-to-b from-cyan-50/70 to-white"
+                } ${importingCodes ? "cursor-wait opacity-70" : ""}`}
+            >
+              <FileSpreadsheet size={38} className="mx-auto mb-3 text-cyan-500" />
+              <p className="text-sm font-bold text-slate-700">
+                {importingCodes ? "Đang xử lý file..." : "Kéo và thả file vào đây"}
+              </p>
+              <p className="my-3 text-xs text-slate-400">hoặc</p>
+              <label className={`inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-cyan-500 to-sky-500 px-4 py-2.5 text-sm font-bold text-white shadow-sm transition hover:from-cyan-400 hover:to-sky-400 ${importingCodes ? "cursor-not-allowed opacity-60" : "cursor-pointer"}`}>
+                <Upload size={16} />
+                Chọn file
+                <input
+                  type="file"
+                  accept=".xlsx,.xls,.csv"
+                  className="hidden"
+                  disabled={importingCodes}
+                  onChange={handleImportEmployeeCodes}
+                />
+              </label>
+              <p className="mt-3 text-[11px] text-slate-400">Hỗ trợ .xlsx, .xls và .csv</p>
+            </div>
+
+            <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <button
+                type="button"
+                onClick={handleDownloadImportTemplate}
+                disabled={importingCodes}
+                className="inline-flex items-center justify-center gap-2 rounded-xl border border-cyan-200 bg-cyan-50 px-4 py-2.5 text-sm font-semibold text-cyan-700 transition hover:bg-cyan-100 disabled:opacity-50"
+              >
+                <Download size={16} />
+                Tải mẫu import
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowImportModal(false)}
+                disabled={importingCodes}
+                className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 disabled:opacity-50"
+              >
+                Đóng
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal tạo link chấm công QR */}
       {ccLinkModal && (

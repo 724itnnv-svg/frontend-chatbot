@@ -68,9 +68,19 @@ const FILE_DEFS_ABC = [
   {
     key: "adcost",
     label: "File chi phí quảng cáo",
-    headers: [...AD_COST_HEADERS, "Sản phẩm chạy quảng cáo", "Ghi chú"],
+    headers: [...AD_COST_HEADERS, "Sản phẩm chạy quảng cáo", "Nhân viên"],
   },
 ];
+
+const AD_COST_NON_BLOCKING_HEADERS = new Set([
+  "CP CHƯA TĂNG",
+  "CP TĂNG TN",
+  "ROAS THỰC TẾ",
+  "ROAS ĐÁNH GIÁ",
+  "MỨC HƯỞNG DT",
+  "CPQC TÍNH HH",
+  "TEAM",
+]);
 
 const CG_SKUS = new Set([
   "NNVCB1",
@@ -595,6 +605,7 @@ const classifyAdCostTypeFromNote = (note) => {
 
 const classifyAdCostTypeFromCampaign = (campaignName) => {
   const text = normalizeNotePlain(campaignName);
+  if (text.startsWith("DSCP")) return "CG";
   if (text.includes("CÂY GIỐNG") || text.includes("CAY GIONG")) return "CG";
   return "";
 };
@@ -868,6 +879,9 @@ export default function CommissionABCCalculator() {
   const [adCostModalOpen, setAdCostModalOpen] = useState(false);
   const [pendingAdCosts, setPendingAdCosts] = useState([]);
   const [adCostOverrides, setAdCostOverrides] = useState({});
+  const [giftDeductionModalOpen, setGiftDeductionModalOpen] = useState(false);
+  const [pendingGiftDeductions, setPendingGiftDeductions] = useState([]);
+  const [giftDeductionOverrides, setGiftDeductionOverrides] = useState(null);
   const [cgShipFeeModalOpen, setCgShipFeeModalOpen] = useState(false);
   const [pendingCgShipFees, setPendingCgShipFees] = useState([]);
   const [cgShipFeeOverrides, setCgShipFeeOverrides] = useState(null);
@@ -1509,6 +1523,9 @@ export default function CommissionABCCalculator() {
     setAdCostModalOpen(false);
     setPendingAdCosts([]);
     setAdCostOverrides(readStoredObject(AD_COST_OVERRIDES_STORAGE_KEY));
+    setGiftDeductionModalOpen(false);
+    setPendingGiftDeductions([]);
+    setGiftDeductionOverrides(null);
     setCashflowEmployees([]);
     setSelectedEmployees([]);
     setEmployeeTypes({});
@@ -1537,6 +1554,8 @@ export default function CommissionABCCalculator() {
     setCashflowNoteModalOpen(false);
     setPendingAdCosts([]);
     setAdCostModalOpen(false);
+    setPendingGiftDeductions([]);
+    setGiftDeductionModalOpen(false);
     setPendingCgShipFees([]);
     setCgShipFeeModalOpen(false);
 
@@ -1545,6 +1564,7 @@ export default function CommissionABCCalculator() {
       overrideGiftPrices = {},
       overrideCashflowNotes = cashflowNoteOverrides,
       overrideAdCosts = adCostOverrides,
+      overrideGiftDeductions = giftDeductionOverrides,
       overrideCgShipFees = null,
       manualCgShipFees = null,
       reviewCgShipFees = false,
@@ -1557,6 +1577,7 @@ export default function CommissionABCCalculator() {
     const storedPrices = await getStoredManualPrices("abc");
 
     const newErrors = [];
+    const nonBlockingErrors = [];
     const newWarnings = [];
     const missingReturnsLocal = [];
     const missingGiftsLocal = [];
@@ -1564,6 +1585,7 @@ export default function CommissionABCCalculator() {
     const pendingCashflowNoteMap = new Map();
     const pendingReturnPriceMap = new Map();
     const pendingAdCostMap = new Map();
+    const pendingGiftDeductionRows = [];
     const pendingCgShipFeeMap = new Map();
     const cgShipFeeKeyCounter = new Map();
 
@@ -1829,7 +1851,7 @@ export default function CommissionABCCalculator() {
           continue;
         }
 
-        rows.forEach((row) => {
+        rows.forEach((row, rowIndex) => {
           const employee = normalizeText(getCell(row, headerMap, "Người bán"));
           if (!employee) return;
           if (!shouldProcess(employee)) return;
@@ -1871,6 +1893,20 @@ export default function CommissionABCCalculator() {
           const salePrice = parseNumber(getCell(row, headerMap, "Giá bán"));
           const qty = parseNumber(getCell(row, headerMap, "Số lượng"));
           const unit = normalizeUnit(getCell(row, headerMap, "ĐVT"));
+          const giftDeductionKey = [
+            def.key,
+            rowIndex,
+            employee,
+            invoiceId,
+            itemCode,
+            note,
+          ].join("||");
+          const hasGiftDeductionOverride =
+            overrideGiftDeductions != null &&
+            Object.prototype.hasOwnProperty.call(
+              overrideGiftDeductions,
+              giftDeductionKey,
+            );
 
           if (salePrice === 0 && SPECIAL_GIFT_RULES.has(itemCode)) {
             const baseRule = SPECIAL_GIFT_RULES.get(itemCode);
@@ -1914,6 +1950,25 @@ export default function CommissionABCCalculator() {
             }
             const giftValue = overridePrice * qty;
             if (giftValue > 0) {
+              if (note && !hasGiftDeductionOverride) {
+                pendingGiftDeductionRows.push({
+                  key: giftDeductionKey,
+                  employee,
+                  invoiceId,
+                  itemCode,
+                  itemName,
+                  unit,
+                  qty,
+                  unitPrice: overridePrice,
+                  giftValue,
+                  note,
+                  selected: true,
+                });
+                return;
+              }
+              if (note && overrideGiftDeductions[giftDeductionKey] === false) {
+                return;
+              }
               applyDelta(stats, rule, -giftValue);
               const log = getGiftLog(employee);
               if (rule.group === "DSCP1") log.dscp1_1200000 += giftValue;
@@ -1978,6 +2033,25 @@ export default function CommissionABCCalculator() {
                 ? parseBaoValue(itemName) * (qty || 1)
                 : effectiveUnitPrice * qty;
             if (giftValue) {
+              if (note && !hasGiftDeductionOverride) {
+                pendingGiftDeductionRows.push({
+                  key: giftDeductionKey,
+                  employee,
+                  invoiceId,
+                  itemCode,
+                  itemName,
+                  unit,
+                  qty,
+                  unitPrice: effectiveUnitPrice,
+                  giftValue,
+                  note,
+                  selected: true,
+                });
+                return;
+              }
+              if (note && overrideGiftDeductions[giftDeductionKey] === false) {
+                return;
+              }
               if (isCG) {
                 if (isCTDB) stats.CG.CTDB -= giftValue;
                 else stats.CG.normal -= giftValue;
@@ -2121,6 +2195,14 @@ export default function CommissionABCCalculator() {
             }
           }
         });
+      }
+
+      if (pendingGiftDeductionRows.length > 0) {
+        setPendingGiftDeductions(pendingGiftDeductionRows);
+        setGiftDeductionModalOpen(true);
+        setWarnings(newWarnings);
+        setProcessing(false);
+        return;
       }
 
       if (reviewCgShipFees && (pendingCgShipFeeMap.size > 0 || (manualCgShipFees && manualCgShipFees.length > 0) || cgShipFeeOverrides !== null)) {
@@ -2435,8 +2517,21 @@ export default function CommissionABCCalculator() {
             );
           } else {
             const { headerMap, missing } = ensureHeaders(headers, def.headers);
-            if (missing.length) {
-              newErrors.push(`${def.label}: Thiếu cột ${missing.join(", ")}.`);
+            const blockingMissing = missing.filter(
+              (header) => !AD_COST_NON_BLOCKING_HEADERS.has(header),
+            );
+            const nonBlockingMissing = missing.filter((header) =>
+              AD_COST_NON_BLOCKING_HEADERS.has(header),
+            );
+            if (nonBlockingMissing.length) {
+              nonBlockingErrors.push(
+                `${def.label}: Thiếu cột ${nonBlockingMissing.join(", ")}.`,
+              );
+            }
+            if (blockingMissing.length) {
+              newErrors.push(
+                `${def.label}: Thiếu cột ${blockingMissing.join(", ")}.`,
+              );
             } else {
               rows.forEach((row) => {
                 const employee = normalizeText(
@@ -2528,12 +2623,13 @@ export default function CommissionABCCalculator() {
           ),
         );
         setAdCostModalOpen(true);
+        setErrors(nonBlockingErrors);
         setWarnings(newWarnings);
         return;
       }
 
       if (newErrors.length) {
-        setErrors(newErrors);
+        setErrors([...newErrors, ...nonBlockingErrors]);
         setWarnings(newWarnings);
         return;
       }
@@ -2593,6 +2689,7 @@ export default function CommissionABCCalculator() {
         }
         setMissingPriceModalOpen(true);
         setMissingPriceModalMode("calculation");
+        setErrors(nonBlockingErrors);
         setWarnings(newWarnings);
         return;
       }
@@ -2602,6 +2699,7 @@ export default function CommissionABCCalculator() {
         setMissingGifts([]);
         setMissingPriceModalMode("calculation");
         setMissingPriceModalOpen(true);
+        setErrors(nonBlockingErrors);
         setWarnings(newWarnings);
         return;
       }
@@ -2753,6 +2851,7 @@ export default function CommissionABCCalculator() {
         })
         .sort((a, b) => a["Nhân viên"].localeCompare(b["Nhân viên"]));
       setLogRows(logRowsLocal);
+      setErrors(nonBlockingErrors);
       setWarnings(newWarnings);
     } catch (err) {
       console.error(err);
@@ -2769,6 +2868,7 @@ export default function CommissionABCCalculator() {
     const storedAdCostOverrides = readStoredObject(AD_COST_OVERRIDES_STORAGE_KEY);
     setCashflowNoteOverrides(storedCashflowNoteOverrides);
     setAdCostOverrides(storedAdCostOverrides);
+    setGiftDeductionOverrides(null);
     if (invoiceGiftRows.length > 0) {
       setMissingReturns([]);
       setMissingGifts(invoiceGiftRows.map((item) => ({ ...item })));
@@ -2781,6 +2881,7 @@ export default function CommissionABCCalculator() {
       overrideGiftPrices: buildOverrideGiftPriceMap(),
       overrideCashflowNotes: storedCashflowNoteOverrides,
       overrideAdCosts: storedAdCostOverrides,
+      overrideGiftDeductions: null,
       reviewCgShipFees: true,
       reviewCashflowNotes: true,
       reviewReturnPrices: true,
@@ -2815,6 +2916,7 @@ export default function CommissionABCCalculator() {
       overrideGiftPrices: buildOverrideGiftPriceMap(),
       overrideCashflowNotes: nextOverrides,
       overrideAdCosts: adCostOverrides,
+      overrideGiftDeductions: giftDeductionOverrides,
       overrideCgShipFees: cgShipFeeOverrides,
       manualCgShipFees: cgShipFeeManuals,
       reviewCgShipFees: true,
@@ -2849,6 +2951,7 @@ export default function CommissionABCCalculator() {
       overrideGiftPrices: buildOverrideGiftPriceMap(),
       overrideCashflowNotes: cashflowNoteOverrides,
       overrideAdCosts: adCostOverrides,
+      overrideGiftDeductions: giftDeductionOverrides,
       overrideCgShipFees: cgShipFeeOverrides,
       manualCgShipFees: cgShipFeeManuals,
       reviewAdCosts: true,
@@ -2867,8 +2970,29 @@ export default function CommissionABCCalculator() {
       overrideGiftPrices: buildOverrideGiftPriceMap(),
       overrideCashflowNotes: cashflowNoteOverrides,
       overrideAdCosts: nextOverrides,
+      overrideGiftDeductions: giftDeductionOverrides,
       overrideCgShipFees: cgShipFeeOverrides,
       manualCgShipFees: cgShipFeeManuals,
+    });
+  };
+
+  const handleConfirmGiftDeductions = () => {
+    const overrides = {};
+    pendingGiftDeductions.forEach((item) => {
+      overrides[item.key] = item.selected !== false;
+    });
+    setGiftDeductionOverrides(overrides);
+    setGiftDeductionModalOpen(false);
+    runClassification({
+      overrideGiftPrices: buildOverrideGiftPriceMap(),
+      overrideCashflowNotes: cashflowNoteOverrides,
+      overrideAdCosts: adCostOverrides,
+      overrideGiftDeductions: overrides,
+      overrideCgShipFees: cgShipFeeOverrides,
+      manualCgShipFees: cgShipFeeManuals,
+      reviewCgShipFees: true,
+      reviewReturnPrices: true,
+      reviewAdCosts: true,
     });
   };
 
@@ -2892,6 +3016,7 @@ export default function CommissionABCCalculator() {
       overrideGiftPrices: buildOverrideGiftPriceMap(),
       overrideCashflowNotes: cashflowNoteOverrides,
       overrideAdCosts: adCostOverrides,
+      overrideGiftDeductions: giftDeductionOverrides,
       overrideCgShipFees: overrides,
       manualCgShipFees: manuals,
       reviewReturnPrices: true,
@@ -2984,6 +3109,7 @@ export default function CommissionABCCalculator() {
         overrideGiftPrices: giftPriceMap,
         overrideCashflowNotes: cashflowNoteOverrides,
         overrideAdCosts: adCostOverrides,
+        overrideGiftDeductions: giftDeductionOverrides,
         overrideCgShipFees: cgShipFeeOverrides,
         manualCgShipFees: cgShipFeeManuals,
         reviewCgShipFees: true,
@@ -2999,6 +3125,7 @@ export default function CommissionABCCalculator() {
       overrideGiftPrices: giftPriceMap,
       overrideCashflowNotes: cashflowNoteOverrides,
       overrideAdCosts: adCostOverrides,
+      overrideGiftDeductions: giftDeductionOverrides,
       overrideCgShipFees: cgShipFeeOverrides,
       manualCgShipFees: cgShipFeeManuals,
       reviewCgShipFees: true,
@@ -3500,6 +3627,91 @@ export default function CommissionABCCalculator() {
           </div>
         )}
       </div>
+
+      <Modal
+        accentClass="to-amber-50/70"
+        open={giftDeductionModalOpen}
+        onClose={() => setGiftDeductionModalOpen(false)}
+        title="Xác nhận trừ hàng tặng"
+        subtitle="Các dòng hàng tặng có ghi chú cần được kiểm tra trước khi tính."
+        showClose={false}
+      >
+        <div className="space-y-4">
+          <div className="overflow-auto rounded-2xl border bg-white/80">
+            <table className="w-full min-w-[920px] text-xs">
+              <thead className="bg-slate-50 text-slate-600">
+                <tr>
+                  <th className="px-3 py-2 text-left">Nhân viên</th>
+                  <th className="px-3 py-2 text-left">Mã HĐ</th>
+                  <th className="px-3 py-2 text-left">Mã hàng</th>
+                  <th className="px-3 py-2 text-left">Tên hàng</th>
+                  <th className="px-3 py-2 text-left">Ghi chú</th>
+                  <th className="px-3 py-2 text-right">SL</th>
+                  <th className="px-3 py-2 text-right">Giá dùng</th>
+                  <th className="px-3 py-2 text-right">Số tiền trừ</th>
+                  <th className="px-3 py-2 text-left">Xử lý</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pendingGiftDeductions.map((item, idx) => (
+                  <tr key={item.key} className="border-t">
+                    <td className="px-3 py-2">{item.employee}</td>
+                    <td className="px-3 py-2">{item.invoiceId || "—"}</td>
+                    <td className="px-3 py-2 font-medium text-slate-800">
+                      {item.itemCode}
+                    </td>
+                    <td className="px-3 py-2">{item.itemName || "—"}</td>
+                    <td className="px-3 py-2">{item.note || "—"}</td>
+                    <td className="px-3 py-2 text-right">
+                      {formatMoney(item.qty)}
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      {formatMoney(item.unitPrice)}
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      {formatMoney(item.giftValue)}
+                    </td>
+                    <td className="px-3 py-2">
+                      <select
+                        className="w-full rounded border bg-white px-2 py-1 text-sm"
+                        value={item.selected === false ? "skip" : "deduct"}
+                        onChange={(e) => {
+                          const selected = e.target.value === "deduct";
+                          setPendingGiftDeductions((prev) => {
+                            const next = [...prev];
+                            next[idx] = { ...next[idx], selected };
+                            return next;
+                          });
+                        }}
+                      >
+                        <option value="deduct">Trừ</option>
+                        <option value="skip">Không trừ</option>
+                      </select>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">
+            <button
+              type="button"
+              onClick={() => setGiftDeductionModalOpen(false)}
+              className="inline-flex items-center justify-center rounded-2xl border bg-white/70 px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-white active:scale-[0.98]"
+            >
+              Hủy
+            </button>
+            <button
+              type="button"
+              onClick={handleConfirmGiftDeductions}
+              className="inline-flex items-center justify-center gap-2 rounded-2xl bg-amber-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-amber-700 active:scale-[0.98]"
+            >
+              Tiếp tục tính
+            </button>
+          </div>
+        </div>
+      </Modal>
 
       <Modal
         accentClass="to-amber-50/70"

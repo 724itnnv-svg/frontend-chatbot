@@ -32,6 +32,8 @@ const DonHang = lazy(() => import("./components/DonHang"));
 const DonHangWeb = lazy(() => import("./components/DonHangWeb"));
 const BusinessStats = lazy(() => import("./components/BusinessStats"));
 const UsersPage = lazy(() => import("./components/UserManager"));
+const EmployeeProfileManager = lazy(() => import("./components/EmployeeProfileManager"));
+const EmployeeAssetManager = lazy(() => import("./components/EmployeeAssetManager"));
 const RolePage = lazy(() => import("./components/role/RoleList"));
 const UserProfile = lazy(() => import("./components/UserProfile"));
 const CommissionOnlineCalculator = lazy(() => import("./components/calculators/CommissionOnlineCalculator"));
@@ -112,6 +114,8 @@ const ADMIN_ROUTE_BY_SCREEN = {
   donhang: "/admin/orders",
   donhangWeb: "/admin/orders-web",
   business_stats: "/admin/business-stats",
+  employee_profiles: "/admin/employee-profiles",
+  employee_assets: "/admin/employee-assets",
   users: "/admin/users",
   roles: "/admin/roles",
   profile: "/admin/profile",
@@ -158,6 +162,8 @@ const adminRoutes = [
   { path: "orders", screenId: "donhang", element: <DonHang /> },
   { path: "orders-web", screenId: "donhangWeb", element: <DonHangWeb /> },
   { path: "business-stats", screenId: "business_stats", element: <BusinessStats /> },
+  { path: "employee-profiles", screenId: "employee_profiles", element: <EmployeeProfileManager standalone /> },
+  { path: "employee-assets", screenId: "employee_assets", element: <EmployeeAssetManager standalone /> },
   { path: "users", screenId: "users", element: <UsersPage /> },
   { path: "roles", screenId: "roles", element: <RolePage /> },
   { path: "profile", screenId: "profile", element: <UserProfile /> },
