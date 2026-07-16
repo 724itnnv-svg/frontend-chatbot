@@ -1,21 +1,28 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import JSZip from "jszip";
 import { saveAs } from "file-saver";
 import {
   AlertTriangle,
+  BarChart3,
   Calendar,
   CircleDollarSign,
   Clock,
   Download,
+  FileDown,
   FileArchive,
   FileJson,
   FileText,
   MapPin,
+  Maximize2,
   MessageSquare,
+  Moon,
   Phone,
+  PieChart,
   RefreshCw,
   Search,
+  SlidersHorizontal,
   ShoppingCart,
+  Sun,
   TrendingUp,
   X,
 } from "lucide-react";
@@ -89,6 +96,45 @@ function formatDateTime(value) {
   return date.toLocaleString("vi-VN");
 }
 
+function formatDateDisplay(value) {
+  if (!value) return "";
+  const raw = String(value).trim();
+  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (match) return `${match[3]}-${match[2]}-${match[1]}`;
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) return raw;
+  return `${String(date.getDate()).padStart(2, "0")}-${String(date.getMonth() + 1).padStart(2, "0")}-${date.getFullYear()}`;
+}
+
+function formatStatsDateLabel(label) {
+  return String(label || "").replace(
+    /(\d{4}-\d{2}-\d{2})/g,
+    (value) => formatDateDisplay(value),
+  );
+}
+
+function maskPhoneNumber(value) {
+  const raw = String(value || "");
+  const digits = raw.replace(/\D/g, "");
+  if (digits.length < 8) return raw || "N/A";
+  return `${digits.slice(0, 4)}****${digits.slice(-3)}`;
+}
+
+function maskPhonesInText(value) {
+  return String(value || "").replace(
+    /(?<!\d)(0\d[\d\s.\-]{7,13}\d)(?!\d)/g,
+    (match) => maskPhoneNumber(match),
+  );
+}
+
+function isDraftOrder(order) {
+  return Number(order?.total || 0) <= 0;
+}
+
+function getOrderAddress(order) {
+  return order?.address || order?.shippingAddress || order?.customerAddress || "N/A";
+}
+
 const COMPANY_FILTERS = [
   { id: "all", label: "Tất cả công ty" },
   { id: "NNV", label: "NNV" },
@@ -99,6 +145,902 @@ const COMPANY_FILTERS = [
 
 function normalizeTeamId(value) {
   return String(value || "").trim().toUpperCase();
+}
+
+function normalizeProvinceName(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d")
+    .replace(/Đ/g, "D")
+    .toLowerCase()
+    .replace(/^(tinh|tp|thanh pho)\s+/, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+const VIETNAM_PROVINCE_COORDS = {
+  "ha giang": [105.0, 22.75],
+  "cao bang": [106.26, 22.67],
+  "lao cai": [103.97, 22.48],
+  "lai chau": [103.45, 22.39],
+  "dien bien": [103.02, 21.38],
+  "son la": [103.91, 21.33],
+  "yen bai": [104.87, 21.7],
+  "tuyen quang": [105.22, 21.82],
+  "bac kan": [105.83, 22.15],
+  "lang son": [106.76, 21.85],
+  "thai nguyen": [105.84, 21.59],
+  "phu tho": [105.22, 21.32],
+  "vinh phuc": [105.6, 21.31],
+  "bac giang": [106.2, 21.28],
+  "bac ninh": [106.08, 21.19],
+  "ha noi": [105.85, 21.03],
+  "hai duong": [106.33, 20.94],
+  "hai phong": [106.68, 20.86],
+  "hung yen": [106.06, 20.65],
+  "hoa binh": [105.34, 20.82],
+  "ha nam": [105.92, 20.54],
+  "thai binh": [106.34, 20.45],
+  "nam dinh": [106.17, 20.43],
+  "ninh binh": [105.98, 20.25],
+  "thanh hoa": [105.78, 19.8],
+  "nghe an": [104.92, 19.23],
+  "ha tinh": [105.9, 18.35],
+  "quang binh": [106.62, 17.48],
+  "quang tri": [107.18, 16.75],
+  "hue": [107.59, 16.46],
+  "thua thien hue": [107.59, 16.46],
+  "da nang": [108.22, 16.07],
+  "quang nam": [108.02, 15.57],
+  "quang ngai": [108.8, 15.12],
+  "binh dinh": [109.22, 13.77],
+  "phu yen": [109.3, 13.09],
+  "khanh hoa": [109.2, 12.25],
+  "ninh thuan": [108.99, 11.75],
+  "binh thuan": [108.1, 10.93],
+  "kon tum": [107.99, 14.35],
+  "gia lai": [108.0, 13.98],
+  "dak lak": [108.04, 12.67],
+  "dak nong": [107.69, 12.26],
+  "lam dong": [108.44, 11.94],
+  "binh phuoc": [106.89, 11.75],
+  "tay ninh": [106.11, 11.31],
+  "binh duong": [106.65, 11.16],
+  "dong nai": [107.19, 10.95],
+  "ba ria vung tau": [107.24, 10.54],
+  "ho chi minh": [106.7, 10.78],
+  "tp ho chi minh": [106.7, 10.78],
+  "long an": [106.17, 10.7],
+  "tien giang": [106.35, 10.36],
+  "ben tre": [106.37, 10.24],
+  "tra vinh": [106.34, 9.95],
+  "vinh long": [105.97, 10.25],
+  "dong thap": [105.63, 10.49],
+  "an giang": [105.12, 10.52],
+  "kien giang": [105.08, 10.0],
+  "can tho": [105.78, 10.05],
+  "hau giang": [105.64, 9.78],
+  "soc trang": [105.97, 9.6],
+  "bac lieu": [105.72, 9.29],
+  "ca mau": [105.15, 9.18],
+};
+
+function getProvinceLngLat(name, index = 0, total = 1) {
+  const direct = VIETNAM_PROVINCE_COORDS[normalizeProvinceName(name)];
+  if (direct) return direct;
+  const t = total <= 1 ? 0.5 : index / Math.max(1, total - 1);
+  return [105.6 + Math.sin(t * Math.PI * 4) * 1.3, 22.4 - t * 13.2];
+}
+
+function getDemandColor(quantity, maxQuantity) {
+  const ratio = maxQuantity > 0 ? quantity / maxQuantity : 0;
+  if (ratio >= 0.8) return "#dc2626";
+  if (ratio >= 0.55) return "#f97316";
+  if (ratio >= 0.35) return "#facc15";
+  if (ratio >= 0.18) return "#38bdf8";
+  return "#2563eb";
+}
+
+function normalizeDemandProduct(item = {}) {
+  const productName = String(
+    item.productName ||
+    item.name ||
+    item.product_name ||
+    item.PRODUCT_NAME ||
+    item.sku ||
+    item.SKU ||
+    "",
+  ).trim();
+  const sku = String(item.sku || item.SKU || item.productCode || item.PRODUCT_CODE || "").trim();
+  const quantity = Number(item.quantity ?? item.qty ?? item.totalQuantity ?? item.count ?? 0) || 0;
+
+  if (!productName && !sku && quantity <= 0) return null;
+
+  return {
+    ...item,
+    productName: productName || sku || "Không tên",
+    sku,
+    quantity,
+  };
+}
+
+function getDemandProductList(value) {
+  const list =
+    Array.isArray(value?.products) ? value.products :
+      Array.isArray(value?.items) ? value.items :
+        Array.isArray(value?.productStats) ? value.productStats :
+          Array.isArray(value?.soldProducts) ? value.soldProducts :
+            [];
+
+  return list
+    .map(normalizeDemandProduct)
+    .filter((item) => item && item.quantity > 0)
+    .sort((a, b) => b.quantity - a.quantity || a.productName.localeCompare(b.productName, "vi"));
+}
+
+function buildDemandProvinces(productProvinceStats = {}) {
+  const rawProvinces = Array.isArray(productProvinceStats.provinces)
+    ? productProvinceStats.provinces
+    : [];
+  const rawCells = Array.isArray(productProvinceStats.cells)
+    ? productProvinceStats.cells
+    : [];
+  const cellsByProvince = new Map();
+
+  rawCells.forEach((cell) => {
+    const provinceKey = normalizeProvinceName(cell?.province || cell?.provinceName || cell?.tinh || "");
+    const product = normalizeDemandProduct(cell);
+    if (!provinceKey || !product || product.quantity <= 0) return;
+
+    const current = cellsByProvince.get(provinceKey) || [];
+    current.push(product);
+    cellsByProvince.set(provinceKey, current);
+  });
+
+  const provinces = rawProvinces.map((province) => {
+    const provinceKey = normalizeProvinceName(province?.province || province?.provinceName || province?.tinh || "");
+    const existingProducts = getDemandProductList(province);
+    const fallbackProducts = (cellsByProvince.get(provinceKey) || [])
+      .sort((a, b) => b.quantity - a.quantity || a.productName.localeCompare(b.productName, "vi"));
+
+    return {
+      ...province,
+      products: existingProducts.length ? existingProducts : fallbackProducts,
+    };
+  });
+
+  if (provinces.length > 0) return provinces;
+
+  return Array.from(cellsByProvince.entries())
+    .map(([provinceKey, products]) => ({
+      province: products[0]?.province || provinceKey,
+      quantity: products.reduce((sum, product) => sum + (Number(product.quantity) || 0), 0),
+      products,
+    }))
+    .sort((a, b) => b.quantity - a.quantity || a.province.localeCompare(b.province, "vi"));
+}
+
+const NEW_PROVINCE_BY_OLD_PROVINCE = {
+  "ha giang": "Tuyên Quang",
+  "tuyen quang": "Tuyên Quang",
+  "lao cai": "Lào Cai",
+  "yen bai": "Lào Cai",
+  "thai nguyen": "Thái Nguyên",
+  "bac kan": "Thái Nguyên",
+  "phu tho": "Phú Thọ",
+  "vinh phuc": "Phú Thọ",
+  "hoa binh": "Phú Thọ",
+  "bac ninh": "Bắc Ninh",
+  "bac giang": "Bắc Ninh",
+  "hung yen": "Hưng Yên",
+  "thai binh": "Hưng Yên",
+  "hai phong": "Hải Phòng",
+  "hai duong": "Hải Phòng",
+  "ninh binh": "Ninh Bình",
+  "nam dinh": "Ninh Bình",
+  "ha nam": "Ninh Bình",
+  "thua thien hue": "Huế",
+  "hue": "Huế",
+  "quang tri": "Quảng Trị",
+  "quang binh": "Quảng Trị",
+  "da nang": "Đà Nẵng",
+  "quang nam": "Đà Nẵng",
+  "quang ngai": "Quảng Ngãi",
+  "kon tum": "Quảng Ngãi",
+  "gia lai": "Gia Lai",
+  "binh dinh": "Gia Lai",
+  "khanh hoa": "Khánh Hòa",
+  "ninh thuan": "Khánh Hòa",
+  "lam dong": "Lâm Đồng",
+  "binh thuan": "Lâm Đồng",
+  "dak nong": "Lâm Đồng",
+  "dak lak": "Đắk Lắk",
+  "dac lac": "Đắk Lắk",
+  "phu yen": "Đắk Lắk",
+  "ho chi minh": "TP. Hồ Chí Minh",
+  "tp ho chi minh": "TP. Hồ Chí Minh",
+  "binh duong": "TP. Hồ Chí Minh",
+  "ba ria vung tau": "TP. Hồ Chí Minh",
+  "dong nai": "Đồng Nai",
+  "binh phuoc": "Đồng Nai",
+  "tay ninh": "Tây Ninh",
+  "long an": "Tây Ninh",
+  "can tho": "Cần Thơ",
+  "hau giang": "Cần Thơ",
+  "soc trang": "Cần Thơ",
+  "vinh long": "Vĩnh Long",
+  "ben tre": "Vĩnh Long",
+  "tra vinh": "Vĩnh Long",
+  "dong thap": "Đồng Tháp",
+  "tien giang": "Đồng Tháp",
+  "ca mau": "Cà Mau",
+  "bac lieu": "Cà Mau",
+  "an giang": "An Giang",
+  "kien giang": "An Giang",
+};
+
+function mergeDemandProvincesToNewMap(provinces = []) {
+  const merged = new Map();
+
+  provinces.forEach((province) => {
+    const oldName = province?.province || province?.provinceName || province?.tinh || "Chưa rõ";
+    const newName = NEW_PROVINCE_BY_OLD_PROVINCE[normalizeProvinceName(oldName)] || oldName;
+    const current = merged.get(newName) || {
+      ...province,
+      province: newName,
+      quantity: 0,
+      products: [],
+    };
+    current.quantity += Number(province?.quantity) || 0;
+    current.products.push(...getDemandProductList(province));
+    merged.set(newName, current);
+  });
+
+  return Array.from(merged.values())
+    .map((province) => {
+      const productMap = new Map();
+      province.products.forEach((product) => {
+        const productKey = `${product.sku || ""}::${product.productName || ""}`;
+        const current = productMap.get(productKey) || { ...product, quantity: 0 };
+        current.quantity += Number(product.quantity) || 0;
+        productMap.set(productKey, current);
+      });
+      return {
+        ...province,
+        products: Array.from(productMap.values())
+          .sort((a, b) => b.quantity - a.quantity || a.productName.localeCompare(b.productName, "vi")),
+      };
+    })
+    .sort((a, b) => b.quantity - a.quantity || a.province.localeCompare(b.province, "vi"));
+}
+
+function loadECharts() {
+  if (typeof window === "undefined") return Promise.reject(new Error("Chart only runs in browser"));
+  if (window.echarts) return Promise.resolve(window.echarts);
+  return new Promise((resolve, reject) => {
+    const existing = document.querySelector('script[data-echarts-js="true"]');
+    if (existing) {
+      existing.addEventListener("load", () => resolve(window.echarts), { once: true });
+      existing.addEventListener("error", reject, { once: true });
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = "https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js";
+    script.async = true;
+    script.dataset.echartsJs = "true";
+    script.onload = () => resolve(window.echarts);
+    script.onerror = () => reject(new Error("Không tải được thư viện ECharts"));
+    document.head.appendChild(script);
+  });
+}
+
+function loadVietnamGeoJson() {
+  const geoJsonUrl = import.meta.env.VITE_VIETNAM_GEOJSON_URL
+    || "https://code.highcharts.com/mapdata/countries/vn/vn-all.geo.json";
+  return fetch(geoJsonUrl).then((response) => {
+    if (!response.ok) throw new Error("Không tải được GeoJSON Việt Nam");
+    return response.json();
+  });
+}
+
+const PROVINCE_NAME_ALIASES = {
+  "ba ria vung tau": ["ba ria vung tau", "ba ria-vung tau"],
+  "can tho": ["can tho"],
+  "da nang": ["da nang"],
+  "dak lak": ["dak lak", "dac lac"],
+  "dak nong": ["dak nong", "dac nong"],
+  "ho chi minh": ["ho chi minh", "ho chi minh city", "tp ho chi minh"],
+  "hue": ["hue", "thua thien hue"],
+  "ha noi": ["ha noi", "hanoi"],
+  "hai phong": ["hai phong", "haiphong"],
+  "quang ninh": ["quang ninh"],
+};
+
+function getNewProvinceNameFromFeature(feature) {
+  const featureName = getFeatureName(feature);
+  return NEW_PROVINCE_BY_OLD_PROVINCE[normalizeProvinceName(featureName)] || featureName;
+}
+
+function toMultiPolygonCoordinates(geometry) {
+  if (!geometry) return [];
+  if (geometry.type === "Polygon") return [geometry.coordinates];
+  if (geometry.type === "MultiPolygon") return geometry.coordinates;
+  return [];
+}
+
+function mergeVietnamGeoJsonToNewProvinces(geoJson) {
+  const groups = new Map();
+
+  (geoJson?.features || []).forEach((feature) => {
+    const provinceName = getNewProvinceNameFromFeature(feature);
+    const provinceKey = normalizeProvinceName(provinceName);
+    if (!provinceKey) return;
+
+    const current = groups.get(provinceKey) || {
+      type: "Feature",
+      properties: { ...(feature.properties || {}), name: provinceName },
+      geometry: { type: "MultiPolygon", coordinates: [] },
+    };
+    current.properties.name = provinceName;
+    current.properties.NAME_1 = provinceName;
+    current.geometry.coordinates.push(...toMultiPolygonCoordinates(feature.geometry));
+    groups.set(provinceKey, current);
+  });
+
+  return {
+    ...geoJson,
+    features: Array.from(groups.values()),
+  };
+}
+
+function getFeatureName(feature) {
+  const properties = feature?.properties || {};
+  return properties.name || properties.NAME_1 || properties.Name || properties.woe_name || properties["hc-a2"] || "";
+}
+
+function collectLngLatPairs(coordinates, pairs = []) {
+  if (!Array.isArray(coordinates)) return pairs;
+  if (
+    coordinates.length >= 2
+    && typeof coordinates[0] === "number"
+    && typeof coordinates[1] === "number"
+  ) {
+    pairs.push([coordinates[0], coordinates[1]]);
+    return pairs;
+  }
+  coordinates.forEach((item) => collectLngLatPairs(item, pairs));
+  return pairs;
+}
+
+function getFeatureCenter(feature) {
+  const pairs = collectLngLatPairs(feature?.geometry?.coordinates);
+  if (!pairs.length) return null;
+
+  let minLng = Infinity;
+  let maxLng = -Infinity;
+  let minLat = Infinity;
+  let maxLat = -Infinity;
+  pairs.forEach(([lng, lat]) => {
+    minLng = Math.min(minLng, lng);
+    maxLng = Math.max(maxLng, lng);
+    minLat = Math.min(minLat, lat);
+    maxLat = Math.max(maxLat, lat);
+  });
+
+  if (![minLng, maxLng, minLat, maxLat].every(Number.isFinite)) return null;
+  return [(minLng + maxLng) / 2, (minLat + maxLat) / 2];
+}
+
+function findDemandForFeature(feature, demandMap) {
+  const featureName = normalizeProvinceName(getFeatureName(feature));
+  if (demandMap.has(featureName)) return demandMap.get(featureName);
+  const mergedProvinceName = NEW_PROVINCE_BY_OLD_PROVINCE[featureName];
+  if (mergedProvinceName) {
+    const mergedProvinceKey = normalizeProvinceName(mergedProvinceName);
+    if (demandMap.has(mergedProvinceKey)) return demandMap.get(mergedProvinceKey);
+  }
+  for (const [sourceName, aliases] of Object.entries(PROVINCE_NAME_ALIASES)) {
+    if (aliases.includes(featureName) && demandMap.has(sourceName)) return demandMap.get(sourceName);
+    if (demandMap.has(featureName) && aliases.includes(sourceName)) return demandMap.get(featureName);
+  }
+  for (const [key, value] of demandMap.entries()) {
+    if (featureName.includes(key) || key.includes(featureName)) return value;
+  }
+  return null;
+}
+
+function VietnamDemandMap({ provinces = [], formatNumber, onFullScreen, compact = false, provinceMode = "new", isDarkMode = false }) {
+  const containerRef = useRef(null);
+  const chartRef = useRef(null);
+  const [chartError, setChartError] = useState("");
+  const maxQuantity = Math.max(...provinces.map((province) => Number(province.quantity) || 0), 0);
+  const resetChart = () => {
+    chartRef.current?.dispatchAction?.({ type: "restore" });
+  };
+  const saveChartImage = () => {
+    const chart = chartRef.current;
+    if (!chart) return;
+    const imageUrl = chart.getDataURL({ type: "png", pixelRatio: 2, backgroundColor: isDarkMode ? "#0f172a" : "#ffffff" });
+    const link = document.createElement("a");
+    link.href = imageUrl;
+    link.download = "ban-do-nhu-cau-theo-tinh.png";
+    link.click();
+  };
+
+  useEffect(() => {
+    if (!containerRef.current) return undefined;
+    let disposed = false;
+    let resizeHandler = null;
+    let resizeObserver = null;
+
+    Promise.all([loadECharts(), loadVietnamGeoJson()])
+      .then(([echarts, sourceGeoJson]) => {
+        if (disposed || !containerRef.current) return;
+        const geoJson = provinceMode === "new"
+          ? mergeVietnamGeoJsonToNewProvinces(sourceGeoJson)
+          : sourceGeoJson;
+        echarts.registerMap("vietnam-demand", geoJson);
+        const demandMap = new Map(
+          provinces.map((province) => [
+            normalizeProvinceName(province.province),
+            {
+              name: province.province,
+              value: Number(province.quantity) || 0,
+              products: Array.isArray(province.products) ? province.products : [],
+            },
+          ]),
+        );
+        const geoFeatures = geoJson.features || [];
+        const chartData = geoFeatures.map((feature) => {
+          const demand = findDemandForFeature(feature, demandMap);
+          const name = getFeatureName(feature);
+          return {
+            name,
+            value: demand?.value || 0,
+            demandName: demand?.name || name,
+            products: demand?.products || [],
+          };
+        });
+        const focusIndex = chartData.reduce((bestIndex, item, index) => {
+          const currentValue = Number(item.value) || 0;
+          const bestValue = bestIndex >= 0 ? Number(chartData[bestIndex]?.value) || 0 : 0;
+          return currentValue > bestValue ? index : bestIndex;
+        }, -1);
+        const focusData = focusIndex >= 0 ? chartData[focusIndex] : null;
+        const focusFeature = focusIndex >= 0 ? geoFeatures[focusIndex] : null;
+        const focusCenter = Number(focusData?.value || 0) > 0
+          ? (getFeatureCenter(focusFeature) || getProvinceLngLat(focusData?.demandName || focusData?.name))
+          : null;
+        const chart = chartRef.current || echarts.init(containerRef.current, null, { renderer: "canvas" });
+        chartRef.current = chart;
+        const chartBackground = isDarkMode ? "#0f172a" : "#ffffff";
+        const mutedTextColor = isDarkMode ? "#94a3b8" : "#475569";
+        const strongTextColor = isDarkMode ? "#f8fafc" : "#0f172a";
+        const tooltipTextColor = isDarkMode ? "#cbd5e1" : "#334155";
+        const tooltipBorderColor = isDarkMode ? "#334155" : "#e2e8f0";
+        const tooltipAccentColor = isDarkMode ? "#7dd3fc" : "#0369a1";
+        chart.resize({
+          width: containerRef.current.clientWidth,
+          height: containerRef.current.clientHeight,
+        });
+        chart.setOption({
+          backgroundColor: chartBackground,
+          tooltip: {
+            trigger: "item",
+            backgroundColor: isDarkMode ? "rgba(15,23,42,0.96)" : "#ffffff",
+            borderColor: tooltipBorderColor,
+            textStyle: { color: tooltipTextColor },
+            formatter: (params) => {
+              const value = Number(params.value) || 0;
+              const products = Array.isArray(params.data?.products) ? params.data.products : [];
+              const productHtml = products.length
+                ? `<div style="margin-top:8px;border-top:1px solid ${tooltipBorderColor};padding-top:7px">
+                    ${products.slice(0, 6).map((product) => {
+                      const productName = String(product.productName || product.sku || "Không tên");
+                      const quantity = Number(product.quantity) || 0;
+                      return `<div style="display:flex;justify-content:space-between;gap:10px;margin-top:3px;color:${tooltipTextColor};font-size:12px">
+                        <span style="max-width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${productName}</span>
+                        <b style="color:${strongTextColor}">${formatNumber(quantity)}</b>
+                      </div>`;
+                    }).join("")}
+                  </div>`
+                : `<div style="margin-top:8px;color:#94a3b8">Chưa có sản phẩm bán tại tỉnh này</div>`;
+              return `<div style="min-width:220px;font-size:12px;line-height:1.35">
+                <div style="font-weight:800;color:${strongTextColor};margin-bottom:3px;font-size:13px">${params.data?.demandName || params.name}</div>
+                <div style="color:${tooltipAccentColor}">${formatNumber(value)} sản phẩm đã chốt</div>
+                ${productHtml}
+              </div>`;
+            },
+          },
+          visualMap: {
+            min: 0,
+            max: Math.max(maxQuantity, 1),
+            left: 18,
+            bottom: 16,
+            text: ["Cao", "Thấp"],
+            realtime: false,
+            calculable: true,
+            inRange: {
+              color: ["#dbeafe", "#7dd3fc", "#fde047", "#fb923c", "#dc2626"],
+            },
+            textStyle: { color: mutedTextColor, fontWeight: 700 },
+          },
+          toolbox: { show: false },
+          series: [
+            {
+              name: "Nhu cầu",
+              type: "map",
+              map: "vietnam-demand",
+              roam: true,
+              selectedMode: false,
+              data: chartData,
+              nameProperty: "name",
+              center: focusCenter || undefined,
+              zoom: focusCenter ? 3.35 : 1,
+              aspectScale: 1,
+              layoutCenter: focusCenter ? undefined : ["52%", "53%"],
+              layoutSize: focusCenter ? undefined : "86%",
+              scaleLimit: { min: 0.8, max: 8 },
+              itemStyle: {
+                borderColor: isDarkMode ? "#1e293b" : "#ffffff",
+                borderWidth: 1,
+                areaColor: isDarkMode ? "#1e293b" : "#e2e8f0",
+              },
+              emphasis: {
+                label: { show: true, color: strongTextColor, fontWeight: 800 },
+                itemStyle: { areaColor: "#f97316" },
+              },
+              label: {
+                show: true,
+                color: strongTextColor,
+                fontSize: 7,
+                fontWeight: 700,
+                formatter: (params) => {
+                  const value = Number(params.value) || 0;
+                  return value > 0 ? `${params.data?.demandName || params.name}\n${formatNumber(value)}` : "";
+                },
+              },
+            },
+          ],
+        }, true);
+        resizeHandler = () => chart.resize({
+          width: containerRef.current?.clientWidth,
+          height: containerRef.current?.clientHeight,
+        });
+        window.addEventListener("resize", resizeHandler);
+        if (typeof ResizeObserver !== "undefined") {
+          resizeObserver = new ResizeObserver(resizeHandler);
+          resizeObserver.observe(containerRef.current);
+        }
+        setChartError("");
+      })
+      .catch((error) => {
+        if (!disposed) setChartError(error.message || "Không tải được bản đồ ECharts");
+      });
+
+    return () => {
+      disposed = true;
+      if (resizeHandler) window.removeEventListener("resize", resizeHandler);
+      if (resizeObserver) resizeObserver.disconnect();
+    };
+  }, [provinces, maxQuantity, formatNumber, provinceMode, isDarkMode]);
+
+  useEffect(() => () => {
+    if (chartRef.current) {
+      chartRef.current.dispose();
+      chartRef.current = null;
+    }
+  }, []);
+
+  return (
+    <div className="relative overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
+      <div className="absolute right-4 top-4 z-10 flex items-center gap-1.5">
+        {onFullScreen && (
+          <button
+            type="button"
+            onClick={onFullScreen}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white/95 text-slate-600 shadow-sm transition hover:bg-slate-50"
+            aria-label="Mở rộng bản đồ"
+          >
+            <Maximize2 size={15} />
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={resetChart}
+          className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white/95 text-slate-600 shadow-sm transition hover:bg-slate-50"
+          aria-label="Khôi phục bản đồ"
+        >
+          <RefreshCw size={15} />
+        </button>
+        <button
+          type="button"
+          onClick={saveChartImage}
+          className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white/95 text-slate-600 shadow-sm transition hover:bg-slate-50"
+          aria-label="Tải ảnh bản đồ"
+        >
+          <Download size={15} />
+        </button>
+      </div>
+      <div ref={containerRef} className={`${compact ? "h-[480px]" : "h-[78vh]"} w-full min-w-0`} />
+      {chartError && (
+        <div className="absolute inset-0 z-20 flex items-center justify-center bg-white/85 p-6 text-center text-sm font-semibold text-rose-600">
+          {chartError}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ProvinceDemandBarChart({ provinces = [], formatNumber, compact = false, isDarkMode = false }) {
+  const containerRef = useRef(null);
+  const chartRef = useRef(null);
+  const [chartError, setChartError] = useState("");
+  const rows = useMemo(() => {
+    return [...provinces]
+      .sort((a, b) => (Number(b.quantity) || 0) - (Number(a.quantity) || 0))
+      .slice(0, 20);
+  }, [provinces]);
+
+  useEffect(() => {
+    if (!containerRef.current) return undefined;
+    let disposed = false;
+    let resizeHandler = null;
+    let resizeObserver = null;
+
+    loadECharts()
+      .then((echarts) => {
+        if (disposed || !containerRef.current) return;
+        const chart = chartRef.current || echarts.init(containerRef.current, null, { renderer: "canvas" });
+        chartRef.current = chart;
+        const chartBackground = isDarkMode ? "#0f172a" : "#ffffff";
+        const strongTextColor = isDarkMode ? "#f8fafc" : "#0f172a";
+        const mutedTextColor = isDarkMode ? "#94a3b8" : "#64748b";
+        const gridLineColor = isDarkMode ? "#1e293b" : "#e2e8f0";
+        chart.resize({
+          width: containerRef.current.clientWidth,
+          height: containerRef.current.clientHeight,
+        });
+        chart.setOption({
+          backgroundColor: chartBackground,
+          animationDuration: 420,
+          animationDurationUpdate: 360,
+          animationEasing: "cubicOut",
+          animationEasingUpdate: "cubicOut",
+          tooltip: {
+            trigger: "axis",
+            axisPointer: { type: "shadow" },
+            backgroundColor: isDarkMode ? "rgba(15,23,42,0.96)" : "#ffffff",
+            borderColor: isDarkMode ? "#334155" : "#e2e8f0",
+            textStyle: { color: strongTextColor, fontSize: 12 },
+            formatter: (params) => {
+              const item = params?.[0];
+              const row = rows[item?.dataIndex] || {};
+              return `<div style="min-width:180px;font-size:12px;line-height:1.35">
+                <div style="font-weight:800;margin-bottom:5px">${row.province || item?.name || ""}</div>
+                <div style="color:${isDarkMode ? "#7dd3fc" : "#0369a1"}">${formatNumber(row.quantity || 0)} sản phẩm đã chốt</div>
+              </div>`;
+            },
+          },
+          grid: { left: 46, right: 24, top: 78, bottom: 92 },
+          xAxis: {
+            type: "category",
+            data: rows.map((row) => row.province),
+            axisLabel: {
+              color: mutedTextColor,
+              fontSize: 10,
+              rotate: 38,
+              width: 76,
+              overflow: "truncate",
+            },
+            axisTick: { show: false },
+            axisLine: { lineStyle: { color: gridLineColor } },
+          },
+          yAxis: {
+            type: "value",
+            axisLabel: { color: mutedTextColor, fontSize: 10 },
+            splitLine: { lineStyle: { color: gridLineColor } },
+          },
+          series: [
+            {
+              name: "Nhu cầu",
+              type: "bar",
+              data: rows.map((row) => Number(row.quantity) || 0),
+              barMaxWidth: 24,
+              itemStyle: {
+                borderRadius: [8, 8, 0, 0],
+                color: {
+                  type: "linear",
+                  x: 0,
+                  y: 1,
+                  x2: 0,
+                  y2: 0,
+                  colorStops: [
+                    { offset: 0, color: "#10b981" },
+                    { offset: 1, color: "#0ea5e9" },
+                  ],
+                },
+              },
+              label: {
+                show: true,
+                position: "top",
+                color: strongTextColor,
+                fontSize: 10,
+                fontWeight: 800,
+                formatter: (params) => formatNumber(params.value),
+              },
+            },
+          ],
+        }, true);
+        resizeHandler = () => chart.resize({
+          width: containerRef.current?.clientWidth,
+          height: containerRef.current?.clientHeight,
+        });
+        window.addEventListener("resize", resizeHandler);
+        if (typeof ResizeObserver !== "undefined") {
+          resizeObserver = new ResizeObserver(resizeHandler);
+          resizeObserver.observe(containerRef.current);
+        }
+        setChartError("");
+      })
+      .catch((error) => {
+        if (!disposed) setChartError(error.message || "Không tải được biểu đồ ECharts");
+      });
+
+    return () => {
+      disposed = true;
+      if (resizeHandler) window.removeEventListener("resize", resizeHandler);
+      if (resizeObserver) resizeObserver.disconnect();
+    };
+  }, [rows, formatNumber, isDarkMode]);
+
+  useEffect(() => () => {
+    if (chartRef.current) {
+      chartRef.current.dispose();
+      chartRef.current = null;
+    }
+  }, []);
+
+  return (
+    <div className="relative overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
+      <div ref={containerRef} className={`${compact ? "h-[480px]" : "h-[78vh]"} w-full min-w-0`} />
+      {chartError && (
+        <div className="absolute inset-0 z-20 flex items-center justify-center bg-white/85 p-6 text-center text-sm font-semibold text-rose-600">
+          {chartError}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ProvinceDemandPieChart({ provinces = [], formatNumber, compact = false, isDarkMode = false }) {
+  const containerRef = useRef(null);
+  const chartRef = useRef(null);
+  const [chartError, setChartError] = useState("");
+  const rows = useMemo(() => {
+    const sorted = [...provinces]
+      .filter((province) => Number(province.quantity) > 0)
+      .sort((a, b) => (Number(b.quantity) || 0) - (Number(a.quantity) || 0));
+    const top = sorted.slice(0, 8);
+    const otherQuantity = sorted.slice(8).reduce((sum, province) => sum + (Number(province.quantity) || 0), 0);
+    return otherQuantity > 0
+      ? [...top, { province: "Khác", quantity: otherQuantity }]
+      : top;
+  }, [provinces]);
+
+  useEffect(() => {
+    if (!containerRef.current) return undefined;
+    let disposed = false;
+    let resizeHandler = null;
+    let resizeObserver = null;
+
+    loadECharts()
+      .then((echarts) => {
+        if (disposed || !containerRef.current) return;
+        const chart = chartRef.current || echarts.init(containerRef.current, null, { renderer: "canvas" });
+        chartRef.current = chart;
+        const chartBackground = isDarkMode ? "#0f172a" : "#ffffff";
+        const strongTextColor = isDarkMode ? "#f8fafc" : "#0f172a";
+        const mutedTextColor = isDarkMode ? "#94a3b8" : "#64748b";
+        const palette = ["#ef4444", "#f97316", "#eab308", "#22c55e", "#06b6d4", "#3b82f6", "#8b5cf6", "#ec4899", "#94a3b8"];
+        chart.resize({
+          width: containerRef.current.clientWidth,
+          height: containerRef.current.clientHeight,
+        });
+        chart.setOption({
+          backgroundColor: chartBackground,
+          animationDuration: 420,
+          animationDurationUpdate: 360,
+          animationEasing: "cubicOut",
+          animationEasingUpdate: "cubicOut",
+          color: palette,
+          tooltip: {
+            trigger: "item",
+            backgroundColor: isDarkMode ? "rgba(15,23,42,0.96)" : "#ffffff",
+            borderColor: isDarkMode ? "#334155" : "#e2e8f0",
+            textStyle: { color: strongTextColor, fontSize: 12 },
+            formatter: (params) => `<div style="min-width:170px;font-size:12px;line-height:1.35">
+              <div style="font-weight:800;margin-bottom:5px">${params.name}</div>
+              <div style="color:${isDarkMode ? "#7dd3fc" : "#0369a1"}">${formatNumber(params.value)} sản phẩm đã chốt</div>
+              <div style="color:${mutedTextColor};margin-top:2px">${Number(params.percent || 0).toFixed(1)}%</div>
+            </div>`,
+          },
+          legend: {
+            type: "scroll",
+            orient: "vertical",
+            right: 16,
+            top: 36,
+            bottom: 24,
+            textStyle: { color: mutedTextColor, fontSize: 10 },
+          },
+          series: [
+            {
+              name: "Nhu cầu",
+              type: "pie",
+              radius: ["42%", "70%"],
+              center: ["40%", "52%"],
+              minAngle: 4,
+              avoidLabelOverlap: true,
+              itemStyle: {
+                borderColor: chartBackground,
+                borderWidth: 2,
+              },
+              label: {
+                color: strongTextColor,
+                fontSize: 10,
+                fontWeight: 700,
+                formatter: "{b}\n{d}%",
+              },
+              labelLine: {
+                lineStyle: { color: mutedTextColor },
+              },
+              data: rows.map((row) => ({
+                name: row.province,
+                value: Number(row.quantity) || 0,
+              })),
+            },
+          ],
+        }, true);
+        resizeHandler = () => chart.resize({
+          width: containerRef.current?.clientWidth,
+          height: containerRef.current?.clientHeight,
+        });
+        window.addEventListener("resize", resizeHandler);
+        if (typeof ResizeObserver !== "undefined") {
+          resizeObserver = new ResizeObserver(resizeHandler);
+          resizeObserver.observe(containerRef.current);
+        }
+        setChartError("");
+      })
+      .catch((error) => {
+        if (!disposed) setChartError(error.message || "Không tải được biểu đồ ECharts");
+      });
+
+    return () => {
+      disposed = true;
+      if (resizeHandler) window.removeEventListener("resize", resizeHandler);
+      if (resizeObserver) resizeObserver.disconnect();
+    };
+  }, [rows, formatNumber, isDarkMode]);
+
+  useEffect(() => () => {
+    if (chartRef.current) {
+      chartRef.current.dispose();
+      chartRef.current = null;
+    }
+  }, []);
+
+  return (
+    <div className="relative overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
+      <div ref={containerRef} className={`${compact ? "h-[480px]" : "h-[78vh]"} w-full min-w-0`} />
+      {chartError && (
+        <div className="absolute inset-0 z-20 flex items-center justify-center bg-white/85 p-6 text-center text-sm font-semibold text-rose-600">
+          {chartError}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function formatWaitingTime(value) {
@@ -149,7 +1091,7 @@ function buildOrderText(order, index) {
 
   return [
     `DON HANG #${index + 1}`,
-    `ID: ${order._id || ""}`,
+    `ID: ${order._id || order.id || ""}`,
     `Ngay tao: ${formatDateTime(order.createdAt)}`,
     `Page: ${order.pageName || ""} (${order.pageId || ""})`,
     `Khach hang: ${order.customerName || ""} (${order.customerId || ""})`,
@@ -230,13 +1172,13 @@ function buildConversationText(conversation, index) {
     `HOI THOAI #${index + 1}`,
     "============================================================",
     `ID: ${conversation._id || ""}`,
-    `Khach hang: ${getConversationCustomerName(conversation)} (${conversation.user || ""})`,
+    `Khach hang: ${getConversationCustomerName(conversation)} (${conversation.user || conversation.customer?.id || ""})`,
     `Page: ${conversation.page || ""}`,
     `Conversation ID: ${conversation.conversationId || ""}`,
     `Thread ID: ${conversation.threadId || ""}`,
     `Cap nhat: ${formatDateTime(conversation.updatedAt)}`,
-    `So dien thoai: ${conversation.phoneNumber || ""}`,
-    `Dia chi: ${conversation.address || ""}`,
+    `So dien thoai: ${conversation.phoneNumber || conversation.customer?.phoneNumber || ""}`,
+    `Dia chi: ${conversation.address || conversation.customer?.address || ""}`,
     `San pham dang tu van: ${conversation.activeProductName || conversation.activeSku || ""}`,
     `Intent cuoi: ${conversation.lastIntent || ""}`,
     `Tom tat: ${conversation.conversationSummary || ""}`,
@@ -269,6 +1211,71 @@ function buildConversationJson(conversation, index) {
     chatHistory: conversation.chatHistory || null,
     raw: conversation,
   };
+}
+
+const ORDER_EXPORT_FIELDS = [
+  ["id", "ID đơn"],
+  ["createdAt", "Ngày tạo"],
+  ["pageName", "Page"],
+  ["pageId", "Page ID"],
+  ["customerName", "Khách hàng"],
+  ["customerId", "Customer ID"],
+  ["phoneNumber", "Điện thoại"],
+  ["address", "Địa chỉ"],
+  ["status", "Trạng thái"],
+  ["total", "Tổng tiền"],
+  ["shippingFee", "Phí ship"],
+  ["note", "Ghi chú"],
+  ["items", "Sản phẩm"],
+];
+
+const CONVERSATION_EXPORT_FIELDS = [
+  ["id", "ID hội thoại"],
+  ["customer", "Khách hàng"],
+  ["page", "Page"],
+  ["conversationId", "Conversation ID"],
+  ["threadId", "Thread ID"],
+  ["updatedAt", "Cập nhật"],
+  ["activeProductName", "Sản phẩm tư vấn"],
+  ["activeSku", "SKU"],
+  ["lastIntent", "Intent cuối"],
+  ["summary", "Tóm tắt"],
+  ["chatHistory", "Lịch sử chat"],
+];
+
+const DEFAULT_ORDER_EXPORT_FIELDS = ORDER_EXPORT_FIELDS.map(([key]) => key);
+const DEFAULT_CONVERSATION_EXPORT_FIELDS = CONVERSATION_EXPORT_FIELDS
+  .map(([key]) => key)
+  .filter((key) => key !== "chatHistory");
+
+function pickExportFields(source, fields) {
+  const result = {};
+  fields.forEach((field) => {
+    if (field === "id") {
+      result.id = source.id ?? source._id ?? null;
+      return;
+    }
+    if (field in source) result[field] = source[field];
+  });
+  return result;
+}
+
+function filterOrderForExport(order, fields) {
+  return pickExportFields({
+    id: order._id || order.id || null,
+    createdAt: order.createdAt,
+    pageName: order.pageName,
+    pageId: order.pageId,
+    customerName: order.customerName,
+    customerId: order.customerId,
+    phoneNumber: order.phoneNumber,
+    address: order.address,
+    status: order.status || "active",
+    total: order.total,
+    shippingFee: order.shippingFee,
+    note: order.note,
+    items: order.items,
+  }, fields);
 }
 
 function buildTextExport(data) {
@@ -714,7 +1721,7 @@ function StatCard({ title, value, subtitle, icon: Icon, tone = "sky", onClick })
       <div className={`absolute inset-x-0 top-0 h-1 ${current.accent}`} />
       <div className="flex min-h-[126px] flex-col justify-between gap-4">
         <div className="flex items-start justify-between gap-3">
-          <p className="min-w-0 text-[11px] font-bold uppercase leading-5 tracking-wide text-slate-500">
+          <p className="min-w-0 text-[10px] font-bold uppercase leading-4 tracking-wide text-slate-500">
             {title}
           </p>
           <div className={`shrink-0 rounded-xl ${current.bg} p-2.5 ${current.text} ring-1 ${current.ring}`}>
@@ -722,11 +1729,11 @@ function StatCard({ title, value, subtitle, icon: Icon, tone = "sky", onClick })
           </div>
         </div>
         <div>
-          <p className="break-words text-3xl font-bold leading-none text-slate-950">
+          <p className="break-words text-2xl font-bold leading-none text-slate-950">
             {value}
           </p>
           {subtitle && (
-            <p className="mt-2 min-h-5 text-sm leading-5 text-slate-500">
+            <p className="mt-1.5 min-h-5 text-xs leading-4 text-slate-500">
               {subtitle}
             </p>
           )}
@@ -744,6 +1751,7 @@ export default function BusinessStats() {
     const today = formatDateInput();
     return { from: today, to: today };
   });
+  const [statsTimeRange, setStatsTimeRange] = useState({ fromTime: "00:00", toTime: "23:59" });
   const [statsPages, setStatsPages] = useState([]);
   const [companyFilter, setCompanyFilter] = useState("all");
   const [pageSelectionMode, setPageSelectionMode] = useState("all");
@@ -758,6 +1766,12 @@ export default function BusinessStats() {
     format: "json",
     packageMode: "single",
     includeHistory: false,
+    orderFields: DEFAULT_ORDER_EXPORT_FIELDS,
+    conversationFields: DEFAULT_CONVERSATION_EXPORT_FIELDS,
+  });
+  const [exportRange, setExportRange] = useState(() => {
+    const today = formatDateInput();
+    return { from: today, fromTime: "00:00", to: today, toTime: "23:59" };
   });
   const [isExporting, setIsExporting] = useState(false);
   const [exportError, setExportError] = useState("");
@@ -787,6 +1801,14 @@ export default function BusinessStats() {
     summary: null,
   });
   const [hoveredOrderHour, setHoveredOrderHour] = useState(null);
+  const [isFilterOpen, setIsFilterOpen] = useState(false);
+  const [isExportOpen, setIsExportOpen] = useState(false);
+  const [isDarkMode, setIsDarkMode] = useState(false);
+  const [isMapFullOpen, setIsMapFullOpen] = useState(false);
+  const [mapProvinceMode, setMapProvinceMode] = useState("new");
+  const [demandChartType, setDemandChartType] = useState("map");
+  const [convertedOrdersTab, setConvertedOrdersTab] = useState("official");
+  const [isFrequentQuestionsOpen, setIsFrequentQuestionsOpen] = useState(false);
 
   useEffect(() => {
     if (!token) return;
@@ -831,6 +1853,51 @@ export default function BusinessStats() {
     return selectedPageIds.filter((pageId) => companyPageIdSet.has(String(pageId)));
   }
 
+  const syncExportRangeFromStats = () => {
+    if (statsMode === "range") {
+      setExportRange((current) => ({
+        ...current,
+        from: statsRange.from,
+        to: statsRange.to,
+        fromTime: statsTimeRange.fromTime,
+        toTime: statsTimeRange.toTime,
+      }));
+      return;
+    }
+    setExportRange((current) => ({
+      ...current,
+      from: statsDate,
+      to: statsDate,
+      fromTime: statsTimeRange.fromTime,
+      toTime: statsTimeRange.toTime,
+    }));
+  };
+
+  const openExportDialog = () => {
+    syncExportRangeFromStats();
+    setExportError("");
+    setIsExportOpen(true);
+  };
+
+  const toggleExportField = (group, field) => {
+    setExportOptions((current) => {
+      const key = group === "orders" ? "orderFields" : "conversationFields";
+      const nextFields = new Set(current[key] || []);
+      if (nextFields.has(field)) nextFields.delete(field);
+      else nextFields.add(field);
+      return { ...current, [key]: Array.from(nextFields) };
+    });
+  };
+
+  const setAllExportFields = (group, checked) => {
+    setExportOptions((current) => ({
+      ...current,
+      [group === "orders" ? "orderFields" : "conversationFields"]: checked
+        ? (group === "orders" ? DEFAULT_ORDER_EXPORT_FIELDS : CONVERSATION_EXPORT_FIELDS.map(([key]) => key))
+        : [],
+    }));
+  };
+
   const buildStatsQuery = () => {
     const timezoneOffset = -new Date().getTimezoneOffset();
     const queryParams = new URLSearchParams({ timezoneOffset: String(timezoneOffset) });
@@ -840,8 +1907,11 @@ export default function BusinessStats() {
       queryParams.set("from", statsRange.from);
       queryParams.set("to", statsRange.to);
     } else {
-      queryParams.set("date", statsDate);
+      queryParams.set("from", statsDate);
+      queryParams.set("to", statsDate);
     }
+    queryParams.set("fromTime", statsTimeRange.fromTime || "00:00");
+    queryParams.set("toTime", statsTimeRange.toTime || "23:59");
 
     if (pageIds.length === 0) {
       queryParams.set("pageScope", "none");
@@ -856,6 +1926,10 @@ export default function BusinessStats() {
     if (!token) return;
     if (statsMode === "day" && !statsDate) return;
     if (statsMode === "range" && (!statsRange.from || !statsRange.to)) return;
+    if ((statsTimeRange.fromTime || "") > (statsTimeRange.toTime || "") && (statsMode === "day" || statsRange.from === statsRange.to)) {
+      setStatsError("Giờ kết thúc phải lớn hơn giờ bắt đầu");
+      return;
+    }
 
     setIsLoadingStats(true);
     setStatsError("");
@@ -879,10 +1953,28 @@ export default function BusinessStats() {
 
   const fetchExportData = async () => {
     if (!token) return null;
-    if (statsMode === "day" && !statsDate) return null;
-    if (statsMode === "range" && (!statsRange.from || !statsRange.to)) return null;
+    if (!exportRange.from || !exportRange.to) return null;
+    if (exportRange.from > exportRange.to) {
+      throw new Error("Ngày kết thúc phải lớn hơn hoặc bằng ngày bắt đầu");
+    }
+    if ((exportRange.fromTime || "") > (exportRange.toTime || "") && exportRange.from === exportRange.to) {
+      throw new Error("Giờ kết thúc phải lớn hơn giờ bắt đầu");
+    }
 
-    const queryParams = buildStatsQuery();
+    const timezoneOffset = -new Date().getTimezoneOffset();
+    const queryParams = new URLSearchParams({
+      timezoneOffset: String(timezoneOffset),
+      from: exportRange.from,
+      to: exportRange.to,
+      fromTime: exportRange.fromTime || "00:00",
+      toTime: exportRange.toTime || "23:59",
+    });
+    const pageIds = getEffectiveStatsPageIds();
+    if (pageIds.length === 0) {
+      queryParams.set("pageScope", "none");
+    } else {
+      queryParams.set("pages", pageIds.join(","));
+    }
     queryParams.set("type", exportOptions.type);
     const shouldIncludeHistory = exportOptions.type !== "orders"
       && (exportOptions.includeHistory || exportOptions.format === "pdf");
@@ -1081,9 +2173,13 @@ export default function BusinessStats() {
 
   const buildExportPayload = (data) => {
     const payload = { meta: data.meta };
-    if (exportOptions.type === "all" || exportOptions.type === "orders") payload.orders = data.orders || [];
+    if (exportOptions.type === "all" || exportOptions.type === "orders") {
+      payload.orders = (data.orders || []).map((order) => filterOrderForExport(order, exportOptions.orderFields || []));
+    }
     if (exportOptions.type === "all" || exportOptions.type === "conversations") {
-      payload.conversations = (data.conversations || []).map(buildConversationJson);
+      payload.conversations = (data.conversations || [])
+        .map(buildConversationJson)
+        .map((conversation) => pickExportFields(conversation, exportOptions.conversationFields || []));
     }
     return payload;
   };
@@ -1105,6 +2201,7 @@ export default function BusinessStats() {
     setStatsMode(range.mode);
     setStatsDate(range.date || range.from);
     setStatsRange({ from: range.from, to: range.to });
+    setStatsTimeRange({ fromTime: "00:00", toTime: "23:59" });
   };
 
   const handleExportData = async () => {
@@ -1113,33 +2210,48 @@ export default function BusinessStats() {
     try {
       const data = await fetchExportData();
       if (!data) throw new Error("Vui long chon moc thoi gian hop le");
+      const wantsOrders = exportOptions.type === "all" || exportOptions.type === "orders";
+      const wantsConversations = exportOptions.type === "all" || exportOptions.type === "conversations";
+      if (wantsOrders && !(exportOptions.orderFields || []).length) {
+        throw new Error("Vui lòng chọn ít nhất 1 field đơn hàng");
+      }
+      if (wantsConversations && !(exportOptions.conversationFields || []).length) {
+        throw new Error("Vui lòng chọn ít nhất 1 field hội thoại");
+      }
 
       const format = exportOptions.format;
       const extension = format === "json" ? "json" : format === "pdf" ? "pdf" : "txt";
+      const timePart = `${String(data.meta?.fromTime || "").slice(0, 5).replace(":", "")}-${String(data.meta?.toTime || "").slice(0, 5).replace(":", "")}`;
       const datePart = data.meta?.fromDate === data.meta?.toDate
         ? data.meta?.fromDate
         : `${data.meta?.fromDate}_to_${data.meta?.toDate}`;
-      const baseName = `thong-ke-kinh-doanh-${datePart}`;
+      const baseName = `thong-ke-kinh-doanh-${datePart}-${timePart}`;
       const payload = buildExportPayload(data);
 
       if (exportOptions.packageMode === "zip") {
         const zip = new JSZip();
-        if (exportOptions.type === "all" || exportOptions.type === "orders") {
-          const orderPayload = { meta: data.meta, orders: data.orders || [] };
+        if (wantsOrders) {
+          const orderPayload = {
+            meta: data.meta,
+            orders: (data.orders || []).map((order) => filterOrderForExport(order, exportOptions.orderFields || [])),
+          };
           zip.file(`don-hang-${datePart}.${extension}`, buildZipFileContent(orderPayload, format));
         }
-        if (exportOptions.type === "all" || exportOptions.type === "conversations") {
-          const conversations = data.conversations || [];
+        if (wantsConversations) {
+          const conversations = (data.conversations || []).map((conversation, index) => ({
+            raw: conversation,
+            filtered: pickExportFields(buildConversationJson(conversation, index), exportOptions.conversationFields || []),
+          }));
           const conversationIndex = conversations.map((conversation, index) => ({
             index: index + 1,
-            file: buildConversationFileName(conversation, index, extension),
-            customerName: getConversationCustomerName(conversation),
-            customerId: conversation.user || null,
-            page: conversation.page || null,
-            conversationId: conversation.conversationId || null,
-            updatedAt: conversation.updatedAt || null,
-            messageCount: Array.isArray(conversation.chatHistory?.messages)
-              ? conversation.chatHistory.messages.length
+            file: buildConversationFileName(conversation.raw, index, extension),
+            customerName: conversation.filtered.customer?.name || getConversationCustomerName(conversation.raw),
+            customerId: conversation.filtered.customer?.id || conversation.raw.user || null,
+            page: conversation.filtered.page || conversation.raw.page || null,
+            conversationId: conversation.filtered.conversationId || conversation.raw.conversationId || null,
+            updatedAt: conversation.filtered.updatedAt || conversation.raw.updatedAt || null,
+            messageCount: Array.isArray(conversation.filtered.chatHistory?.messages)
+              ? conversation.filtered.chatHistory.messages.length
               : null,
           }));
 
@@ -1151,15 +2263,15 @@ export default function BusinessStats() {
           conversations.forEach((conversation, index) => {
             const conversationPayload = {
               meta: data.meta,
-              conversation: buildConversationJson(conversation, index),
+              conversation: conversation.filtered,
             };
             zip.file(
-              buildConversationFileName(conversation, index, extension),
+              buildConversationFileName(conversation.raw, index, extension),
               format === "json"
                 ? JSON.stringify(conversationPayload, null, 2)
                 : format === "pdf"
                   ? makeBlob(conversationPayload, "pdf")
-                  : buildConversationText(conversation, index),
+                  : buildConversationText(conversation.filtered, index),
             );
           });
         }
@@ -1181,7 +2293,7 @@ export default function BusinessStats() {
   useEffect(() => {
     fetchDailyStats();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, statsMode, statsDate, statsRange.from, statsRange.to, pageSelectionMode, selectedPageIds, companyFilter, statsPages]);
+  }, [token, statsMode, statsDate, statsRange.from, statsRange.to, statsTimeRange.fromTime, statsTimeRange.toTime, pageSelectionMode, selectedPageIds, companyFilter, statsPages]);
 
   const statsLabel = dailyStats?.fromDate && dailyStats?.toDate
     ? dailyStats.fromDate === dailyStats.toDate
@@ -1190,15 +2302,19 @@ export default function BusinessStats() {
     : statsMode === "range"
       ? `${statsRange.from} đến ${statsRange.to}`
       : statsDate;
+  const statsTimeLabel = `${String(dailyStats?.fromTime || statsTimeRange.fromTime || "00:00").slice(0, 5)} - ${String(dailyStats?.toTime || statsTimeRange.toTime || "23:59").slice(0, 5)}`;
+  const isFullDayStatsTime = statsTimeLabel === "00:00 - 23:59";
+  const displayStatsLabel = `${formatStatsDateLabel(statsLabel)}${isFullDayStatsTime ? "" : ` · ${statsTimeLabel}`}`;
 
   const productStats = Array.isArray(dailyStats?.productStats) ? dailyStats.productStats : [];
   const topProducts = productStats.slice(0, 10);
   const maxProductQuantity = Math.max(...topProducts.map((product) => Number(product.quantity) || 0), 0);
   const productProvinceStats = dailyStats?.productProvinceStats || {};
   const demandProducts = Array.isArray(productProvinceStats.products) ? productProvinceStats.products : [];
-  const demandProvinces = Array.isArray(productProvinceStats.provinces) ? productProvinceStats.provinces : [];
-  const demandCells = Array.isArray(productProvinceStats.cells) ? productProvinceStats.cells : [];
-  const maxDemandQuantity = Number(productProvinceStats.maxQuantity || 0);
+  const oldDemandProvinces = buildDemandProvinces(productProvinceStats);
+  const newDemandProvinces = mergeDemandProvincesToNewMap(oldDemandProvinces);
+  const demandProvinces = mapProvinceMode === "new" ? newDemandProvinces : oldDemandProvinces;
+  const maxDemandProvinceQuantity = Math.max(...demandProvinces.map((item) => Number(item.quantity) || 0), 0);
   const frequentQuestions = Array.isArray(dailyStats?.frequentQuestions) ? dailyStats.frequentQuestions : [];
   const orderHourlyStats = dailyStats?.orderHourlyStats || {};
   const hourlyOrderRows = Array.isArray(orderHourlyStats.hours) ? orderHourlyStats.hours : [];
@@ -1206,7 +2322,6 @@ export default function BusinessStats() {
   const maxHourlyOrderCount = Number(orderHourlyStats.maxOrderCount || 0);
   const previewOrderHour = hoveredOrderHour || peakOrderHour;
   const isPreviewingHoveredHour = Boolean(hoveredOrderHour);
-  const demandCellMap = new Map(demandCells.map((cell) => [`${cell.productKey}::${cell.province}`, cell]));
   const conversationCount = Number(dailyStats?.conversationCount || 0);
   const totalOrderAmount = Number(dailyStats?.totalOrderAmount || 0);
   const orderCount = Number(dailyStats?.orderCount || 0);
@@ -1261,6 +2376,11 @@ export default function BusinessStats() {
     ...customer,
     statuses: Array.from(customer.statuses),
   }));
+  const officialConvertedCustomerRows = convertedCustomerRows.filter((customer) => !isDraftOrder(customer));
+  const draftConvertedCustomerRows = convertedCustomerRows.filter((customer) => isDraftOrder(customer));
+  const activeConvertedRows = convertedOrdersTab === "draft" ? draftConvertedCustomerRows : officialConvertedCustomerRows;
+  const officialConvertedOrderCount = officialConvertedCustomerRows.reduce((sum, customer) => sum + Number(customer.orderCount || 0), 0);
+  const draftConvertedOrderCount = draftConvertedCustomerRows.reduce((sum, customer) => sum + Number(customer.orderCount || 0), 0);
   const allStatsPagesSelected = pageSelectionMode === "all";
   const effectiveSelectedPageIds = getEffectiveStatsPageIds();
   const normalizedPageSearch = pageSearch.trim().toLowerCase();
@@ -1299,297 +2419,333 @@ export default function BusinessStats() {
   ];
 
   return (
-    <div className="min-h-screen bg-slate-100 px-4 py-6 text-slate-800 md:px-6">
-      <div className="mx-auto max-w-[96rem] space-y-6">
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(360px,520px)] xl:items-start">
-              <div className="min-w-0 self-center py-1">
-                <div className="inline-flex items-center gap-2 rounded-full bg-cyan-50 px-3 py-1 text-xs font-bold uppercase tracking-wide text-cyan-700 ring-1 ring-cyan-100">
-                  <TrendingUp size={14} />
-                  Báo cáo vận hành
-                </div>
-                <h1 className="mt-3 text-2xl font-bold tracking-tight text-slate-950 md:text-3xl">Thống kê kinh doanh</h1>
-                <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-500">
-                  Tổng hợp doanh thu, đơn chốt và các hội thoại cần chăm sóc lại theo mốc thời gian. Chỉ thống kê page đang bật AutoReply.
-                </p>
+    <div className={`${isDarkMode ? "business-stats-dark " : ""}min-h-screen bg-slate-100 px-2 py-3 text-slate-800 md:px-3`}>
+      <div className="mx-auto max-w-[100rem] space-y-3 text-[12px]">
+        <section className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+          <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(560px,680px)] xl:items-center">
+            <div className="min-w-0">
+              <div className="inline-flex items-center gap-1.5 rounded-full bg-cyan-50 px-2.5 py-1 text-[11px] font-bold uppercase text-cyan-700 ring-1 ring-cyan-100">
+                <TrendingUp size={13} />
+                Báo cáo vận hành
               </div>
-
-              <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-slate-50/80 p-3 shadow-inner">
-                <label className="flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 shadow-sm">
-                  <span className="shrink-0 text-slate-500">Công ty:</span>
-                  <select
-                    value={companyFilter}
-                    onChange={(event) => setCompanyFilter(event.target.value)}
-                    className="min-w-0 flex-1 bg-transparent font-bold text-slate-900 outline-none"
-                  >
-                    {COMPANY_FILTERS.map((company) => (
-                      <option key={company.id} value={company.id}>
-                        {company.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              <details className="relative w-full sm:self-end">
-                <summary className="flex h-10 cursor-pointer list-none items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 sm:min-w-[280px]">
-                  <span className="min-w-0 truncate">Page: {selectedPageLabel}</span>
-                  <span className="text-xs font-bold text-slate-400">Chọn</span>
-                </summary>
-                <div className="absolute right-0 z-30 mt-2 w-full min-w-[300px] rounded-xl border border-slate-200 bg-white p-2 shadow-xl">
-                  <div className="flex items-center gap-2 px-1 pb-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setPageSelectionMode("all");
-                        setSelectedPageIds([]);
-                      }}
-                      className={`flex-1 rounded-lg px-3 py-2 text-xs font-bold transition ${
-                        allStatsPagesSelected
-                          ? "bg-slate-900 text-white"
-                          : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
-                      }`}
-                    >
-                      Tất cả Page
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setPageSelectionMode("custom");
-                        setSelectedPageIds([]);
-                      }}
-                      className="flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-700"
-                    >
-                      Bỏ chọn tất cả
-                    </button>
-                  </div>
-                  <label className="mx-1 mb-2 flex h-9 items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm text-slate-600 focus-within:border-cyan-300 focus-within:bg-white">
-                    <Search size={15} className="shrink-0 text-slate-400" />
-                    <input
-                      type="search"
-                      value={pageSearch}
-                      onChange={(event) => setPageSearch(event.target.value)}
-                      placeholder="Tìm theo tên hoặc ID Page"
-                      className="min-w-0 flex-1 bg-transparent outline-none placeholder:text-slate-400"
-                    />
-                  </label>
-                  <div className="max-h-64 overflow-auto border-t border-slate-100 pt-1">
-                    {companyFilteredStatsPages.length === 0 ? (
-                    <div className="px-3 py-2 text-sm text-slate-500">Không có Page đang bật AutoReply.</div>
-                  ) : filteredStatsPages.length === 0 ? (
-                    <div className="px-3 py-2 text-sm text-slate-500">Không tìm thấy Page phù hợp.</div>
-                  ) : (
-                    filteredStatsPages.map((page) => {
-                      const pageId = String(page.facebookId);
-                      return (
-                        <label key={pageId} className="flex cursor-pointer items-start gap-3 rounded-lg px-3 py-2 text-sm text-slate-700 hover:bg-slate-50">
-                          <input
-                            type="checkbox"
-                            checked={allStatsPagesSelected || selectedPageIds.includes(pageId)}
-                            onChange={() => toggleStatsPage(pageId)}
-                            className="mt-0.5 h-4 w-4 accent-slate-900"
-                          />
-                          <span className="min-w-0">
-                            <span className="block truncate font-semibold text-slate-800">{page.name || pageId}</span>
-                            <span className="block truncate text-xs text-slate-400">{page.teamId || "N/A"} • {pageId}</span>
-                          </span>
-                        </label>
-                      );
-                    })
-                    )}
-                  </div>
-                </div>
-              </details>
-
-              <div className="inline-flex w-full rounded-xl border border-slate-200 bg-white p-1 sm:w-fit sm:self-end">
-              <button
-                type="button"
-                onClick={() => setStatsMode("day")}
-                className={`flex-1 whitespace-nowrap rounded-lg px-3 py-1.5 text-sm font-semibold transition sm:flex-none ${statsMode === "day" ? "bg-slate-900 text-white shadow-sm" : "text-slate-600 hover:bg-slate-50"}`}
-              >
-                1 ngày
-              </button>
-              <button
-                type="button"
-                onClick={() => setStatsMode("range")}
-                className={`flex-1 whitespace-nowrap rounded-lg px-3 py-1.5 text-sm font-semibold transition sm:flex-none ${statsMode === "range" ? "bg-slate-900 text-white shadow-sm" : "text-slate-600 hover:bg-slate-50"}`}
-              >
-                Khoảng thời gian
-              </button>
-            </div>
-
-              <div className="flex flex-wrap items-center justify-end gap-2">
-              {statsMode === "day" ? (
-              <label className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm">
-                <Calendar size={16} className="text-slate-400" />
-                <input
-                  type="date"
-                  className="bg-transparent outline-none"
-                  value={statsDate}
-                  onChange={(e) => {
-                    setStatsDate(e.target.value);
-                    setStatsRange({ from: e.target.value, to: e.target.value });
-                  }}
-                />
-              </label>
-            ) : (
-              <>
-                <label className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm">
-                  <span className="text-xs font-bold uppercase text-slate-400">Từ</span>
-                  <input
-                    type="date"
-                    className="bg-transparent outline-none"
-                    value={statsRange.from}
-                    onChange={(e) => setStatsRange((current) => ({ ...current, from: e.target.value }))}
-                  />
-                </label>
-                <label className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm">
-                  <span className="text-xs font-bold uppercase text-slate-400">Đến</span>
-                  <input
-                    type="date"
-                    className="bg-transparent outline-none"
-                    value={statsRange.to}
-                    onChange={(e) => setStatsRange((current) => ({ ...current, to: e.target.value }))}
-                  />
-                </label>
-              </>
-            )}
-            <button
-              type="button"
-              onClick={fetchDailyStats}
-              disabled={isLoadingStats}
-              className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:opacity-60"
-            >
-              <RefreshCw size={16} className={isLoadingStats ? "animate-spin" : ""} />
-              Làm mới
-            </button>
-              </div>
-
-            </div>
-          </div>
-
-          <div className="mt-5 flex flex-col gap-3 rounded-2xl border border-slate-200 bg-slate-50/70 p-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
-              {quickRanges.map(([key, label]) => (
+              <h1 className="mt-2 text-xl font-black tracking-tight text-slate-950">Thống kê kinh doanh</h1>
+              <p className="mt-1 max-w-4xl text-xs leading-5 text-slate-500">
+                Tổng hợp doanh thu, đơn chốt và các hội thoại cần chăm sóc lại theo mốc thời gian. Chỉ thống kê page đang bật AutoReply.
+              </p>
+              <div className="hidden">
                 <button
-                  key={key}
                   type="button"
-                  onClick={() => applyQuickRange(key)}
-                  className="whitespace-nowrap rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 shadow-sm transition hover:border-cyan-200 hover:bg-cyan-50 hover:text-cyan-700 sm:text-sm"
+                  onClick={fetchDailyStats}
+                  disabled={isLoadingStats}
+                  className="inline-flex h-9 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:opacity-60"
                 >
-                  {label}
+                  <RefreshCw size={14} className={isLoadingStats ? "animate-spin" : ""} />
+                  Làm mới
                 </button>
-              ))}
+                <button
+                  type="button"
+                  onClick={() => setIsDarkMode((value) => !value)}
+                  className="inline-flex h-9 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 shadow-sm transition hover:bg-slate-50"
+                >
+                  {isDarkMode ? <Sun size={14} /> : <Moon size={14} />}
+                  {isDarkMode ? "Light" : "Dark"}
+                </button>
+              </div>
             </div>
-            <div className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600 shadow-sm sm:w-auto">
-              <Calendar size={16} className="text-slate-400" />
-              <span>Mốc thống kê:</span>
-              <span className="font-bold text-slate-900">{statsLabel}</span>
-              <span className="text-slate-300">•</span>
-              <span className="font-bold text-slate-900">{selectedPageLabel}</span>
+
+            <div className="flex min-w-0 flex-col gap-2">
+              <div className="flex min-w-0 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm">
+                <div className="min-w-0 flex-1">
+                  <div className="text-[10px] font-black uppercase text-slate-400">Bộ lọc đang áp dụng</div>
+                  <div className="mt-0.5 truncate text-[13px] font-black text-slate-950">{displayStatsLabel}</div>
+                  <div className="truncate text-[11px] text-slate-500">{selectedPageLabel}</div>
+                </div>
+              </div>
+              <div className="grid grid-cols-[auto_auto_minmax(0,1fr)_minmax(0,1fr)] gap-2">
+                <button
+                  type="button"
+                  onClick={fetchDailyStats}
+                  disabled={isLoadingStats}
+                  className="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 text-[11px] font-bold text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:opacity-60"
+                >
+                  <RefreshCw size={13} className={isLoadingStats ? "animate-spin" : ""} />
+                  Làm mới
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsDarkMode((value) => !value)}
+                  className="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 text-[11px] font-bold text-slate-700 shadow-sm transition hover:bg-slate-50"
+                >
+                  {isDarkMode ? <Sun size={13} /> : <Moon size={13} />}
+                  {isDarkMode ? "Light" : "Dark"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsFilterOpen(true)}
+                  className="inline-flex h-8 items-center justify-center gap-2 rounded-lg bg-slate-950 px-3 text-xs font-black text-white shadow-sm transition hover:bg-slate-800"
+                >
+                  <SlidersHorizontal size={14} />
+                  Bộ lọc
+                </button>
+                <button
+                  type="button"
+                  onClick={openExportDialog}
+                  className="inline-flex h-8 items-center justify-center gap-2 rounded-lg bg-emerald-600 px-3 text-xs font-black text-white shadow-sm transition hover:bg-emerald-700"
+                >
+                  <FileDown size={14} />
+                  Công cụ xuất
+                  <Download size={13} />
+                </button>
+              </div>
             </div>
           </div>
         </section>
 
         {statsError && (
-          <div className="flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+          <div className="flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs text-rose-700">
             <AlertTriangle size={16} />
             {statsError}
           </div>
         )}
 
         {statsPagesError && (
-          <div className="flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+          <div className="flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-700">
             <AlertTriangle size={16} />
             {statsPagesError}
           </div>
         )}
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="flex flex-col gap-5">
-            <div>
-              <h2 className="text-base font-bold text-slate-900">Xuất dữ liệu</h2>
-              <p className="mt-1 text-sm text-slate-500">
-                Xuất dữ liệu đơn hàng và hội thoại theo đúng mốc thống kê đang chọn.
-              </p>
-            </div>
+        {isFilterOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-3 backdrop-blur-sm">
+            <div className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
+              <div className="flex items-start justify-between gap-3 border-b border-slate-100 px-4 py-3">
+                <div>
+                  <h3 className="text-[13px] font-black text-slate-950">Bộ lọc thống kê</h3>
+                  <p className="mt-0.5 text-xs text-slate-500">{displayStatsLabel} · {selectedPageLabel}</p>
+                </div>
+                <button type="button" onClick={() => setIsFilterOpen(false)} className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 hover:bg-slate-50" aria-label="Đóng">
+                  <X size={17} />
+                </button>
+              </div>
+              <div className="min-h-0 flex-1 space-y-4 overflow-auto p-4 text-xs">
+                <div className="grid gap-3 md:grid-cols-2">
+                  <label className="space-y-1">
+                    <span className="font-black uppercase text-slate-500">Công ty</span>
+                    <select value={companyFilter} onChange={(event) => setCompanyFilter(event.target.value)} className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 font-bold text-slate-800 outline-none">
+                      {COMPANY_FILTERS.map((company) => <option key={company.id} value={company.id}>{company.label}</option>)}
+                    </select>
+                  </label>
+                  <div className="space-y-1">
+                    <span className="font-black uppercase text-slate-500">Chế độ thời gian</span>
+                    <div className="grid h-10 grid-cols-2 rounded-xl border border-slate-200 bg-white p-1">
+                      <button type="button" onClick={() => setStatsMode("day")} className={`rounded-lg text-xs font-black ${statsMode === "day" ? "bg-slate-950 text-white" : "text-slate-600 hover:bg-slate-50"}`}>1 ngày</button>
+                      <button type="button" onClick={() => setStatsMode("range")} className={`rounded-lg text-xs font-black ${statsMode === "range" ? "bg-slate-950 text-white" : "text-slate-600 hover:bg-slate-50"}`}>Khoảng</button>
+                    </div>
+                  </div>
+                  {statsMode === "day" ? (
+                    <label className="space-y-1">
+                      <span className="font-black uppercase text-slate-500">Ngày</span>
+                      <input type="date" value={statsDate} onChange={(e) => { setStatsDate(e.target.value); setStatsRange({ from: e.target.value, to: e.target.value }); }} className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 font-bold text-slate-800 outline-none" />
+                    </label>
+                  ) : (
+                    <>
+                      <label className="space-y-1">
+                        <span className="font-black uppercase text-slate-500">Từ</span>
+                        <input type="date" value={statsRange.from} onChange={(e) => setStatsRange((current) => ({ ...current, from: e.target.value }))} className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 font-bold text-slate-800 outline-none" />
+                      </label>
+                      <label className="space-y-1">
+                        <span className="font-black uppercase text-slate-500">Đến</span>
+                        <input type="date" value={statsRange.to} onChange={(e) => setStatsRange((current) => ({ ...current, to: e.target.value }))} className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 font-bold text-slate-800 outline-none" />
+                      </label>
+                    </>
+                  )}
+                  <label className="space-y-1">
+                    <span className="font-black uppercase text-slate-500">Từ giờ</span>
+                    <input type="time" value={statsTimeRange.fromTime} onChange={(e) => setStatsTimeRange((current) => ({ ...current, fromTime: e.target.value }))} className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 font-bold text-slate-800 outline-none" />
+                  </label>
+                  <label className="space-y-1">
+                    <span className="font-black uppercase text-slate-500">Đến giờ</span>
+                    <input type="time" value={statsTimeRange.toTime} onChange={(e) => setStatsTimeRange((current) => ({ ...current, toTime: e.target.value }))} className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 font-bold text-slate-800 outline-none" />
+                  </label>
+                </div>
 
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-[1.1fr_0.75fr_1fr_1.05fr_auto] lg:items-end">
-              <label className="space-y-1">
-                <span className="text-xs font-bold uppercase text-slate-500">Dữ liệu</span>
-                <select
-                  value={exportOptions.type}
-                  onChange={(e) => setExportOptions((current) => ({
-                    ...current,
-                    type: e.target.value,
-                    includeHistory: e.target.value === "orders" ? false : current.includeHistory,
-                  }))}
-                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 outline-none focus:ring-2 focus:ring-sky-100"
-                >
-                  <option value="all">Đơn hàng + hội thoại</option>
-                  <option value="orders">Chỉ đơn hàng</option>
-                  <option value="conversations">Chỉ hội thoại</option>
-                </select>
-              </label>
+                <div className="flex flex-wrap gap-2">
+                  {quickRanges.map(([key, label]) => (
+                    <button key={key} type="button" onClick={() => applyQuickRange(key)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 shadow-sm transition hover:bg-cyan-50 hover:text-cyan-700">
+                      {label}
+                    </button>
+                  ))}
+                </div>
 
-              <label className="space-y-1">
-                <span className="text-xs font-bold uppercase text-slate-500">Định dạng</span>
-                <select
-                  value={exportOptions.format}
-                  onChange={(e) => setExportOptions((current) => ({ ...current, format: e.target.value }))}
-                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 outline-none focus:ring-2 focus:ring-sky-100"
-                >
-                  <option value="json">JSON</option>
-                  <option value="txt">TXT</option>
-                  <option value="pdf">PDF</option>
-                </select>
-              </label>
-
-              <label className="space-y-1">
-                <span className="text-xs font-bold uppercase text-slate-500">Cách xuất</span>
-                <select
-                  value={exportOptions.packageMode}
-                  onChange={(e) => setExportOptions((current) => ({ ...current, packageMode: e.target.value }))}
-                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 outline-none focus:ring-2 focus:ring-sky-100"
-                >
-                  <option value="single">Tất cả trong 1 file</option>
-                  <option value="zip">Tách file và tải ZIP</option>
-                </select>
-              </label>
-
-              <label className="flex min-h-[42px] items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700">
-                <input
-                  type="checkbox"
-                  checked={exportOptions.includeHistory || (exportOptions.format === "pdf" && exportOptions.type !== "orders")}
-                  disabled={exportOptions.type === "orders" || exportOptions.format === "pdf"}
-                  onChange={(e) => setExportOptions((current) => ({ ...current, includeHistory: e.target.checked }))}
-                  className="h-4 w-4 accent-slate-900 disabled:opacity-40"
-                />
-                <span className={exportOptions.type === "orders" ? "text-slate-400" : ""}>
-                  {exportOptions.format === "pdf" && exportOptions.type !== "orders" ? "PDF tự kèm lịch sử chat" : "Kèm lịch sử chat"}
-                </span>
-              </label>
-
-              <button
-                type="button"
-                onClick={handleExportData}
-                disabled={isExporting}
-                className="inline-flex min-h-[42px] items-center justify-center gap-2 rounded-xl bg-slate-900 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 disabled:opacity-60"
-              >
-                {exportOptions.packageMode === "zip" ? <FileArchive size={17} /> : exportOptions.format === "json" ? <FileJson size={17} /> : <FileText size={17} />}
-                {isExporting ? "Đang xuất..." : "Xuất dữ liệu"}
-                {!isExporting && <Download size={16} />}
-              </button>
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <div className="text-xs font-black uppercase text-slate-500">Page</div>
+                    <div className="flex gap-2">
+                      <button type="button" onClick={() => { setPageSelectionMode("all"); setSelectedPageIds([]); }} className={`rounded-lg px-2.5 py-1.5 text-xs font-black ${allStatsPagesSelected ? "bg-slate-950 text-white" : "border border-slate-200 bg-white text-slate-600"}`}>Tất cả</button>
+                      <button type="button" onClick={() => { setPageSelectionMode("custom"); setSelectedPageIds([]); }} className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-black text-slate-600">Bỏ chọn</button>
+                    </div>
+                  </div>
+                  <label className="mb-2 flex h-9 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-slate-600">
+                    <Search size={14} className="shrink-0 text-slate-400" />
+                    <input type="search" value={pageSearch} onChange={(event) => setPageSearch(event.target.value)} placeholder="Tìm theo tên hoặc ID Page" className="min-w-0 flex-1 bg-transparent outline-none" />
+                  </label>
+                  <div className="max-h-56 overflow-auto rounded-lg bg-white">
+                    {companyFilteredStatsPages.length === 0 ? (
+                      <div className="px-3 py-2 text-slate-500">Không có Page đang bật AutoReply.</div>
+                    ) : filteredStatsPages.length === 0 ? (
+                      <div className="px-3 py-2 text-slate-500">Không tìm thấy Page phù hợp.</div>
+                    ) : filteredStatsPages.map((page) => {
+                      const pageId = String(page.facebookId);
+                      return (
+                        <label key={pageId} className="flex cursor-pointer items-start gap-2 border-b border-slate-100 px-3 py-2 last:border-b-0 hover:bg-slate-50">
+                          <input type="checkbox" checked={allStatsPagesSelected || selectedPageIds.includes(pageId)} onChange={() => toggleStatsPage(pageId)} className="mt-0.5 h-4 w-4 accent-slate-900" />
+                          <span className="min-w-0">
+                            <span className="block truncate font-bold text-slate-800">{page.name || pageId}</span>
+                            <span className="block truncate text-[11px] text-slate-400">{page.teamId || "N/A"} · {pageId}</span>
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+              <div className="flex justify-end gap-2 border-t border-slate-100 px-4 py-3">
+                <button type="button" onClick={() => setIsFilterOpen(false)} className="h-9 rounded-lg border border-slate-200 bg-white px-4 text-xs font-bold text-slate-700">Đóng</button>
+                <button type="button" onClick={() => { setIsFilterOpen(false); fetchDailyStats(); }} className="h-9 rounded-lg bg-slate-950 px-4 text-xs font-black text-white">Áp dụng</button>
+              </div>
             </div>
           </div>
+        )}
 
-          {exportError && (
-            <div className="mt-4 flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-              <AlertTriangle size={16} />
-              {exportError}
+        {isExportOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-3 backdrop-blur-sm">
+            <div className="flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
+              <div className="flex items-start justify-between gap-3 border-b border-slate-100 px-4 py-3">
+                <div>
+                  <h3 className="text-[13px] font-black text-slate-950">Công cụ xuất dữ liệu</h3>
+                  <p className="mt-0.5 text-xs text-slate-500">{displayStatsLabel} · {selectedPageLabel}</p>
+                </div>
+                <button type="button" onClick={() => setIsExportOpen(false)} className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 hover:bg-slate-50" aria-label="Đóng">
+                  <X size={17} />
+                </button>
+              </div>
+              <div className="grid min-h-0 gap-3 overflow-auto p-4 text-xs sm:grid-cols-2">
+                <label className="space-y-1">
+                  <span className="font-black uppercase text-slate-500">Dữ liệu</span>
+                  <select value={exportOptions.type} onChange={(e) => setExportOptions((current) => ({ ...current, type: e.target.value, includeHistory: e.target.value === "orders" ? false : current.includeHistory }))} className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 font-bold text-slate-800 outline-none">
+                    <option value="all">Đơn hàng + hội thoại</option>
+                    <option value="orders">Chỉ đơn hàng</option>
+                    <option value="conversations">Chỉ hội thoại</option>
+                  </select>
+                </label>
+                <label className="space-y-1">
+                  <span className="font-black uppercase text-slate-500">Định dạng</span>
+                  <select value={exportOptions.format} onChange={(e) => setExportOptions((current) => ({ ...current, format: e.target.value }))} className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 font-bold text-slate-800 outline-none">
+                    <option value="json">JSON</option>
+                    <option value="txt">TXT</option>
+                    <option value="pdf">PDF</option>
+                  </select>
+                </label>
+                <label className="space-y-1">
+                  <span className="font-black uppercase text-slate-500">Cách xuất</span>
+                  <select value={exportOptions.packageMode} onChange={(e) => setExportOptions((current) => ({ ...current, packageMode: e.target.value }))} className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 font-bold text-slate-800 outline-none">
+                    <option value="single">Tất cả trong 1 file</option>
+                    <option value="zip">Tách file và tải ZIP</option>
+                  </select>
+                </label>
+                <label className="flex min-h-10 items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 font-bold text-slate-700">
+                  <input type="checkbox" checked={exportOptions.includeHistory || (exportOptions.format === "pdf" && exportOptions.type !== "orders")} disabled={exportOptions.type === "orders" || exportOptions.format === "pdf"} onChange={(e) => setExportOptions((current) => ({ ...current, includeHistory: e.target.checked }))} className="h-4 w-4 accent-slate-900 disabled:opacity-40" />
+                  <span className={exportOptions.type === "orders" ? "text-slate-400" : ""}>
+                    {exportOptions.format === "pdf" && exportOptions.type !== "orders" ? "PDF tự kèm lịch sử chat" : "Kèm lịch sử chat"}
+                  </span>
+                </label>
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 sm:col-span-2">
+                  <div className="mb-2 flex items-center justify-between gap-3">
+                    <span className="font-black uppercase text-slate-500">Thời gian xuất</span>
+                    <button
+                      type="button"
+                      onClick={syncExportRangeFromStats}
+                      className="rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-bold text-slate-600 hover:bg-slate-50"
+                    >
+                      Theo bộ lọc
+                    </button>
+                  </div>
+                  <div className="grid gap-2 sm:grid-cols-4">
+                    <label className="space-y-1">
+                      <span className="text-[10px] font-black uppercase text-slate-400">Từ ngày</span>
+                      <input type="date" value={exportRange.from} onChange={(e) => setExportRange((current) => ({ ...current, from: e.target.value }))} className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2 font-bold text-slate-800 outline-none" />
+                    </label>
+                    <label className="space-y-1">
+                      <span className="text-[10px] font-black uppercase text-slate-400">Từ giờ</span>
+                      <input type="time" value={exportRange.fromTime} onChange={(e) => setExportRange((current) => ({ ...current, fromTime: e.target.value }))} className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2 font-bold text-slate-800 outline-none" />
+                    </label>
+                    <label className="space-y-1">
+                      <span className="text-[10px] font-black uppercase text-slate-400">Đến ngày</span>
+                      <input type="date" value={exportRange.to} onChange={(e) => setExportRange((current) => ({ ...current, to: e.target.value }))} className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2 font-bold text-slate-800 outline-none" />
+                    </label>
+                    <label className="space-y-1">
+                      <span className="text-[10px] font-black uppercase text-slate-400">Đến giờ</span>
+                      <input type="time" value={exportRange.toTime} onChange={(e) => setExportRange((current) => ({ ...current, toTime: e.target.value }))} className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2 font-bold text-slate-800 outline-none" />
+                    </label>
+                  </div>
+                </div>
+                {(exportOptions.type === "all" || exportOptions.type === "orders") && (
+                  <div className="rounded-xl border border-slate-200 bg-white p-3">
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <span className="font-black uppercase text-slate-500">Field đơn hàng</span>
+                      <button type="button" onClick={() => setAllExportFields("orders", (exportOptions.orderFields || []).length !== ORDER_EXPORT_FIELDS.length)} className="text-[11px] font-bold text-sky-700">
+                        {(exportOptions.orderFields || []).length === ORDER_EXPORT_FIELDS.length ? "Bỏ chọn" : "Chọn hết"}
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {ORDER_EXPORT_FIELDS.map(([key, label]) => (
+                        <label key={key} className="flex items-center gap-1.5 rounded-lg bg-slate-50 px-2 py-1.5 font-semibold text-slate-700">
+                          <input type="checkbox" checked={(exportOptions.orderFields || []).includes(key)} onChange={() => toggleExportField("orders", key)} className="h-3.5 w-3.5 accent-slate-900" />
+                          <span className="truncate">{label}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {(exportOptions.type === "all" || exportOptions.type === "conversations") && (
+                  <div className="rounded-xl border border-slate-200 bg-white p-3">
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <span className="font-black uppercase text-slate-500">Field hội thoại</span>
+                      <button type="button" onClick={() => setAllExportFields("conversations", (exportOptions.conversationFields || []).length !== CONVERSATION_EXPORT_FIELDS.length)} className="text-[11px] font-bold text-sky-700">
+                        {(exportOptions.conversationFields || []).length === CONVERSATION_EXPORT_FIELDS.length ? "Bỏ chọn" : "Chọn hết"}
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {CONVERSATION_EXPORT_FIELDS.map(([key, label]) => (
+                        <label key={key} className="flex items-center gap-1.5 rounded-lg bg-slate-50 px-2 py-1.5 font-semibold text-slate-700">
+                          <input type="checkbox" checked={(exportOptions.conversationFields || []).includes(key)} onChange={() => toggleExportField("conversations", key)} className="h-3.5 w-3.5 accent-slate-900" />
+                          <span className="truncate">{label}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {exportError && (
+                  <div className="sm:col-span-2 flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
+                    <AlertTriangle size={15} />
+                    {exportError}
+                  </div>
+                )}
+              </div>
+              <div className="flex justify-end gap-2 border-t border-slate-100 px-4 py-3">
+                <button type="button" onClick={() => setIsExportOpen(false)} className="h-9 rounded-lg border border-slate-200 bg-white px-4 text-xs font-bold text-slate-700">Đóng</button>
+                <button type="button" onClick={handleExportData} disabled={isExporting} className="inline-flex h-9 items-center gap-2 rounded-lg bg-emerald-600 px-4 text-xs font-black text-white disabled:opacity-60">
+                  {exportOptions.packageMode === "zip" ? <FileArchive size={15} /> : exportOptions.format === "json" ? <FileJson size={15} /> : <FileText size={15} />}
+                  {isExporting ? "Đang xuất..." : "Xuất dữ liệu"}
+                  {!isExporting && <Download size={14} />}
+                </button>
+              </div>
             </div>
-          )}
-        </section>
+          </div>
+        )}
 
-        <div className="grid grid-cols-[repeat(auto-fit,minmax(280px,1fr))] gap-4">
+        <div className="grid gap-3 xl:grid-cols-10">
+        <div className="grid grid-cols-2 gap-2 xl:col-span-3 xl:col-start-1 xl:row-start-1">
           <StatCard
             title="Đơn hàng"
             value={isLoadingStats ? "..." : formatNumber(orderCount)}
@@ -1626,34 +2782,322 @@ export default function BusinessStats() {
             tone="rose"
             onClick={openMessageReportsModal}
           />
+          <div className="group relative min-w-0 overflow-hidden rounded-xl border border-emerald-200/70 bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
+            <div className="absolute inset-x-0 top-0 h-1 bg-emerald-500" />
+            <div className="flex min-h-[126px] flex-col justify-between gap-3">
+              <div className="flex items-start justify-between gap-3">
+                <p className="min-w-0 text-[10px] font-bold uppercase leading-4 tracking-wide text-emerald-700">
+                  Cao điểm chốt đơn
+                </p>
+                <div className="shrink-0 rounded-xl bg-emerald-50 p-2.5 text-emerald-700 ring-1 ring-emerald-100">
+                  <Clock size={22} strokeWidth={2.1} />
+                </div>
+              </div>
+              <div>
+                <p className="break-words text-2xl font-bold leading-none text-slate-950">
+                  {isLoadingStats ? "..." : peakOrderHour?.label || "--:--"}
+                </p>
+                <div className="mt-2 grid gap-1 text-[11px] text-slate-600">
+                  <div className="flex justify-between gap-2 rounded-lg bg-slate-50 px-2 py-1">
+                    <span>Đơn hàng</span>
+                    <span className="font-black text-slate-950">{formatNumber(peakOrderHour?.orderCount)}</span>
+                  </div>
+                  <div className="flex justify-between gap-2 rounded-lg bg-slate-50 px-2 py-1">
+                    <span>Khách chốt</span>
+                    <span className="font-black text-slate-950">{formatNumber(peakOrderHour?.customerCount)}</span>
+                  </div>
+                  <div className="flex justify-between gap-2 rounded-lg bg-slate-50 px-2 py-1">
+                    <span>Doanh thu</span>
+                    <span className="font-black text-slate-950">{formatCurrency(peakOrderHour?.revenue)}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm xl:col-span-4 xl:col-start-1 xl:row-start-2">
+          <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+            <div>
+              <h2 className="text-[13px] font-bold text-slate-900">Phễu chăm sóc khách hàng</h2>
+              <p className="mt-1 text-xs text-slate-500">Theo dõi tiến độ từ hội thoại có khách tương tác đến đơn đã chốt.</p>
+            </div>
+          </div>
+
+          <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-2">
+            {careFunnelItems.map(([label, value, note, tone], index) => {
+              const isConvertedCard = index === 1;
+              const isUnconvertedCard = index === 2;
+              const isSilentCard = index === 3;
+              const onCardOpen = isConvertedCard
+                ? openConvertedOrdersModal
+                : isUnconvertedCard
+                  ? openUnconvertedConversationsModal
+                  : isSilentCard
+                    ? openSilentConversationsModal
+                    : undefined;
+              return (
+              <div
+                key={label}
+                role={onCardOpen ? "button" : undefined}
+                tabIndex={onCardOpen ? 0 : undefined}
+                onClick={onCardOpen}
+                onKeyDown={(event) => {
+                  if (!onCardOpen) return;
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    onCardOpen();
+                  }
+                }}
+                className={`rounded-xl border p-4 ${tone} ${onCardOpen ? "cursor-pointer transition hover:-translate-y-0.5 hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-emerald-200" : ""}`}
+              >
+                <div className="text-[11px] font-bold uppercase">{label}</div>
+                <div className="mt-2 text-2xl font-bold text-slate-950">
+                  {isLoadingStats ? "..." : formatNumber(value)}
+                </div>
+                <div className="mt-1 text-xs text-slate-500">{note}</div>
+              </div>
+              );
+            })}
+          </div>
+        </section>
+
+        <section className="min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white p-3 shadow-sm xl:col-span-7 xl:col-start-4 xl:row-start-1">
+          <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+            <div>
+              <h2 className="text-[13px] font-black text-slate-900">Phân bố nhu cầu và sản phẩm</h2>
+              <p className="text-xs text-slate-500">Bản đồ nhu cầu theo tỉnh và sản phẩm đã chốt trong mốc thống kê.</p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => setIsFrequentQuestionsOpen(true)}
+                className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-bold text-slate-600 transition hover:bg-slate-50"
+              >
+                <MessageSquare size={14} />
+                {formatNumber(frequentQuestions.length)} nhóm câu hỏi
+              </button>
+              <button type="button" className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-bold text-slate-600">
+                <MapPin size={14} />
+                {formatNumber(demandProvinces.length)} tỉnh/thành {mapProvinceMode === "new" ? "mới" : "cũ"}
+              </button>
+              <span className="inline-flex items-center rounded-full border border-emerald-100 bg-emerald-50 px-3 py-1 text-xs font-black text-emerald-700">
+                {formatNumber(productStats.length)} sản phẩm
+              </span>
+            </div>
+          </div>
+
+          {isLoadingStats ? (
+            <div className="mt-3 rounded-xl border border-slate-100 bg-slate-50 p-6 text-center text-xs text-slate-500">
+              Đang tải bản đồ nhu cầu...
+            </div>
+          ) : demandProvinces.length === 0 ? (
+            <div className="mt-3 rounded-xl border border-slate-100 bg-slate-50 p-6 text-center text-xs text-slate-500">
+              Chưa đủ dữ liệu địa chỉ để thống kê nhu cầu theo tỉnh.
+            </div>
+          ) : (
+            <div className="mt-3 grid min-w-0 items-stretch gap-3 xl:grid-cols-[minmax(0,1fr)_300px] 2xl:grid-cols-[minmax(0,1fr)_320px]">
+              <div className="relative min-w-0 overflow-hidden">
+                <div className="absolute left-4 top-4 z-10 flex max-w-[calc(100%-8rem)] flex-wrap items-center gap-2 text-[11px] font-black">
+                  <div className="flex rounded-full border border-slate-200 bg-white/95 p-1 shadow-sm">
+                    <button
+                      type="button"
+                      onClick={() => setDemandChartType("map")}
+                      className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 ${demandChartType === "map" ? "bg-slate-950 text-white" : "text-slate-500"}`}
+                    >
+                      <MapPin size={12} />
+                      Bản đồ
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDemandChartType("bar")}
+                      className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 ${demandChartType === "bar" ? "bg-slate-950 text-white" : "text-slate-500"}`}
+                    >
+                      <BarChart3 size={12} />
+                      Cột
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDemandChartType("pie")}
+                      className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 ${demandChartType === "pie" ? "bg-slate-950 text-white" : "text-slate-500"}`}
+                    >
+                      <PieChart size={12} />
+                      Tròn
+                    </button>
+                  </div>
+                  {demandChartType === "map" && (
+                    <div className="business-chart-swap flex rounded-full border border-slate-200 bg-white/95 p-1 shadow-sm">
+                      <button type="button" onClick={() => setMapProvinceMode("old")} className={`rounded-full px-2.5 py-1 ${mapProvinceMode === "old" ? "bg-slate-950 text-white" : "text-slate-500"}`}>Tỉnh cũ</button>
+                      <button type="button" onClick={() => setMapProvinceMode("new")} className={`rounded-full px-2.5 py-1 ${mapProvinceMode === "new" ? "bg-slate-950 text-white" : "text-slate-500"}`}>Tỉnh mới</button>
+                    </div>
+                  )}
+                </div>
+                <div key={demandChartType} className="business-chart-swap">
+                  {demandChartType === "bar" ? (
+                    <ProvinceDemandBarChart provinces={demandProvinces} formatNumber={formatNumber} compact isDarkMode={isDarkMode} />
+                  ) : demandChartType === "pie" ? (
+                    <ProvinceDemandPieChart provinces={demandProvinces} formatNumber={formatNumber} compact isDarkMode={isDarkMode} />
+                  ) : (
+                    <VietnamDemandMap provinces={demandProvinces} formatNumber={formatNumber} onFullScreen={() => setIsMapFullOpen(true)} compact provinceMode={mapProvinceMode} isDarkMode={isDarkMode} />
+                  )}
+                </div>
+              </div>
+
+              <div className="grid h-[480px] min-h-0 min-w-0 grid-rows-2 gap-3 overflow-hidden">
+                <div className="min-h-0 min-w-0 overflow-hidden rounded-xl border border-slate-200 bg-white p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="text-xs font-black text-slate-900">Tỉnh mua nhiều</div>
+                    <div className="rounded-full bg-slate-50 px-2.5 py-1 text-[11px] font-black text-slate-500 ring-1 ring-slate-200">
+                      Top {formatNumber(Math.min(demandProvinces.length, 10))}
+                    </div>
+                  </div>
+                  <div className="mt-2 max-h-[177px] min-w-0 space-y-1.5 overflow-auto overflow-x-hidden pr-1">
+                    {demandProvinces.slice(0, 10).map((province, index) => {
+                      const quantity = Number(province.quantity) || 0;
+                      const color = getDemandColor(quantity, maxDemandProvinceQuantity);
+                      const percent = maxDemandProvinceQuantity > 0 ? Math.max(6, (quantity / maxDemandProvinceQuantity) * 100) : 0;
+                      return (
+                        <div key={province.province} className="min-w-0 rounded-lg bg-slate-50 p-2">
+                          <div className="flex items-center justify-between gap-3 text-xs">
+                            <span className="flex min-w-0 items-center gap-2">
+                              <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: color }} />
+                              <span className="truncate font-bold text-slate-700">{index + 1}. {province.province}</span>
+                            </span>
+                            <span className="shrink-0 font-bold text-slate-900">{formatNumber(quantity)}</span>
+                          </div>
+                          <div className="mt-2 h-1.5 rounded-full bg-slate-200/70">
+                            <div className="h-full rounded-full" style={{ width: `${percent}%`, backgroundColor: color }} />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="min-h-0 min-w-0 overflow-hidden rounded-xl border border-slate-200 bg-white p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="text-xs font-black text-slate-900">Sản phẩm được chốt</div>
+                    <div className="rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-black text-emerald-700 ring-1 ring-emerald-100">
+                      Top {formatNumber(Math.min(productStats.length, 10))}
+                    </div>
+                  </div>
+                  <div className="mt-2 max-h-[177px] min-w-0 space-y-1.5 overflow-auto overflow-x-hidden pr-1">
+                    {topProducts.map((product, index) => {
+                      const quantity = Number(product.quantity) || 0;
+                      const percent = maxProductQuantity > 0 ? Math.max(4, (quantity / maxProductQuantity) * 100) : 0;
+                      return (
+                        <div key={`${product.sku || product.productName}-${index}`} className="min-w-0 rounded-lg bg-slate-50 p-2">
+                          <div className="flex items-center justify-between gap-2 text-xs">
+                            <span className="min-w-0 truncate font-black text-slate-800">{index + 1}. {product.productName || "Không tên"}</span>
+                            <span className="shrink-0 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-black text-emerald-700">{formatNumber(quantity)}</span>
+                          </div>
+                          <div className="mt-1 text-[11px] text-slate-500">{formatCurrency(product.revenue)}</div>
+                          <div className="mt-2 h-1.5 rounded-full bg-slate-200/70">
+                            <div className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-sky-500" style={{ width: `${percent}%` }} />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+        </section>
+
+        {isFrequentQuestionsOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm">
+            <div className="flex max-h-[88vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
+              <div className="flex flex-col gap-3 border-b border-slate-100 px-5 py-4 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <h3 className="text-base font-bold text-slate-950">Câu hỏi khách hàng thường hỏi nhất</h3>
+                  <p className="mt-1 text-xs text-slate-500">
+                    {displayStatsLabel} • {formatNumber(frequentQuestions.length)} nhóm câu hỏi
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsFrequentQuestionsOpen(false)}
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition hover:bg-slate-50 hover:text-slate-900"
+                  aria-label="Đóng"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="min-h-0 flex-1 overflow-auto p-5">
+                {isLoadingStats ? (
+                  <div className="rounded-xl border border-slate-100 bg-slate-50 p-8 text-center text-xs text-slate-500">
+                    Đang tải danh sách câu hỏi...
+                  </div>
+                ) : frequentQuestions.length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center text-xs text-slate-500">
+                    Chưa có đủ dữ liệu câu hỏi của khách trong mốc này.
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+                    <div className="min-w-[760px]">
+                      <div className="grid grid-cols-[52px_minmax(220px,1fr)_110px_120px_150px] border-b border-slate-200 bg-slate-100 px-4 py-3 text-xs font-bold uppercase text-slate-500">
+                        <div>#</div>
+                        <div>Câu hỏi</div>
+                        <div className="text-right">Số lần</div>
+                        <div className="text-right">Khách</div>
+                        <div className="text-right">Gần nhất</div>
+                      </div>
+                      {frequentQuestions.map((item, index) => (
+                        <div
+                          key={`${item.question}-${index}`}
+                          className="grid grid-cols-[52px_minmax(220px,1fr)_110px_120px_150px] items-start gap-0 border-b border-slate-100 px-4 py-2.5 text-xs last:border-b-0 hover:bg-sky-50/40"
+                        >
+                          <div className="font-bold text-slate-400">{index + 1}</div>
+                          <div className="min-w-0">
+                            <div className="break-words font-semibold text-slate-800">{maskPhonesInText(item.question || "Không rõ nội dung")}</div>
+                            {Array.isArray(item.examples) && item.examples.length > 1 && (
+                              <div className="mt-1 truncate text-xs text-slate-400" title={maskPhonesInText(item.examples.join(" | "))}>
+                                Ví dụ khác: {maskPhonesInText(item.examples.slice(1, 3).join(" | "))}
+                              </div>
+                            )}
+                          </div>
+                          <div className="text-right font-bold text-slate-900">{formatNumber(item.count)}</div>
+                          <div className="text-right text-slate-600">{formatNumber(item.customerCount)}</div>
+                          <div className="text-right text-xs text-slate-500">{formatDateTime(item.latestAt) || "N/A"}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm xl:col-span-6 xl:col-start-5 xl:row-start-2">
           <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
             <div>
-              <h2 className="text-base font-bold text-slate-900">Khung giờ chốt đơn nhiều nhất</h2>
-              <p className="text-sm text-slate-500">Thống kê theo giờ tạo đơn hàng đã chốt trong mốc đang chọn.</p>
+              <h2 className="text-[13px] font-black text-slate-900">Khung giờ chốt đơn nhiều nhất</h2>
+              <p className="mt-1 text-xs text-slate-500">Thống kê theo giờ tạo đơn hàng đã chốt trong mốc đang chọn.</p>
             </div>
-            <div className="inline-flex w-fit items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-sm font-semibold text-slate-600">
+            <div className="inline-flex w-fit items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-bold text-slate-700">
               <Clock size={15} />
               {isLoadingStats
                 ? "..."
                 : maxHourlyOrderCount > 0
-                  ? `${peakOrderHour?.label || "--:--"} • ${formatNumber(peakOrderHour?.orderCount)} đơn`
+                  ? `${peakOrderHour?.label || "--:--"} · ${formatNumber(peakOrderHour?.orderCount)} đơn`
                   : "Chưa có đơn"}
             </div>
           </div>
 
           {isLoadingStats ? (
-            <div className="mt-5 rounded-xl border border-slate-100 bg-slate-50 p-6 text-center text-sm text-slate-500">
+            <div className="mt-5 rounded-xl border border-slate-100 bg-slate-50 p-6 text-center text-xs text-slate-500">
               Đang tải biểu đồ khung giờ...
             </div>
           ) : hourlyOrderRows.length === 0 || maxHourlyOrderCount === 0 ? (
-            <div className="mt-5 rounded-xl border border-slate-100 bg-slate-50 p-6 text-center text-sm text-slate-500">
+            <div className="mt-5 rounded-xl border border-slate-100 bg-slate-50 p-6 text-center text-xs text-slate-500">
               Chưa có đơn hàng đã chốt trong mốc này để thống kê khung giờ.
             </div>
           ) : (
-            <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1fr)_300px]">
+            <div className="mt-5">
               <div
                 className="relative overflow-x-auto rounded-xl border border-slate-200 bg-slate-50 p-4"
                 onMouseLeave={() => setHoveredOrderHour(null)}
@@ -1662,28 +3106,29 @@ export default function BusinessStats() {
                   <div className="pointer-events-none absolute right-4 top-4 z-20 w-64 rounded-xl border border-slate-200 bg-white/95 p-3 text-left shadow-xl shadow-slate-900/10 ring-1 ring-slate-900/5 backdrop-blur">
                     <div className="flex items-start justify-between gap-3">
                       <div>
-                        <div className="text-[11px] font-bold uppercase tracking-wide text-slate-400">
+                        <div className="text-[11px] font-black uppercase tracking-wide text-slate-400">
                           {isPreviewingHoveredHour ? "Khung giờ đang xem" : "Khung giờ cao điểm"}
                         </div>
-                        <div className="mt-1 text-base font-black text-slate-950">
+                        <div className="mt-1 text-[13px] font-black text-slate-950">
                           {formatHourRange(previewOrderHour.hour)}
                         </div>
                       </div>
                       <span className={[
-                        "rounded-full px-2.5 py-1 text-xs font-bold",
+                        "rounded-full px-2.5 py-1 text-xs font-black",
                         isPreviewingHoveredHour ? "bg-sky-50 text-sky-700" : "bg-emerald-50 text-emerald-700",
-                      ].join(" ")}>
+                      ].join(" ")}
+                      >
                         {formatNumber(previewOrderHour.orderCount)} đơn
                       </span>
                     </div>
                     <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
                       <div className="rounded-lg bg-slate-50 px-2.5 py-2">
                         <div className="text-slate-400">Khách chốt</div>
-                        <div className="mt-0.5 font-bold text-slate-900">{formatNumber(previewOrderHour.customerCount)}</div>
+                        <div className="mt-0.5 font-black text-slate-900">{formatNumber(previewOrderHour.customerCount)}</div>
                       </div>
                       <div className="rounded-lg bg-slate-50 px-2.5 py-2">
                         <div className="text-slate-400">Doanh thu</div>
-                        <div className="mt-0.5 font-bold text-slate-900">{formatCurrency(previewOrderHour.revenue)}</div>
+                        <div className="mt-0.5 font-black text-slate-900">{formatCurrency(previewOrderHour.revenue)}</div>
                       </div>
                     </div>
                   </div>
@@ -1716,7 +3161,7 @@ export default function BusinessStats() {
                             aria-label={`${item.label}: ${formatNumber(item.orderCount)} don, ${formatCurrency(item.revenue)}`}
                           />
                         </div>
-                        <div className={["text-[11px] font-semibold", isPeak ? "text-emerald-700" : "text-slate-500"].join(" ")}>
+                        <div className={["text-[11px] font-bold", isPeak ? "text-emerald-700" : "text-slate-500"].join(" ")}>
                           {String(item.hour).padStart(2, "0")}
                         </div>
                       </div>
@@ -1725,301 +3170,37 @@ export default function BusinessStats() {
                 </div>
               </div>
 
-              <div className="rounded-xl border border-emerald-100 bg-emerald-50/70 p-4">
-                <div className="text-xs font-bold uppercase text-emerald-700">Cao điểm chốt đơn</div>
-                <div className="mt-2 text-3xl font-black text-slate-950">{peakOrderHour?.label || "--:--"}</div>
-                <div className="mt-3 grid gap-2 text-sm text-slate-700">
-                  <div className="flex justify-between gap-3 rounded-lg bg-white/80 px-3 py-2">
-                    <span>Đơn hàng</span>
-                    <span className="font-bold text-slate-950">{formatNumber(peakOrderHour?.orderCount)}</span>
-                  </div>
-                  <div className="flex justify-between gap-3 rounded-lg bg-white/80 px-3 py-2">
-                    <span>Khách chốt</span>
-                    <span className="font-bold text-slate-950">{formatNumber(peakOrderHour?.customerCount)}</span>
-                  </div>
-                  <div className="flex justify-between gap-3 rounded-lg bg-white/80 px-3 py-2">
-                    <span>Doanh thu</span>
-                    <span className="font-bold text-slate-950">{formatCurrency(peakOrderHour?.revenue)}</span>
-                  </div>
-                </div>
-              </div>
             </div>
           )}
         </section>
+        </div>
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
-            <div>
-              <h2 className="text-base font-bold text-slate-900">Phễu chăm sóc khách hàng</h2>
-              <p className="mt-1 text-sm text-slate-500">Theo dõi tiến độ từ hội thoại có khách tương tác đến đơn đã chốt.</p>
-            </div>
-            <div className="inline-flex w-fit items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-sm font-semibold text-slate-600">
-              <MessageSquare size={15} />
-              {isLoadingStats ? "..." : formatNumber(interactedCustomerCount)} hội thoại tương tác
-            </div>
-          </div>
-
-          <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-            {careFunnelItems.map(([label, value, note, tone], index) => {
-              const isConvertedCard = index === 1;
-              const isUnconvertedCard = index === 2;
-              const isSilentCard = index === 3;
-              const onCardOpen = isConvertedCard
-                ? openConvertedOrdersModal
-                : isUnconvertedCard
-                  ? openUnconvertedConversationsModal
-                  : isSilentCard
-                    ? openSilentConversationsModal
-                    : undefined;
-              return (
-              <div
-                key={label}
-                role={onCardOpen ? "button" : undefined}
-                tabIndex={onCardOpen ? 0 : undefined}
-                onClick={onCardOpen}
-                onKeyDown={(event) => {
-                  if (!onCardOpen) return;
-                  if (event.key === "Enter" || event.key === " ") {
-                    event.preventDefault();
-                    onCardOpen();
-                  }
-                }}
-                className={`rounded-xl border p-4 ${tone} ${onCardOpen ? "cursor-pointer transition hover:-translate-y-0.5 hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-emerald-200" : ""}`}
-              >
-                <div className="text-xs font-bold uppercase">{label}</div>
-                <div className="mt-2 text-3xl font-bold text-slate-950">
-                  {isLoadingStats ? "..." : formatNumber(value)}
+        {isMapFullOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-3 backdrop-blur-sm">
+            <div className="flex h-[92vh] w-full max-w-7xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
+              <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+                <div>
+                  <h3 className="text-[13px] font-black text-slate-950">Phân bố nhu cầu theo tỉnh</h3>
+                  <p className="text-xs text-slate-500">{displayStatsLabel} · {formatNumber(demandProvinces.length)} tỉnh/thành {mapProvinceMode === "new" ? "mới" : "cũ"}</p>
                 </div>
-                <div className="mt-1 text-sm text-slate-500">{note}</div>
+                <button type="button" onClick={() => setIsMapFullOpen(false)} className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 hover:bg-slate-50" aria-label="Đóng">
+                  <X size={17} />
+                </button>
               </div>
-              );
-            })}
-          </div>
-        </section>
-
-        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-            <div>
-              <h2 className="text-base font-bold text-slate-900">Sản phẩm được chốt</h2>
-              <p className="text-xs text-slate-500">Top sản phẩm theo số lượng trong mốc thống kê.</p>
-            </div>
-            <div className="inline-flex w-fit items-center rounded-full border border-emerald-100 bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700">
-              {formatNumber(productStats.length)} sản phẩm
+              <div className="min-h-0 flex-1 p-3">
+                <VietnamDemandMap provinces={demandProvinces} formatNumber={formatNumber} provinceMode={mapProvinceMode} isDarkMode={isDarkMode} />
+              </div>
             </div>
           </div>
-
-          {isLoadingStats ? (
-            <div className="mt-4 rounded-xl border border-slate-100 bg-slate-50 p-5 text-center text-sm text-slate-500">
-              Đang tải biểu đồ...
-            </div>
-          ) : topProducts.length === 0 ? (
-            <div className="mt-4 rounded-xl border border-slate-100 bg-slate-50 p-5 text-center text-sm text-slate-500">
-              Chưa có sản phẩm được chốt trong mốc này.
-            </div>
-          ) : (
-            <div className="mt-4 overflow-hidden rounded-xl border border-slate-200">
-              <div className="grid grid-cols-[42px_minmax(0,1fr)_92px_120px] items-center border-b border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold uppercase text-slate-500">
-                <div>#</div>
-                <div>Sản phẩm</div>
-                <div className="text-center">SL</div>
-                <div className="text-right">Doanh thu</div>
-              </div>
-              {topProducts.map((product, index) => {
-                const quantity = Number(product.quantity) || 0;
-                const percent = maxProductQuantity > 0 ? Math.max(4, (quantity / maxProductQuantity) * 100) : 0;
-                return (
-                  <div key={`${product.sku || product.productName}-${index}`} className="grid grid-cols-[42px_minmax(0,1fr)_92px_120px] items-center gap-2 border-b border-slate-100 px-3 py-2.5 last:border-b-0 transition hover:bg-sky-50/50">
-                    <div className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-100 text-xs font-bold text-slate-600">
-                      {index + 1}
-                    </div>
-                    <div className="min-w-0 pr-1">
-                      <div className="truncate text-sm font-semibold text-slate-800" title={product.productName || "Không tên"}>
-                        {product.productName || "Không tên"}
-                      </div>
-                      <div className="mt-1 flex items-center gap-2 text-xs text-slate-400">
-                        <span className="truncate">SKU: {product.sku || "N/A"}</span>
-                        <span className="h-1 w-1 shrink-0 rounded-full bg-slate-300" />
-                        <span className="shrink-0">{formatNumber(product.orderCount)} đơn</span>
-                      </div>
-                      <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-slate-100">
-                        <div
-                          className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-sky-500"
-                          style={{ width: `${percent}%` }}
-                        />
-                      </div>
-                    </div>
-                    <div className="justify-self-center rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-bold text-emerald-700">
-                      {formatNumber(quantity)}
-                    </div>
-                    <div className="truncate text-right text-sm font-bold text-slate-800" title={formatCurrency(product.revenue)}>
-                      {formatCurrency(product.revenue)}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </section>
-
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-            <div>
-              <h2 className="text-base font-bold text-slate-900">Phân bố nhu cầu theo tỉnh</h2>
-              <p className="text-sm text-slate-500">Số lượng sản phẩm đã chốt theo tỉnh/thành lấy từ địa chỉ đơn hàng.</p>
-            </div>
-            <div className="inline-flex w-fit items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-sm font-semibold text-slate-600">
-              <MapPin size={15} />
-              {formatNumber(demandProvinces.length)} tỉnh/thành
-            </div>
-          </div>
-
-          {isLoadingStats ? (
-            <div className="mt-5 rounded-xl border border-slate-100 bg-slate-50 p-6 text-center text-sm text-slate-500">
-              Đang tải biểu đồ nhu cầu...
-            </div>
-          ) : demandProducts.length === 0 || demandProvinces.length === 0 ? (
-            <div className="mt-5 rounded-xl border border-slate-100 bg-slate-50 p-6 text-center text-sm text-slate-500">
-              Chưa đủ dữ liệu địa chỉ để thống kê nhu cầu theo tỉnh.
-            </div>
-          ) : (
-            <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
-              <div className="overflow-x-auto rounded-xl border border-slate-200">
-                <div className="min-w-[920px]">
-                  <div
-                    className="grid border-b border-slate-200 bg-slate-50 text-xs font-bold uppercase text-slate-500"
-                    style={{ gridTemplateColumns: `minmax(220px,1.35fr) repeat(${demandProvinces.length}, minmax(92px,1fr))` }}
-                  >
-                    <div className="px-3 py-3">Sản phẩm</div>
-                    {demandProvinces.map((province) => (
-                      <div key={province.province} className="px-2 py-3 text-center" title={`${province.province}: ${formatNumber(province.quantity)} sản phẩm`}>
-                        <div className="truncate">{province.province}</div>
-                        <div className="mt-0.5 text-[11px] font-semibold normal-case text-slate-400">{formatNumber(province.quantity)}</div>
-                      </div>
-                    ))}
-                  </div>
-
-                  {demandProducts.map((product) => (
-                    <div
-                      key={product.productKey}
-                      className="grid border-b border-slate-100 last:border-b-0"
-                      style={{ gridTemplateColumns: `minmax(220px,1.35fr) repeat(${demandProvinces.length}, minmax(92px,1fr))` }}
-                    >
-                      <div className="min-w-0 px-3 py-3">
-                        <div className="truncate text-sm font-semibold text-slate-800" title={product.productName}>
-                          {product.productName || "Không tên"}
-                        </div>
-                        <div className="mt-0.5 text-xs text-slate-400">
-                          {formatNumber(product.quantity)} sản phẩm
-                        </div>
-                      </div>
-                      {demandProvinces.map((province) => {
-                        const cell = demandCellMap.get(`${product.productKey}::${province.province}`);
-                        const quantity = Number(cell?.quantity || 0);
-                        const opacity = maxDemandQuantity > 0 ? 0.12 + (quantity / maxDemandQuantity) * 0.78 : 0.12;
-                        return (
-                          <div key={`${product.productKey}-${province.province}`} className="flex items-center justify-center border-l border-slate-100 px-2 py-3">
-                            <div
-                              className="flex h-10 w-full items-center justify-center rounded-lg text-sm font-bold text-slate-900 ring-1 ring-sky-100"
-                              style={{
-                                backgroundColor: quantity > 0 ? `rgba(14, 165, 233, ${opacity})` : "rgba(248, 250, 252, 1)",
-                              }}
-                              title={`${product.productName} tại ${province.province}: ${formatNumber(quantity)}`}
-                            >
-                              {quantity > 0 ? formatNumber(quantity) : "-"}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4">
-                <div className="text-sm font-bold text-slate-900">Tỉnh/thành mua nhiều</div>
-                <div className="mt-4 space-y-3">
-                  {demandProvinces.map((province, index) => {
-                    const maxProvinceQuantity = Math.max(...demandProvinces.map((item) => Number(item.quantity) || 0), 0);
-                    const percent = maxProvinceQuantity > 0 ? Math.max(6, (province.quantity / maxProvinceQuantity) * 100) : 0;
-                    return (
-                      <div key={province.province}>
-                        <div className="flex items-center justify-between gap-3 text-xs">
-                          <span className="truncate font-semibold text-slate-700">{index + 1}. {province.province}</span>
-                          <span className="shrink-0 font-bold text-slate-900">{formatNumber(province.quantity)}</span>
-                        </div>
-                        <div className="mt-1 h-2 rounded-full bg-white shadow-inner">
-                          <div className="h-full rounded-full bg-sky-500" style={{ width: `${percent}%` }} />
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-          )}
-
-          <div className="mt-6 rounded-xl border border-slate-200 bg-slate-50/80 p-4">
-            <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
-              <div>
-                <h3 className="text-sm font-bold text-slate-900">Câu hỏi khách hàng thường hỏi nhất</h3>
-                <p className="mt-1 text-sm text-slate-500">Tổng hợp từ tin nhắn của khách trong mốc thống kê đang chọn.</p>
-              </div>
-              <div className="inline-flex w-fit items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-sm font-semibold text-slate-600">
-                <MessageSquare size={15} />
-                {isLoadingStats ? "..." : formatNumber(frequentQuestions.length)} nhóm câu hỏi
-              </div>
-            </div>
-
-            {isLoadingStats ? (
-              <div className="mt-4 rounded-xl border border-slate-100 bg-white p-6 text-center text-sm text-slate-500">
-                Đang tải danh sách câu hỏi...
-              </div>
-            ) : frequentQuestions.length === 0 ? (
-              <div className="mt-4 rounded-xl border border-dashed border-slate-300 bg-white p-6 text-center text-sm text-slate-500">
-                Chưa có đủ dữ liệu câu hỏi của khách trong mốc này.
-              </div>
-            ) : (
-              <div className="mt-4 overflow-x-auto rounded-xl border border-slate-200 bg-white">
-                <div className="min-w-[760px]">
-                  <div className="grid grid-cols-[52px_minmax(220px,1fr)_110px_120px_150px] border-b border-slate-200 bg-slate-100 px-4 py-3 text-xs font-bold uppercase text-slate-500">
-                    <div>#</div>
-                    <div>Câu hỏi</div>
-                    <div className="text-right">Số lần</div>
-                    <div className="text-right">Khách</div>
-                    <div className="text-right">Gần nhất</div>
-                  </div>
-                  {frequentQuestions.slice(0, 12).map((item, index) => (
-                    <div
-                      key={`${item.question}-${index}`}
-                      className="grid grid-cols-[52px_minmax(220px,1fr)_110px_120px_150px] items-start gap-0 border-b border-slate-100 px-4 py-3 text-sm last:border-b-0 hover:bg-sky-50/40"
-                    >
-                      <div className="font-bold text-slate-400">{index + 1}</div>
-                      <div className="min-w-0">
-                        <div className="break-words font-semibold text-slate-800">{item.question || "Không rõ nội dung"}</div>
-                        {Array.isArray(item.examples) && item.examples.length > 1 && (
-                          <div className="mt-1 truncate text-xs text-slate-400" title={item.examples.join(" | ")}>
-                            Ví dụ khác: {item.examples.slice(1, 3).join(" | ")}
-                          </div>
-                        )}
-                      </div>
-                      <div className="text-right font-bold text-slate-900">{formatNumber(item.count)}</div>
-                      <div className="text-right text-slate-600">{formatNumber(item.customerCount)}</div>
-                      <div className="text-right text-xs text-slate-500">{formatDateTime(item.latestAt) || "N/A"}</div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        </section>
+        )}
 
         {messageReportsModal.isOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm">
             <div className="flex max-h-[88vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
               <div className="flex flex-col gap-3 border-b border-slate-100 px-5 py-4 sm:flex-row sm:items-start sm:justify-between">
                 <div>
-                  <h3 className="text-lg font-bold text-slate-950">Hội thoại lỗi</h3>
-                  <p className="mt-1 text-sm text-slate-500">
+                  <h3 className="text-base font-bold text-slate-950">Hội thoại lỗi</h3>
+                  <p className="mt-1 text-xs text-slate-500">
                     {statsLabel} • {messageReportsModal.isLoading ? "Đang tải..." : `${formatNumber(messageReportsModal.reports.length)} lượt báo lỗi`}
                   </p>
                 </div>
@@ -2035,16 +3216,16 @@ export default function BusinessStats() {
 
               <div className="min-h-0 flex-1 overflow-auto p-5">
                 {messageReportsModal.isLoading ? (
-                  <div className="rounded-xl border border-slate-100 bg-slate-50 p-8 text-center text-sm text-slate-500">
+                  <div className="rounded-xl border border-slate-100 bg-slate-50 p-8 text-center text-xs text-slate-500">
                     Đang tải danh sách hội thoại lỗi...
                   </div>
                 ) : messageReportsModal.error ? (
-                  <div className="flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                  <div className="flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs text-rose-700">
                     <AlertTriangle size={16} />
                     {messageReportsModal.error}
                   </div>
                 ) : messageReportsModal.reports.length === 0 ? (
-                  <div className="rounded-xl border border-slate-100 bg-slate-50 p-8 text-center text-sm text-slate-500">
+                  <div className="rounded-xl border border-slate-100 bg-slate-50 p-8 text-center text-xs text-slate-500">
                     Chưa có hội thoại lỗi trong mốc này.
                   </div>
                 ) : (
@@ -2071,7 +3252,7 @@ export default function BusinessStats() {
                     )}
 
                     <div className="overflow-hidden rounded-xl border border-slate-200">
-                      <table className="w-full min-w-[980px] border-collapse text-left text-sm">
+                      <table className="w-full min-w-[980px] border-collapse text-left text-xs">
                         <thead className="bg-slate-50 text-xs uppercase text-slate-500">
                           <tr>
                             <th className="border-b border-slate-200 px-4 py-3">Thời gian</th>
@@ -2129,12 +3310,12 @@ export default function BusinessStats() {
 
         {convertedOrdersModal.isOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm">
-            <div className="flex max-h-[88vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
-              <div className="flex flex-col gap-3 border-b border-slate-100 px-5 py-4 sm:flex-row sm:items-start sm:justify-between">
+            <div className="flex max-h-[88vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white text-[12px] shadow-2xl">
+              <div className="flex flex-col gap-3 border-b border-slate-100 px-4 py-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
-                  <h3 className="text-lg font-bold text-slate-950">Khách đã chốt</h3>
-                  <p className="mt-1 text-sm text-slate-500">
-                    {statsLabel} • {convertedOrdersModal.isLoading ? "Đang tải..." : `${formatNumber(convertedCustomerRows.length)} khách`} • {formatNumber(convertedOrdersModal.orders.length)} đơn hàng
+                  <h3 className="text-base font-black text-slate-950">Khách đã chốt</h3>
+                  <p className="mt-1 text-xs text-slate-500">
+                    {displayStatsLabel} • {convertedOrdersModal.isLoading ? "Đang tải..." : `${formatNumber(officialConvertedCustomerRows.length)} khách`} • {formatNumber(officialConvertedOrderCount)} đơn hàng
                   </p>
                 </div>
                 <button
@@ -2147,62 +3328,87 @@ export default function BusinessStats() {
                 </button>
               </div>
 
-              <div className="min-h-0 flex-1 overflow-auto p-5">
+              <div className="min-h-0 flex-1 overflow-auto p-4">
                 {convertedOrdersModal.isLoading ? (
-                  <div className="rounded-xl border border-slate-100 bg-slate-50 p-8 text-center text-sm text-slate-500">
+                  <div className="rounded-xl border border-slate-100 bg-slate-50 p-8 text-center text-xs text-slate-500">
                     Đang tải danh sách đơn hàng...
                   </div>
                 ) : convertedOrdersModal.error ? (
-                  <div className="flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                  <div className="flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs text-rose-700">
                     <AlertTriangle size={16} />
                     {convertedOrdersModal.error}
                   </div>
                 ) : convertedCustomerRows.length === 0 ? (
-                  <div className="rounded-xl border border-slate-100 bg-slate-50 p-8 text-center text-sm text-slate-500">
+                  <div className="rounded-xl border border-slate-100 bg-slate-50 p-8 text-center text-xs text-slate-500">
                     Chưa có khách đã chốt trong mốc này.
                   </div>
                 ) : (
+                  <>
+                  <div className="mb-3 inline-flex rounded-xl border border-slate-200 bg-slate-50 p-1">
+                    <button type="button" onClick={() => setConvertedOrdersTab("official")} className={`rounded-lg px-3 py-1.5 text-xs font-black ${convertedOrdersTab === "official" ? "bg-white text-slate-950 shadow-sm" : "text-slate-500"}`}>
+                      Đơn hàng ({formatNumber(officialConvertedOrderCount)})
+                    </button>
+                    <button type="button" onClick={() => setConvertedOrdersTab("draft")} className={`rounded-lg px-3 py-1.5 text-xs font-black ${convertedOrdersTab === "draft" ? "bg-white text-slate-950 shadow-sm" : "text-slate-500"}`}>
+                      Đơn nháp ({formatNumber(draftConvertedOrderCount)})
+                    </button>
+                  </div>
+                  {activeConvertedRows.length === 0 ? (
+                    <div className="rounded-xl border border-slate-100 bg-slate-50 p-8 text-center text-xs text-slate-500">
+                      Không có dữ liệu trong tab này.
+                    </div>
+                  ) : (
                   <div className="overflow-hidden rounded-xl border border-slate-200">
-                    <table className="w-full min-w-[900px] border-collapse text-left text-sm">
+                    <table className="w-full min-w-[1080px] border-collapse text-left text-xs">
                       <thead className="bg-slate-50 text-xs uppercase text-slate-500">
                         <tr>
-                          <th className="border-b border-slate-200 px-4 py-3">Khách hàng</th>
-                          <th className="border-b border-slate-200 px-4 py-3">Điện thoại</th>
-                          <th className="border-b border-slate-200 px-4 py-3">Sản phẩm</th>
-                          <th className="border-b border-slate-200 px-4 py-3">Tổng tiền</th>
-                          <th className="border-b border-slate-200 px-4 py-3">Số đơn</th>
-                          <th className="border-b border-slate-200 px-4 py-3">Đơn gần nhất</th>
+                          <th className="border-b border-slate-200 px-3 py-2">Khách hàng</th>
+                          <th className="border-b border-slate-200 px-3 py-2">Điện thoại</th>
+                          <th className="border-b border-slate-200 px-3 py-2">Địa chỉ</th>
+                          <th className="border-b border-slate-200 px-3 py-2">Sản phẩm</th>
+                          <th className="border-b border-slate-200 px-3 py-2 text-right">Tổng tiền</th>
+                          <th className="border-b border-slate-200 px-3 py-2 text-center">Số đơn</th>
+                          <th className="border-b border-slate-200 px-3 py-2">Đơn gần nhất</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
-                        {convertedCustomerRows.map((customer) => {
+                        {activeConvertedRows.map((customer) => {
                           const items = Array.isArray(customer.items) ? customer.items : [];
                           const itemSummary = items.length
                             ? items.map((item) => `${item.productName || item.sku || "Sản phẩm"} x${formatNumber(item.quantity || 0)}`).join(", ")
                             : "Không có sản phẩm";
+                          const sourceOrder = (convertedOrdersModal.orders || []).find((order) => (
+                            String(order.customerId || "") === String(customer.customerId || "")
+                            && String(order.pageId || "") === String(customer.pageId || "")
+                          ));
                           return (
                             <tr key={customer.key} className="hover:bg-slate-50/80">
-                              <td className="px-4 py-3">
-                                <div className="font-semibold text-slate-900">{customer.customerName || customer.customerId || "Không tên"}</div>
-                                <div className="mt-0.5 text-xs text-slate-400">{customer.pageName || customer.pageId || ""}</div>
+                              <td className="px-3 py-2">
+                                <div className="font-black text-slate-900">{customer.customerName || customer.customerId || "Không tên"}</div>
+                                <div className="mt-0.5 text-[11px] text-slate-400">{customer.customerId || ""}</div>
+                                <div className="mt-0.5 text-[11px] text-slate-400">{customer.pageName || customer.pageId || ""}</div>
                               </td>
-                              <td className="px-4 py-3 text-slate-700">{customer.phoneNumber || "N/A"}</td>
-                              <td className="max-w-[360px] px-4 py-3 text-slate-600">
+                              <td className="px-3 py-2 font-semibold text-slate-700">{maskPhoneNumber(customer.phoneNumber)}</td>
+                              <td className="max-w-[220px] px-3 py-2 text-slate-600">
+                                <div className="line-clamp-2" title={getOrderAddress(sourceOrder)}>{getOrderAddress(sourceOrder)}</div>
+                              </td>
+                              <td className="max-w-[300px] px-3 py-2 text-slate-600">
                                 <div className="line-clamp-2" title={itemSummary}>{itemSummary}</div>
                               </td>
-                              <td className="px-4 py-3 font-bold text-slate-900">{formatCurrency(customer.total)}</td>
-                              <td className="px-4 py-3">
+                              <td className="px-3 py-2 text-right font-black text-slate-900">{formatCurrency(customer.total)}</td>
+                              <td className="px-3 py-2 text-center">
                                 <span className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-bold text-emerald-700">
                                   {formatNumber(customer.orderCount)} đơn
                                 </span>
                               </td>
-                              <td className="px-4 py-3 text-slate-500">{formatDateTime(customer.lastOrderAt)}</td>
+                              <td className="px-3 py-2 text-slate-500">{formatDateTime(customer.lastOrderAt)}</td>
                             </tr>
                           );
                         })}
                       </tbody>
                     </table>
                   </div>
+                  )}
+                  </>
                 )}
               </div>
             </div>
@@ -2214,8 +3420,8 @@ export default function BusinessStats() {
             <div className="flex max-h-[88vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
               <div className="flex flex-col gap-3 border-b border-slate-100 px-5 py-4 sm:flex-row sm:items-start sm:justify-between">
                 <div>
-                  <h3 className="text-lg font-bold text-slate-950">Hội thoại chưa chốt</h3>
-                  <p className="mt-1 text-sm text-slate-500">
+                  <h3 className="text-base font-bold text-slate-950">Hội thoại chưa chốt</h3>
+                  <p className="mt-1 text-xs text-slate-500">
                     {statsLabel} • {unconvertedConversationsModal.isLoading ? "Đang tải..." : `${formatNumber(unconvertedConversationsModal.conversations.length)} hội thoại`}
                   </p>
                 </div>
@@ -2231,21 +3437,21 @@ export default function BusinessStats() {
 
               <div className="min-h-0 flex-1 overflow-auto p-5">
                 {unconvertedConversationsModal.isLoading ? (
-                  <div className="rounded-xl border border-slate-100 bg-slate-50 p-8 text-center text-sm text-slate-500">
+                  <div className="rounded-xl border border-slate-100 bg-slate-50 p-8 text-center text-xs text-slate-500">
                     Đang tải danh sách hội thoại...
                   </div>
                 ) : unconvertedConversationsModal.error ? (
-                  <div className="flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                  <div className="flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs text-rose-700">
                     <AlertTriangle size={16} />
                     {unconvertedConversationsModal.error}
                   </div>
                 ) : unconvertedConversationsModal.conversations.length === 0 ? (
-                  <div className="rounded-xl border border-slate-100 bg-slate-50 p-8 text-center text-sm text-slate-500">
+                  <div className="rounded-xl border border-slate-100 bg-slate-50 p-8 text-center text-xs text-slate-500">
                     Chưa có hội thoại chưa chốt trong mốc này.
                   </div>
                 ) : (
                   <div className="overflow-hidden rounded-xl border border-slate-200">
-                    <table className="w-full min-w-[860px] border-collapse text-left text-sm">
+                    <table className="w-full min-w-[860px] border-collapse text-left text-xs">
                       <thead className="bg-slate-50 text-xs uppercase text-slate-500">
                         <tr>
                           <th className="border-b border-slate-200 px-4 py-3">Khách hàng</th>
@@ -2295,8 +3501,8 @@ export default function BusinessStats() {
             <div className="flex max-h-[88vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
               <div className="flex flex-col gap-3 border-b border-slate-100 px-5 py-4 sm:flex-row sm:items-start sm:justify-between">
                 <div>
-                  <h3 className="text-lg font-bold text-slate-950">Cần chăm sóc lại</h3>
-                  <p className="mt-1 text-sm text-slate-500">
+                  <h3 className="text-base font-bold text-slate-950">Cần chăm sóc lại</h3>
+                  <p className="mt-1 text-xs text-slate-500">
                     {statsLabel} • {silentConversationsModal.isLoading ? "Đang tải..." : `${formatNumber(silentConversationsModal.conversations.length)} hội thoại`} • Chưa có phản hồi BOT hoặc người
                   </p>
                 </div>
@@ -2312,21 +3518,21 @@ export default function BusinessStats() {
 
               <div className="min-h-0 flex-1 overflow-auto p-5">
                 {silentConversationsModal.isLoading ? (
-                  <div className="rounded-xl border border-slate-100 bg-slate-50 p-8 text-center text-sm text-slate-500">
+                  <div className="rounded-xl border border-slate-100 bg-slate-50 p-8 text-center text-xs text-slate-500">
                     Đang tải danh sách hội thoại cần chăm sóc...
                   </div>
                 ) : silentConversationsModal.error ? (
-                  <div className="flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                  <div className="flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs text-rose-700">
                     <AlertTriangle size={16} />
                     {silentConversationsModal.error}
                   </div>
                 ) : silentConversationsModal.conversations.length === 0 ? (
-                  <div className="rounded-xl border border-slate-100 bg-slate-50 p-8 text-center text-sm text-slate-500">
+                  <div className="rounded-xl border border-slate-100 bg-slate-50 p-8 text-center text-xs text-slate-500">
                     Chưa có hội thoại cần chăm sóc lại trong mốc này.
                   </div>
                 ) : (
                   <div className="overflow-hidden rounded-xl border border-slate-200">
-                    <table className="w-full min-w-[960px] border-collapse text-left text-sm">
+                    <table className="w-full min-w-[960px] border-collapse text-left text-xs">
                       <thead className="bg-slate-50 text-xs uppercase text-slate-500">
                         <tr>
                           <th className="border-b border-slate-200 px-4 py-3">Khách hàng</th>

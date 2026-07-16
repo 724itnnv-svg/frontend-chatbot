@@ -91,7 +91,7 @@ const MENU_GROUPS = [
     id: "business",
     label: "Kinh doanh",
     icon: MessageCircle,
-    items: ["business_stats", "pages", "meta_pages", "pagesmessage", "customer_care", "chatweb", "donhang", "donhangWeb"],
+    items: ["business_stats", "pages", "pagesmessage", "customer_care", "chatweb", "donhang", "donhangWeb"],
   },
   {
     id: "attendance",
@@ -115,7 +115,7 @@ const MENU_GROUPS = [
     id: "system",
     label: "Hệ thống & AI",
     icon: ShieldCheck,
-    items: ["admin_dashboard", "admin_products_tool", "admin_vectorstore_tool", "admin_chat_v3_file_search", "admin_chat_v3_contexts", "admin_chat_v3_rules", "admin_chat_v3_try", "admin_agent", "admin_agent_intent", "admin_agent_promo", "admin_agent_response_templates", "admin_chatbot_config", "admin_chat_v3_faq", "admin_logs", "admin_chat_webhook_logs"],
+    items: ["admin_dashboard", "meta_pages", "admin_products_tool", "admin_vectorstore_tool", "admin_chat_v3_file_search", "admin_chat_v3_contexts", "admin_chat_v3_rules", "admin_chat_v3_try", "admin_agent", "admin_agent_intent", "admin_agent_promo", "admin_agent_response_templates", "admin_chatbot_config", "admin_chat_v3_faq", "admin_logs", "admin_chat_webhook_logs"],
   },
   {
     id: "experimental",
