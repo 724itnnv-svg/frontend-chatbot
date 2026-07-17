@@ -234,24 +234,37 @@ function PageMessage() {
     : rawUserPageIds
       ? [rawUserPageIds]
       : [];
+  const userPageScopeKey = userPageIds.map(String).sort().join(",");
 
   // ✅ Load danh sách page
   useEffect(() => {
     const fetchPages = async () => {
       try {
         setLoadingPages(true);
-        const res = await fetch("/api/page?autoReply=true", {
+        // Màn hình tin nhắn phải hiển thị toàn bộ page được quản lý.
+        // autoReply là trạng thái chatbot, không phải điều kiện phân quyền page.
+        const res = await fetch("/api/page", {
           headers: {
             Authorization: `Bearer ${token}`,
           },
         });
         if (res.status === 401) logout();
 
-        let data = await res.json();       
+        const data = await res.json();
+        if (!res.ok) throw new Error(data?.message || "Không thể tải danh sách page");
 
-        setPages(Array.isArray(data) ? data : []);
+        const pageList = Array.isArray(data) ? data : [];
+        setPages(pageList);
+        setSelectedPage((current) => {
+          if (!current) return null;
+          return pageList.some((page) => String(page._id) === String(current._id))
+            ? current
+            : null;
+        });
       } catch (err) {
         console.error(err);
+        setPages([]);
+        setSelectedPage(null);
       } finally {
         setLoadingPages(false);
       }
@@ -259,7 +272,7 @@ function PageMessage() {
 
     fetchPages();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAdmin, isUser]);
+  }, [token, user?._id, userPageScopeKey]);
 
   // ✅ Lấy info người dùng từ FB (participants)
   const fetchUserInfo = async (page, localUserIds, currentInfo = {}, { loadSeq = null } = {}) => {
