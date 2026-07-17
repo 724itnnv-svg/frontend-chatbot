@@ -15,6 +15,7 @@ import {
 import {
   buildCashflowPayloadEntries,
   buildCashflowPayloads,
+  hasCashflowInvoiceId,
 } from "../services/cashflowService/payloadService";
 
 import ControlsPanel from "./cashflow-components/ControlsPanel";
@@ -267,6 +268,160 @@ const cashflowStyles = `
   margin: 0 auto 18px;
 }
 
+.app-shell .stats-shell {
+  display: grid;
+  gap: 14px;
+  max-width: 1600px;
+  margin: 0 auto 18px;
+}
+
+.app-shell .totals-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.app-shell .totals-grid--compact {
+  grid-template-columns: 1fr;
+}
+
+.app-shell .hero-panel .totals-grid {
+  margin-top: 2px;
+}
+
+.app-shell .hero-panel .totals-grid--compact {
+  gap: 12px;
+}
+
+.app-shell .hero-panel .totals-grid--compact .stat-card {
+  min-height: 84px;
+  padding: 14px 16px;
+}
+
+.app-shell .order-progress {
+  display: grid;
+  gap: 10px;
+  margin-top: 2px;
+  border: 1px solid rgba(125, 211, 252, 0.28);
+  border-radius: 18px;
+  padding: 14px 16px;
+  background:
+    linear-gradient(180deg, rgba(240, 249, 255, 0.98), rgba(255, 255, 255, 0.96));
+  box-shadow: 0 12px 30px rgba(14, 165, 233, 0.08);
+}
+
+.app-shell .order-progress__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.app-shell .order-progress__head span {
+  display: block;
+  color: #64748b;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.app-shell .order-progress__head strong {
+  display: block;
+  margin-top: 4px;
+  color: #0f172a;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.app-shell .order-progress__head em {
+  color: #0f766e;
+  font-size: 14px;
+  font-style: normal;
+  font-weight: 900;
+}
+
+.app-shell .order-progress__bar {
+  overflow: hidden;
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.16);
+}
+
+.app-shell .order-progress__bar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #0ea5e9, #14b8a6);
+  transition: width 180ms ease;
+}
+
+.app-shell .order-progress.is-active .order-progress__bar span {
+  box-shadow: 0 0 0 1px rgba(14, 165, 233, 0.08);
+}
+
+.app-shell .send-progress {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+  border: 1px solid rgba(165, 180, 252, 0.28);
+  border-radius: 18px;
+  padding: 14px 16px;
+  background:
+    linear-gradient(180deg, rgba(245, 243, 255, 0.98), rgba(255, 255, 255, 0.96));
+  box-shadow: 0 12px 30px rgba(99, 102, 241, 0.08);
+}
+
+.app-shell .send-progress__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.app-shell .send-progress__head span {
+  display: block;
+  color: #6b7280;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.app-shell .send-progress__head strong {
+  display: block;
+  margin-top: 4px;
+  color: #111827;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.app-shell .send-progress__head em {
+  color: #7c3aed;
+  font-size: 14px;
+  font-style: normal;
+  font-weight: 900;
+}
+
+.app-shell .send-progress__bar {
+  overflow: hidden;
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.16);
+}
+
+.app-shell .send-progress__bar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #8b5cf6, #06b6d4);
+  transition: width 180ms ease;
+}
+
+.app-shell .send-progress.is-active .send-progress__bar span {
+  box-shadow: 0 0 0 1px rgba(139, 92, 246, 0.08);
+}
+
 .app-shell .stat-card {
   display: grid;
   gap: 8px;
@@ -276,6 +431,32 @@ const cashflowStyles = `
   padding: 18px;
   background: rgba(255, 255, 255, 0.84);
   box-shadow: 0 18px 40px rgba(15, 23, 42, 0.06);
+}
+
+.app-shell .stat-card--accent {
+  min-height: 110px;
+  border-width: 1px;
+  border-style: solid;
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
+}
+
+.app-shell .stat-card--money {
+  border-color: rgba(16, 185, 129, 0.18);
+  background: linear-gradient(180deg, rgba(236, 253, 245, 0.98), rgba(255, 255, 255, 0.96));
+}
+
+.app-shell .stat-card--ship {
+  border-color: rgba(14, 165, 233, 0.18);
+  background: linear-gradient(180deg, rgba(240, 249, 255, 0.98), rgba(255, 255, 255, 0.96));
+}
+
+.app-shell .stat-card--grand {
+  border-color: rgba(168, 85, 247, 0.16);
+  background: linear-gradient(180deg, rgba(250, 245, 255, 0.98), rgba(255, 255, 255, 0.96));
+}
+
+.app-shell .hero-panel .totals-grid .stat-card {
+  min-height: 90px;
 }
 
 .app-shell .stat-card span {
@@ -324,7 +505,7 @@ const cashflowStyles = `
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  max-height: calc(100vh - 320px);
+  max-height: calc(100vh - 120px);
 }
 
 .app-shell .json-card {
@@ -619,6 +800,12 @@ const cashflowStyles = `
   margin-top: 14px;
 }
 
+.app-shell .missing-invoice-list {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+}
+
 .app-shell .payload-preview {
   overflow: auto;
   max-height: 320px;
@@ -703,6 +890,10 @@ const cashflowStyles = `
   border-radius: 28px;
   padding: 22px;
 }
+
+
+
+
 
 .app-shell .detail-modal__sections {
   display: grid;
@@ -1014,6 +1205,10 @@ const cashflowStyles = `
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .app-shell .totals-grid {
+    grid-template-columns: 1fr;
+  }
+
   .app-shell .detail-grid,
   .app-shell .detail-grid--compact {
     grid-template-columns: 1fr;
@@ -1073,6 +1268,10 @@ const cashflowStyles = `
     grid-template-columns: 1fr;
   }
 
+  .app-shell .totals-grid {
+    grid-template-columns: 1fr;
+  }
+
   .app-shell .toast-container {
     left: 14px;
     right: 14px;
@@ -1106,19 +1305,38 @@ const filterRowsByRetailer = (rows) => {
 
 const filterSelectableRows = (rows) => rows.filter((row) => !row.__sentToKiot);
 
+const parseMoneyValue = (value) => {
+  const text = normalizeText(value).replace(/,/g, "");
+  if (!text) return 0;
+
+  const number = Number(text);
+  return Number.isFinite(number) ? number : 0;
+};
+
+const sumMoneyColumn = (rows, header) =>
+  rows.reduce((total, row) => total + parseMoneyValue(row?.[header]), 0);
+
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const getOrderDeliveryCode = (row) =>
   normalizeText(row["Mã vận đơn"] || row["Mã Vận Đơn"] || row["mã vận đơn"]);
 
 const stripOrderDeliveryData = (row) => {
-  const { __orderDelivery, __orderDeliveryLoaded, ...rest } = row || {};
+  const {
+    __orderDelivery,
+    __orderDeliveryLoaded,
+    __orderDeliveryMissingInvoice,
+    ...rest
+  } = row || {};
   return rest;
 };
 
 const mergeOrderDeliveryIntoRow = (row, orderDelivery) => ({
   ...row,
-  "Mã HD Kiot": orderDelivery.invoiceId || row["Mã HD Kiot"] || "",
+  "Mã HD Kiot":
+    normalizeText(orderDelivery.invoiceId || orderDelivery.invoiceIdCode) ||
+    row["Mã HD Kiot"] ||
+    "",
   "Đối tác chuyển tiền":
     orderDelivery.partnerDeliveryName || row["Đối tác chuyển tiền"] || "",
   "Nhân viên":
@@ -1133,6 +1351,9 @@ const mergeOrderDeliveryIntoRow = (row, orderDelivery) => ({
   PartnerCode: orderDelivery.partnerDeliveryCode || row.PartnerCode || "",
   __orderDelivery: orderDelivery,
   __orderDeliveryLoaded: true,
+  __orderDeliveryMissingInvoice: !normalizeText(
+    orderDelivery.invoiceId || orderDelivery.invoiceIdCode,
+  ),
 });
 
 export default function CashFlowApp() {
@@ -1158,8 +1379,21 @@ export default function CashFlowApp() {
   const [toasts, setToasts] = useState([]);
   const toastIdRef = useRef(0);
   const [sendingPayloads, setSendingPayloads] = useState(false);
+  const [sendPayloadProgress, setSendPayloadProgress] = useState({
+    runId: 0,
+    active: false,
+    total: 0,
+    completed: 0,
+  });
+  const [orderDeliveryLoadProgress, setOrderDeliveryLoadProgress] = useState({
+    runId: 0,
+    active: false,
+    total: 0,
+    completed: 0,
+  });
   const orderDeliveryInFlightRef = useRef(new Set());
   const orderDeliveryBulkRunIdRef = useRef(0);
+  const sendPayloadRunIdRef = useRef(0);
   const sourceExcelRef = useRef({
     workbook: null,
     file: null,
@@ -1189,8 +1423,42 @@ export default function CashFlowApp() {
 
   const [exportingExcel, setExportingExcel] = useState(false);
 
+  const cancelSendPayloadProgress = () => {
+    sendPayloadRunIdRef.current += 1;
+    setSendPayloadProgress((current) =>
+      current.active ? { ...current, active: false } : current,
+    );
+  };
+
+  const startSendPayloadProgress = (total) => {
+    const runId = sendPayloadRunIdRef.current + 1;
+    sendPayloadRunIdRef.current = runId;
+    setSendPayloadProgress({
+      runId,
+      active: total > 0,
+      total,
+      completed: 0,
+    });
+    return runId;
+  };
+
   const cancelBulkOrderDeliveryLoad = () => {
     orderDeliveryBulkRunIdRef.current += 1;
+    setOrderDeliveryLoadProgress((current) =>
+      current.active ? { ...current, active: false } : current,
+    );
+  };
+
+  const startBulkOrderDeliveryLoad = (total) => {
+    const runId = orderDeliveryBulkRunIdRef.current + 1;
+    orderDeliveryBulkRunIdRef.current = runId;
+    setOrderDeliveryLoadProgress({
+      runId,
+      active: total > 0,
+      total,
+      completed: 0,
+    });
+    return runId;
   };
 
   const loadOrderDeliveryForRow = async (row) => {
@@ -1229,6 +1497,18 @@ export default function CashFlowApp() {
         : response?.data?.[0] || response?.Data?.[0] || response;
 
       if (!orderDelivery || typeof orderDelivery !== "object") {
+        setAllRows((currentRows) =>
+          currentRows.map((item) =>
+            getOrderDeliveryCode(item) === deliveryCode
+              ? {
+                  ...item,
+                  __orderDelivery: null,
+                  __orderDeliveryLoaded: true,
+                  __orderDeliveryMissingInvoice: true,
+                }
+              : item,
+          ),
+        );
         return;
       }
 
@@ -1255,27 +1535,56 @@ export default function CashFlowApp() {
   };
 
   const loadOrderDeliveryRowsInBatches = async (rows) => {
-    const runId = orderDeliveryBulkRunIdRef.current;
+    const total = rows.length;
+    const runId = startBulkOrderDeliveryLoad(total);
 
-    for (let index = 0; index < rows.length; index += 1) {
-      if (orderDeliveryBulkRunIdRef.current !== runId) {
-        return;
+    try {
+      for (let index = 0; index < rows.length; index += 1) {
+        if (orderDeliveryBulkRunIdRef.current !== runId) {
+          return;
+        }
+
+        const row = rows[index];
+        await loadOrderDeliveryForRow(row);
+
+        if (orderDeliveryBulkRunIdRef.current !== runId) {
+          return;
+        }
+
+        const completed = index + 1;
+        setOrderDeliveryLoadProgress((current) =>
+          current.runId === runId
+            ? {
+                ...current,
+                active: completed < total,
+                total,
+                completed,
+              }
+            : current,
+        );
+
+        if (index === rows.length - 1) {
+          break;
+        }
+
+        await sleep(ORDER_DELIVERY_ROW_DELAY_MS);
+
+        const completedCount = index + 1;
+        if (completedCount % ORDER_DELIVERY_BATCH_SIZE === 0) {
+          await sleep(ORDER_DELIVERY_BATCH_PAUSE_MS);
+        }
       }
-
-      const row = rows[index];
-      await loadOrderDeliveryForRow(row);
-
-      const isLastRow = index === rows.length - 1;
-      if (isLastRow) {
-        return;
-      }
-
-      await sleep(ORDER_DELIVERY_ROW_DELAY_MS);
-
-      const completedCount = index + 1;
-      if (completedCount % ORDER_DELIVERY_BATCH_SIZE === 0) {
-        await sleep(ORDER_DELIVERY_BATCH_PAUSE_MS);
-      }
+    } finally {
+      setOrderDeliveryLoadProgress((current) =>
+        current.runId === runId
+          ? {
+              ...current,
+              active: false,
+              total,
+              completed: Math.min(current.completed || 0, total),
+            }
+          : current,
+      );
     }
   };
 
@@ -1348,12 +1657,39 @@ export default function CashFlowApp() {
     [visibleRows, selectedIds],
   );
 
+  const excelTotals = useMemo(() => {
+    const moneyTotal = sumMoneyColumn(allRows, "Tiền thu hộ(VNĐ)");
+    const shipTotal = sumMoneyColumn(allRows, "Tiền cước (VNĐ)");
+
+    return {
+      moneyTotal,
+      shipTotal,
+      combinedTotal: moneyTotal - shipTotal,
+    };
+  }, [allRows]);
+
   const payloadSourceRows = useMemo(
     () =>
       selectedRows.length > 0
         ? selectedRows
         : filterSelectableRows(visibleRows),
     [selectedRows, visibleRows],
+  );
+
+  const payloadReadyRows = useMemo(
+    () =>
+      payloadSourceRows.filter(
+        (row) => hasCashflowInvoiceId(row) && !row.__orderDeliveryMissingInvoice,
+      ),
+    [payloadSourceRows],
+  );
+
+  const missingInvoiceRows = useMemo(
+    () =>
+      payloadSourceRows.filter(
+        (row) => row.__orderDeliveryMissingInvoice === true,
+      ),
+    [payloadSourceRows],
   );
 
   useEffect(() => {
@@ -1386,17 +1722,18 @@ export default function CashFlowApp() {
   const generatedPayloads = useMemo(
     () =>
       buildCashflowPayloads(
-        payloadSourceRows,
+        payloadReadyRows,
         [],
         partnerDeliveries,
         bankAccounts,
         retailer,
       ),
-    [payloadSourceRows, partnerDeliveries, bankAccounts, retailer],
+    [payloadReadyRows, partnerDeliveries, bankAccounts, retailer],
   );
 
   const handleRetailerChange = (nextRetailer) => {
     cancelBulkOrderDeliveryLoad();
+    cancelSendPayloadProgress();
     setRetailer(nextRetailer);
     setSelectedIds(new Set());
     setCurrentAccessToken("");
@@ -1494,24 +1831,45 @@ export default function CashFlowApp() {
   };
 
   const handleSendPayloads = async () => {
+    let payloadEntries = [];
+    let payloads = [];
+    let runId = 0;
+
     try {
       setSendingPayloads(true);
       setPayloadError("");
 
-      const payloadEntries = buildCashflowPayloadEntries(
-        payloadSourceRows,
+      payloadEntries = buildCashflowPayloadEntries(
+        payloadReadyRows,
         [],
         partnerDeliveries,
         bankAccounts,
         retailer,
       );
-      const payloads = payloadEntries.map((entry) => entry.payload);
+      payloads = payloadEntries.map((entry) => entry.payload);
+      runId = startSendPayloadProgress(payloads.length);
 
       if (payloads.length === 0) {
+        setSendPayloadProgress((current) =>
+          current.runId === runId
+            ? {
+                ...current,
+                active: false,
+                total: 0,
+                completed: 0,
+              }
+            : current,
+        );
         addToast({
-          type: "warning",
-          title: "Không có dòng chưa gửi",
-          message: "Các dòng đang chọn đều đã gửi Kiot rồi.",
+          type: missingInvoiceRows.length > 0 ? "warning" : "warning",
+          title:
+            missingInvoiceRows.length > 0
+              ? "Có dòng thiếu mã hóa đơn"
+              : "Không có dòng chưa gửi",
+          message:
+            missingInvoiceRows.length > 0
+              ? `Có ${missingInvoiceRows.length} vận đơn thiếu mã hóa đơn. Xem danh sách bên phải để tự tạo KiotViet.`
+              : "Các dòng đang chọn đều đã gửi Kiot rồi.",
         });
         return;
       }
@@ -1538,6 +1896,17 @@ export default function CashFlowApp() {
         } catch (error) {
           results.push({ status: "rejected", reason: error });
         }
+
+        setSendPayloadProgress((current) =>
+          current.runId === runId
+            ? {
+                ...current,
+                active: true,
+                total: payloadEntries.length,
+                completed: index + 1,
+              }
+            : current,
+        );
 
         if (index < payloadEntries.length - 1) {
           await sleep(SEND_REQUEST_DELAY_MS);
@@ -1638,6 +2007,18 @@ export default function CashFlowApp() {
         message: errorMessage,
       });
     } finally {
+      if (runId > 0) {
+        setSendPayloadProgress((current) =>
+          current.runId === runId
+            ? {
+                ...current,
+                active: false,
+                total: payloads.length,
+                completed: payloads.length,
+              }
+            : current,
+        );
+      }
       setSendingPayloads(false);
     }
   };
@@ -1679,6 +2060,7 @@ export default function CashFlowApp() {
     if (!file) return;
 
     cancelBulkOrderDeliveryLoad();
+    cancelSendPayloadProgress();
     setExcelError("");
     setSelectedIds(new Set());
     setFileName(file.name);
@@ -1835,6 +2217,10 @@ export default function CashFlowApp() {
           onRetailerChange={handleRetailerChange}
           onFileChange={handleFileChange}
           retailers={RETAILERS}
+          moneyTotal={excelTotals.moneyTotal}
+          shipTotal={excelTotals.shipTotal}
+          combinedTotal={excelTotals.combinedTotal}
+          orderDeliveryProgress={orderDeliveryLoadProgress}
         />
       </header>
 
@@ -1867,16 +2253,18 @@ export default function CashFlowApp() {
           onSaveFile={handleSaveFile}
         />
 
-        <SelectedRowsPanel
-          selectedRows={selectedRows}
-          generatedPayloads={generatedPayloads}
-          getPayloadEntriesForRow={getPayloadEntriesForRow}
-          onSendPayloads={handleSendPayloads}
-          onExportExcel={handleExportExcel}
-          isSendingPayloads={sendingPayloads}
-          isExportingExcel={exportingExcel}
-          payloadSourceCount={payloadSourceRows.length}
-        />
+          <SelectedRowsPanel
+            selectedRows={selectedRows}
+            generatedPayloads={generatedPayloads}
+            getPayloadEntriesForRow={getPayloadEntriesForRow}
+            onSendPayloads={handleSendPayloads}
+            onExportExcel={handleExportExcel}
+            isSendingPayloads={sendingPayloads}
+            sendPayloadProgress={sendPayloadProgress}
+            isExportingExcel={exportingExcel}
+            payloadSourceCount={payloadSourceRows.length}
+            missingInvoiceRows={missingInvoiceRows}
+          />
       </section>
     </div>
   );

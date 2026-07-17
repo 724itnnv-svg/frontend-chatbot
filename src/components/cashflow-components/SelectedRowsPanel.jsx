@@ -31,6 +31,7 @@ const pickField = (row, keys = []) => {
 
 const buildRowSummary = (row) => ({
   code: pickField(row, ["Mã HD Kiot"]),
+  deliveryCode: pickField(row, ["Mã vận đơn", "Mã Vận Đơn", "mã vận đơn"]),
   partner: pickField(row, ["Đối tác chuyển tiền"]),
   employee: pickField(row, ["Nhân viên"]),
   money: pickField(row, ["Tiền hàng"]),
@@ -255,8 +256,10 @@ export default function SelectedRowsPanel({
   onSendPayloads,
   onExportExcel,
   isSendingPayloads,
+  sendPayloadProgress,
   isExportingExcel,
   payloadSourceCount,
+  missingInvoiceRows,
 }) {
   const [activeRowId, setActiveRowId] = useState("");
   const [modalRowId, setModalRowId] = useState("");
@@ -294,6 +297,17 @@ export default function SelectedRowsPanel({
       null
     );
   }, [modalRow, modalPayloadKind, modalPayloadEntries]);
+
+  const sendProgressTotal = sendPayloadProgress?.total ?? 0;
+  const sendProgressCompleted = sendPayloadProgress?.completed ?? 0;
+  const sendProgressActive = Boolean(sendPayloadProgress?.active);
+  const sendProgressPercent =
+    sendProgressTotal > 0
+      ? Math.min(
+          100,
+          Math.round((sendProgressCompleted / sendProgressTotal) * 100),
+        )
+      : 0;
 
   return (
     <aside className="card json-card">
@@ -366,6 +380,46 @@ export default function SelectedRowsPanel({
         )}
       </div>
 
+      {missingInvoiceRows?.length > 0 ? (
+        <div className="summary-box summary-box-topline">
+          <div className="summary-head">
+            <div>
+              <h3>Vận đơn thiếu mã hóa đơn</h3>
+              <p className="summary-subtitle">
+                {missingInvoiceRows.length} dòng chưa có invoiceId. Các dòng
+                này không được đưa vào payload và cần tạo thủ công trên KiotViet.
+              </p>
+            </div>
+          </div>
+
+          <div className="missing-invoice-list">
+            {missingInvoiceRows.map((row) => {
+              const summary = buildRowSummary(row);
+              return (
+                <article key={row.__rowId} className="selected-row-card">
+                  <div className="selected-row-card__top">
+                    <div>
+                      <strong>{summary.deliveryCode || `Dòng ${row.__rowId}`}</strong>
+                      <p>
+                        {summary.partner || "Không có đối tác"} ·{" "}
+                        {summary.employee || "Không có nhân viên"}
+                      </p>
+                    </div>
+                    <span className="chip muted">Thiếu mã hóa đơn</span>
+                  </div>
+
+                  <div className="selected-row-meta">
+                    <span className="summary-badge summary-badge--muted">
+                      Mã vận đơn: {summary.deliveryCode || "-"}
+                    </span>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
+
       <div className="summary-box summary-box-topline">
         <div className="summary-head">
           <div className="payload-actions">
@@ -387,6 +441,23 @@ export default function SelectedRowsPanel({
             </button>
           </div>
         </div>
+
+        {sendProgressTotal > 0 ? (
+          <div className={`send-progress ${sendProgressActive ? "is-active" : ""}`}>
+            <div className="send-progress__head">
+              <div>
+                <span>Gửi KiotViet</span>
+                <strong>
+                  {sendProgressCompleted}/{sendProgressTotal} payload
+                </strong>
+              </div>
+              <em>{sendProgressPercent}%</em>
+            </div>
+            <div className="send-progress__bar" aria-hidden="true">
+              <span style={{ width: `${sendProgressPercent}%` }} />
+            </div>
+          </div>
+        ) : null}
 
         <div className="payload-preview-shell">
           <div className="payload-preview-head">

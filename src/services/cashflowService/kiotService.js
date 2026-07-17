@@ -1,10 +1,13 @@
 import { api } from "./api";
 import axios from "axios";
+import { apiUrl, getApiBaseUrl } from "../../api/baseUrl";
 
-const tokenURL = "http://localhost:5000/api/cashflow";
+const tokenURL = "/api/cashflow";
 const apiKiotURL = "https://public.kiotapi.com";
 
 const token = localStorage.getItem("token");
+
+console.log("check", tokenURL);
 
 export async function getEmployeesByRetailer(
   retailer = "kingfarm",
