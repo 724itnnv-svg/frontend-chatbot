@@ -7,7 +7,7 @@ const apiKiotURL = "https://public.kiotapi.com";
 
 const token = localStorage.getItem("token");
 
-console.log("check", tokenURL);
+// console.log("check", tokenURL);
 
 export async function getEmployeesByRetailer(
   retailer = "kingfarm",
@@ -57,7 +57,7 @@ export async function createCashFlow(
   payload,
   accessPrivateToken,
 ) {
-  console.log("Creating cash flow with payload:", payload);
+  // console.log("Creating cash flow with payload:", payload);
   try {
     const response = await axios.post(`${tokenURL}/cashflow`, payload, {
       params: {
@@ -151,7 +151,7 @@ export async function getOrderDelivery(
   deliveryCode,
   accessToken,
 ) {
-  console.log("ahsdaskhdasd", accessToken);
+  // console.log("ahsdaskhdasd", accessToken);
   try {
     const response = await axios.get(`${tokenURL}/orderdelivery`, {
       params: {

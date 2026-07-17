@@ -47,17 +47,12 @@ const DonHang = lazy(() => import("./components/DonHang"));
 const DonHangWeb = lazy(() => import("./components/DonHangWeb"));
 const BusinessStats = lazy(() => import("./components/BusinessStats"));
 const UsersPage = lazy(() => import("./components/UserManager"));
-<<<<<<< HEAD
-const EmployeeProfileManager = lazy(() => import("./components/employees/EmployeeProfileManager"));
-const EmployeeAssetManager = lazy(() => import("./components/employees/EmployeeAssetManager"));
-=======
 const EmployeeProfileManager = lazy(
-  () => import("./components/EmployeeProfileManager"),
+  () => import("./components/employees/EmployeeProfileManager"),
 );
 const EmployeeAssetManager = lazy(
-  () => import("./components/EmployeeAssetManager"),
+  () => import("./components/employees/EmployeeAssetManager"),
 );
->>>>>>> 1173f657e2e4b4e14cb2b522d0bac55e608f1a66
 const RolePage = lazy(() => import("./components/role/RoleList"));
 const UserProfile = lazy(() => import("./components/UserProfile"));
 const CommissionOnlineCalculator = lazy(

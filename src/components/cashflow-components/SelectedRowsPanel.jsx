@@ -1,6 +1,16 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 
+const buttonClass =
+  "cursor-pointer rounded-[14px] border border-sky-300/25 bg-sky-50/95 px-3.5 py-[11px] text-xs font-extrabold text-sky-700 no-underline transition hover:border-sky-400/40 hover:bg-sky-500/15 hover:text-sky-800 disabled:cursor-not-allowed disabled:opacity-55";
+const activeButtonClass = "border-sky-400/40 bg-sky-500/15 text-sky-800";
+const cardClass =
+  "rounded-[20px] border border-slate-400/20 bg-white/90 p-4 shadow-[0_18px_42px_rgba(15,23,42,0.08)]";
+const sectionHeadingClass =
+  "flex flex-col items-start justify-between gap-3 md:flex-row [&_h3]:text-[13px] [&_h3]:font-black [&_h3]:text-slate-900 [&_p]:mt-1 [&_p]:text-[11px] [&_p]:leading-[1.6] [&_p]:text-slate-500";
+const detailCardClass =
+  "grid min-h-[90px] gap-1.5 rounded-[18px] border border-slate-200/95 bg-gradient-to-b from-slate-50 to-white px-[15px] py-3.5 [&_span]:text-[10px] [&_span]:font-black [&_span]:uppercase [&_span]:tracking-[0.12em] [&_span]:text-slate-500 [&_strong]:break-words [&_strong]:text-[13px] [&_strong]:font-extrabold [&_strong]:leading-[1.55] [&_strong]:text-slate-900";
+
 const normalizeText = (value) => String(value ?? "").trim();
 
 const toMoneyText = (value) => {
@@ -138,35 +148,35 @@ function DetailModal({
   ];
 
   const modalContent = (
-    <div className="detail-modal-backdrop" onClick={onClose}>
+    <div className="fixed inset-0 z-[80] grid place-items-center bg-[radial-gradient(circle_at_top,rgba(56,189,248,0.22),transparent_34%),radial-gradient(circle_at_bottom_right,rgba(16,185,129,0.16),transparent_28%),rgba(15,23,42,0.58)] p-[18px] backdrop-blur-[14px]" onClick={onClose}>
       <div
-        className="detail-modal"
+        className="relative isolate flex max-h-[88vh] w-[min(100%,calc(100vw-28px))] flex-col gap-[18px] overflow-auto rounded-[22px] border border-white/60 bg-gradient-to-b from-white/95 to-slate-50/95 p-[18px] shadow-[0_40px_120px_rgba(15,23,42,0.32),0_12px_28px_rgba(14,165,233,0.12)] sm:max-h-[min(82vh,860px)] sm:w-[min(1320px,calc(100vw-36px))] sm:rounded-[30px] sm:p-6"
         role="dialog"
         aria-modal="true"
         aria-label="Chi tiết hóa đơn"
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="detail-modal__header">
+        <div className="mb-0.5 flex flex-col items-start justify-between gap-4 md:flex-row [&_h4]:mt-1 [&_h4]:text-[clamp(1.35rem,2vw,1.85rem)] [&_h4]:font-black [&_h4]:leading-[1.08] [&_h4]:tracking-[-0.04em] [&_h4]:text-slate-900">
           <div>
-            <p className="invoice-detail__eyebrow">{summary.code || "Phiếu"}</p>
+            <p className="m-0 text-[11px] font-black uppercase tracking-[0.18em] text-teal-700">{summary.code || "Phiếu"}</p>
             <h4>{payloadTitle}</h4>
-            <p className="detail-modal__subtitle">
+            <p className="mt-1.5 text-xs leading-[1.6] text-slate-500">
               {summary.partner || "Không có đối tác"} ·{" "}
               {summary.employee || "Không có nhân viên"}
             </p>
-            <p className="detail-modal__subtitle">Số payload: 1</p>
+            <p className="mt-1.5 text-xs leading-[1.6] text-slate-500">Số payload: 1</p>
           </div>
 
-          <div className="detail-modal__actions">
-            <button type="button" className="ghost-link" onClick={onClose}>
+          <div className="flex gap-2.5 [&>*]:flex-auto md:[&>*]:flex-none">
+            <button type="button" className={buttonClass} onClick={onClose}>
               Đóng
             </button>
           </div>
         </div>
 
-        <div className="detail-modal__summary">
+        <div className="mb-0.5 rounded-[18px] border border-slate-200/90 bg-white/70 px-3.5 py-3">
           {availableEntries.length > 1 ? (
-            <div className="payload-buttons" style={{ marginBottom: "12px" }}>
+            <div className="mb-3 flex flex-wrap gap-2.5 [&>*]:flex-auto md:[&>*]:flex-none">
               {availableEntries.map((entry) => {
                 const isActive = entry.kind === activeKind;
                 const label =
@@ -176,7 +186,7 @@ function DetailModal({
                   <button
                     key={entry.kind}
                     type="button"
-                    className={`ghost-link ${isActive ? "active" : ""}`}
+                    className={`${buttonClass} ${isActive ? activeButtonClass : ""}`}
                     onClick={() => onSelectKind(entry.kind)}
                   >
                     {label}
@@ -185,51 +195,42 @@ function DetailModal({
               })}
             </div>
           ) : null}
-          {/* <span className="summary-badge">
-            {buildDisplayTitle(primaryPayload)}
-          </span> */}
-          {/* <span className="summary-badge summary-badge--muted">
-            {payloadEntry.kind === "money" ? "Khoản chính" : "Phí ship"}
-          </span>
-          <span className="summary-badge summary-badge--muted">
-            1 payload
-          </span> */}
         </div>
 
-        <div className="detail-modal__sections">
-          <section className="detail-section-card">
-            <div className="detail-section-card__head">
+        <div className="grid grid-cols-1 items-start gap-4 md:grid-cols-[minmax(0,1.08fr)_minmax(0,0.92fr)]">
+          <section className="relative overflow-hidden rounded-3xl border border-slate-200/95 bg-gradient-to-b from-white to-slate-50 p-[18px] shadow-[0_18px_40px_rgba(15,23,42,0.08)]">
+            <div className="mb-3.5 flex items-center justify-between gap-3 [&_h5]:m-0 [&_h5]:text-[13px] [&_h5]:font-black [&_h5]:text-slate-900">
               <h5>Thông tin chung</h5>
             </div>
-            <div className="detail-grid">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               {getDetailFields(primaryPayload).map((item) => (
                 <div
                   key={item.label}
-                  className="detail-card detail-card--compact"
+                  className={detailCardClass}
                 >
                   <span>{item.label}</span>
                   <strong>{item.value}</strong>
                 </div>
               ))}
-              <div className="detail-card detail-card--compact">
+              <div className={detailCardClass}>
                 <span>Đến tài khoản</span>
                 <strong>{bankAccountInfo}</strong>
               </div>
             </div>
           </section>
 
-          <section className="payload-detail-card">
-            <div className="payload-detail-card__head">
+          <section className="relative overflow-hidden rounded-3xl border border-slate-200/95 bg-gradient-to-b from-white to-slate-50 p-[18px] shadow-[0_18px_40px_rgba(15,23,42,0.08)]">
+            <div className="mb-3.5 flex items-center justify-between gap-3 [&>strong]:text-[13px] [&>strong]:font-black [&>strong]:text-slate-900">
               <strong>Chi tiết payload</strong>
-              <span className="chip muted">
+              <span className="inline-flex items-center rounded-full border border-sky-300/30 bg-sky-50 px-2.5 py-[7px] text-[11px] font-extrabold text-sky-700 shadow-[0_8px_20px_rgba(14,165,233,0.08)]">
                 {payloadEntry.kind === "money" ? "Khoản chính" : "Phí ship"}
               </span>
             </div>
-            <div className="detail-grid detail-grid--compact">
+            <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
               {entryFields.map((item) => (
                 <div
                   key={item.label}
-                  className="detail-card detail-card--compact"
+                  className={detailCardClass}
                 >
                   <span>{item.label}</span>
                   <strong>{item.value}</strong>
@@ -310,8 +311,8 @@ export default function SelectedRowsPanel({
       : 0;
 
   return (
-    <aside className="card json-card">
-      <div className="card-head">
+    <aside className="rounded-[22px] border border-slate-400/20 bg-white/90 p-[18px] shadow-[0_18px_42px_rgba(15,23,42,0.08)] backdrop-blur-xl sm:rounded-[26px] sm:p-[22px] xl:sticky xl:top-[18px]">
+      <div className="mb-4 flex flex-col items-start justify-between gap-3.5 md:flex-row [&_h2]:m-0 [&_h2]:text-lg [&_h2]:font-black [&_h2]:leading-[1.2] [&_h2]:tracking-[-0.03em] [&_h2]:text-slate-900 [&_p]:mt-1.5 [&_p]:text-xs [&_p]:leading-[1.55] [&_p]:text-slate-500">
         <div>
           <h2>Dữ liệu đã chọn</h2>
           <p>
@@ -321,9 +322,9 @@ export default function SelectedRowsPanel({
         </div>
       </div>
 
-      <div className="selected-rows-list">
+      <div className="grid max-h-[56vh] gap-3 overflow-auto pr-0.5">
         {selectedRows.length === 0 ? (
-          <div className="empty-state selected-empty">
+          <div className="py-10 text-center text-sm text-slate-500">
             Chưa chọn dòng nào. Hãy tick dữ liệu ở bảng bên trái trước.
           </div>
         ) : (
@@ -341,9 +342,9 @@ export default function SelectedRowsPanel({
             return (
               <article
                 key={row.__rowId}
-                className={`selected-row-card ${isActive ? "active" : ""}`}
+                className={`${cardClass} ${isActive ? "border-sky-400/40 shadow-[0_18px_40px_rgba(14,165,233,0.12)]" : ""}`}
               >
-                <div className="selected-row-card__top">
+                <div className="flex flex-col items-start justify-between gap-3 md:flex-row [&_strong]:text-[13px] [&_strong]:font-black [&_strong]:text-slate-900 [&_p]:mt-1 [&_p]:text-[11px] [&_p]:leading-[1.6] [&_p]:text-slate-500">
                   <div>
                     <strong>{summary.code || `Dòng ${row.__rowId}`}</strong>
                     <p>
@@ -351,11 +352,11 @@ export default function SelectedRowsPanel({
                       {summary.employee || "Không có nhân viên"}
                     </p>
                   </div>
-                  <div className="payload-buttons">
+                  <div className="flex flex-wrap gap-2.5 [&>*]:flex-auto md:[&>*]:flex-none">
                     {payloadEntries.length > 0 ? (
                       <button
                         type="button"
-                        className="ghost-link"
+                        className={buttonClass}
                         onClick={() => {
                           setActiveRowId(row.__rowId);
                           setModalRowId(row.__rowId);
@@ -381,23 +382,23 @@ export default function SelectedRowsPanel({
       </div>
 
       {missingInvoiceRows?.length > 0 ? (
-        <div className="summary-box summary-box-topline">
-          <div className="summary-head">
+        <div className="mt-4 rounded-[22px] border border-slate-400/20 bg-white/90 p-[18px] shadow-[0_18px_42px_rgba(15,23,42,0.08)] sm:rounded-3xl">
+          <div className={sectionHeadingClass}>
             <div>
               <h3>Vận đơn thiếu mã hóa đơn</h3>
-              <p className="summary-subtitle">
+              <p>
                 {missingInvoiceRows.length} dòng chưa có invoiceId. Các dòng
                 này không được đưa vào payload và cần tạo thủ công trên KiotViet.
               </p>
             </div>
           </div>
 
-          <div className="missing-invoice-list">
+          <div className="mt-3.5 grid gap-3">
             {missingInvoiceRows.map((row) => {
               const summary = buildRowSummary(row);
               return (
-                <article key={row.__rowId} className="selected-row-card">
-                  <div className="selected-row-card__top">
+                <article key={row.__rowId} className={cardClass}>
+                  <div className="flex flex-col items-start justify-between gap-3 md:flex-row [&_strong]:text-[13px] [&_strong]:font-black [&_strong]:text-slate-900 [&_p]:mt-1 [&_p]:text-[11px] [&_p]:leading-[1.6] [&_p]:text-slate-500">
                     <div>
                       <strong>{summary.deliveryCode || `Dòng ${row.__rowId}`}</strong>
                       <p>
@@ -405,11 +406,11 @@ export default function SelectedRowsPanel({
                         {summary.employee || "Không có nhân viên"}
                       </p>
                     </div>
-                    <span className="chip muted">Thiếu mã hóa đơn</span>
+                    <span className="inline-flex items-center rounded-full border border-sky-300/30 bg-sky-50 px-2.5 py-[7px] text-[11px] font-extrabold text-sky-700">Thiếu mã hóa đơn</span>
                   </div>
 
-                  <div className="selected-row-meta">
-                    <span className="summary-badge summary-badge--muted">
+                  <div className="mt-3 flex flex-wrap gap-2 text-[10px] text-slate-600">
+                    <span className="rounded-full bg-slate-50 px-2.5 py-[7px] text-slate-600">
                       Mã vận đơn: {summary.deliveryCode || "-"}
                     </span>
                   </div>
@@ -420,12 +421,12 @@ export default function SelectedRowsPanel({
         </div>
       ) : null}
 
-      <div className="summary-box summary-box-topline">
-        <div className="summary-head">
-          <div className="payload-actions">
+      <div className="mt-3.5 rounded-[22px] border border-slate-400/20 bg-white/90 p-[18px] shadow-[0_18px_42px_rgba(15,23,42,0.08)] sm:rounded-3xl">
+        <div className={sectionHeadingClass}>
+          <div className="flex flex-wrap gap-2.5 [&>*]:flex-auto md:[&>*]:flex-none">
             <button
               type="button"
-              className="ghost-link"
+              className={buttonClass}
               onClick={onSendPayloads}
               disabled={isSendingPayloads}
             >
@@ -433,7 +434,7 @@ export default function SelectedRowsPanel({
             </button>
             <button
               type="button"
-              className="ghost-link"
+              className={buttonClass}
               onClick={onExportExcel}
               disabled={isExportingExcel}
             >
@@ -443,48 +444,51 @@ export default function SelectedRowsPanel({
         </div>
 
         {sendProgressTotal > 0 ? (
-          <div className={`send-progress ${sendProgressActive ? "is-active" : ""}`}>
-            <div className="send-progress__head">
+          <div className="mt-3 grid gap-2.5 rounded-[18px] border border-indigo-300/30 bg-gradient-to-b from-violet-50 to-white px-4 py-3.5 shadow-[0_12px_30px_rgba(99,102,241,0.08)]">
+            <div className="flex items-baseline justify-between gap-3 [&_span]:block [&_span]:text-[10px] [&_span]:font-black [&_span]:uppercase [&_span]:tracking-[0.14em] [&_span]:text-gray-500 [&_strong]:mt-1 [&_strong]:block [&_strong]:text-[13px] [&_strong]:font-black [&_strong]:text-gray-900">
               <div>
                 <span>Gửi KiotViet</span>
                 <strong>
                   {sendProgressCompleted}/{sendProgressTotal} payload
                 </strong>
               </div>
-              <em>{sendProgressPercent}%</em>
+              <em className="text-sm font-black not-italic text-violet-700">{sendProgressPercent}%</em>
             </div>
-            <div className="send-progress__bar" aria-hidden="true">
-              <span style={{ width: `${sendProgressPercent}%` }} />
-            </div>
+            <progress
+              className={`h-2.5 w-full overflow-hidden rounded-full bg-slate-400/20 [&::-moz-progress-bar]:rounded-full [&::-moz-progress-bar]:bg-violet-500 [&::-webkit-progress-bar]:rounded-full [&::-webkit-progress-bar]:bg-slate-400/20 [&::-webkit-progress-value]:rounded-full [&::-webkit-progress-value]:bg-gradient-to-r [&::-webkit-progress-value]:from-violet-500 [&::-webkit-progress-value]:to-cyan-500 ${sendProgressActive ? "shadow-[0_0_0_1px_rgba(139,92,246,0.08)]" : ""}`}
+              max="100"
+              value={sendProgressPercent}
+              aria-label={`Tiến độ gửi KiotViet: ${sendProgressPercent}%`}
+            />
           </div>
         ) : null}
 
-        <div className="payload-preview-shell">
-          <div className="payload-preview-head">
+        <div className="mt-3.5 grid gap-2.5">
+          <div className="flex flex-col items-start justify-between gap-3 md:flex-row [&>strong]:text-[13px] [&>strong]:font-black [&>strong]:text-slate-900">
             <strong>Payload xem nhanh</strong>
-            <span className="summary-subtitle">
+            <span className="mt-1 text-[11px] leading-[1.6] text-slate-500">
               {generatedPayloads.length > 0
                 ? `${generatedPayloads.length} payload`
                 : "Chưa có payload (chưa chọn dòng hoặc chưa có dữ liệu)"}
             </span>
           </div>
-          <pre className="payload-preview">
+          <pre className="m-0 max-h-80 overflow-auto rounded-[18px] border border-slate-200/90 bg-slate-900 p-3.5 text-[11px] leading-[1.6] text-blue-100">
             {JSON.stringify(generatedPayloads, null, 2)}
           </pre>
         </div>
       </div>
 
-      <div className="summary-box summary-box-topline">
-        <div className="summary-head">
+      <div className="mt-3.5 rounded-[22px] border border-slate-400/20 bg-white/90 p-[18px] shadow-[0_18px_42px_rgba(15,23,42,0.08)] sm:rounded-3xl">
+        <div className={sectionHeadingClass}>
           <div>
             <h3>Thông tin tổng quan</h3>
-            <p className="summary-subtitle">
+            <p>
               Nguồn dữ liệu: {payloadSourceCount} dòng
             </p>
           </div>
         </div>
 
-        <div className="selected-rows-footer">
+        <div className="mt-3 flex flex-wrap gap-2.5 [&_span]:rounded-full [&_span]:bg-slate-50 [&_span]:px-2.5 [&_span]:py-[7px] [&_span]:text-slate-600">
           <span>Đã chọn: {selectedRows.length} dòng</span>
           <span>Payload đã tạo: {generatedPayloads.length}</span>
         </div>

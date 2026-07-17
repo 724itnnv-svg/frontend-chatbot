@@ -103,8 +103,8 @@ export default function ExcelTable({
   };
 
   return (
-    <div className="card table-card">
-      <div className="card-head">
+    <div className="flex max-h-[calc(100vh-280px)] flex-col overflow-hidden rounded-[22px] border border-slate-400/20 bg-white/90 p-[18px] shadow-[0_18px_42px_rgba(15,23,42,0.08)] backdrop-blur-xl sm:max-h-[calc(100vh-120px)] sm:rounded-[26px] sm:p-[22px]">
+      <div className="mb-4 flex flex-col items-start justify-between gap-3.5 md:flex-row [&_h2]:m-0 [&_h2]:text-lg [&_h2]:font-black [&_h2]:leading-[1.2] [&_h2]:tracking-[-0.03em] [&_h2]:text-slate-900 [&_p]:mt-1.5 [&_p]:text-xs [&_p]:leading-[1.55] [&_p]:text-slate-500">
         <div>
           <h2>Bảng Excel</h2>
           <p>
@@ -114,10 +114,10 @@ export default function ExcelTable({
           </p>
         </div>
 
-        <div className="table-actions">
+        <div className="flex w-full flex-wrap justify-stretch gap-2.5 md:w-auto md:justify-end [&>*]:flex-auto md:[&>*]:flex-none">
           <button
             type="button"
-            className="ghost-btn"
+            className="cursor-pointer rounded-[14px] border border-slate-400/20 bg-slate-50/95 px-3.5 py-[11px] text-xs font-extrabold text-slate-700 transition hover:-translate-y-px hover:border-sky-400/30 hover:bg-cyan-50 hover:text-teal-700 disabled:cursor-not-allowed disabled:opacity-55"
             onClick={onToggleVisibleSelection}
             disabled={rows.length === 0}
           >
@@ -127,7 +127,7 @@ export default function ExcelTable({
           </button>
           <button
             type="button"
-            className="ghost-btn"
+            className="cursor-pointer rounded-[14px] border border-slate-400/20 bg-slate-50/95 px-3.5 py-[11px] text-xs font-extrabold text-slate-700 transition hover:-translate-y-px hover:border-sky-400/30 hover:bg-cyan-50 hover:text-teal-700 disabled:cursor-not-allowed disabled:opacity-55"
             onClick={onClearSelection}
             disabled={selectedIds.size === 0}
           >
@@ -137,7 +137,7 @@ export default function ExcelTable({
           {/* Nút Save File */}
           <button
             type="button"
-            className="primary-btn"
+            className="cursor-pointer rounded-[14px] border border-transparent bg-gradient-to-br from-sky-500 to-teal-500 px-3.5 py-[11px] text-xs font-extrabold text-white shadow-[0_14px_28px_rgba(14,165,233,0.22)] transition hover:-translate-y-px hover:shadow-[0_16px_32px_rgba(14,165,233,0.28)] disabled:cursor-not-allowed disabled:opacity-55 disabled:shadow-none"
             onClick={onSaveFile}
             disabled={rows.length === 0}
           >
@@ -146,11 +146,11 @@ export default function ExcelTable({
         </div>
       </div>
 
-      <div className="table-wrap">
+      <div className="min-h-0 flex-1 overflow-auto rounded-[22px] border border-slate-400/20 bg-slate-50/80 [&_table]:w-full [&_table]:min-w-[1000px] [&_table]:border-separate [&_table]:border-spacing-0 [&_th]:border-b [&_th]:border-slate-200/90 [&_th]:px-3 [&_th]:py-[13px] [&_th]:text-left [&_th]:align-top [&_td]:border-b [&_td]:border-slate-200/90 [&_td]:px-3 [&_td]:py-[13px] [&_td]:text-left [&_td]:align-top [&_thead_th]:sticky [&_thead_th]:top-0 [&_thead_th]:z-[2] [&_thead_th]:bg-white/98 [&_thead_th]:text-[11px] [&_thead_th]:font-black [&_thead_th]:uppercase [&_thead_th]:tracking-[0.08em] [&_thead_th]:text-slate-700 [&_tbody_tr]:transition-colors [&_tbody_tr:hover]:bg-sky-50/75">
         <table>
           <thead>
             <tr>
-              <th className="checkbox-col sticky-col sticky-col-0">
+              <th className="sticky left-0 z-[3] w-[46px] bg-inherit text-center [&_input]:h-4 [&_input]:w-4 [&_input]:accent-cyan-600">
                 <input
                   ref={selectAllRef}
                   type="checkbox"
@@ -164,9 +164,9 @@ export default function ExcelTable({
                 <th
                   key={header}
                   className={[
-                    "draggable-header",
-                    index === 0 ? "sticky-col sticky-col-1" : "",
-                    draggedHeader === header ? "dragging" : "",
+                    "cursor-grab select-none",
+                    index === 0 ? "sticky left-[46px] z-[3] bg-inherit" : "",
+                    draggedHeader === header ? "cursor-grabbing opacity-60" : "",
                   ]
                     .filter(Boolean)
                     .join(" ")}
@@ -177,11 +177,11 @@ export default function ExcelTable({
                   onDragEnd={() => setDraggedHeader("")}
                   title="Kéo để đổi vị trí cột"
                 >
-                  <span className="column-handle">⋮⋮</span>
+                  <span className="mr-2 font-black tracking-[-0.12em] text-slate-400">⋮⋮</span>
                   <span>{header}</span>
                 </th>
               ))}
-              <th className="status-col">Kiot</th>
+              <th className="min-w-24 text-center">Kiot</th>
             </tr>
           </thead>
           <tbody>
@@ -189,7 +189,7 @@ export default function ExcelTable({
               <tr>
                 <td
                   colSpan={Math.max(orderedHeaders.length, 1) + 2}
-                  className="empty-state"
+                  className="py-12 text-center text-sm text-slate-500"
                 >
                   Chưa có dữ liệu Excel hoặc không có dòng nào khớp bộ lọc hiện
                   tại.
@@ -203,10 +203,10 @@ export default function ExcelTable({
                 return (
                   <tr
                     key={__rowId}
-                    className={isSelected ? "selected" : ""}
+                    className={isSelected ? "bg-sky-100/70" : ""}
                     onClick={() => onToggleRow(__rowId)}
                   >
-                    <td className="checkbox-col sticky-col sticky-col-0">
+                    <td className="sticky left-0 z-[1] w-[46px] bg-inherit text-center [&_input]:h-4 [&_input]:w-4 [&_input]:accent-cyan-600">
                       <input
                         type="checkbox"
                         checked={isSelected}
@@ -230,7 +230,7 @@ export default function ExcelTable({
                         <td
                           key={header}
                           className={
-                            index === 0 ? "sticky-col sticky-col-1" : ""
+                            index === 0 ? "sticky left-[46px] z-[1] bg-inherit" : ""
                           }
                           // Bắt sự kiện double click để sửa
                           onDoubleClick={(e) => {
@@ -241,11 +241,7 @@ export default function ExcelTable({
                           {isEditingThisCell ? (
                             <input
                               autoFocus
-                              style={{
-                                width: "100%",
-                                boxSizing: "border-box",
-                                padding: "4px",
-                              }}
+                              className="w-full rounded border border-sky-300 bg-white p-1 outline-none focus:ring-2 focus:ring-sky-200"
                               value={editingCell.value}
                               onChange={(e) =>
                                 setEditingCell({
@@ -267,12 +263,12 @@ export default function ExcelTable({
                         </td>
                       );
                     })}
-                    <td className="status-col">
+                    <td className="min-w-24 text-center">
                       <span
-                        className={`status-pill ${
+                        className={`inline-flex min-w-[78px] items-center justify-center rounded-full px-[11px] py-[7px] text-[10px] font-black uppercase tracking-[0.08em] ${
                           row.__sentToKiot
-                            ? "status-pill--success"
-                            : "status-pill--pending"
+                            ? "bg-green-100 text-green-800"
+                            : "bg-amber-100 text-amber-800"
                         }`}
                       >
                         {row.__sentToKiot ? "Đã gửi" : "Chưa gửi"}
