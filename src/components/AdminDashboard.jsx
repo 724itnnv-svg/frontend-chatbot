@@ -81,6 +81,17 @@ function buildExportOrderParams(exportConfig) {
     return params;
 }
 
+function attachTeamIdToOrders(orders, pageTeamMap) {
+    return (Array.isArray(orders) ? orders : []).map(order => {
+        const pageId = String(order?.pageId || "").trim();
+        return {
+            ...order,
+            // API là nguồn chính; map page là fallback để tương thích dữ liệu/response cũ.
+            teamId: order?.teamId || pageTeamMap[pageId] || "Khác",
+        };
+    });
+}
+
 export default function AdminDashboard() {
     const { user, token } = useAuth() || {};
     const navigate = useNavigate();
@@ -243,10 +254,7 @@ export default function AdminDashboard() {
             if (!res.ok) throw new Error(data.message || "Lỗi server");
 
             // Gắn teamId từ pageTeamMap
-            let orders = (data.orders || []).map(order => ({
-                ...order,
-                teamId: pageTeamMap[order.pageId] || "Khác",
-            }));
+            let orders = attachTeamIdToOrders(data.orders, pageTeamMap);
 
             // Lọc theo team
             if (!selectedTeams.has("ALL")) {
@@ -303,10 +311,7 @@ export default function AdminDashboard() {
             const data = await res.json();
             if (!res.ok) throw new Error(data.message || "Lỗi server");
 
-            let orders = (data.orders || []).map(order => ({
-                ...order,
-                teamId: pageTeamMap[order.pageId] || "Khác",
-            }));
+            let orders = attachTeamIdToOrders(data.orders, pageTeamMap);
 
             if (!selectedTeams.has("ALL")) {
                 orders = orders.filter(o => selectedTeams.has(o.teamId));
