@@ -69,8 +69,9 @@ const buildSinglePayload = ({
     row["Nhân viên"] || orderDelivery.employeeName || orderDelivery.givenName,
   );
   const employeeId =
-    findEmployeeId(employeeName, employeeOptions) ||
-    normalizeText(orderDelivery.userId);
+    normalizeText(orderDelivery.userId) ||
+    findEmployeeId(employeeName, employeeOptions);
+
   const numericValue = parseMoney(value);
   const accountId = getAccountId(bankAccounts);
   const rawPaymentMethod = normalizeText(
@@ -105,7 +106,7 @@ const buildSinglePayload = ({
   const cashflowCode = invoiceCode
     ? retailer === "abctv"
       ? `${isPairedCashflow ? codePrefix : ""}${invoiceCode}`
-      : `TESTDTETI${codePrefix}${invoiceCode}`
+      : `TESTDTYTTTETI${codePrefix}${invoiceCode}`
     : "";
 
   return {

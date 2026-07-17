@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 
 const normalizeText = (value) => String(value ?? "").trim();
 
@@ -95,7 +96,6 @@ function DetailModal({
   onClose,
 }) {
   const primaryPayload = payloadEntry?.payload || null;
-  const payloadCount = payloadEntry ? 1 : 0;
 
   useEffect(() => {
     const onKeyDown = (event) => {
@@ -136,7 +136,7 @@ function DetailModal({
     { label: "Ghi chú", value: buildDisplayNote(primaryPayload) },
   ];
 
-  return (
+  const modalContent = (
     <div className="detail-modal-backdrop" onClick={onClose}>
       <div
         className="detail-modal"
@@ -153,7 +153,7 @@ function DetailModal({
               {summary.partner || "Không có đối tác"} ·{" "}
               {summary.employee || "Không có nhân viên"}
             </p>
-            <p className="detail-modal__subtitle">Số payload: {payloadCount}</p>
+            <p className="detail-modal__subtitle">Số payload: 1</p>
           </div>
 
           <div className="detail-modal__actions">
@@ -191,7 +191,7 @@ function DetailModal({
             {payloadEntry.kind === "money" ? "Khoản chính" : "Phí ship"}
           </span>
           <span className="summary-badge summary-badge--muted">
-            {payloadCount} payload
+            1 payload
           </span> */}
         </div>
 
@@ -240,6 +240,12 @@ function DetailModal({
       </div>
     </div>
   );
+
+  if (typeof document === "undefined") {
+    return modalContent;
+  }
+
+  return createPortal(modalContent, document.body);
 }
 
 export default function SelectedRowsPanel({
@@ -317,7 +323,6 @@ export default function SelectedRowsPanel({
             const shipEntry = payloadEntries.find(
               (entry) => entry.kind === "ship",
             );
-            const payloadCount = payloadEntries.length;
 
             return (
               <article
@@ -355,20 +360,6 @@ export default function SelectedRowsPanel({
                   </div>
                 </div>
 
-                {/* <div className="selected-row-meta">
-                  <span>
-                    {summary.money
-                      ? `Tiền hàng: ${toMoneyText(summary.money)}`
-                      : "Tiền hàng: -"}
-                  </span>
-                  <span>
-                    {summary.ship
-                      ? `Phí ship: ${toMoneyText(summary.ship)}`
-                      : "Phí ship: -"}
-                  </span>
-                  <span>{row.__sentToKiot ? "Đã gửi Kiot" : "Chưa gửi"}</span>
-                  <span>{`Payload: ${payloadCount}`}</span>
-                </div> */}
               </article>
             );
           })

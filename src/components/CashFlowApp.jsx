@@ -1,9 +1,8 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+﻿import React, { useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import {
   createCashFlow,
   getAccessToken,
-  getEmployeesByRetailer,
   getPartnerDelivery,
   getAccessPrivateToken,
   getBankAccount,
@@ -30,8 +29,6 @@ const RETAILERS = [
   { value: "vietnhattv", label: "vietnhattv" },
   { value: "abctv", label: "abctv" },
 ];
-
-const ALL_EMPLOYEES_VALUE = "__all_employees__";
 const PRIVATE_TOKEN_COOKIE_PREFIX = "kiot_private_token_";
 const SEND_REQUEST_DELAY_MS = 350;
 const ORDER_DELIVERY_BATCH_SIZE = 10;
@@ -324,7 +321,10 @@ const cashflowStyles = `
 }
 
 .app-shell .table-card {
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
+  max-height: calc(100vh - 320px);
 }
 
 .app-shell .json-card {
@@ -427,6 +427,8 @@ const cashflowStyles = `
 }
 
 .app-shell .table-wrap {
+  flex: 1;
+  min-height: 0;
   overflow: auto;
   border: 1px solid rgba(148, 163, 184, 0.14);
   border-radius: 22px;
@@ -692,11 +694,21 @@ const cashflowStyles = `
 }
 
 .app-shell .detail-modal {
-  width: min(1100px, 100%);
-  max-height: min(88vh, 920px);
+  width: min(1320px, calc(100vw - 36px));
+  max-height: min(82vh, 860px);
   overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
   border-radius: 28px;
   padding: 22px;
+}
+
+.app-shell .detail-modal__sections {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.95fr);
+  gap: 14px;
+  align-items: start;
 }
 
 .app-shell .detail-modal__header {
@@ -722,6 +734,191 @@ const cashflowStyles = `
 
 .app-shell .detail-section-card + .payload-detail-card {
   margin-top: 14px;
+}
+
+.detail-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background:
+    radial-gradient(circle at top, rgba(56, 189, 248, 0.22), transparent 34%),
+    radial-gradient(circle at bottom right, rgba(16, 185, 129, 0.16), transparent 28%),
+    rgba(15, 23, 42, 0.58);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+.detail-modal {
+  width: min(1320px, calc(100vw - 36px));
+  max-height: min(82vh, 860px);
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  position: relative;
+  isolation: isolate;
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  border-radius: 30px;
+  padding: 24px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 251, 255, 0.92)),
+    linear-gradient(135deg, rgba(14, 165, 233, 0.08), rgba(20, 184, 166, 0.06));
+  box-shadow:
+    0 40px 120px rgba(15, 23, 42, 0.32),
+    0 12px 28px rgba(14, 165, 233, 0.12);
+}
+
+.detail-modal::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background:
+    radial-gradient(circle at top left, rgba(56, 189, 248, 0.16), transparent 26%),
+    radial-gradient(circle at top right, rgba(20, 184, 166, 0.12), transparent 22%);
+  pointer-events: none;
+  z-index: -1;
+}
+
+.detail-modal__sections {
+  display: grid;
+  grid-template-columns: minmax(0, 1.08fr) minmax(0, 0.92fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.detail-modal__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 2px;
+}
+
+.detail-modal__actions {
+  display: flex;
+  gap: 10px;
+}
+
+.detail-modal__header h4 {
+  margin: 4px 0 0;
+  color: #0f172a;
+  font-size: clamp(1.35rem, 2vw, 1.85rem);
+  line-height: 1.08;
+  font-weight: 900;
+  letter-spacing: -0.04em;
+}
+
+.detail-modal__subtitle {
+  margin: 6px 0 0;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.invoice-detail__eyebrow {
+  margin: 0;
+  color: #0f766e;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.detail-modal__summary {
+  margin-bottom: 2px;
+  padding: 12px 14px;
+  border: 1px solid rgba(226, 232, 240, 0.92);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.detail-section-card,
+.payload-detail-card {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(226, 232, 240, 0.95);
+  border-radius: 24px;
+  padding: 18px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.94));
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
+}
+
+.detail-section-card + .payload-detail-card {
+  margin-top: 14px;
+}
+
+.detail-section-card__head,
+.payload-detail-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.detail-section-card__head h5,
+.payload-detail-card__head strong {
+  margin: 0;
+  color: #0f172a;
+  font-size: 13px;
+  font-weight: 900;
+  letter-spacing: -0.01em;
+}
+
+.detail-grid,
+.detail-grid--compact {
+  display: grid;
+  gap: 12px;
+}
+
+.detail-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.detail-grid--compact {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.detail-card {
+  display: grid;
+  gap: 6px;
+  min-height: 90px;
+  border: 1px solid rgba(226, 232, 240, 0.95);
+  border-radius: 18px;
+  padding: 14px 15px;
+  background: linear-gradient(180deg, rgba(248, 250, 252, 0.96), rgba(255, 255, 255, 0.98));
+}
+
+.detail-card span {
+  color: #64748b;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.detail-card strong {
+  color: #0f172a;
+  font-size: 13px;
+  line-height: 1.55;
+  font-weight: 800;
+  word-break: break-word;
+}
+
+.chip.muted {
+  background: rgba(240, 249, 255, 0.98);
+  color: #0369a1;
+  border: 1px solid rgba(125, 211, 252, 0.3);
+  box-shadow: 0 8px 20px rgba(14, 165, 233, 0.08);
+}
+
+.ghost-link {
+  text-decoration: none;
 }
 
 .app-shell .toast-container {
@@ -822,6 +1019,20 @@ const cashflowStyles = `
     grid-template-columns: 1fr;
   }
 
+  .app-shell .detail-modal__sections {
+    grid-template-columns: 1fr;
+  }
+
+  .detail-modal {
+    width: min(100%, calc(100vw - 28px));
+    max-height: 88vh;
+    padding: 18px;
+  }
+
+  .detail-modal__sections {
+    grid-template-columns: 1fr;
+  }
+
   .app-shell .card-head,
   .app-shell .selected-row-card__top,
   .app-shell .summary-head,
@@ -830,6 +1041,10 @@ const cashflowStyles = `
   .app-shell .detail-section-card__head,
   .app-shell .payload-preview-head {
     flex-direction: column;
+  }
+
+  .app-shell .table-card {
+    max-height: calc(100vh - 280px);
   }
 
   .app-shell .table-actions {
@@ -847,6 +1062,11 @@ const cashflowStyles = `
 @media (max-width: 640px) {
   .app-shell .hero h1 {
     max-width: none;
+  }
+
+  .app-shell .detail-modal {
+    width: min(100%, calc(100vw - 28px));
+    max-height: 88vh;
   }
 
   .app-shell .stats-grid {
@@ -874,38 +1094,17 @@ const setCookie = (name, value, maxAgeSeconds = 60 * 60 * 24 * 30) => {
   )}; path=/; max-age=${maxAgeSeconds}`;
 };
 
-const getEmployeeName = (row) => normalizeText(row["Nhân viên"]);
-
 const getVisibleHeaders = (headers, rows) =>
   headers.filter((header) =>
     rows.some((row) => normalizeText(row?.[header]) !== ""),
   );
 
-const filterRowsByEmployee = (
-  rows,
-  employeeFilter,
-  employeeOptions,
-  filterByEmployee,
-) => {
-  if (!filterByEmployee) {
-    return rows;
-  }
-
-  if (employeeFilter === ALL_EMPLOYEES_VALUE) {
-    return rows;
-  }
-
-  if (!employeeFilter) {
-    return rows;
-  }
-
-  return rows.filter((row) => getEmployeeName(row) === employeeFilter);
-};
-
-const filterRowsByRetailer = (rows, retailer) => {
+const filterRowsByRetailer = (rows) => {
   // T?m t?t l?c theo retailer ?? gi? to?n b? d?ng Excel.
   return rows;
 };
+
+const filterSelectableRows = (rows) => rows.filter((row) => !row.__sentToKiot);
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -938,11 +1137,6 @@ const mergeOrderDeliveryIntoRow = (row, orderDelivery) => ({
 
 export default function CashFlowApp() {
   const [retailer, setRetailer] = useState("kingfarm");
-  const [filterByEmployee, setFilterByEmployee] = useState(false);
-  const [employeeFilter, setEmployeeFilter] = useState(ALL_EMPLOYEES_VALUE);
-  const [employeeOptions, setEmployeeOptions] = useState([]);
-  const [employeeLoading, setEmployeeLoading] = useState(false);
-  const [employeeError, setEmployeeError] = useState("");
   const [partnerDeliveries, setPartnerDeliveries] = useState([]);
   const [partnerDeliveryError, setPartnerDeliveryError] = useState("");
   const [bankAccounts, setBankAccounts] = useState([]);
@@ -961,9 +1155,6 @@ export default function CashFlowApp() {
   const [currentAccessToken, setCurrentAccessToken] = useState("");
   const [currentAccessPrivateToken, setCurrentAccessPrivateToken] =
     useState("");
-  const [sendResult, setSendResult] = useState("");
-  const [sendStatus, setSendStatus] = useState("");
-  const [sendResultDetails, setSendResultDetails] = useState([]);
   const [toasts, setToasts] = useState([]);
   const toastIdRef = useRef(0);
   const [sendingPayloads, setSendingPayloads] = useState(false);
@@ -1092,20 +1283,15 @@ export default function CashFlowApp() {
     let ignore = false;
 
     async function loadRetailerData() {
-      setEmployeeLoading(true);
-      setEmployeeError("");
       setPartnerDeliveryError("");
       setBankAccountError("");
-      setEmployeeOptions([]);
       setPartnerDeliveries([]);
       setBankAccounts([]);
-      setEmployeeFilter(ALL_EMPLOYEES_VALUE);
 
       try {
         const accessToken = await getAccessToken(retailer);
         const PrivateToken = await getAccessPrivateToken(retailer);
-        const [employees, deliveries, accounts] = await Promise.all([
-          getEmployeesByRetailer(retailer, accessToken),
+        const [deliveries, accounts] = await Promise.all([
           getPartnerDelivery(retailer, PrivateToken),
           getBankAccount(retailer, PrivateToken),
         ]);
@@ -1117,44 +1303,14 @@ export default function CashFlowApp() {
         setCookie(getPrivateTokenCookieName(retailer), PrivateToken || "");
         setPartnerDeliveries(Array.isArray(deliveries) ? deliveries : []);
         setBankAccounts(Array.isArray(accounts) ? accounts : []);
-
-        const options = employees
-          .map((user) => ({
-            id: user.id,
-            value: normalizeText(
-              user.fullName ||
-                user.givenName ||
-                user.employeeName ||
-                user.userName,
-            ),
-            label: normalizeText(
-              user.fullName ||
-                user.givenName ||
-                user.employeeName ||
-                user.userName,
-            ),
-          }))
-          .filter((item) => item.value);
-
-        const unique = Array.from(
-          new Map(options.map((item) => [item.value, item])).values(),
-        );
-        setEmployeeOptions(unique);
       } catch (error) {
         if (!ignore) {
-          setEmployeeError(
-            error.message || "Không lấy được danh sách nhân viên",
-          );
           setPartnerDeliveryError(
             error.message || "Không lấy được danh sách partnerDelivery",
           );
           setBankAccountError(
             error.message || "Không lấy được danh sách bank account",
           );
-        }
-      } finally {
-        if (!ignore) {
-          setEmployeeLoading(false);
         }
       }
     }
@@ -1177,24 +1333,51 @@ export default function CashFlowApp() {
   );
 
   const selectedRows = useMemo(
-    () => allRows.filter((row) => selectedIds.has(row.__rowId)),
+    () =>
+      allRows.filter(
+        (row) => selectedIds.has(row.__rowId) && !row.__sentToKiot,
+      ),
     [allRows, selectedIds],
   );
 
   const selectedCountInView = useMemo(
-    () => visibleRows.filter((row) => selectedIds.has(row.__rowId)).length,
+    () =>
+      visibleRows.filter(
+        (row) => selectedIds.has(row.__rowId) && !row.__sentToKiot,
+      ).length,
     [visibleRows, selectedIds],
   );
 
   const payloadSourceRows = useMemo(
-    () => (selectedRows.length > 0 ? selectedRows : visibleRows),
+    () =>
+      selectedRows.length > 0
+        ? selectedRows
+        : filterSelectableRows(visibleRows),
     [selectedRows, visibleRows],
   );
+
+  useEffect(() => {
+    setSelectedIds((prev) => {
+      let changed = false;
+      const next = new Set();
+
+      prev.forEach((rowId) => {
+        const row = allRows.find((item) => item.__rowId === rowId);
+        if (row && !row.__sentToKiot) {
+          next.add(rowId);
+        } else {
+          changed = true;
+        }
+      });
+
+      return changed ? next : prev;
+    });
+  }, [allRows]);
 
   const getPayloadEntriesForRow = (row) =>
     buildCashflowPayloadEntries(
       [row],
-      employeeOptions,
+      [],
       partnerDeliveries,
       bankAccounts,
       retailer,
@@ -1204,18 +1387,12 @@ export default function CashFlowApp() {
     () =>
       buildCashflowPayloads(
         payloadSourceRows,
-        employeeOptions,
+        [],
         partnerDeliveries,
         bankAccounts,
         retailer,
       ),
-    [
-      payloadSourceRows,
-      employeeOptions,
-      partnerDeliveries,
-      bankAccounts,
-      retailer,
-    ],
+    [payloadSourceRows, partnerDeliveries, bankAccounts, retailer],
   );
 
   const handleRetailerChange = (nextRetailer) => {
@@ -1224,8 +1401,6 @@ export default function CashFlowApp() {
     setSelectedIds(new Set());
     setCurrentAccessToken("");
     setCurrentAccessPrivateToken("");
-    setFilterByEmployee(false);
-    setSendResult("");
     setSourceWorkbook(null);
     setSourceFile(null);
     setSourceFileBuffer(null);
@@ -1243,6 +1418,19 @@ export default function CashFlowApp() {
 
   const toggleRow = (rowId) => {
     const row = allRows.find((item) => item.__rowId === rowId);
+    if (row?.__sentToKiot) {
+      setSelectedIds((prev) => {
+        if (!prev.has(rowId)) {
+          return prev;
+        }
+
+        const next = new Set(prev);
+        next.delete(rowId);
+        return next;
+      });
+      return;
+    }
+
     const isCurrentlySelected = selectedIds.has(rowId);
 
     setSelectedIds((prev) => {
@@ -1266,7 +1454,8 @@ export default function CashFlowApp() {
   };
 
   const handleToggleVisibleSelection = () => {
-    const visibleIds = visibleRows.map((row) => row.__rowId);
+    const selectableVisibleRows = filterSelectableRows(visibleRows);
+    const visibleIds = selectableVisibleRows.map((row) => row.__rowId);
     if (visibleIds.length === 0) {
       return;
     }
@@ -1292,7 +1481,7 @@ export default function CashFlowApp() {
       return;
     }
 
-    const rowsToLoad = visibleRows.filter(
+    const rowsToLoad = selectableVisibleRows.filter(
       (row) => !row.__orderDeliveryLoaded && getOrderDeliveryCode(row),
     );
 
@@ -1308,13 +1497,10 @@ export default function CashFlowApp() {
     try {
       setSendingPayloads(true);
       setPayloadError("");
-      setSendResult("");
-      setSendStatus("");
-      setSendResultDetails([]);
 
       const payloadEntries = buildCashflowPayloadEntries(
         payloadSourceRows,
-        employeeOptions,
+        [],
         partnerDeliveries,
         bankAccounts,
         retailer,
@@ -1322,7 +1508,11 @@ export default function CashFlowApp() {
       const payloads = payloadEntries.map((entry) => entry.payload);
 
       if (payloads.length === 0) {
-        setSendResult("Không có payload nào để gửi");
+        addToast({
+          type: "warning",
+          title: "Không có dòng chưa gửi",
+          message: "Các dòng đang chọn đều đã gửi Kiot rồi.",
+        });
         return;
       }
 
@@ -1427,9 +1617,6 @@ export default function CashFlowApp() {
           ? `Đã gửi thành công ${successCount}/${payloads.length} payload`
           : `Đã gửi thành công ${successCount}/${payloads.length} payload, ${failedCount} payload lỗi`;
 
-      setSendResult(summaryText);
-      setSendResultDetails(detailRows);
-      setSendStatus(failedCount === 0 ? "success" : "warning");
       addToast({
         type: failedCount === 0 ? "success" : "warning",
         title:
@@ -1445,8 +1632,6 @@ export default function CashFlowApp() {
     } catch (error) {
       const errorMessage = error.message || "Không gửi được payload";
       setPayloadError(errorMessage);
-      setSendStatus("error");
-      setSendResultDetails([]);
       addToast({
         type: "error",
         title: "Lỗi gửi dữ liệu",
@@ -1463,7 +1648,11 @@ export default function CashFlowApp() {
       setPayloadError("");
 
       if (allRows.length === 0) {
-        setSendResult("Chưa có dữ liệu để xuất Excel");
+        addToast({
+          type: "warning",
+          title: "Không có dữ liệu",
+          message: "Chưa có dòng nào để xuất Excel.",
+        });
         return;
       }
 
@@ -1479,7 +1668,6 @@ export default function CashFlowApp() {
         rows: allRows,
         fileName: `${baseName}-checked.xlsx`,
       });
-      setSendResult("Đã xuất file Excel có trạng thái gửi Kiot");
     } catch (error) {
       setPayloadError(error.message || "Không xuất được file Excel");
     } finally {
@@ -1511,6 +1699,15 @@ export default function CashFlowApp() {
       setHeaders(result.headers);
       setAllRows(result.rows);
       setFileInfo(result.fileInfo);
+
+      const sentCount = result.rows.filter((row) => row.__sentToKiot).length;
+      if (sentCount > 0) {
+        addToast({
+          type: "warning",
+          title: "Đã có dòng gửi Kiot",
+          message: `Phát hiện ${sentCount} dòng đã gửi Kiot. Những dòng này sẽ không được chọn lại.`,
+        });
+      }
     } catch (error) {
       setExcelError(error.message || "Không đọc được file Excel");
       setSheetName("");
@@ -1588,8 +1785,6 @@ export default function CashFlowApp() {
       // Tự động thêm chữ "Edited_" đằng trước tên file gốc
       const newFileName = fileName ? `Edited_${fileName}` : "Data_Da_Sua.xlsx";
       XLSX.writeFile(workbook, newFileName);
-
-      // Bắn thông báo toast (tận dụng mảng toasts của bro)
       const newToast = {
         id: toastIdRef.current++,
         message: "Lưu file thành công!",
@@ -1638,27 +1833,14 @@ export default function CashFlowApp() {
         <ControlsPanel
           retailer={retailer}
           onRetailerChange={handleRetailerChange}
-          filterByEmployee={filterByEmployee}
-          onFilterByEmployeeChange={setFilterByEmployee}
-          employeeFilter={employeeFilter}
-          onEmployeeFilterChange={setEmployeeFilter}
-          employeeOptions={employeeOptions}
-          employeeLoading={employeeLoading}
           onFileChange={handleFileChange}
-          allEmployeesValue={ALL_EMPLOYEES_VALUE}
           retailers={RETAILERS}
         />
       </header>
 
-      {(employeeError ||
-        excelError ||
-        partnerDeliveryError ||
-        bankAccountError) && (
+      {(excelError || partnerDeliveryError || bankAccountError) && (
         <div className="notice error">
-          {employeeError ||
-            excelError ||
-            partnerDeliveryError ||
-            bankAccountError}
+          {excelError || partnerDeliveryError || bankAccountError}
         </div>
       )}
 

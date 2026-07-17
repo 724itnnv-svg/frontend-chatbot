@@ -212,6 +212,12 @@ export default function ExcelTable({
                         checked={isSelected}
                         onChange={() => onToggleRow(__rowId)}
                         onClick={(event) => event.stopPropagation()}
+                        disabled={row.__sentToKiot}
+                        title={
+                          row.__sentToKiot
+                            ? "Dòng này đã gửi Kiot, không thể chọn lại"
+                            : "Chọn dòng"
+                        }
                       />
                     </td>
                     {orderedHeaders.map((header, index) => {
