@@ -74,6 +74,16 @@ function ImageAttachment({ imageUrl, isUser }) {
   );
 }
 
+function isSuppressedAiMessage(message = {}) {
+  const metadata = message.metadata || {};
+  return Boolean(
+    metadata.deliverySuppressed ||
+    metadata.notSentToCustomer ||
+    metadata.deliveryStatus === "suppressed" ||
+    (metadata.openaiProcessed && message.role === "assistant"),
+  );
+}
+
 export default function ChatMessagesPanel({
   messages,
   customerAvatarUrl = "",
@@ -137,6 +147,7 @@ export default function ChatMessagesPanel({
         role,
         text: cleanedText,
         imageUrl,
+        metadata: m?.metadata || {},
         ts: m?.createdAt || m?.created_at,
         pending: !!m?.pending,
         error: !!m?.error,
@@ -200,9 +211,12 @@ export default function ChatMessagesPanel({
             }
 
             const isUser = m.role === "user";
-            const displayName = isUser ? "Khách hàng" : "Page";
+            const isInternalAi = !isUser && isSuppressedAiMessage(m);
+            const displayName = isUser ? "Khách hàng" : isInternalAi ? "OpenAI xử lý" : "Page";
             const bubbleCls = isUser
               ? "rounded-2xl rounded-bl-md border border-slate-200 bg-white text-slate-800 shadow-sm"
+              : isInternalAi
+                ? "rounded-2xl rounded-br-md border border-dashed border-violet-300 bg-violet-50 text-violet-950 shadow-sm"
               : "rounded-2xl rounded-br-md bg-gradient-to-br from-sky-500 to-blue-600 text-white shadow-md shadow-sky-900/15";
 
             return (
@@ -218,6 +232,7 @@ export default function ChatMessagesPanel({
                     <div className={`mb-1 flex flex-wrap items-center gap-1.5 px-1 ${isUser ? "" : "justify-end"}`}>
                       <span className="text-[11px] font-semibold text-slate-600">{displayName}</span>
                       {m.ts ? <span className="text-[10px] text-slate-400">• {formatTime(m.ts)}</span> : null}
+                      {isInternalAi ? <span className="text-[10px] font-semibold text-violet-600">• Chỉ xử lý nội bộ - Không gửi khách</span> : null}
                       {m.pending ? <span className="text-[10px] text-slate-400">• Đang gửi</span> : null}
                       {m.error ? <span className="text-[10px] font-semibold text-red-600">• Lỗi gửi</span> : null}
                     </div>
