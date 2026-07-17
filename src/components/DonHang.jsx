@@ -599,9 +599,15 @@ function DonHang() {
             : "",
         Page: selectedPage?.name || "",
         PageId: selectedPage?.facebookId || "",
+        Team: o.teamId || selectedPage?.teamId || "",
         OrderId: o._id || "",
       };
     });
+
+    if (rows.length === 0) {
+      alert("Không có đơn hàng để xuất Excel.");
+      return;
+    }
 
     const ws = XLSX.utils.json_to_sheet(rows);
 
