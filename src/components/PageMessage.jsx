@@ -15,6 +15,7 @@ const SOCKET_URL =
   import.meta.env.VITE_SOCKET_URL ||
   (isViteDevServer ? "http://localhost:5000" : getApiOrigin() || undefined);
 const QUICK_REPLY_STORAGE_KEY = "page_message_quick_replies";
+const CUSTOMER_ORDER_LOOKBACK_DAYS = 365;
 const DEFAULT_QUICK_REPLIES = [
   {
     id: "greeting",
@@ -476,6 +477,14 @@ function PageMessage() {
     setMobileTab("messages");
     if (!isDesktop) setIsPageListOpen(false);
 
+    const activePage = pageOverride || selectedPageRef.current || selectedPage;
+    if (activePage?.facebookId && chat?.user) {
+      refreshSelectedCustomerSnapshot(chat, activePage, {
+        pageLoadSeq: pageLoadSeq ?? pageLoadSeqRef.current,
+        chatLoadSeq,
+      });
+    }
+
     if (messageFetchRef.current) messageFetchRef.current.abort();
     const controller = new AbortController();
     messageFetchRef.current = controller;
@@ -510,6 +519,56 @@ function PageMessage() {
     } finally {
       if (chatLoadSeqRef.current === chatLoadSeq) setLoadingMessages(false);
     }
+  };
+
+  const refreshSelectedCustomerSnapshot = async (chat, page, { pageLoadSeq = null, chatLoadSeq = null } = {}) => {
+    if (!chat?.user || !page?.facebookId || !token) return;
+
+    const userId = String(chat.user);
+    const expectedPageSeq = pageLoadSeq ?? pageLoadSeqRef.current;
+
+    const [chatResult] = await Promise.allSettled([
+      refreshChatsForPage(page, { updateUserNames: false, loadSeq: expectedPageSeq }),
+      refreshSelectedCustomerOrders(page, userId, { chatLoadSeq }),
+    ]);
+
+    if (pageLoadSeqRef.current !== expectedPageSeq) return;
+    if (chatLoadSeq !== null && chatLoadSeqRef.current !== chatLoadSeq) return;
+
+    if (chatResult.status !== "fulfilled") return;
+    const latestChats = Array.isArray(chatResult.value) ? chatResult.value : [];
+    const latestChat = latestChats.find((item) => {
+      if (String(item?.user || "") !== userId) return false;
+      if (chat.conversationId && item?.conversationId) {
+        return String(item.conversationId) === String(chat.conversationId);
+      }
+      if (chat.threadId && item?.threadId) {
+        return String(item.threadId) === String(chat.threadId);
+      }
+      return true;
+    });
+
+    if (!latestChat) return;
+
+    const nextSelected = {
+      ...chat,
+      ...latestChat,
+      threadId: latestChat.conversationId || latestChat.threadId || chat.threadId,
+      conversationId: latestChat.conversationId || chat.conversationId,
+    };
+
+    selectedChatRef.current = nextSelected;
+    setSelectedChat(nextSelected);
+    setActiveThreadId(nextSelected.conversationId || nextSelected.threadId || nextSelected.user);
+
+    setUserInfo((prev) => ({
+      ...prev,
+      [userId]: {
+        name: latestChat.userName || prev[userId]?.name || chat.userName || userId,
+        picture: latestChat.userPicture || prev[userId]?.picture || chat.userPicture || defaultAvatar,
+      },
+    }));
+    fetchUserInfo(page, [userId], userInfo, { loadSeq: expectedPageSeq });
   };
 
   const buildHistoryEndpoint = (chatOrId) => {
@@ -1227,7 +1286,54 @@ function PageMessage() {
     return `${yyyy}-${mm}-${dd}`;
   };
 
-  const fetchOrdersAndBuildSet = async (page, { loadSeq = null } = {}) => {
+  const buildOrderDraftFromOrder = (order) => ({
+    customerName: order.customerName || "",
+    phoneNumber: order.phoneNumber || "",
+    address: order.address || "",
+    adName: order.adName || "",
+    note: order.note || "",
+    shippingFee: order.shippingFee == null ? "" : String(order.shippingFee),
+    items: Array.isArray(order.items)
+      ? order.items.map((item) => ({
+        productName: item.productName || "",
+        sku: item.sku || "",
+        unitName: item.unitName || "",
+        quantity: item.quantity == null ? "" : String(item.quantity),
+        price: item.price == null ? "" : String(item.price),
+      }))
+      : [],
+  });
+
+  const fetchOrdersForPage = async (page, { lookbackDays = 7 } = {}) => {
+    const params = new URLSearchParams();
+    params.set("pageId", String(page.facebookId));
+
+    const end = new Date();
+    const start = new Date(end);
+    start.setDate(end.getDate() - lookbackDays);
+
+    params.set("from", fmtDate(start));
+    params.set("to", fmtDate(end));
+
+    const res = await fetch(`/api/order?${params.toString()}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) throw new Error("KhÃ´ng láº¥y Ä‘Æ°á»£c danh sÃ¡ch Ä‘Æ¡n hÃ ng");
+
+    const data = await res.json();
+    const orders = Array.isArray(data) ? data : (data?.orders || []);
+    const pageKey = String(page?.facebookId || page?._id || "");
+
+    return pageKey
+      ? orders.filter((o) => {
+        const opage =
+          o?.page || o?.pageId || o?.facebookId || o?.pageFacebookId || o?.page_id;
+        return opage ? String(opage) === pageKey : true;
+      })
+      : orders;
+  };
+
+  const fetchOrdersAndBuildSet = async (page, { loadSeq = null, lookbackDays = 7 } = {}) => {
     try {
       setLoadingOrders(true);
 
@@ -1237,7 +1343,7 @@ function PageMessage() {
       // ✅ mặc định: từ hôm nay lùi 10 ngày
       const end = new Date(); // hôm nay
       const start = new Date(end);
-      start.setDate(end.getDate() - 7);
+      start.setDate(end.getDate() - lookbackDays);
 
       params.set("from", fmtDate(start));
       params.set("to", fmtDate(end));
@@ -1288,6 +1394,56 @@ function PageMessage() {
       }
     } finally {
       if (loadSeq === null || pageLoadSeqRef.current === loadSeq) setLoadingOrders(false);
+    }
+  };
+
+  const refreshSelectedCustomerOrders = async (page, customerId, { chatLoadSeq = null } = {}) => {
+    if (!page?.facebookId || !customerId || !token) return;
+
+    const targetCustomerId = String(customerId);
+
+    try {
+      setLoadingOrders(true);
+      const filteredOrders = await fetchOrdersForPage(page, {
+        lookbackDays: CUSTOMER_ORDER_LOOKBACK_DAYS,
+      });
+
+      if (chatLoadSeq !== null && chatLoadSeqRef.current !== chatLoadSeq) return;
+
+      const customerOrders = filteredOrders
+        .filter((order) => String(order?.customerId || "") === targetCustomerId)
+        .sort((a, b) => {
+          const ta = a?.createdAt ? new Date(a.createdAt).getTime() : 0;
+          const tb = b?.createdAt ? new Date(b.createdAt).getTime() : 0;
+          return tb - ta;
+        });
+
+      setOrdersByCustomer((current) => {
+        const next = new Map(current);
+        if (customerOrders.length > 0) next.set(targetCustomerId, customerOrders);
+        else next.delete(targetCustomerId);
+        return next;
+      });
+
+      setOrderedCustomerSet((current) => {
+        const next = new Set(current);
+        if (customerOrders.length > 0) next.add(targetCustomerId);
+        else next.delete(targetCustomerId);
+        return next;
+      });
+
+      setOrderDrafts((current) => {
+        const next = { ...current };
+        customerOrders.forEach((order) => {
+          const id = String(order?._id || "");
+          if (id) next[id] = buildOrderDraftFromOrder(order);
+        });
+        return next;
+      });
+    } catch (err) {
+      console.error("refreshSelectedCustomerOrders error:", err);
+    } finally {
+      if (chatLoadSeq === null || chatLoadSeqRef.current === chatLoadSeq) setLoadingOrders(false);
     }
   };
 
