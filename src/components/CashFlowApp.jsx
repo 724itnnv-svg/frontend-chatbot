@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+﻿import React, { useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import {
   createCashFlow,
@@ -18,11 +18,12 @@ import {
   hasCashflowInvoiceId,
 } from "../services/cashflowService/payloadService";
 
-import ControlsPanel from "./cashflow-components/ControlsPanel";
-import StatsGrid from "./cashflow-components/StatsGrid";
-import ExcelTable from "./cashflow-components/ExcelTable";
-import SelectedRowsPanel from "./cashflow-components/SelectedRowsPanel";
-import ToastContainer from "./cashflow-components/ToastContainer";
+import ControlsPanel from "./cashflow-components/cashflow/ControlsPanel";
+import StatsGrid from "./cashflow-components/cashflow/StatsGrid";
+import ExcelTable from "./cashflow-components/cashflow/ExcelTable";
+import SelectedRowsPanel from "./cashflow-components/cashflow/SelectedRowsPanel";
+import ToastContainer from "./cashflow-components/cashflow/ToastContainer";
+import EinvoicesTab from "./cashflow-components/Einvoices/EinvoicesTab";
 
 const RETAILERS = [
   { value: "nnvtv", label: "nnvtv" },
@@ -35,8 +36,57 @@ const SEND_REQUEST_DELAY_MS = 350;
 const ORDER_DELIVERY_BATCH_SIZE = 10;
 const ORDER_DELIVERY_ROW_DELAY_MS = 350;
 const ORDER_DELIVERY_BATCH_PAUSE_MS = 1400;
+const APP_TABS = [
+  { id: "cashflow", label: "Tính sổ quỹ" },
+  { id: "einvoice", label: "Xuất hóa đơn điện tử" },
+];
+
+const DEMO_EINVOICE_ROWS = [
+  {
+    id: "HD-0001",
+    code: "INV-260720-001",
+    customer: "Công ty TNHH An Khang",
+    phone: "0901 234 567",
+    amount: 1280000,
+    tax: 128000,
+    total: 1408000,
+    status: "Chờ phát hành",
+    note: "Đơn hàng giao sáng nay",
+  },
+  {
+    id: "HD-0002",
+    code: "INV-260720-002",
+    customer: "Shop Hoa Mai",
+    phone: "0912 345 678",
+    amount: 890000,
+    tax: 89000,
+    total: 979000,
+    status: "Đã ký số",
+    note: "Khách yêu cầu xuất gấp",
+  },
+  {
+    id: "HD-0003",
+    code: "INV-260720-003",
+    customer: "Cửa hàng Minh Tâm",
+    phone: "0938 765 432",
+    amount: 2145000,
+    tax: 214500,
+    total: 2359500,
+    status: "Đã gửi",
+    note: "Đợi phản hồi từ cổng hóa đơn",
+  },
+];
 
 const normalizeText = (value) => String(value ?? "").trim();
+
+const pickFirstNonEmpty = (row, keys = []) => {
+  for (const key of keys) {
+    const value = normalizeText(row?.[key]);
+    if (value) return value;
+  }
+
+  return "";
+};
 
 const getPrivateTokenCookieName = (retailer) =>
   `${PRIVATE_TOKEN_COOKIE_PREFIX}${retailer}`;
@@ -75,7 +125,14 @@ const sumMoneyColumn = (rows, header) =>
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const getOrderDeliveryCode = (row) =>
-  normalizeText(row["Mã vận đơn"] || row["Mã Vận Đơn"] || row["mã vận đơn"]);
+  pickFirstNonEmpty(row, [
+    "Mã vận đơn",
+    "Mã Vận Đơn",
+    "mã vận đơn",
+    "Mã đơn GHN",
+    "Mã Đơn GHN",
+    "mã đơn ghn",
+  ]);
 
 const stripOrderDeliveryData = (row) => {
   const {
@@ -100,8 +157,10 @@ const mergeOrderDeliveryIntoRow = (row, orderDelivery) => ({
     orderDelivery.givenName ||
     row["Nhân viên"] ||
     "",
-  "Tiền hàng": row["Tiền thu hộ(VNĐ)"] ?? orderDelivery.invoiceTotal ?? "",
-  "Phí ship NVC thu": row["Tiền cước (VNĐ)"] ?? orderDelivery.totalPrice ?? "",
+  "Tiền hàng":
+    row["Tiền thu hộ(VNĐ)"] ?? row["(1)"] ?? orderDelivery.invoiceTotal ?? "",
+  "Phí ship NVC thu":
+    row["Tiền cước (VNĐ)"] ?? row["(5)"] ?? orderDelivery.totalPrice ?? "",
   "Số điện thoại": orderDelivery.phoneNumber || row["Số điện thoại"] || "",
   PartnerName: orderDelivery.partnerDeliveryName || row.PartnerName || "",
   PartnerCode: orderDelivery.partnerDeliveryCode || row.PartnerCode || "",
@@ -113,6 +172,7 @@ const mergeOrderDeliveryIntoRow = (row, orderDelivery) => ({
 });
 
 export default function CashFlowApp() {
+  const [activeTab, setActiveTab] = useState("cashflow");
   const [retailer, setRetailer] = useState("kingfarm");
   const [partnerDeliveries, setPartnerDeliveries] = useState([]);
   const [partnerDeliveryError, setPartnerDeliveryError] = useState("");
@@ -178,6 +238,28 @@ export default function CashFlowApp() {
   };
 
   const [exportingExcel, setExportingExcel] = useState(false);
+
+  const demoEInvoiceSummary = useMemo(() => {
+    const subtotal = DEMO_EINVOICE_ROWS.reduce(
+      (total, row) => total + row.amount,
+      0,
+    );
+    const taxTotal = DEMO_EINVOICE_ROWS.reduce(
+      (total, row) => total + row.tax,
+      0,
+    );
+    const grandTotal = DEMO_EINVOICE_ROWS.reduce(
+      (total, row) => total + row.total,
+      0,
+    );
+
+    return {
+      subtotal,
+      taxTotal,
+      grandTotal,
+      count: DEMO_EINVOICE_ROWS.length,
+    };
+  }, []);
 
   const cancelSendPayloadProgress = () => {
     sendPayloadRunIdRef.current += 1;
@@ -257,11 +339,11 @@ export default function CashFlowApp() {
           currentRows.map((item) =>
             getOrderDeliveryCode(item) === deliveryCode
               ? {
-                ...item,
-                __orderDelivery: null,
-                __orderDeliveryLoaded: true,
-                __orderDeliveryMissingInvoice: true,
-              }
+                  ...item,
+                  __orderDelivery: null,
+                  __orderDeliveryLoaded: true,
+                  __orderDeliveryMissingInvoice: true,
+                }
               : item,
           ),
         );
@@ -311,11 +393,11 @@ export default function CashFlowApp() {
         setOrderDeliveryLoadProgress((current) =>
           current.runId === runId
             ? {
-              ...current,
-              active: completed < total,
-              total,
-              completed,
-            }
+                ...current,
+                active: completed < total,
+                total,
+                completed,
+              }
             : current,
         );
 
@@ -334,11 +416,11 @@ export default function CashFlowApp() {
       setOrderDeliveryLoadProgress((current) =>
         current.runId === runId
           ? {
-            ...current,
-            active: false,
-            total,
-            completed: Math.min(current.completed || 0, total),
-          }
+              ...current,
+              active: false,
+              total,
+              completed: Math.min(current.completed || 0, total),
+            }
           : current,
       );
     }
@@ -414,15 +496,22 @@ export default function CashFlowApp() {
   );
 
   const excelTotals = useMemo(() => {
-    const moneyTotal = sumMoneyColumn(allRows, "Tiền thu hộ(VNĐ)");
-    const shipTotal = sumMoneyColumn(allRows, "Tiền cước (VNĐ)");
+    const sourceFormat =
+      fileInfo?.formatKey || allRows[0]?.__sourceFormat || "viettel";
+    const isGhnFormat = sourceFormat === "ghn";
+    const moneyHeader = isGhnFormat ? "Tiền hàng" : "Tiền thu hộ(VNĐ)";
+    const shipHeader = isGhnFormat ? "Phí ship NVC thu" : "Tiền cước (VNĐ)";
+    const moneyTotal = sumMoneyColumn(allRows, moneyHeader);
+    const shipTotal = sumMoneyColumn(allRows, shipHeader);
 
     return {
       moneyTotal,
       shipTotal,
-      combinedTotal: moneyTotal - shipTotal,
+      combinedTotal: isGhnFormat
+        ? moneyTotal + shipTotal
+        : moneyTotal - shipTotal,
     };
-  }, [allRows]);
+  }, [allRows, fileInfo]);
 
   const payloadSourceRows = useMemo(
     () =>
@@ -435,7 +524,8 @@ export default function CashFlowApp() {
   const payloadReadyRows = useMemo(
     () =>
       payloadSourceRows.filter(
-        (row) => hasCashflowInvoiceId(row) && !row.__orderDeliveryMissingInvoice,
+        (row) =>
+          hasCashflowInvoiceId(row) && !row.__orderDeliveryMissingInvoice,
       ),
     [payloadSourceRows],
   );
@@ -502,6 +592,7 @@ export default function CashFlowApp() {
       file: null,
       fileBuffer: null,
       sheetName: "",
+      headerRowIndex: 0,
     };
     setPartnerDeliveries([]);
     setBankAccounts([]);
@@ -609,11 +700,11 @@ export default function CashFlowApp() {
         setSendPayloadProgress((current) =>
           current.runId === runId
             ? {
-              ...current,
-              active: false,
-              total: 0,
-              completed: 0,
-            }
+                ...current,
+                active: false,
+                total: 0,
+                completed: 0,
+              }
             : current,
         );
         addToast({
@@ -656,11 +747,11 @@ export default function CashFlowApp() {
         setSendPayloadProgress((current) =>
           current.runId === runId
             ? {
-              ...current,
-              active: true,
-              total: payloadEntries.length,
-              completed: index + 1,
-            }
+                ...current,
+                active: true,
+                total: payloadEntries.length,
+                completed: index + 1,
+              }
             : current,
         );
 
@@ -767,11 +858,11 @@ export default function CashFlowApp() {
         setSendPayloadProgress((current) =>
           current.runId === runId
             ? {
-              ...current,
-              active: false,
-              total: payloads.length,
-              completed: payloads.length,
-            }
+                ...current,
+                active: false,
+                total: payloads.length,
+                completed: payloads.length,
+              }
             : current,
         );
       }
@@ -802,6 +893,10 @@ export default function CashFlowApp() {
         file: sourceExcelRef.current.file || sourceFile,
         fileBuffer: sourceExcelRef.current.fileBuffer || sourceFileBuffer,
         sheetName: sourceExcelRef.current.sheetName || sheetName,
+        headerRowIndex:
+          sourceExcelRef.current.headerRowIndex ??
+          fileInfo?.headerRowIndex ??
+          0,
         rows: allRows,
         fileName: `${baseName}-checked.xlsx`,
       });
@@ -833,6 +928,7 @@ export default function CashFlowApp() {
         file,
         fileBuffer,
         sheetName: result.sheetName,
+        headerRowIndex: result.fileInfo?.headerRowIndex ?? 0,
       };
       setHeaders(result.headers);
       setAllRows(result.rows);
@@ -857,12 +953,171 @@ export default function CashFlowApp() {
         file: null,
         fileBuffer: null,
         sheetName: "",
+        headerRowIndex: 0,
       };
       setHeaders([]);
       setAllRows([]);
       setFileInfo(null);
     }
   };
+
+  const RenderEInvoiceTab = () => (
+    <section className="mx-auto grid max-w-[1600px] grid-cols-1 gap-[18px] xl:grid-cols-[minmax(0,1.25fr)_minmax(360px,0.75fr)]">
+      <div className="rounded-[22px] border border-slate-400/20 bg-white/90 p-[18px] shadow-[0_18px_42px_rgba(15,23,42,0.08)] backdrop-blur-xl sm:rounded-[28px] sm:p-[22px]">
+        <div className="mb-5 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+          <div>
+            <p className="mb-2 text-[11px] font-extrabold uppercase tracking-[0.22em] text-cyan-600">
+              Hóa đơn điện tử
+            </p>
+            <h2 className="m-0 text-[clamp(1.4rem,2vw,2rem)] font-black leading-[1.05] tracking-[-0.04em] text-slate-950">
+              Demo xuất hóa đơn điện tử
+            </h2>
+            <p className="mt-2 max-w-[72ch] text-sm leading-7 text-slate-600">
+              Tab này đang dùng dữ liệu mẫu để test UI và chuyển tab. Khi có
+              nguồn dữ liệu thật, mình chỉ cần thay mảng demo bằng API là xong.
+            </p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+          <article className="rounded-[20px] border border-cyan-200/70 bg-gradient-to-b from-cyan-50 to-white p-4 shadow-[0_16px_36px_rgba(14,165,233,0.08)]">
+            <div className="text-[11px] font-extrabold uppercase tracking-[0.16em] text-slate-500">
+              Số hóa đơn
+            </div>
+            <div className="mt-2 text-2xl font-black text-slate-950">
+              {demoEInvoiceSummary.count}
+            </div>
+          </article>
+          <article className="rounded-[20px] border border-emerald-200/70 bg-gradient-to-b from-emerald-50 to-white p-4 shadow-[0_16px_36px_rgba(16,185,129,0.08)]">
+            <div className="text-[11px] font-extrabold uppercase tracking-[0.16em] text-slate-500">
+              Tạm tính chưa thuế
+            </div>
+            <div className="mt-2 text-2xl font-black text-slate-950">
+              {new Intl.NumberFormat("vi-VN").format(
+                demoEInvoiceSummary.subtotal,
+              )}
+            </div>
+          </article>
+          <article className="rounded-[20px] border border-amber-200/70 bg-gradient-to-b from-amber-50 to-white p-4 shadow-[0_16px_36px_rgba(245,158,11,0.08)]">
+            <div className="text-[11px] font-extrabold uppercase tracking-[0.16em] text-slate-500">
+              Tổng sau thuế
+            </div>
+            <div className="mt-2 text-2xl font-black text-slate-950">
+              {new Intl.NumberFormat("vi-VN").format(
+                demoEInvoiceSummary.grandTotal,
+              )}
+            </div>
+          </article>
+        </div>
+
+        <div className="mt-5 overflow-hidden rounded-[22px] border border-slate-200/90 bg-white shadow-[0_18px_42px_rgba(15,23,42,0.06)]">
+          <div className="flex items-center justify-between gap-3 border-b border-slate-200/80 px-4 py-3.5">
+            <div>
+              <h3 className="m-0 text-base font-black text-slate-900">
+                Danh sách hóa đơn mẫu
+              </h3>
+              <p className="m-0 mt-1 text-xs text-slate-500">
+                Dữ liệu giả lập để test giao diện trước khi nối API.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setActiveTab("cashflow")}
+              className="rounded-[14px] border border-sky-300/30 bg-sky-50 px-3.5 py-2.5 text-xs font-extrabold text-sky-700 transition hover:bg-sky-100"
+            >
+              Quay về sổ quỹ
+            </button>
+          </div>
+
+          <div className="overflow-auto">
+            <table className="min-w-full border-separate border-spacing-0 text-left">
+              <thead>
+                <tr className="bg-slate-50 text-[11px] uppercase tracking-[0.14em] text-slate-500">
+                  <th className="px-4 py-3 font-black">Mã HĐ</th>
+                  <th className="px-4 py-3 font-black">Khách hàng</th>
+                  <th className="px-4 py-3 font-black">Số tiền</th>
+                  <th className="px-4 py-3 font-black">Thuế</th>
+                  <th className="px-4 py-3 font-black">Tổng cộng</th>
+                  <th className="px-4 py-3 font-black">Trạng thái</th>
+                  <th className="px-4 py-3 font-black">Ghi chú</th>
+                </tr>
+              </thead>
+              <tbody>
+                {DEMO_EINVOICE_ROWS.map((row) => (
+                  <tr key={row.id} className="border-t border-slate-100">
+                    <td className="px-4 py-3.5 font-extrabold text-slate-900">
+                      {row.code}
+                    </td>
+                    <td className="px-4 py-3.5 text-slate-700">
+                      <div className="font-semibold">{row.customer}</div>
+                      <div className="text-xs text-slate-500">{row.phone}</div>
+                    </td>
+                    <td className="px-4 py-3.5 text-slate-700">
+                      {new Intl.NumberFormat("vi-VN").format(row.amount)}
+                    </td>
+                    <td className="px-4 py-3.5 text-slate-700">
+                      {new Intl.NumberFormat("vi-VN").format(row.tax)}
+                    </td>
+                    <td className="px-4 py-3.5 font-bold text-slate-950">
+                      {new Intl.NumberFormat("vi-VN").format(row.total)}
+                    </td>
+                    <td className="px-4 py-3.5">
+                      <span className="inline-flex rounded-full border border-sky-300/30 bg-sky-50 px-2.5 py-1 text-[11px] font-extrabold text-sky-700">
+                        {row.status}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3.5 text-slate-600">{row.note}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <aside className="rounded-[22px] border border-slate-400/20 bg-white/90 p-[18px] shadow-[0_18px_42px_rgba(15,23,42,0.08)] backdrop-blur-xl sm:rounded-[28px] sm:p-[22px] xl:sticky xl:top-[18px]">
+        <div className="mb-4">
+          <h3 className="m-0 text-lg font-black text-slate-900">
+            Tác vụ nhanh
+          </h3>
+          <p className="mt-1.5 text-xs leading-[1.55] text-slate-500">
+            Khu này để mình nhét các nút phát hành, ký số, tải PDF sau này.
+          </p>
+        </div>
+
+        <div className="grid gap-3">
+          <button
+            type="button"
+            className="rounded-[18px] border border-emerald-300/30 bg-emerald-50 px-4 py-3.5 text-left text-sm font-extrabold text-emerald-800 transition hover:bg-emerald-100"
+          >
+            Tạo hóa đơn mới
+          </button>
+          <button
+            type="button"
+            className="rounded-[18px] border border-sky-300/30 bg-sky-50 px-4 py-3.5 text-left text-sm font-extrabold text-sky-800 transition hover:bg-sky-100"
+          >
+            Đồng bộ trạng thái
+          </button>
+          <button
+            type="button"
+            className="rounded-[18px] border border-slate-300/40 bg-slate-50 px-4 py-3.5 text-left text-sm font-extrabold text-slate-700 transition hover:bg-slate-100"
+          >
+            Cấu hình mẫu xuất
+          </button>
+        </div>
+
+        <div className="mt-5 rounded-[20px] border border-slate-200/90 bg-gradient-to-b from-slate-50 to-white p-4">
+          <div className="text-[11px] font-extrabold uppercase tracking-[0.16em] text-slate-500">
+            Lưu ý
+          </div>
+          <p className="mt-2 text-sm leading-7 text-slate-600">
+            Tab này đang là bản demo. Khi có nguồn dữ liệu thật, mình chỉ cần
+            thay mảng mẫu bằng API là xong.
+          </p>
+        </div>
+      </aside>
+    </section>
+  );
 
   // Giả sử bro đang lưu data excel trong state này
   // const [rows, setRows] = useState([]);
@@ -873,6 +1128,11 @@ export default function CashFlowApp() {
         if (row.__rowId === rowId) {
           // 1. Cập nhật giá trị mới cho BẤT KỲ cột nào bro vừa sửa (Tiền, SĐT, Mã...)
           const updatedRow = { ...row, [header]: newValue };
+          const aliasHeaders = row.__headerAliasMap?.[header] || [];
+
+          aliasHeaders.forEach((aliasHeader) => {
+            updatedRow[aliasHeader] = newValue;
+          });
 
           // 2. CHỈ reset lại trạng thái API khi sửa đúng cột "Mã vận đơn"
           // Các cột khác (như Tiền) sẽ không bị gọi lại API để tránh mất dữ liệu nhập tay
@@ -937,94 +1197,128 @@ export default function CashFlowApp() {
 
   return (
     <div className="min-h-screen w-full bg-[radial-gradient(circle_at_top_left,rgba(14,165,233,0.16),transparent_34%),radial-gradient(circle_at_top_right,rgba(16,185,129,0.12),transparent_28%),linear-gradient(180deg,#f8fbff_0%,#f3f8ff_46%,#eef6f4_100%)] p-3.5 text-left text-sm text-slate-900 sm:p-6">
-      <header className="mx-auto mb-5 grid max-w-[1600px] grid-cols-1 items-stretch gap-5 xl:grid-cols-[minmax(0,1.25fr)_minmax(320px,0.9fr)]">
-        <div className="relative overflow-hidden rounded-[22px] border border-slate-400/20 bg-gradient-to-br from-white/95 to-sky-50/90 p-[18px] shadow-[0_24px_80px_rgba(15,23,42,0.08)] backdrop-blur-xl after:pointer-events-none after:absolute after:-bottom-[90px] after:-right-20 after:h-60 after:w-60 after:rounded-full after:bg-[radial-gradient(circle,rgba(56,189,248,0.28),transparent_68%)] sm:rounded-[28px] sm:p-7">
-          <p className="mb-2.5 text-[11px] font-extrabold uppercase tracking-[0.22em] text-cyan-600">Excel to Object Picker</p>
-          <h1 className="m-0 text-[clamp(1.65rem,2.5vw,2.55rem)] font-black leading-[1.04] tracking-[-0.04em] text-slate-950">Tạo sổ quỹ từ file Excel và gửi lên KiotViet</h1>
-          <p className="mt-3.5 max-w-[72ch] text-sm leading-7 text-slate-600">
-            Dành cho team vận hành và marketing dùng nhanh mà không cần hiểu kỹ
-            cấu trúc dữ liệu. Làm theo 3 bước dưới đây là xong:
-          </p>
-          <ol className="mt-[22px] grid list-none gap-3 p-0">
-            <li className="grid gap-1 rounded-[18px] border border-slate-400/20 bg-white/70 px-4 py-3.5">
-              <strong className="text-xs font-extrabold text-slate-900">1. Chọn nguồn dữ liệu</strong>
-              <span className="text-[11px] leading-[1.55] text-slate-500">Chọn công ty, nhân viên và tải file Excel cần xử lý.</span>
-            </li>
-            <li className="grid gap-1 rounded-[18px] border border-slate-400/20 bg-white/70 px-4 py-3.5">
-              <strong className="text-xs font-extrabold text-slate-900">2. Chọn dòng cần tạo sổ quỹ</strong>
-              <span className="text-[11px] leading-[1.55] text-slate-500">
-                Tick những dòng cần dùng, hoặc để trống nếu muốn lấy toàn bộ dữ
-                liệu đang hiển thị.
-              </span>
-            </li>
-            <li className="grid gap-1 rounded-[18px] border border-slate-400/20 bg-white/70 px-4 py-3.5">
-              <strong className="text-xs font-extrabold text-slate-900">3. Kiểm tra payload rồi gửi lên KiotViet</strong>
-              <span className="text-[11px] leading-[1.55] text-slate-500">
-                Dòng được tự động tách thành payload dựa trên dữ liệu. Kiểm tra
-                chi tiết rồi nhấn "Gửi dữ liệu lên KiotViet".
-              </span>
-            </li>
-          </ol>
-        </div>
+      <div className="mx-auto mb-4 flex max-w-[1600px] flex-wrap gap-2 rounded-[22px] border border-slate-400/20 bg-white/80 p-2 shadow-[0_16px_40px_rgba(15,23,42,0.08)] backdrop-blur-xl">
+        {APP_TABS.map((tab) => {
+          const isActive = activeTab === tab.id;
 
-        <ControlsPanel
-          retailer={retailer}
-          onRetailerChange={handleRetailerChange}
-          onFileChange={handleFileChange}
-          retailers={RETAILERS}
-          moneyTotal={excelTotals.moneyTotal}
-          shipTotal={excelTotals.shipTotal}
-          combinedTotal={excelTotals.combinedTotal}
-          orderDeliveryProgress={orderDeliveryLoadProgress}
-        />
-      </header>
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setActiveTab(tab.id)}
+              className={`min-h-11 rounded-[16px] px-4 py-2.5 text-sm font-extrabold transition ${isActive ? "bg-slate-900 text-white shadow-[0_12px_24px_rgba(15,23,42,0.18)]" : "bg-transparent text-slate-600 hover:bg-white hover:text-slate-900"}`}
+            >
+              {tab.label}
+            </button>
+          );
+        })}
+      </div>
+      {activeTab === "einvoice" ? (
+        <EinvoicesTab onSwitchToCashflow={() => setActiveTab("cashflow")} />
+      ) : (
+        <>
+          <header className="mx-auto mb-5 grid max-w-[1600px] grid-cols-1 items-stretch gap-5 xl:grid-cols-[minmax(0,1.25fr)_minmax(320px,0.9fr)]">
+            <div className="relative overflow-hidden rounded-[22px] border border-slate-400/20 bg-gradient-to-br from-white/95 to-sky-50/90 p-[18px] shadow-[0_24px_80px_rgba(15,23,42,0.08)] backdrop-blur-xl after:pointer-events-none after:absolute after:-bottom-[90px] after:-right-20 after:h-60 after:w-60 after:rounded-full after:bg-[radial-gradient(circle,rgba(56,189,248,0.28),transparent_68%)] sm:rounded-[28px] sm:p-7">
+              <p className="mb-2.5 text-[11px] font-extrabold uppercase tracking-[0.22em] text-cyan-600">
+                Excel to Object Picker
+              </p>
+              <h1 className="m-0 text-[clamp(1.65rem,2.5vw,2.55rem)] font-black leading-[1.04] tracking-[-0.04em] text-slate-950">
+                Tạo sổ quỹ từ file Excel và gửi lên KiotViet
+              </h1>
+              <p className="mt-3.5 max-w-[72ch] text-sm leading-7 text-slate-600">
+                Dành cho team vận hành và marketing dùng nhanh mà không cần hiểu
+                kỹ cấu trúc dữ liệu. Làm theo 3 bước dưới đây là xong:
+              </p>
+              <ol className="mt-[22px] grid list-none gap-3 p-0">
+                <li className="grid gap-1 rounded-[18px] border border-slate-400/20 bg-white/70 px-4 py-3.5">
+                  <strong className="text-xs font-extrabold text-slate-900">
+                    1. Chọn nguồn dữ liệu
+                  </strong>
+                  <span className="text-[11px] leading-[1.55] text-slate-500">
+                    Chọn công ty, nhân viên và tải file Excel cần xử lý.
+                  </span>
+                </li>
+                <li className="grid gap-1 rounded-[18px] border border-slate-400/20 bg-white/70 px-4 py-3.5">
+                  <strong className="text-xs font-extrabold text-slate-900">
+                    2. Chọn dòng cần tạo sổ quỹ
+                  </strong>
+                  <span className="text-[11px] leading-[1.55] text-slate-500">
+                    Tick những dòng cần dùng, hoặc để trống nếu muốn lấy toàn bộ
+                    dữ liệu đang hiển thị.
+                  </span>
+                </li>
+                <li className="grid gap-1 rounded-[18px] border border-slate-400/20 bg-white/70 px-4 py-3.5">
+                  <strong className="text-xs font-extrabold text-slate-900">
+                    3. Kiểm tra payload rồi gửi lên KiotViet
+                  </strong>
+                  <span className="text-[11px] leading-[1.55] text-slate-500">
+                    Dòng được tự động tách thành payload dựa trên dữ liệu. Kiểm
+                    tra chi tiết rồi nhấn "Gửi dữ liệu lên KiotViet".
+                  </span>
+                </li>
+              </ol>
+            </div>
 
-      {(excelError || partnerDeliveryError || bankAccountError) && (
-        <div className="mx-auto mb-4 max-w-[1600px] rounded-[18px] border border-red-400/30 bg-red-50/95 px-4 py-3.5 text-[13px] font-bold text-red-700 shadow-[0_18px_40px_rgba(185,28,28,0.08)] backdrop-blur-xl">
-          {excelError || partnerDeliveryError || bankAccountError}
-        </div>
+            <ControlsPanel
+              retailer={retailer}
+              onRetailerChange={handleRetailerChange}
+              onFileChange={handleFileChange}
+              retailers={RETAILERS}
+              moneyTotal={excelTotals.moneyTotal}
+              shipTotal={excelTotals.shipTotal}
+              combinedTotal={excelTotals.combinedTotal}
+              orderDeliveryProgress={orderDeliveryLoadProgress}
+            />
+          </header>
+
+          {(excelError || partnerDeliveryError || bankAccountError) && (
+            <div className="mx-auto mb-4 max-w-[1600px] rounded-[18px] border border-red-400/30 bg-red-50/95 px-4 py-3.5 text-[13px] font-bold text-red-700 shadow-[0_18px_40px_rgba(185,28,28,0.08)] backdrop-blur-xl">
+              {excelError || partnerDeliveryError || bankAccountError}
+            </div>
+          )}
+
+          {payloadError && (
+            <div className="mx-auto mb-4 max-w-[1600px] rounded-[18px] border border-red-400/30 bg-red-50/95 px-4 py-3.5 text-[13px] font-bold text-red-700 shadow-[0_18px_40px_rgba(185,28,28,0.08)] backdrop-blur-xl">
+              {payloadError}
+            </div>
+          )}
+          <ToastContainer toasts={toasts} onDismiss={dismissToast} />
+
+          <StatsGrid
+            fileName={fileInfo?.fileName || fileName || "Chưa chọn file"}
+            sheetName={sheetName || "-"}
+            rowCount={fileInfo?.rowCount ?? 0}
+            selectedCount={selectedRows.length}
+          />
+
+          <section className="mx-auto grid max-w-[1600px] grid-cols-1 items-start gap-[18px] xl:grid-cols-[minmax(0,1.75fr)_minmax(360px,0.95fr)]">
+            <ExcelTable
+              headers={visibleHeaders}
+              rows={visibleRows}
+              selectedIds={selectedIds}
+              onToggleRow={toggleRow}
+              onClearSelection={handleClearSelection}
+              onToggleVisibleSelection={handleToggleVisibleSelection}
+              selectedCountInView={selectedCountInView}
+              onUpdateCell={handleUpdateCell}
+              onSaveFile={handleSaveFile}
+            />
+
+            <SelectedRowsPanel
+              selectedRows={selectedRows}
+              generatedPayloads={generatedPayloads}
+              getPayloadEntriesForRow={getPayloadEntriesForRow}
+              onSendPayloads={handleSendPayloads}
+              onExportExcel={handleExportExcel}
+              isSendingPayloads={sendingPayloads}
+              sendPayloadProgress={sendPayloadProgress}
+              isExportingExcel={exportingExcel}
+              payloadSourceCount={payloadSourceRows.length}
+              missingInvoiceRows={missingInvoiceRows}
+            />
+          </section>
+        </>
       )}
-
-      {payloadError && (
-        <div className="mx-auto mb-4 max-w-[1600px] rounded-[18px] border border-red-400/30 bg-red-50/95 px-4 py-3.5 text-[13px] font-bold text-red-700 shadow-[0_18px_40px_rgba(185,28,28,0.08)] backdrop-blur-xl">
-          {payloadError}
-        </div>
-      )}
-      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
-
-      <StatsGrid
-        fileName={fileInfo?.fileName || fileName || "Chưa chọn file"}
-        sheetName={sheetName || "-"}
-        rowCount={fileInfo?.rowCount ?? 0}
-        selectedCount={selectedRows.length}
-      />
-
-      <section className="mx-auto grid max-w-[1600px] grid-cols-1 items-start gap-[18px] xl:grid-cols-[minmax(0,1.75fr)_minmax(360px,0.95fr)]">
-        <ExcelTable
-          headers={visibleHeaders}
-          rows={visibleRows}
-          selectedIds={selectedIds}
-          onToggleRow={toggleRow}
-          onClearSelection={handleClearSelection}
-          onToggleVisibleSelection={handleToggleVisibleSelection}
-          selectedCountInView={selectedCountInView}
-          onUpdateCell={handleUpdateCell}
-          onSaveFile={handleSaveFile}
-        />
-
-        <SelectedRowsPanel
-          selectedRows={selectedRows}
-          generatedPayloads={generatedPayloads}
-          getPayloadEntriesForRow={getPayloadEntriesForRow}
-          onSendPayloads={handleSendPayloads}
-          onExportExcel={handleExportExcel}
-          isSendingPayloads={sendingPayloads}
-          sendPayloadProgress={sendPayloadProgress}
-          isExportingExcel={exportingExcel}
-          payloadSourceCount={payloadSourceRows.length}
-          missingInvoiceRows={missingInvoiceRows}
-        />
-      </section>
     </div>
   );
 }
