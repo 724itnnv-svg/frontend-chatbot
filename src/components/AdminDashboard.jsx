@@ -95,7 +95,9 @@ function attachTeamIdToOrders(orders, pageTeamMap) {
 export default function AdminDashboard() {
     const { user, token } = useAuth() || {};
     const navigate = useNavigate();
-    const isAdmin = user?.role?.toLowerCase() === "admin";
+    const roleLower = user?.role?.toLowerCase?.() || "";
+    const isAdmin = roleLower === "admin" || roleLower === "superadmin";
+    const canExportSensitiveFields = isAdmin || roleLower === "mkt";
 
     // ===== States: Export đơn hàng =====
     const [exportConfig, setExportConfig] = useState({ startDate: "", endDate: "", startTime: "", endTime: "" });
@@ -212,7 +214,7 @@ export default function AdminDashboard() {
 
     // ===== Helpers chọn field =====
     const toggleField = (key) => {
-        if (SENSITIVE_FIELDS.has(key) && !isAdmin) return;
+        if (SENSITIVE_FIELDS.has(key) && !canExportSensitiveFields) return;
         setSelectedFields(prev => {
             const next = new Set(prev);
             if (next.has(key)) next.delete(key);
@@ -224,7 +226,7 @@ export default function AdminDashboard() {
     const toggleAllFields = () => {
         const selectableKeys = EXPORT_FIELDS
             .map(f => f.key)
-            .filter(key => isAdmin || !SENSITIVE_FIELDS.has(key));
+            .filter(key => canExportSensitiveFields || !SENSITIVE_FIELDS.has(key));
         const allSelected = selectableKeys.every(key => selectedFields.has(key));
         if (allSelected) {
             setSelectedFields(DEFAULT_FIELDS);
@@ -452,11 +454,11 @@ export default function AdminDashboard() {
         </div>
     );
 
-    const selectableFieldCount = isAdmin
+    const selectableFieldCount = canExportSensitiveFields
         ? EXPORT_FIELDS.length
         : EXPORT_FIELDS.filter(f => !SENSITIVE_FIELDS.has(f.key)).length;
     const allFieldsSelected = EXPORT_FIELDS
-        .filter(f => isAdmin || !SENSITIVE_FIELDS.has(f.key))
+        .filter(f => canExportSensitiveFields || !SENSITIVE_FIELDS.has(f.key))
         .every(f => selectedFields.has(f.key));
     const isAllTeams = selectedTeams.has("ALL");
     const isAllPages = selectedPages.has("ALL");
@@ -613,12 +615,12 @@ export default function AdminDashboard() {
                         <div className="flex flex-wrap gap-2">
                             {EXPORT_FIELDS.map(field => {
                                 const isSensitive = SENSITIVE_FIELDS.has(field.key);
-                                const locked = isSensitive && !isAdmin;
+                                const locked = isSensitive && !canExportSensitiveFields;
                                 const active = !locked && selectedFields.has(field.key);
                                 return (
                                     <button key={field.key} type="button" onClick={() => toggleField(field.key)}
                                         disabled={locked}
-                                        title={locked ? "Chỉ Admin mới được xuất trường này" : undefined}
+                                        title={locked ? "Bạn không có quyền xuất trường này" : undefined}
                                         className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition ${locked
                                             ? "cursor-not-allowed border-slate-200 bg-slate-50 text-slate-300"
                                             : active
@@ -628,7 +630,7 @@ export default function AdminDashboard() {
                                             ? <Lock size={11} className="text-slate-300" />
                                             : active ? <CheckSquare size={12} /> : <Square size={12} />}
                                         {field.label}
-                                        {locked && <span className="ml-0.5 text-[9px] font-bold uppercase tracking-wide text-slate-300">Admin</span>}
+                                        {locked && <span className="ml-0.5 text-[9px] font-bold uppercase tracking-wide text-slate-300">Khóa</span>}
                                     </button>
                                 );
                             })}
@@ -641,7 +643,8 @@ export default function AdminDashboard() {
                             Đã chọn <span className="font-semibold text-slate-600">{selectedFields.size}</span>/<span className="font-semibold text-slate-600">{selectableFieldCount}</span> cột
                             {!isAllTeams && <> · <span className="font-semibold text-slate-600">{selectedTeams.size}</span> team</>}
                             {!isAllPages && <> · <span className="font-semibold text-sky-600">{selectedPages.size}</span> page</>}
-                            {!isAdmin && <span className="ml-1 text-amber-500">(Số ĐT &amp; Địa chỉ chỉ Admin xuất được)</span>}
+                            {roleLower === "mkt" && <span className="ml-1 text-amber-500">(Số ĐT &amp; Địa chỉ chỉ hiện ở page bạn quản lý)</span>}
+                            {!canExportSensitiveFields && <span className="ml-1 text-amber-500">(Không có quyền xuất Số ĐT &amp; Địa chỉ)</span>}
                         </p>
                         <div className="flex items-center gap-2">
                             <button type="button" onClick={handleExportProducts}

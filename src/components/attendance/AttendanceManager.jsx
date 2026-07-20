@@ -887,7 +887,7 @@ export default function AttendanceManager() {
       const res = await api.post("/auto-attendance/run-now", { type, time });
       const data = res.data?.data || {};
       showFlash(true, `Đã chạy thử: tạo ${data.created || 0}, cập nhật ${data.updated || 0}, bỏ qua ${data.skipped || 0}.`);
-      refreshCurrentTab();
+      await refreshCurrentTab();
     } catch (err) {
       showFlash(false, err.response?.data?.message || "Không thể chạy thử chấm công tự động.");
     } finally {
@@ -916,15 +916,15 @@ export default function AttendanceManager() {
     }
   }, [tab, from, to, statusFilter, teamFilter, loadList, loadOverview, loadReport, loadPending, loadAutoSettings]);
 
-  function refreshCurrentTab() {
+  async function refreshCurrentTab({ listPage = page, pendingListPage = pendingPage } = {}) {
     if (tab === "overview") {
-      loadOverview();
-      loadAutoSettings();
+      await Promise.all([loadOverview(), loadAutoSettings()]);
+      return;
     }
-    if (tab === "list") loadList(page);
-    if (tab === "pending") loadPending(pendingPage);
-    if (tab === "auto") loadAutoSettings();
-    if (tab === "report") loadReport();
+    if (tab === "list") await loadList(listPage);
+    if (tab === "pending") await loadPending(pendingListPage);
+    if (tab === "auto") await loadAutoSettings();
+    if (tab === "report") await loadReport();
   }
 
   function goPage(p) {
@@ -1045,11 +1045,7 @@ export default function AttendanceManager() {
       const nextPage = editingRecord?._id ? page : 1;
       closeForm();
       setPage(nextPage);
-      if (tab === "overview") {
-        loadOverview();
-      } else {
-        loadList(nextPage);
-      }
+      await refreshCurrentTab({ listPage: nextPage });
     } catch (err) {
       showFlash(false, err.response?.data?.message || "Không thể lưu bản ghi chấm công.");
     } finally {
@@ -1063,7 +1059,13 @@ export default function AttendanceManager() {
       await api.delete(`/attendance/${record._id}`);
       showFlash(true, "Đã xóa bản ghi.");
       closeForm();
-      loadList(page);
+      const nextPage = tab === "list" && records.length === 1 && page > 1 ? page - 1 : page;
+      const nextPendingPage = tab === "pending" && pendingRecords.length === 1 && pendingPage > 1
+        ? pendingPage - 1
+        : pendingPage;
+      setPage(nextPage);
+      setPendingPage(nextPendingPage);
+      await refreshCurrentTab({ listPage: nextPage, pendingListPage: nextPendingPage });
     } catch {
       showFlash(false, "Không thể xóa.");
     }
@@ -1143,7 +1145,7 @@ export default function AttendanceManager() {
       const res = await api.post("/attendance/bulk", { records });
       setBulkStamping(false);
       showFlash(true, res.data.message || `Đã tạo ${res.data.success} bản ghi.`);
-      if (res.data.success > 0) refreshCurrentTab();
+      if (res.data.success > 0) await refreshCurrentTab();
     } catch (err) {
       setBulkStamping(false);
       showFlash(false, err?.response?.data?.message || "Lỗi khi chấm công hàng loạt.");
@@ -1190,7 +1192,7 @@ export default function AttendanceManager() {
 
       showFlash(true, `Đã xóa ${dayRecords.length} bản ghi chấm công ngày ${fmtShortDate(bulkDeleteDate)}.`);
       setBulkDeleteOpen(false);
-      refreshCurrentTab();
+      await refreshCurrentTab();
     } catch (err) {
       showFlash(false, err?.response?.data?.message || "Lỗi khi xóa bản ghi hàng loạt.");
     } finally {

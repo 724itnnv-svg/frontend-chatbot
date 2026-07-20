@@ -4,18 +4,37 @@ const APP_PERMISSIONS = {
       id: "business",
       name: "Kinh doanh",
       description: "Thống kê, Page, tin nhắn, chatbot và đơn hàng",
-      screenIds: ["business_stats", "pages", "meta_pages", "pagesmessage", "customer_care", "chatweb", "donhang", "donhangWeb"],
+      screenIds: [
+        "business_stats",
+        "pages",
+        "meta_pages",
+        "pagesmessage",
+        "customer_care",
+        "chatweb",
+        "donhang",
+        "donhangWeb",
+        "so_quy",
+      ],
     },
     {
       id: "attendance",
       name: "Chấm công",
-      description: "Chấm công, ca làm, vị trí, tính lương và thông báo thiết bị",
-      screenIds: ["attendance_self", "attendance", "attendance_shifts", "attendance_locations", "payroll", "notifications"],
+      description:
+        "Chấm công, ca làm, vị trí, tính lương và thông báo thiết bị",
+      screenIds: [
+        "attendance_self",
+        "attendance",
+        "attendance_shifts",
+        "attendance_locations",
+        "payroll",
+        "notifications",
+      ],
     },
     {
       id: "people",
       name: "Nhân sự",
-      description: "Hồ sơ nhân sự, kho thiết bị, người dùng và vai trò phân quyền",
+      description:
+        "Hồ sơ nhân sự, kho thiết bị, người dùng và vai trò phân quyền",
       screenIds: ["employee_profiles", "employee_assets", "users", "roles"],
     },
     {
@@ -92,7 +111,10 @@ const APP_PERMISSIONS = {
     { id: "admin_agent", name: "Quản Trị Agent" },
     { id: "admin_agent_intent", name: "Quản Lý Intent" },
     { id: "admin_agent_promo", name: "Quản Lý Khuyến Mãi" },
-    { id: "admin_agent_response_templates", name: "Mẫu câu trả lời theo intent" },
+    {
+      id: "admin_agent_response_templates",
+      name: "Mẫu câu trả lời theo intent",
+    },
     { id: "admin_chatbot_config", name: "Cấu Hình ChatBot" },
     { id: "admin_chat_v3_faq", name: "Bộ câu hỏi dùng chung" },
     { id: "admin_faq", name: "FAQ Theo Page" },
@@ -111,6 +133,7 @@ const APP_PERMISSIONS = {
     { id: "attendance_locations", name: "Vị trí chấm công" },
     { id: "payroll", name: "Chấm công tính lương" },
     { id: "dua_sap", name: "Quản Lý Dừa Sáp" },
+    { id: "so_quy", name: "Tính Sổ Quỹ" },
   ],
   actions: [
     { id: "view", name: "Xem", color: "blue" },
