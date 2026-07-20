@@ -150,6 +150,7 @@ const buildSinglePayload = ({
         ? {
             invoiceId: invoiceCode,
             InvoiceId: invoiceCode,
+            invoiceIdCode: orderDelivery.invoiceIdCode,
           }
         : {}),
     },
