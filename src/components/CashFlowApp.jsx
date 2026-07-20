@@ -79,6 +79,15 @@ const DEMO_EINVOICE_ROWS = [
 
 const normalizeText = (value) => String(value ?? "").trim();
 
+const pickFirstNonEmpty = (row, keys = []) => {
+  for (const key of keys) {
+    const value = normalizeText(row?.[key]);
+    if (value) return value;
+  }
+
+  return "";
+};
+
 const getPrivateTokenCookieName = (retailer) =>
   `${PRIVATE_TOKEN_COOKIE_PREFIX}${retailer}`;
 
@@ -116,7 +125,14 @@ const sumMoneyColumn = (rows, header) =>
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const getOrderDeliveryCode = (row) =>
-  normalizeText(row["Mã vận đơn"] || row["Mã Vận Đơn"] || row["mã vận đơn"]);
+  pickFirstNonEmpty(row, [
+    "Mã vận đơn",
+    "Mã Vận Đơn",
+    "mã vận đơn",
+    "Mã đơn GHN",
+    "Mã Đơn GHN",
+    "mã đơn ghn",
+  ]);
 
 const stripOrderDeliveryData = (row) => {
   const {
@@ -141,8 +157,10 @@ const mergeOrderDeliveryIntoRow = (row, orderDelivery) => ({
     orderDelivery.givenName ||
     row["Nhân viên"] ||
     "",
-  "Tiền hàng": row["Tiền thu hộ(VNĐ)"] ?? orderDelivery.invoiceTotal ?? "",
-  "Phí ship NVC thu": row["Tiền cước (VNĐ)"] ?? orderDelivery.totalPrice ?? "",
+  "Tiền hàng":
+    row["Tiền thu hộ(VNĐ)"] ?? row["(1)"] ?? orderDelivery.invoiceTotal ?? "",
+  "Phí ship NVC thu":
+    row["Tiền cước (VNĐ)"] ?? row["(5)"] ?? orderDelivery.totalPrice ?? "",
   "Số điện thoại": orderDelivery.phoneNumber || row["Số điện thoại"] || "",
   PartnerName: orderDelivery.partnerDeliveryName || row.PartnerName || "",
   PartnerCode: orderDelivery.partnerDeliveryCode || row.PartnerCode || "",
@@ -478,15 +496,22 @@ export default function CashFlowApp() {
   );
 
   const excelTotals = useMemo(() => {
-    const moneyTotal = sumMoneyColumn(allRows, "Tiền thu hộ(VNĐ)");
-    const shipTotal = sumMoneyColumn(allRows, "Tiền cước (VNĐ)");
+    const sourceFormat =
+      fileInfo?.formatKey || allRows[0]?.__sourceFormat || "viettel";
+    const isGhnFormat = sourceFormat === "ghn";
+    const moneyHeader = isGhnFormat ? "Tiền hàng" : "Tiền thu hộ(VNĐ)";
+    const shipHeader = isGhnFormat ? "Phí ship NVC thu" : "Tiền cước (VNĐ)";
+    const moneyTotal = sumMoneyColumn(allRows, moneyHeader);
+    const shipTotal = sumMoneyColumn(allRows, shipHeader);
 
     return {
       moneyTotal,
       shipTotal,
-      combinedTotal: moneyTotal - shipTotal,
+      combinedTotal: isGhnFormat
+        ? moneyTotal + shipTotal
+        : moneyTotal - shipTotal,
     };
-  }, [allRows]);
+  }, [allRows, fileInfo]);
 
   const payloadSourceRows = useMemo(
     () =>
@@ -567,6 +592,7 @@ export default function CashFlowApp() {
       file: null,
       fileBuffer: null,
       sheetName: "",
+      headerRowIndex: 0,
     };
     setPartnerDeliveries([]);
     setBankAccounts([]);
@@ -867,6 +893,10 @@ export default function CashFlowApp() {
         file: sourceExcelRef.current.file || sourceFile,
         fileBuffer: sourceExcelRef.current.fileBuffer || sourceFileBuffer,
         sheetName: sourceExcelRef.current.sheetName || sheetName,
+        headerRowIndex:
+          sourceExcelRef.current.headerRowIndex ??
+          fileInfo?.headerRowIndex ??
+          0,
         rows: allRows,
         fileName: `${baseName}-checked.xlsx`,
       });
@@ -898,6 +928,7 @@ export default function CashFlowApp() {
         file,
         fileBuffer,
         sheetName: result.sheetName,
+        headerRowIndex: result.fileInfo?.headerRowIndex ?? 0,
       };
       setHeaders(result.headers);
       setAllRows(result.rows);
@@ -922,6 +953,7 @@ export default function CashFlowApp() {
         file: null,
         fileBuffer: null,
         sheetName: "",
+        headerRowIndex: 0,
       };
       setHeaders([]);
       setAllRows([]);
@@ -1096,6 +1128,11 @@ export default function CashFlowApp() {
         if (row.__rowId === rowId) {
           // 1. Cập nhật giá trị mới cho BẤT KỲ cột nào bro vừa sửa (Tiền, SĐT, Mã...)
           const updatedRow = { ...row, [header]: newValue };
+          const aliasHeaders = row.__headerAliasMap?.[header] || [];
+
+          aliasHeaders.forEach((aliasHeader) => {
+            updatedRow[aliasHeader] = newValue;
+          });
 
           // 2. CHỈ reset lại trạng thái API khi sửa đúng cột "Mã vận đơn"
           // Các cột khác (như Tiền) sẽ không bị gọi lại API để tránh mất dữ liệu nhập tay
