@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { io } from "socket.io-client";
 import * as XLSX from "xlsx";
 import { saveAs } from "file-saver";
 import {
@@ -25,8 +26,12 @@ import {
   Zap,
 } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
+import { getApiOrigin } from "../../api/baseUrl";
 
 const PAGE_LIMIT = 20;
+const isViteDevServer = typeof window !== "undefined" && window.location.port === "5173";
+const ATTENDANCE_SOCKET_URL = import.meta.env.VITE_SOCKET_URL ||
+  (isViteDevServer ? "http://localhost:5000" : getApiOrigin() || undefined);
 
 const STATUS_CONFIG = {
   present: { label: "Đủ công", tone: "emerald", Icon: CheckCircle2 },
@@ -180,6 +185,12 @@ function hasWrongLocationRecord(record) {
   return record?.status === "invalid" || getRecordShifts(record).some(hasWrongLocationShift);
 }
 
+function hasAttendancePunch(record) {
+  if (!record) return false;
+  if (record.checkIn?.time || record.checkOut?.time) return true;
+  return getRecordShifts(record).some((shift) => shift?.checkIn?.time || shift?.checkOut?.time);
+}
+
 function isPastAttendanceDate(date, today) {
   return Boolean(date && today && date < today);
 }
@@ -190,7 +201,9 @@ function isSundayDate(dateStr) {
 }
 
 function getAttendanceDayStyle(record, date, today) {
-  if (!record && isSundayDate(date)) {
+  const isMissingAttendance = !record || !hasAttendancePunch(record);
+
+  if (isMissingAttendance && isSundayDate(date)) {
     return {
       border: "border-slate-200",
       bg: "bg-slate-100/80",
@@ -200,7 +213,7 @@ function getAttendanceDayStyle(record, date, today) {
     };
   }
 
-  if (!record) {
+  if (isMissingAttendance) {
     return isPastAttendanceDate(date, today)
       ? {
         border: "border-rose-400 ring-2 ring-rose-100 hover:border-rose-500",
@@ -486,6 +499,17 @@ function createBulkStampForm() {
   };
 }
 
+function createBulkEditTimeForm() {
+  return {
+    dateFrom: todayVN(),
+    dateTo: todayVN(),
+    workDays: [1, 2, 3, 4, 5, 6],
+    shiftNo: 1,
+    checkInTime: DEFAULT_SHIFT_FORM[0].scheduledStart,
+    checkOutTime: DEFAULT_SHIFT_FORM[0].scheduledEnd,
+  };
+}
+
 function createAutoAttendanceForm() {
   return {
     locationId: "",
@@ -601,7 +625,7 @@ function Badge({ tone = "slate", children, icon: Icon }) {
 }
 
 export default function AttendanceManager() {
-  const { api, user: authUser } = useAuth();
+  const { api, token } = useAuth();
   const formRef = useRef(null);
   const [tab, setTab] = useState("overview");
   const [from, setFrom] = useState(firstDayOfMonth());
@@ -639,6 +663,11 @@ export default function AttendanceManager() {
   const [bulkStampUserIds, setBulkStampUserIds] = useState(new Set());
   const [bulkUserSearch, setBulkUserSearch] = useState("");
   const [bulkStamping, setBulkStamping] = useState(false);
+  const [bulkEditTimeOpen, setBulkEditTimeOpen] = useState(false);
+  const [bulkEditTimeForm, setBulkEditTimeForm] = useState(createBulkEditTimeForm);
+  const [bulkEditTimeUserIds, setBulkEditTimeUserIds] = useState(new Set());
+  const [bulkEditTimeUserSearch, setBulkEditTimeUserSearch] = useState("");
+  const [bulkEditingTime, setBulkEditingTime] = useState(false);
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
   const [bulkDeleteDate, setBulkDeleteDate] = useState(todayVN);
   const [bulkDeleteUserIds, setBulkDeleteUserIds] = useState(new Set());
@@ -742,6 +771,19 @@ export default function AttendanceManager() {
       showFlash(false, "Không thể tải danh sách cần duyệt.");
     } finally {
       setPendingLoading(false);
+    }
+  }, [api, from, to, teamFilter]);
+
+  const loadPendingCount = useCallback(async () => {
+    try {
+      const params = new URLSearchParams();
+      if (from) params.set("from", from);
+      if (to) params.set("to", to);
+      if (teamFilter) params.set("teamId", normalizeTeam(teamFilter));
+      const res = await api.get(`/attendance/pending-review/count?${params}`);
+      setPendingTotal(Number(res.data?.total || 0));
+    } catch {
+      // Polling/realtime failures stay silent; opening the tab still shows the normal load error.
     }
   }, [api, from, to, teamFilter]);
 
@@ -899,6 +941,56 @@ export default function AttendanceManager() {
   }, [loadFormOptions]);
 
   useEffect(() => {
+    loadPendingCount();
+
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") loadPendingCount();
+    };
+    const intervalId = window.setInterval(loadPendingCount, 30000);
+    window.addEventListener("focus", loadPendingCount);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener("focus", loadPendingCount);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
+  }, [loadPendingCount]);
+
+  useEffect(() => {
+    if (!token) return undefined;
+
+    const socket = io(ATTENDANCE_SOCKET_URL, {
+      auth: { token },
+      transports: ["polling", "websocket"],
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 800,
+      reconnectionDelayMax: 5000,
+      timeout: 20000,
+    });
+    let refreshTimer = null;
+
+    const refreshAttendance = () => {
+      window.clearTimeout(refreshTimer);
+      refreshTimer = window.setTimeout(() => {
+        loadPendingCount();
+        if (tab === "pending") loadPending(pendingPage);
+      }, 200);
+    };
+
+    socket.on("connect", loadPendingCount);
+    socket.on("attendance:changed", refreshAttendance);
+
+    return () => {
+      window.clearTimeout(refreshTimer);
+      socket.off("connect", loadPendingCount);
+      socket.off("attendance:changed", refreshAttendance);
+      socket.disconnect();
+    };
+  }, [loadPending, loadPendingCount, pendingPage, tab, token]);
+
+  useEffect(() => {
     if (tab === "overview") {
       loadOverview();
       loadAutoSettings();
@@ -937,6 +1029,7 @@ export default function AttendanceManager() {
     setForm(createEmptyForm());
     setFormOpen(true);
     setBulkStampOpen(false);
+    setBulkEditTimeOpen(false);
     setBulkDeleteOpen(false);
     setTab("list");
   }
@@ -962,6 +1055,7 @@ export default function AttendanceManager() {
     });
     setFormOpen(true);
     setBulkStampOpen(false);
+    setBulkEditTimeOpen(false);
     setBulkDeleteOpen(false);
     setTimeout(() => formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
   }
@@ -971,6 +1065,7 @@ export default function AttendanceManager() {
     setForm(recordToForm(record));
     setFormOpen(true);
     setBulkStampOpen(false);
+    setBulkEditTimeOpen(false);
     setBulkDeleteOpen(false);
     setTimeout(() => formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
   }
@@ -1074,6 +1169,7 @@ export default function AttendanceManager() {
   function openBulkStampPanel() {
     setBulkStampOpen(true);
     setFormOpen(false);
+    setBulkEditTimeOpen(false);
     setBulkDeleteOpen(false);
     setBulkStampForm(createBulkStampForm());
     setBulkStampUserIds(new Set());
@@ -1152,10 +1248,77 @@ export default function AttendanceManager() {
     }
   }
 
+  function openBulkEditTimePanel() {
+    setBulkEditTimeOpen(true);
+    setFormOpen(false);
+    setBulkStampOpen(false);
+    setBulkDeleteOpen(false);
+    setBulkEditTimeForm(createBulkEditTimeForm());
+    setBulkEditTimeUserIds(new Set());
+    setBulkEditTimeUserSearch("");
+  }
+
+  function toggleBulkEditTimeUser(id) {
+    setBulkEditTimeUserIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+
+  async function handleBulkEditTime() {
+    const userIds = [...bulkEditTimeUserIds];
+    if (userIds.length === 0) return showFlash(false, "Chưa chọn nhân viên nào.");
+
+    const { dateFrom, dateTo, workDays, shiftNo, checkInTime, checkOutTime } = bulkEditTimeForm;
+    const allDates = buildDateRange(dateFrom, dateTo);
+    if (allDates.length > 0 && allDates[allDates.length - 1] !== dateTo) {
+      return showFlash(false, "Mỗi lần chỉ được sửa tối đa 31 ngày.");
+    }
+    const dates = allDates.filter((date) => {
+      const parsed = parseDateOnly(date);
+      return parsed && workDays.includes(parsed.getDay());
+    });
+    if (dates.length === 0) return showFlash(false, "Khoảng ngày hoặc ngày trong tuần không hợp lệ.");
+    if (!checkInTime) return showFlash(false, "Vui lòng nhập giờ vào.");
+    if (checkOutTime && minutesFromTime(checkOutTime) <= minutesFromTime(checkInTime)) {
+      return showFlash(false, "Giờ ra phải sau giờ vào.");
+    }
+
+    const maxRecords = userIds.length * dates.length;
+    const timeRangeLabel = checkOutTime ? `${checkInTime} – ${checkOutTime}` : `${checkInTime} – chưa có giờ ra`;
+    if (!window.confirm(
+      `Sửa giờ thành ${timeRangeLabel} cho các bản ghi hiện có của ${userIds.length} nhân viên trong ${dates.length} ngày đã chọn?\nTối đa ${maxRecords} bản ghi sẽ được cập nhật.`
+    )) return;
+
+    setBulkEditingTime(true);
+    try {
+      const res = await api.post("/attendance/bulk-update-times", {
+        userIds,
+        dateFrom,
+        dateTo,
+        workDays,
+        shiftNo,
+        checkInTime,
+        checkOutTime,
+      });
+      showFlash(res.data.updated > 0, res.data.message || `Đã cập nhật ${res.data.updated || 0} bản ghi.`);
+      if (res.data.updated > 0) {
+        setBulkEditTimeOpen(false);
+        await refreshCurrentTab();
+      }
+    } catch (err) {
+      showFlash(false, err?.response?.data?.message || "Lỗi khi sửa giờ chấm công hàng loạt.");
+    } finally {
+      setBulkEditingTime(false);
+    }
+  }
+
   function openBulkDeletePanel() {
     setBulkDeleteOpen(true);
     setFormOpen(false);
     setBulkStampOpen(false);
+    setBulkEditTimeOpen(false);
     setBulkDeleteDate(todayVN());
     setBulkDeleteUserIds(new Set());
     setBulkDeleteUserSearch("");
@@ -1435,7 +1598,7 @@ export default function AttendanceManager() {
       overviewDates.forEach((date) => {
         if (isSundayDate(date)) return;
         const record = overviewByUserDate.get(`${employee.id}-${date}`) || overviewByUserDate.get(`${employee.name}-${date}`);
-        if (!record && isPastAttendanceDate(date, today)) missingPast += 1;
+        if (!hasAttendancePunch(record) && isPastAttendanceDate(date, today)) missingPast += 1;
       });
     });
     return { present, incomplete, invalid, missingPast, autoEnabled };
@@ -1476,6 +1639,12 @@ export default function AttendanceManager() {
             className="flex items-center gap-1.5 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-sm font-semibold text-violet-700 shadow-sm hover:bg-violet-100"
           >
             <Users size={14} /> Chấm hàng loạt
+          </button>
+          <button
+            onClick={openBulkEditTimePanel}
+            className="flex items-center gap-1.5 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-sm font-semibold text-sky-700 shadow-sm hover:bg-sky-100"
+          >
+            <Pencil size={14} /> Sửa giờ hàng loạt
           </button>
           <button
             onClick={openBulkDeletePanel}
@@ -1930,6 +2099,174 @@ export default function AttendanceManager() {
                   >
                     {bulkStamping ? <Loader2 size={15} className="animate-spin" /> : <Zap size={15} />}
                     {bulkStamping ? "Đang chấm..." : "Chấm hàng loạt"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
+        {bulkEditTimeOpen && (() => {
+          const keyword = bulkEditTimeUserSearch.trim().toLowerCase();
+          const filteredUsers = keyword
+            ? users.filter((user) => `${getUserName(user)} ${user.code || ""} ${user.teamId || ""}`.toLowerCase().includes(keyword))
+            : users;
+          const selectedWorkDays = bulkEditTimeForm.workDays || [];
+          const totalDates = buildDateRange(bulkEditTimeForm.dateFrom, bulkEditTimeForm.dateTo).filter((date) => {
+            const parsed = parseDateOnly(date);
+            return parsed && selectedWorkDays.includes(parsed.getDay());
+          }).length;
+
+          return (
+            <div className="rounded-2xl border border-sky-200 bg-white p-4 shadow-sm">
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h2 className="flex items-center gap-2 text-base font-bold text-slate-900">
+                    <Pencil size={16} className="text-sky-600" /> Sửa giờ chấm công hàng loạt
+                  </h2>
+                  <p className="text-xs text-slate-500">Chỉ cập nhật giờ vào/ra của các bản ghi đã tồn tại; không tạo thêm bản ghi mới.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setBulkEditTimeOpen(false)}
+                  className="flex items-center gap-1 rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                >
+                  <X size={13} /> Đóng
+                </button>
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="flex flex-col gap-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <label className="text-xs font-semibold text-slate-500">
+                      CHỌN NHÂN VIÊN ({bulkEditTimeUserIds.size}/{filteredUsers.length})
+                    </label>
+                    <div className="flex gap-3">
+                      <button
+                        type="button"
+                        onClick={() => setBulkEditTimeUserIds(new Set(filteredUsers.map((user) => user._id)))}
+                        className="text-xs font-semibold text-sky-600 hover:underline"
+                      >
+                        Chọn tất cả
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setBulkEditTimeUserIds((prev) => new Set([...prev].filter((id) => !filteredUsers.some((user) => user._id === id))))}
+                        className="text-xs font-semibold text-slate-500 hover:underline"
+                      >
+                        Bỏ chọn
+                      </button>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5">
+                    <Search size={13} className="text-slate-400" />
+                    <input
+                      value={bulkEditTimeUserSearch}
+                      onChange={(event) => setBulkEditTimeUserSearch(event.target.value)}
+                      placeholder="Tìm tên, mã hoặc team..."
+                      className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder-slate-400"
+                    />
+                  </div>
+                  <div className="max-h-64 divide-y divide-slate-100 overflow-y-auto rounded-xl border border-slate-200">
+                    {filteredUsers.length === 0 ? (
+                      <p className="py-6 text-center text-xs text-slate-400">Không tìm thấy nhân viên.</p>
+                    ) : filteredUsers.map((user) => (
+                      <label key={user._id} className={`flex cursor-pointer items-center gap-2.5 px-3 py-2 hover:bg-slate-50 ${bulkEditTimeUserIds.has(user._id) ? "bg-sky-50/70" : ""}`}>
+                        <input
+                          type="checkbox"
+                          checked={bulkEditTimeUserIds.has(user._id)}
+                          onChange={() => toggleBulkEditTimeUser(user._id)}
+                          className="accent-sky-600"
+                        />
+                        <span className="text-sm font-medium text-slate-700">{user.code ? `${user.code} - ` : ""}{getUserName(user)}</span>
+                        {user.teamId && <span className="text-xs text-slate-400">{user.teamId}</span>}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-4">
+                  <div className="grid grid-cols-2 gap-3">
+                    <label className="flex flex-col gap-1 text-xs font-semibold text-slate-500">
+                      TỪ NGÀY
+                      <input
+                        type="date"
+                        value={bulkEditTimeForm.dateFrom}
+                        onChange={(event) => setBulkEditTimeForm((prev) => ({ ...prev, dateFrom: event.target.value }))}
+                        className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-normal text-slate-700 outline-none focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                      />
+                    </label>
+                    <label className="flex flex-col gap-1 text-xs font-semibold text-slate-500">
+                      ĐẾN NGÀY
+                      <input
+                        type="date"
+                        value={bulkEditTimeForm.dateTo}
+                        onChange={(event) => setBulkEditTimeForm((prev) => ({ ...prev, dateTo: event.target.value }))}
+                        className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-normal text-slate-700 outline-none focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                      />
+                    </label>
+                  </div>
+
+                  <div className="flex flex-col gap-1">
+                    <label className="text-xs font-semibold text-slate-500">NGÀY TRONG TUẦN</label>
+                    <div className="flex flex-wrap gap-1.5">
+                      {BULK_WEEK_DAYS.map(({ value, label }) => {
+                        const checked = selectedWorkDays.includes(value);
+                        return (
+                          <label key={value} className={`flex cursor-pointer items-center gap-1 rounded-lg border px-2.5 py-1 text-xs font-bold ${checked ? "border-sky-300 bg-sky-50 text-sky-700" : "border-slate-200 bg-slate-50 text-slate-400"}`}>
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => setBulkEditTimeForm((prev) => {
+                                const next = new Set(prev.workDays || []);
+                                if (next.has(value)) next.delete(value); else next.add(value);
+                                return { ...prev, workDays: [...next] };
+                              })}
+                              className="h-3 w-3 rounded accent-sky-600"
+                            />
+                            {label}
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3 rounded-xl border border-sky-200 bg-sky-50/50 p-3">
+                    <label className="flex flex-col gap-1 text-xs font-semibold text-slate-500">
+                      GIỜ VÀO MỚI
+                      <input
+                        type="time"
+                        value={bulkEditTimeForm.checkInTime}
+                        onChange={(event) => setBulkEditTimeForm((prev) => ({ ...prev, checkInTime: event.target.value }))}
+                        className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-normal text-slate-700 outline-none focus:border-sky-400"
+                      />
+                    </label>
+                    <label className="flex flex-col gap-1 text-xs font-semibold text-slate-500">
+                      GIỜ RA MỚI (CÓ THỂ ĐỂ TRỐNG)
+                      <input
+                        type="time"
+                        value={bulkEditTimeForm.checkOutTime}
+                        onChange={(event) => setBulkEditTimeForm((prev) => ({ ...prev, checkOutTime: event.target.value }))}
+                        className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-normal text-slate-700 outline-none focus:border-sky-400"
+                      />
+                      <span className="font-normal text-slate-400">Để trống nếu nhân viên chưa chấm ra.</span>
+                    </label>
+                  </div>
+
+                  {bulkEditTimeUserIds.size > 0 && totalDates > 0 && (
+                    <div className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs font-semibold text-sky-700">
+                      {bulkEditTimeUserIds.size} nhân viên × {totalDates} ngày; chỉ các bản ghi hiện có sẽ được sửa.
+                    </div>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={handleBulkEditTime}
+                    disabled={bulkEditingTime || bulkEditTimeUserIds.size === 0 || totalDates === 0}
+                    className="flex items-center justify-center gap-2 rounded-xl bg-sky-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-sky-700 disabled:opacity-50"
+                  >
+                    {bulkEditingTime ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />}
+                    {bulkEditingTime ? "Đang cập nhật..." : "Cập nhật giờ hàng loạt"}
                   </button>
                 </div>
               </div>
