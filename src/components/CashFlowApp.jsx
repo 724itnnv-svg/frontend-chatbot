@@ -1,5 +1,6 @@
 ﻿import React, { useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
+import { useAuth } from "../context/AuthContext";
 import {
   createCashFlow,
   getAccessToken,
@@ -31,6 +32,17 @@ const RETAILERS = [
   { value: "vietnhattv", label: "vietnhattv" },
   { value: "abctv", label: "abctv" },
 ];
+// Team ID người dùng (models/user.js) dùng chung quy ước với BusinessStats.jsx: NNV, KF, ABC, VN
+const TEAM_ID_TO_RETAILER = {
+  NNV: "nnvtv",
+  KF: "kingfarm",
+  ABC: "abctv",
+  VN: "vietnhattv",
+};
+
+const getRetailerFromTeamId = (teamId) =>
+  TEAM_ID_TO_RETAILER[String(teamId || "").trim().toUpperCase()] || "";
+
 const PRIVATE_TOKEN_COOKIE_PREFIX = "kiot_private_token_";
 const SEND_REQUEST_DELAY_MS = 350;
 const ORDER_DELIVERY_BATCH_SIZE = 10;
@@ -172,8 +184,12 @@ const mergeOrderDeliveryIntoRow = (row, orderDelivery) => ({
 });
 
 export default function CashFlowApp() {
+  const { user } = useAuth();
   const [activeTab, setActiveTab] = useState("cashflow");
-  const [retailer, setRetailer] = useState("kingfarm");
+  const [retailer, setRetailer] = useState(
+    () => getRetailerFromTeamId(user?.teamId) || "kingfarm",
+  );
+  const hasAutoSelectedRetailerRef = useRef(false);
   const [partnerDeliveries, setPartnerDeliveries] = useState([]);
   const [partnerDeliveryError, setPartnerDeliveryError] = useState("");
   const [bankAccounts, setBankAccounts] = useState([]);
@@ -426,6 +442,19 @@ export default function CashFlowApp() {
     }
   };
 
+  // Nếu user (teamId) chỉ có sau khi verifySession chạy xong (login lần đầu),
+  // tự chọn lại công ty theo team một lần, miễn là user chưa tự đổi tay.
+  useEffect(() => {
+    if (hasAutoSelectedRetailerRef.current) return;
+
+    const mappedRetailer = getRetailerFromTeamId(user?.teamId);
+    if (mappedRetailer && mappedRetailer !== retailer) {
+      hasAutoSelectedRetailerRef.current = true;
+      setRetailer(mappedRetailer);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.teamId]);
+
   useEffect(() => {
     let ignore = false;
 
@@ -578,6 +607,7 @@ export default function CashFlowApp() {
   );
 
   const handleRetailerChange = (nextRetailer) => {
+    hasAutoSelectedRetailerRef.current = true;
     cancelBulkOrderDeliveryLoad();
     cancelSendPayloadProgress();
     setRetailer(nextRetailer);
