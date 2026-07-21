@@ -135,11 +135,12 @@ export default function AdminDashboard() {
         const loadPages = async () => {
             setPagesLoading(true);
             try {
-                const res = await fetch("/api/page", {
+                const res = await fetch("/api/admin-dashboard/pages", {
                     headers: { Authorization: `Bearer ${token}` },
                 });
                 const data = await res.json();
-                const pageList = Array.isArray(data) ? data : [];
+                if (!res.ok) throw new Error(data.message || "Không thể tải danh sách Page");
+                const pageList = Array.isArray(data?.pages) ? data.pages : [];
 
                 const teamMap = {};
                 pageList.forEach(page => {
@@ -252,7 +253,7 @@ export default function AdminDashboard() {
         setIsExporting(true);
         try {
             const params = buildExportOrderParams(exportConfig);
-            const res = await fetch(`/api/order/allpage?${params}`, {
+            const res = await fetch(`/api/admin-dashboard/orders/export?${params}`, {
                 headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
             });
             const data = await res.json();
@@ -310,7 +311,7 @@ export default function AdminDashboard() {
         setIsExportingProducts(true);
         try {
             const params = buildExportOrderParams(exportConfig);
-            const res = await fetch(`/api/order/allpage?${params}`, {
+            const res = await fetch(`/api/admin-dashboard/orders/export?${params}`, {
                 headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
             });
             const data = await res.json();
