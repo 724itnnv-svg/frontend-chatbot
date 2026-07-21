@@ -15,7 +15,8 @@ const SOCKET_URL =
   import.meta.env.VITE_SOCKET_URL ||
   (isViteDevServer ? "http://localhost:5000" : getApiOrigin() || undefined);
 const QUICK_REPLY_STORAGE_KEY = "page_message_quick_replies";
-const CUSTOMER_ORDER_LOOKBACK_DAYS = 365;
+const DEFAULT_PAGE_MESSAGE_LOOKBACK_HOURS = 48;
+const PAGE_MESSAGE_LOOKBACK_OPTIONS = [12, 24, 48];
 const DEFAULT_QUICK_REPLIES = [
   {
     id: "greeting",
@@ -105,6 +106,7 @@ function PageMessage() {
 
   const [loadingPages, setLoadingPages] = useState(false);
   const [loadingChats, setLoadingChats] = useState(false);
+  const [lookbackHours, setLookbackHours] = useState(DEFAULT_PAGE_MESSAGE_LOOKBACK_HOURS);
   const [sendingBulk, setSendingBulk] = useState(false);
   const [replyText, setReplyText] = useState("");
   const [replyAttachmentUrl, setReplyAttachmentUrl] = useState("");
@@ -153,6 +155,7 @@ function PageMessage() {
   const realtimeSocketRef = useRef(null);
   const selectedPageRef = useRef(null);
   const selectedChatRef = useRef(null);
+  const lookbackHoursRef = useRef(DEFAULT_PAGE_MESSAGE_LOOKBACK_HOURS);
   const pageLoadSeqRef = useRef(0);
   const chatLoadSeqRef = useRef(0);
 
@@ -311,16 +314,36 @@ function PageMessage() {
   };
 
   // ✅ Chọn Page → load chats local + load userInfo từ FB
-  const refreshChatsForPage = async (page, { updateUserNames = false, loadSeq = null } = {}) => {
+  useEffect(() => {
+    lookbackHoursRef.current = lookbackHours;
+  }, [lookbackHours]);
+
+  const refreshChatsForPage = async (
+    page,
+    { updateUserNames = false, loadSeq = null, hours = null } = {},
+  ) => {
     if (!page?.facebookId || !token) return [];
 
-    const params = new URLSearchParams({ page: page.facebookId });
+    const effectiveHours = hours ?? lookbackHoursRef.current;
+    const to = new Date();
+    const from = new Date(to.getTime() - effectiveHours * 60 * 60 * 1000);
+    const params = new URLSearchParams({
+      page: page.facebookId,
+      hours: String(effectiveHours),
+      from: from.toISOString(),
+      to: to.toISOString(),
+      _fresh: String(to.getTime()),
+    });
     const chatRes = await fetch(`/api/chat/recent?${params.toString()}`, {
       headers: {
         Authorization: `Bearer ${token}`,
       },
+      cache: "no-store",
     });
     const allChats = await chatRes.json();
+    if (!chatRes.ok) {
+      throw new Error(allChats?.message || "Không thể tải danh sách hội thoại");
+    }
     const filteredChats = (Array.isArray(allChats) ? allChats : []).filter(
       (c) => String(c.page) === String(page.facebookId),
     );
@@ -348,7 +371,7 @@ function PageMessage() {
     return filteredChats;
   };
 
-  const handleSelectPage = async (page) => {
+  const handleSelectPage = async (page, { hours = null } = {}) => {
     if (isUser && !userPageIds.includes(page.facebookId)) {
       alert("⚠️ Bạn không có quyền truy cập Page này");
       return;
@@ -391,10 +414,16 @@ function PageMessage() {
     try {
       setLoadingChats(true);
 
-      const [filteredChats] = await Promise.all([
-        refreshChatsForPage(page, { updateUserNames: true, loadSeq }),
-        fetchOrdersAndBuildSet(page, { loadSeq }),
-      ]);
+      const effectiveHours = hours ?? lookbackHoursRef.current;
+      const filteredChats = await refreshChatsForPage(page, {
+        updateUserNames: true,
+        loadSeq,
+        hours: effectiveHours,
+      });
+      await fetchOrdersAndBuildSet(page, {
+        loadSeq,
+        customerIds: filteredChats.map((chat) => chat.user),
+      });
       if (pageLoadSeqRef.current !== loadSeq) return;
       
 
@@ -417,6 +446,17 @@ function PageMessage() {
   };
 
   // ✅ Search + sort giống ChatwebManager
+  const handleLookbackHoursChange = (event) => {
+    const nextHours = Number(event.target.value);
+    if (!PAGE_MESSAGE_LOOKBACK_OPTIONS.includes(nextHours) || nextHours === lookbackHours) return;
+
+    lookbackHoursRef.current = nextHours;
+    setLookbackHours(nextHours);
+    if (selectedPageRef.current) {
+      handleSelectPage(selectedPageRef.current, { hours: nextHours });
+    }
+  };
+
   const filteredChats = useMemo(() => {
     const q = chatSearch.trim().toLowerCase();
     const base = Array.isArray(chats) ? chats : [];
@@ -437,8 +477,8 @@ function PageMessage() {
       });
 
     return searched.slice().sort((a, b) => {
-      const ta = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
-      const tb = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
+      const ta = a.lastMessageAt ? new Date(a.lastMessageAt).getTime() : 0;
+      const tb = b.lastMessageAt ? new Date(b.lastMessageAt).getTime() : 0;
       return tb - ta;
     });
   }, [chats, chatSearch, userInfo]);
@@ -736,6 +776,15 @@ function PageMessage() {
     const payloadUser = String(payload.user || "");
     if (!page?.facebookId || !payloadPage || !payloadUser) return;
     if (String(payloadPage) !== String(page.facebookId)) return;
+    if (
+      payload.kind &&
+      !["customer_message", "bot_message", "human_admin_message"].includes(payload.kind)
+    ) return;
+
+    const currentTime = Date.now();
+    const messageTime = new Date(payload.createdAt || currentTime).getTime();
+    const cutoff = currentTime - lookbackHoursRef.current * 60 * 60 * 1000;
+    if (!Number.isFinite(messageTime) || messageTime < cutoff || messageTime > currentTime) return;
 
     if (payload.chat?.userPicture || payload.chat?.userName) {
       setUserInfo((prev) => ({
@@ -756,6 +805,7 @@ function PageMessage() {
         return [
           {
             ...payload.chat,
+            lastMessageAt: payload.createdAt || payload.chat.lastMessageAt || new Date().toISOString(),
             updatedAt: payload.createdAt || payload.chat.updatedAt || new Date().toISOString(),
             lastMessage: payload.text || payload.chat.lastMessage,
           },
@@ -766,6 +816,7 @@ function PageMessage() {
       const next = [...prev];
       next[index] = {
         ...next[index],
+        lastMessageAt: payload.createdAt || new Date().toISOString(),
         updatedAt: payload.createdAt || new Date().toISOString(),
         lastMessage: payload.text || next[index].lastMessage,
       };
@@ -1286,6 +1337,17 @@ function PageMessage() {
     return `${yyyy}-${mm}-${dd}`;
   };
 
+  const fmtTime = (d) => `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+
+  const applyOrderLookbackRange = (params) => {
+    const end = new Date();
+    const start = new Date(end.getTime() - lookbackHoursRef.current * 60 * 60 * 1000);
+    params.set("from", fmtDate(start));
+    params.set("to", fmtDate(end));
+    params.set("fromTime", fmtTime(start));
+    params.set("toTime", fmtTime(end));
+  };
+
   const buildOrderDraftFromOrder = (order) => ({
     customerName: order.customerName || "",
     phoneNumber: order.phoneNumber || "",
@@ -1304,16 +1366,13 @@ function PageMessage() {
       : [],
   });
 
-  const fetchOrdersForPage = async (page, { lookbackDays = 7 } = {}) => {
+  const fetchOrdersForPage = async (page, customerIds = []) => {
     const params = new URLSearchParams();
     params.set("pageId", String(page.facebookId));
 
-    const end = new Date();
-    const start = new Date(end);
-    start.setDate(end.getDate() - lookbackDays);
-
-    params.set("from", fmtDate(start));
-    params.set("to", fmtDate(end));
+    const normalizedCustomerIds = [...new Set(customerIds.map(String).filter(Boolean))];
+    if (normalizedCustomerIds.length) params.set("customerIds", normalizedCustomerIds.join(","));
+    else applyOrderLookbackRange(params);
 
     const res = await fetch(`/api/order?${params.toString()}`, {
       headers: { Authorization: `Bearer ${token}` },
@@ -1333,20 +1392,25 @@ function PageMessage() {
       : orders;
   };
 
-  const fetchOrdersAndBuildSet = async (page, { loadSeq = null, lookbackDays = 7 } = {}) => {
+  const fetchOrdersAndBuildSet = async (page, { loadSeq = null, customerIds = [] } = {}) => {
     try {
       setLoadingOrders(true);
+
+      if (customerIds.length === 0) {
+        if (loadSeq === null || pageLoadSeqRef.current === loadSeq) {
+          setOrderedCustomerSet(new Set());
+          setOrdersByCustomer(new Map());
+        }
+        return;
+      }
 
       const params = new URLSearchParams();
       params.set("pageId", String(page.facebookId));
 
       // ✅ mặc định: từ hôm nay lùi 10 ngày
-      const end = new Date(); // hôm nay
-      const start = new Date(end);
-      start.setDate(end.getDate() - lookbackDays);
-
-      params.set("from", fmtDate(start));
-      params.set("to", fmtDate(end));
+      const normalizedCustomerIds = [...new Set(customerIds.map(String).filter(Boolean))];
+      if (normalizedCustomerIds.length) params.set("customerIds", normalizedCustomerIds.join(","));
+      else applyOrderLookbackRange(params);
 
       const res = await fetch(`/api/order?${params.toString()}`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -1404,9 +1468,7 @@ function PageMessage() {
 
     try {
       setLoadingOrders(true);
-      const filteredOrders = await fetchOrdersForPage(page, {
-        lookbackDays: CUSTOMER_ORDER_LOOKBACK_DAYS,
-      });
+      const filteredOrders = await fetchOrdersForPage(page, [targetCustomerId]);
 
       if (chatLoadSeq !== null && chatLoadSeqRef.current !== chatLoadSeq) return;
 
@@ -2059,10 +2121,26 @@ function PageMessage() {
               >
                 {/* Bulk send box */}
                 <div className="space-y-3 border-b border-slate-200 bg-white p-3">
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between gap-2">
                     <div className="text-sm font-bold text-slate-800">
                       Danh sách khách
                     </div>
+
+                    <div className="flex items-center gap-2">
+                      <label className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-600">
+                        <span>Trong</span>
+                        <select
+                          value={lookbackHours}
+                          onChange={handleLookbackHoursChange}
+                          disabled={loadingChats}
+                          className="bg-transparent font-bold text-sky-700 outline-none disabled:opacity-60"
+                          aria-label="Chọn khoảng thời gian hiển thị hội thoại"
+                        >
+                          {PAGE_MESSAGE_LOOKBACK_OPTIONS.map((hours) => (
+                            <option key={hours} value={hours}>{hours}h</option>
+                          ))}
+                        </select>
+                      </label>
 
                     <label className="flex select-none items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-600">
                       <input
@@ -2073,6 +2151,7 @@ function PageMessage() {
                       />
                       Chọn hết
                     </label>
+                    </div>
                   </div>
 
                   <input
@@ -2198,7 +2277,7 @@ function PageMessage() {
                                   {isSpam ? "Spam" : hasOrder ? "Đã có đơn" : "Chưa chốt"}
                                 </span>
                                 <span className="hidden max-w-[96px] truncate text-right text-[10px] leading-4 text-slate-400 md:block">
-                                  {chat.updatedAt ? new Date(chat.updatedAt).toLocaleString("vi-VN") : ""}
+                                  {chat.lastMessageAt ? new Date(chat.lastMessageAt).toLocaleString("vi-VN") : ""}
                                 </span>
                               </div>
                             </button>

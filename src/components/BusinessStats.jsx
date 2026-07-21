@@ -27,6 +27,7 @@ import {
   X,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
+import ChatMessagesPanel from "./ChatMessagesPanel";
 
 function formatDateInput(date = new Date()) {
   const year = date.getFullYear();
@@ -1781,6 +1782,13 @@ export default function BusinessStats() {
     error: "",
     orders: [],
   });
+  const [chatHistoryModal, setChatHistoryModal] = useState({
+    isOpen: false,
+    isLoading: false,
+    error: "",
+    customer: null,
+    messages: [],
+  });
   const [unconvertedConversationsModal, setUnconvertedConversationsModal] = useState({
     isOpen: false,
     isLoading: false,
@@ -2007,19 +2015,39 @@ export default function BusinessStats() {
       const queryParams = buildStatsQuery();
       queryParams.set("type", "orders");
       queryParams.set("convertedOnly", "1");
+      queryParams.set("latestByPhone", "1");
+      queryParams.set("_fresh", String(Date.now()));
 
       const res = await fetch(`/api/chat/stats/export?${queryParams.toString()}`, {
         method: "GET",
+        cache: "no-store",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || "Khong the tai danh sach don hang");
 
+      const exportedOrders = Array.isArray(data.orders) ? data.orders : [];
+      const latestOrders = await Promise.all(exportedOrders.map(async (order) => {
+        if (!order?._id) return order;
+        try {
+          const latestRes = await fetch(`/api/order/${order._id}?_fresh=${Date.now()}`, {
+            method: "GET",
+            cache: "no-store",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          });
+          if (!latestRes.ok) return order;
+          const latestOrder = await latestRes.json();
+          return latestOrder?._id ? latestOrder : order;
+        } catch {
+          return order;
+        }
+      }));
+
       setConvertedOrdersModal({
         isOpen: true,
         isLoading: false,
         error: "",
-        orders: Array.isArray(data.orders) ? data.orders : [],
+        orders: latestOrders,
       });
     } catch (err) {
       console.error(err);
@@ -2034,6 +2062,27 @@ export default function BusinessStats() {
 
   const closeConvertedOrdersModal = () => {
     setConvertedOrdersModal((current) => ({ ...current, isOpen: false }));
+  };
+
+  const openChatHistoryModal = async (customer) => {
+    setChatHistoryModal({ isOpen: true, isLoading: true, error: "", customer, messages: [] });
+    try {
+      const params = new URLSearchParams({
+        pageId: String(customer.pageId || ""),
+        userId: String(customer.customerId || ""),
+        _fresh: String(Date.now()),
+      });
+      const res = await fetch(`/api/chat/stats/history?${params.toString()}`, {
+        method: "GET",
+        cache: "no-store",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error?.message || data?.message || "Không thể tải lịch sử chat");
+      setChatHistoryModal({ isOpen: true, isLoading: false, error: "", customer, messages: Array.isArray(data.messages) ? data.messages : [] });
+    } catch (error) {
+      setChatHistoryModal({ isOpen: true, isLoading: false, error: error.message || "Không thể tải lịch sử chat", customer, messages: [] });
+    }
   };
 
   const openUnconvertedConversationsModal = async () => {
@@ -3368,6 +3417,7 @@ export default function BusinessStats() {
                           <th className="border-b border-slate-200 px-3 py-2 text-right">Tổng tiền</th>
                           <th className="border-b border-slate-200 px-3 py-2 text-center">Số đơn</th>
                           <th className="border-b border-slate-200 px-3 py-2">Đơn gần nhất</th>
+                          <th className="border-b border-slate-200 px-3 py-2 text-center">Lịch sử chat</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
@@ -3401,6 +3451,11 @@ export default function BusinessStats() {
                                 </span>
                               </td>
                               <td className="px-3 py-2 text-slate-500">{formatDateTime(customer.lastOrderAt)}</td>
+                              <td className="px-3 py-2 text-center">
+                                <button type="button" onClick={() => openChatHistoryModal(customer)} className="inline-flex items-center gap-1.5 rounded-lg border border-sky-200 bg-sky-50 px-2.5 py-1.5 text-xs font-bold text-sky-700 transition hover:bg-sky-100">
+                                  <MessageSquare size={14} /> Xem chat
+                                </button>
+                              </td>
                             </tr>
                           );
                         })}
@@ -3409,6 +3464,33 @@ export default function BusinessStats() {
                   </div>
                   )}
                   </>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {chatHistoryModal.isOpen && (
+          <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/55 p-4 backdrop-blur-sm">
+            <div className="flex max-h-[86vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
+              <div className="flex items-start justify-between border-b border-slate-100 px-5 py-4">
+                <div>
+                  <h3 className="text-base font-black text-slate-950">Lịch sử đoạn chat</h3>
+                  <p className="mt-1 text-xs text-slate-500">{chatHistoryModal.customer?.customerName || chatHistoryModal.customer?.customerId || "Khách hàng"} • {chatHistoryModal.customer?.pageName || chatHistoryModal.customer?.pageId || ""}</p>
+                </div>
+                <button type="button" onClick={() => setChatHistoryModal((current) => ({ ...current, isOpen: false }))} className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 text-slate-500 hover:bg-slate-50" aria-label="Đóng">
+                  <X size={17} />
+                </button>
+              </div>
+              <div className="min-h-0 flex-1 bg-slate-50">
+                {chatHistoryModal.isLoading ? (
+                  <div className="py-12 text-center text-sm text-slate-500">Đang tải lịch sử chat...</div>
+                ) : chatHistoryModal.error ? (
+                  <div className="m-5 flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700"><AlertTriangle size={16} />{chatHistoryModal.error}</div>
+                ) : (
+                  <div className="h-[68vh] max-h-[700px] min-h-[420px]">
+                    <ChatMessagesPanel messages={chatHistoryModal.messages} />
+                  </div>
                 )}
               </div>
             </div>
