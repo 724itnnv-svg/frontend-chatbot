@@ -17,7 +17,6 @@ import {
     CheckSquare,
     Square,
     BarChart2,
-    Lock,
     MessageSquare,
     ShoppingCart,
     TrendingUp,
@@ -48,8 +47,6 @@ const EXPORT_FIELDS = [
 
 const DEFAULT_FIELDS = new Set(["stt", "createdAt", "updatedAt", "teamId", "pageName", "customerName", "adName", "items", "total", "note"]);
 
-// Các field chứa thông tin nhạy cảm — chỉ admin mới được chọn
-const SENSITIVE_FIELDS = new Set(["phoneNumber", "address"]);
 function formatDateInput(date = new Date()) {
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -97,10 +94,19 @@ export default function AdminDashboard() {
     const navigate = useNavigate();
     const roleLower = user?.role?.toLowerCase?.() || "";
     const isAdmin = roleLower === "admin" || roleLower === "superadmin";
-    const canExportSensitiveFields = isAdmin || roleLower === "mkt";
 
     // ===== States: Export đơn hàng =====
-    const [exportConfig, setExportConfig] = useState({ startDate: "", endDate: "", startTime: "", endTime: "" });
+    const [exportConfig, setExportConfig] = useState(() => {
+        const today = new Date();
+        const firstDayOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+
+        return {
+            startDate: formatDateInput(firstDayOfMonth),
+            endDate: formatDateInput(today),
+            startTime: "",
+            endTime: "",
+        };
+    });
     const [isExporting, setIsExporting] = useState(false);
     const [selectedFields, setSelectedFields] = useState(DEFAULT_FIELDS);
 
@@ -129,11 +135,12 @@ export default function AdminDashboard() {
         const loadPages = async () => {
             setPagesLoading(true);
             try {
-                const res = await fetch("/api/page", {
+                const res = await fetch("/api/admin-dashboard/pages", {
                     headers: { Authorization: `Bearer ${token}` },
                 });
                 const data = await res.json();
-                const pageList = Array.isArray(data) ? data : [];
+                if (!res.ok) throw new Error(data.message || "Không thể tải danh sách Page");
+                const pageList = Array.isArray(data?.pages) ? data.pages : [];
 
                 const teamMap = {};
                 pageList.forEach(page => {
@@ -214,7 +221,6 @@ export default function AdminDashboard() {
 
     // ===== Helpers chọn field =====
     const toggleField = (key) => {
-        if (SENSITIVE_FIELDS.has(key) && !canExportSensitiveFields) return;
         setSelectedFields(prev => {
             const next = new Set(prev);
             if (next.has(key)) next.delete(key);
@@ -224,9 +230,7 @@ export default function AdminDashboard() {
     };
 
     const toggleAllFields = () => {
-        const selectableKeys = EXPORT_FIELDS
-            .map(f => f.key)
-            .filter(key => canExportSensitiveFields || !SENSITIVE_FIELDS.has(key));
+        const selectableKeys = EXPORT_FIELDS.map(f => f.key);
         const allSelected = selectableKeys.every(key => selectedFields.has(key));
         if (allSelected) {
             setSelectedFields(DEFAULT_FIELDS);
@@ -249,7 +253,7 @@ export default function AdminDashboard() {
         setIsExporting(true);
         try {
             const params = buildExportOrderParams(exportConfig);
-            const res = await fetch(`/api/order/allpage?${params}`, {
+            const res = await fetch(`/api/admin-dashboard/orders/export?${params}`, {
                 headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
             });
             const data = await res.json();
@@ -307,7 +311,7 @@ export default function AdminDashboard() {
         setIsExportingProducts(true);
         try {
             const params = buildExportOrderParams(exportConfig);
-            const res = await fetch(`/api/order/allpage?${params}`, {
+            const res = await fetch(`/api/admin-dashboard/orders/export?${params}`, {
                 headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
             });
             const data = await res.json();
@@ -454,12 +458,8 @@ export default function AdminDashboard() {
         </div>
     );
 
-    const selectableFieldCount = canExportSensitiveFields
-        ? EXPORT_FIELDS.length
-        : EXPORT_FIELDS.filter(f => !SENSITIVE_FIELDS.has(f.key)).length;
-    const allFieldsSelected = EXPORT_FIELDS
-        .filter(f => canExportSensitiveFields || !SENSITIVE_FIELDS.has(f.key))
-        .every(f => selectedFields.has(f.key));
+    const selectableFieldCount = EXPORT_FIELDS.length;
+    const allFieldsSelected = EXPORT_FIELDS.every(f => selectedFields.has(f.key));
     const isAllTeams = selectedTeams.has("ALL");
     const isAllPages = selectedPages.has("ALL");
 
@@ -614,23 +614,14 @@ export default function AdminDashboard() {
                         </div>
                         <div className="flex flex-wrap gap-2">
                             {EXPORT_FIELDS.map(field => {
-                                const isSensitive = SENSITIVE_FIELDS.has(field.key);
-                                const locked = isSensitive && !canExportSensitiveFields;
-                                const active = !locked && selectedFields.has(field.key);
+                                const active = selectedFields.has(field.key);
                                 return (
                                     <button key={field.key} type="button" onClick={() => toggleField(field.key)}
-                                        disabled={locked}
-                                        title={locked ? "Bạn không có quyền xuất trường này" : undefined}
-                                        className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition ${locked
-                                            ? "cursor-not-allowed border-slate-200 bg-slate-50 text-slate-300"
-                                            : active
-                                                ? "border-violet-400 bg-violet-50 text-violet-700"
-                                                : "border-slate-200 bg-white text-slate-400 hover:bg-slate-50"}`}>
-                                        {locked
-                                            ? <Lock size={11} className="text-slate-300" />
-                                            : active ? <CheckSquare size={12} /> : <Square size={12} />}
+                                        className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition ${active
+                                            ? "border-violet-400 bg-violet-50 text-violet-700"
+                                            : "border-slate-200 bg-white text-slate-400 hover:bg-slate-50"}`}>
+                                        {active ? <CheckSquare size={12} /> : <Square size={12} />}
                                         {field.label}
-                                        {locked && <span className="ml-0.5 text-[9px] font-bold uppercase tracking-wide text-slate-300">Khóa</span>}
                                     </button>
                                 );
                             })}
@@ -643,8 +634,7 @@ export default function AdminDashboard() {
                             Đã chọn <span className="font-semibold text-slate-600">{selectedFields.size}</span>/<span className="font-semibold text-slate-600">{selectableFieldCount}</span> cột
                             {!isAllTeams && <> · <span className="font-semibold text-slate-600">{selectedTeams.size}</span> team</>}
                             {!isAllPages && <> · <span className="font-semibold text-sky-600">{selectedPages.size}</span> page</>}
-                            {roleLower === "mkt" && <span className="ml-1 text-amber-500">(Số ĐT &amp; Địa chỉ chỉ hiện ở page bạn quản lý)</span>}
-                            {!canExportSensitiveFields && <span className="ml-1 text-amber-500">(Không có quyền xuất Số ĐT &amp; Địa chỉ)</span>}
+                            <span className="ml-1 text-amber-500">(Số ĐT &amp; Địa chỉ chỉ hiện ở page bạn quản lý)</span>
                         </p>
                         <div className="flex items-center gap-2">
                             <button type="button" onClick={handleExportProducts}
