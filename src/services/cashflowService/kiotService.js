@@ -1,9 +1,7 @@
 import { api } from "./api";
 import axios from "axios";
-import { apiUrl, getApiBaseUrl } from "../../api/baseUrl";
 
 const tokenURL = "/api/cashflow";
-const apiKiotURL = "https://public.kiotapi.com";
 
 const token = localStorage.getItem("token");
 
@@ -159,6 +157,36 @@ export async function getOrderDelivery(
         accessPrivateToken,
         deliveryCode,
         accessToken,
+      },
+
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    return response.data;
+  } catch (error) {
+    throw new Error(`Failed to call API with auth: ${error.message}`);
+  }
+}
+
+export async function getListOrder(
+  retailer = "kingfarm",
+  accessPrivateToken,
+  accessToken,
+  timeRange = "month",
+  EInvoiceStatus = 0,
+  queryParams = {},
+) {
+  try {
+    const response = await axios.get(`${tokenURL}/list-order`, {
+      params: {
+        retailer,
+        accessPrivateToken,
+        accessToken,
+        timeRange,
+        EInvoiceStatus,
+        ...queryParams,
       },
 
       headers: {
