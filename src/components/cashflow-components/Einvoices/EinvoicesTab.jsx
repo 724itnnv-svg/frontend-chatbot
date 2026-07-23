@@ -216,6 +216,7 @@ export default function EinvoicesTab({
     getLocalDateInputValue(new Date()),
   );
   const [eInvoiceStatus, setEInvoiceStatus] = useState("0");
+  const [activeRowId, setActiveRowId] = useState("");
   const [visibleColumnIds, setVisibleColumnIds] = useState(() =>
     INVOICE_COLUMNS.filter((column) => column.defaultVisible !== false).map(
       (column) => column.id,
@@ -257,7 +258,19 @@ export default function EinvoicesTab({
 
         if (ignore) return;
 
-        setApiRows(Array.isArray(directRows) ? directRows.slice(1) : []);
+        setApiRows(
+          Array.isArray(directRows)
+            ? directRows.slice(1).map((row, index) => ({
+                ...row,
+                __rowId:
+                  row?.__rowId ??
+                  row?.Id ??
+                  row?.id ??
+                  row?.Code ??
+                  `row-${index}`,
+              }))
+            : [],
+        );
       } catch (err) {
         if (!ignore) {
           setApiRows([]);
@@ -289,11 +302,27 @@ export default function EinvoicesTab({
 
   const visibleRows = apiRows;
   const hasNoInvoices = !loading && !error && visibleRows.length === 0;
+  const activeRow = useMemo(
+    () => visibleRows.find((row) => row.__rowId === activeRowId) || null,
+    [activeRowId, visibleRows],
+  );
+  const activeRowRawData = useMemo(() => {
+    if (!activeRow) return null;
+
+    const { __rowId, ...rawRow } = activeRow;
+    return rawRow;
+  }, [activeRow]);
   const visibleColumns = useMemo(
     () =>
       INVOICE_COLUMNS.filter((column) => visibleColumnIds.includes(column.id)),
     [visibleColumnIds],
   );
+
+  useEffect(() => {
+    if (activeRowId && !activeRow) {
+      setActiveRowId("");
+    }
+  }, [activeRow, activeRowId]);
 
   const toggleColumn = (columnId) => {
     setVisibleColumnIds((current) =>
@@ -301,6 +330,10 @@ export default function EinvoicesTab({
         ? current.filter((id) => id !== columnId)
         : [...current, columnId],
     );
+  };
+
+  const handleSelectRow = (rowId) => {
+    setActiveRowId((current) => (current === rowId ? "" : rowId));
   };
 
   const exportToExcel = async () => {
@@ -594,6 +627,9 @@ export default function EinvoicesTab({
             <table className="min-w-[1200px] w-full border-separate border-spacing-0 text-left">
               <thead>
                 <tr className="bg-slate-50 text-[11px] uppercase tracking-[0.14em] text-slate-500">
+                  <th className="sticky top-0 z-10 px-4 py-3 font-black backdrop-blur">
+                    Chọn
+                  </th>
                   {visibleColumns.map((column) => (
                     <th
                       key={column.id}
@@ -616,11 +652,21 @@ export default function EinvoicesTab({
                   </tr>
                 ) : (
                   visibleRows.map((row, index) => {
+                    const isSelected = row.__rowId === activeRowId;
                     return (
                       <tr
                         key={row.id || index}
                         className="border-t border-slate-100"
                       >
+                        <td className="px-4 py-4 text-slate-700">
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => handleSelectRow(row.__rowId)}
+                            className="h-4 w-4 cursor-pointer rounded border-slate-300 text-sky-600 focus:ring-sky-300"
+                            aria-label={`Chọn dòng ${index + 1}`}
+                          />
+                        </td>
                         {visibleColumns.map((column) => {
                           const value = column.getValue(row, index);
                           const renderedValue = column.render
@@ -705,6 +751,46 @@ export default function EinvoicesTab({
           >
             Cấu hình mẫu xuất
           </button>
+        </div>
+
+        <div className="mt-5 rounded-[20px] border border-slate-200/90 bg-gradient-to-b from-slate-50 to-white p-4">
+          <div className="mb-2 flex items-center justify-between gap-3">
+            <div className="text-[11px] font-extrabold uppercase tracking-[0.16em] text-slate-500">
+              Dữ liệu dòng chọn
+            </div>
+            <span className="rounded-full border border-sky-300/30 bg-sky-50 px-2.5 py-1 text-[11px] font-extrabold text-sky-700">
+              {activeRowRawData ? "Đã chọn" : "Chưa chọn"}
+            </span>
+          </div>
+
+          {activeRow ? (
+            <div className="mb-3 grid gap-2 text-xs text-slate-600">
+              <div>
+                <span className="font-bold text-slate-500">Mã vận đơn: </span>
+                {activeRow.InvoiceDeliveryCode ||
+                  activeRow.Code ||
+                  activeRow["Mã đơn GHN"] ||
+                  "-"}
+              </div>
+              <div>
+                <span className="font-bold text-slate-500">Mã hóa đơn: </span>
+                {activeRow.Code ||
+                  getFirstEInvoice(activeRow).EInvoiceNumber ||
+                  "-"}
+              </div>
+            </div>
+          ) : (
+            <p className="m-0 mb-3 text-sm leading-7 text-slate-500">
+              Tick một dòng ở bảng bên trái để xem dữ liệu trả ra từ
+              getListOrder.
+            </p>
+          )}
+
+          <pre className="m-0 max-h-72 overflow-auto rounded-[18px] border border-slate-200/90 bg-slate-900 p-3.5 text-[11px] leading-[1.6] text-blue-100">
+            {activeRowRawData
+              ? JSON.stringify(activeRowRawData, null, 2)
+              : "{}"}
+          </pre>
         </div>
       </aside>
     </section>

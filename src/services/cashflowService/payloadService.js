@@ -47,6 +47,24 @@ const getBankAccountDisplay = (bankAccounts = []) => {
   return [bankCode, accountNumber, accountName].filter(Boolean).join(" - ");
 };
 
+const buildTransdateValue = (transDate) => {
+  const text = normalizeText(transDate);
+
+  if (!text) {
+    return new Date().toISOString();
+  }
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) {
+    const [year, month, day] = text.split("-").map(Number);
+    return new Date(Date.UTC(year, month - 1, day, 0, 0, 0, 0)).toISOString();
+  }
+
+  const parsedDate = new Date(text);
+  return Number.isNaN(parsedDate.getTime())
+    ? new Date().toISOString()
+    : parsedDate.toISOString();
+};
+
 const getOrderDelivery = (row = {}) => row.__orderDelivery || {};
 
 export const getCashflowInvoiceId = (row = {}) =>
@@ -69,6 +87,7 @@ const buildSinglePayload = ({
   employeeOptions,
   partnerDeliveries,
   bankAccounts,
+  transDate,
 }) => {
   const orderDelivery = getOrderDelivery(row);
   const partnerSource =
@@ -138,6 +157,7 @@ const buildSinglePayload = ({
       PartnerId: mapCarrierToId(partnerSource, partnerDeliveries),
       RetailerId: mapCarrierToRetailerId(partnerSource, partnerDeliveries),
       AccountId: Number(accountId),
+      Transdate: buildTransdateValue(transDate),
       CustomerId: orderDelivery.customerId,
       Description: description,
       outflow: numericValue > 0 ? false : true,
@@ -163,6 +183,7 @@ const buildCashflowPayloadEntriesForRow = ({
   employeeOptions,
   partnerDeliveries,
   bankAccounts,
+  transDate,
 }) => {
   const orderDelivery = getOrderDelivery(row);
   const invoiceId = getCashflowInvoiceId(row);
@@ -195,6 +216,7 @@ const buildCashflowPayloadEntriesForRow = ({
         employeeOptions,
         partnerDeliveries,
         bankAccounts,
+        transDate,
       }),
     });
   }
@@ -217,6 +239,7 @@ const buildCashflowPayloadEntriesForRow = ({
         employeeOptions,
         partnerDeliveries,
         bankAccounts,
+        transDate,
       }),
     });
   }
@@ -230,6 +253,7 @@ export function buildCashflowPayloads(
   partnerDeliveries = [],
   bankAccounts = [],
   retailer = "",
+  transDate = "",
 ) {
   return buildCashflowPayloadEntries(
     rows,
@@ -237,6 +261,7 @@ export function buildCashflowPayloads(
     partnerDeliveries,
     bankAccounts,
     retailer,
+    transDate,
   ).map((entry) => entry.payload);
 }
 
@@ -246,6 +271,7 @@ export function buildCashflowPayloadEntries(
   partnerDeliveries = [],
   bankAccounts = [],
   retailer = "",
+  transDate = "",
 ) {
   const entries = [];
 
@@ -257,6 +283,7 @@ export function buildCashflowPayloadEntries(
         employeeOptions,
         partnerDeliveries,
         bankAccounts,
+        transDate,
       }),
     );
   });
