@@ -41,7 +41,11 @@ const TEAM_ID_TO_RETAILER = {
 };
 
 const getRetailerFromTeamId = (teamId) =>
-  TEAM_ID_TO_RETAILER[String(teamId || "").trim().toUpperCase()] || "";
+  TEAM_ID_TO_RETAILER[
+    String(teamId || "")
+      .trim()
+      .toUpperCase()
+  ] || "";
 
 const PRIVATE_TOKEN_COOKIE_PREFIX = "kiot_private_token_";
 const SEND_REQUEST_DELAY_MS = 350;
@@ -172,6 +176,7 @@ export default function CashFlowApp() {
   const [currentAccessToken, setCurrentAccessToken] = useState("");
   const [currentAccessPrivateToken, setCurrentAccessPrivateToken] =
     useState("");
+  const [cashflowTransDate, setCashflowTransDate] = useState("");
   const [toasts, setToasts] = useState([]);
   const toastIdRef = useRef(0);
   const [sendingPayloads, setSendingPayloads] = useState(false);
@@ -535,6 +540,7 @@ export default function CashFlowApp() {
       partnerDeliveries,
       bankAccounts,
       retailer,
+      cashflowTransDate,
     );
 
   const generatedPayloads = useMemo(
@@ -545,8 +551,15 @@ export default function CashFlowApp() {
         partnerDeliveries,
         bankAccounts,
         retailer,
+        cashflowTransDate,
       ),
-    [payloadReadyRows, partnerDeliveries, bankAccounts, retailer],
+    [
+      payloadReadyRows,
+      partnerDeliveries,
+      bankAccounts,
+      retailer,
+      cashflowTransDate,
+    ],
   );
 
   const handleRetailerChange = (nextRetailer) => {
@@ -665,6 +678,7 @@ export default function CashFlowApp() {
         partnerDeliveries,
         bankAccounts,
         retailer,
+        cashflowTransDate,
       );
       payloads = payloadEntries.map((entry) => entry.payload);
       runId = startSendPayloadProgress(payloads.length);
@@ -1062,6 +1076,8 @@ export default function CashFlowApp() {
           retailer={retailer}
           accessToken={currentAccessToken}
           accessPrivateToken={currentAccessPrivateToken}
+          partnerDeliveries={partnerDeliveries}
+          bankAccounts={bankAccounts}
           onSwitchToCashflow={() => setActiveTab("cashflow")}
         />
       ) : (
@@ -1152,6 +1168,8 @@ export default function CashFlowApp() {
               selectedCountInView={selectedCountInView}
               onUpdateCell={handleUpdateCell}
               onSaveFile={handleSaveFile}
+              cashflowTransDate={cashflowTransDate}
+              onCashflowTransDateChange={setCashflowTransDate}
             />
 
             <SelectedRowsPanel
