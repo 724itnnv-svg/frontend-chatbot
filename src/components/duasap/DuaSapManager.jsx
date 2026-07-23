@@ -19,7 +19,7 @@ function toDirectImageUrl(url) {
     url.match(/drive\.google\.com\/file\/d\/([^/?#]+)/)?.[1] ||
     url.match(/[?&]id=([^&#]+)/)?.[1];
   if (driveFileId && /(?:drive|googleusercontent)\.google\.com/.test(url)) {
-    return `https://lh3.googleusercontent.com/d/${encodeURIComponent(decodeURIComponent(driveFileId))}`;
+    return `https://lh3.googlaeusercontent.com/d/${encodeURIComponent(decodeURIComponent(driveFileId))}`;
   }
   return url;
 }
@@ -309,6 +309,8 @@ const TRANG_THAI_OPTIONS = [
 const TRANG_THAI_ONG_NGHIEM_OPTIONS = [
   { value: "vo_mau", label: "Vô mẫu" },
   { value: "nay_mam", label: "Nãy mầm" },
+  { value: "tach_choi", label: "Tách chồi" },
+  { value: "cay_chuyen", label: "Cấy chuyền" },
   { value: "nhiem", label: "Nhiễm" },
   { value: "xu_ly_nhiem", label: "Xử lý nhiễm" },
   { value: "huy_mau", label: "Hủy mẫu" },
@@ -340,6 +342,8 @@ const TRANG_THAI_CLS = {
   ngung_theo_doi: "bg-gray-100 text-gray-400",
   vo_mau: "bg-violet-100 text-violet-700",
   nay_mam: "bg-lime-100 text-lime-700",
+  tach_choi: "bg-cyan-100 text-cyan-700",
+  cay_chuyen: "bg-sky-100 text-sky-700",
   nhiem: "bg-red-100 text-red-700",
   xu_ly_nhiem: "bg-orange-100 text-orange-700",
   huy_mau: "bg-gray-100 text-gray-500",
@@ -2771,6 +2775,24 @@ export default function DuaSapManager() {
         };
         const selectCls = "text-sm border border-gray-200 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-300 bg-white";
         const activeCls = "border-emerald-400 ring-1 ring-emerald-200";
+        const statusOptionsForLoai = filterLoai === "ong_nghiem"
+          ? TRANG_THAI_ONG_NGHIEM_OPTIONS
+          : filterLoai === "cay_giong"
+            ? TRANG_THAI_OPTIONS
+            : null;
+        const handleFilterLoaiChange = (e) => {
+          const nextLoai = e.target.value;
+          const nextStatusOptions = nextLoai === "ong_nghiem"
+            ? TRANG_THAI_ONG_NGHIEM_OPTIONS
+            : nextLoai === "cay_giong"
+              ? TRANG_THAI_OPTIONS
+              : null;
+
+          setFilterLoai(nextLoai);
+          if (nextStatusOptions && !nextStatusOptions.some((t) => t.value === filterTrangThai)) {
+            setFilterTrangThai("");
+          }
+        };
         return (
           <div className="mb-5 space-y-2">
             {/* Hàng 1: tìm kiếm + nút làm mới */}
@@ -2802,13 +2824,24 @@ export default function DuaSapManager() {
                 className={`${selectCls} ${filterTrangThai ? activeCls : ""}`}
               >
                 <option value="">Tất cả trạng thái</option>
-                {TRANG_THAI_OPTIONS.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+                {statusOptionsForLoai ? (
+                  statusOptionsForLoai.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)
+                ) : (
+                  <>
+                    <optgroup label="Cây giống">
+                      {TRANG_THAI_OPTIONS.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+                    </optgroup>
+                    <optgroup label="Ống nghiệm">
+                      {TRANG_THAI_ONG_NGHIEM_OPTIONS.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+                    </optgroup>
+                  </>
+                )}
               </select>
 
               {/* Loại */}
               <select
                 value={filterLoai}
-                onChange={(e) => setFilterLoai(e.target.value)}
+                onChange={handleFilterLoaiChange}
                 className={`${selectCls} ${filterLoai ? activeCls : ""}`}
               >
                 <option value="">Tất cả loại</option>
