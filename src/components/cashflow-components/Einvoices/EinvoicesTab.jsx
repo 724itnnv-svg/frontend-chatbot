@@ -4,6 +4,7 @@ import {
   getLocationSuggest,
   updateCustomerAddress,
   getIdAdministrativearea,
+  publishEInvoice,
 } from "../../../services/cashflowService/kiotService";
 const currency = new Intl.NumberFormat("vi-VN");
 
@@ -168,7 +169,11 @@ const buildEinvoicePayload = (row) => {
     Returns: row?.Returns ?? [],
     InvoiceDeliveryCode: row?.InvoiceDeliveryCode ?? "",
     CustomerCode: row?.CustomerCode ?? "",
-    // InvoiceDeliveryCode: row?.InvoiceDeliveryCode ?? "",
+    GivenName: row?.SoldBy?.GivenName ?? "",
+    CompareSoldById: row?.CompareSoldById,
+    UsingCod: 1,
+    OriginStatus: 1,
+    ValidateMessage: null,
   };
 };
 
@@ -214,7 +219,9 @@ const buildCustomerAddressUpdatePayload = async (
   return {
     Id: row?.CustomerId ?? row?.CustomerId ?? "",
     CustomerId: row?.CustomerId ?? row?.customerId ?? "",
-    AddressEInvoice: streetAddress,
+    AddressEInvoice: [streetAddress, districtName, provinceName]
+      .filter(Boolean)
+      .join(", "),
     LocationIdEInvoiceLevel_1: provinceIds?.[0]?.Id ?? null,
     LocationNameEInvoiceLevel_1: provinceName,
     LocationIdEInvoiceLevel_2: wardId?.[0]?.Id ?? null,
@@ -239,7 +246,11 @@ const buildCustomerAddressUpdatePayload = async (
     templocEInvoiceLevel_1: provinceName,
     templocEInvoiceLevel_2: districtName,
     temploc: provinceName,
-    
+    LocationItemsEInvoice: {
+      1: provinceIds?.[0],
+      2: wardId?.[0],
+    },
+    ContactNumberEInvoice: row?.CustomerContactNumber,
   };
 };
 
@@ -514,10 +525,16 @@ export default function EinvoicesTab({
   };
 
   const handleExportHDDT = async () => {
-    console.log("HDDT payload", previewPayloadRows);
     setHddtStatusMessage(
       `Đã chuẩn bị ${previewPayloadRows.length} dòng cho HDDT.`,
     );
+    const response = await publishEInvoice(
+      retailer,
+      accessPrivateToken,
+      accessToken,
+      previewPayloadRows,
+    );
+    return response.data;
   };
 
   const handleSyncAddress = async () => {

@@ -237,9 +237,39 @@ export async function updateCustomerAddress(
   payload,
 ) {
   try {
+    const responseGetCustomer = await axios.get(
+      `https://api-man1.kiotviet.vn/api/customers?format=json&Code=${payload.Code ?? payload.CompareCode}`,
+
+      {
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessPrivateToken}`,
+          retailer,
+        },
+      },
+    );
+
+    let payloadData = {
+      ...payload,
+      CustomerGroupNames: responseGetCustomer.data.Data[0].CustomerGroupNames,
+      CustomerGroupIds: responseGetCustomer.data.Data[0].CustomerGroupIds,
+      EmployeeInChargeNames:
+        responseGetCustomer.data.Data[0].EmployeeInChargeNames,
+      EmployeeInChargeIds: responseGetCustomer.data.Data[0].EmployeeInChargeIds,
+      EmployeeInCharges: responseGetCustomer.data.Data[0].EmployeeInCharges,
+      Groups: responseGetCustomer.data.Data[0].Groups,
+      CustomerGroupDetails: (
+        responseGetCustomer.data.Data[0].CustomerGroupIds || []
+      ).map((groupId) => ({
+        GroupId: groupId,
+        CustomerId: responseGetCustomer.data.Data[0].Id,
+      })),
+    };
+
+    console.log("payloadData", payloadData);
     const response = await axios.post(
       `https://api-man1.kiotviet.vn/api/customers`,
-      { Customer: payload },
+      { Customer: payloadData },
       {
         headers: {
           "Content-Type": "application/json",
@@ -307,5 +337,35 @@ export async function getIdAdministrativearea(
       error.message;
 
     throw new Error(`Failed to call administrative area API: ${message}`);
+  }
+}
+
+export async function publishEInvoice(
+  retailer = "kingfarm",
+  accessPrivateToken,
+  accessToken,
+  payload,
+) {
+  try {
+    const response = await axios.post(
+      `${tokenURL}/publishEInvoice`,
+      {},
+      {
+        params: {
+          retailer,
+          accessPrivateToken,
+          accessToken,
+          payload,
+        },
+
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+      },
+    );
+    return response.data;
+  } catch (error) {
+    throw new Error(`Failed to call API with auth: ${error.message}`);
   }
 }
