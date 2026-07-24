@@ -219,9 +219,9 @@ const buildCustomerAddressUpdatePayload = async (
   return {
     Id: row?.CustomerId ?? row?.CustomerId ?? "",
     CustomerId: row?.CustomerId ?? row?.customerId ?? "",
-    AddressEInvoice: [streetAddress, districtName, provinceName]
-      .filter(Boolean)
-      .join(", "),
+    AddressEInvoice:
+      [streetAddress, districtName, provinceName].filter(Boolean).join(", ") ||
+      "Bán cho người tiêu dùng",
     LocationIdEInvoiceLevel_1: provinceIds?.[0]?.Id ?? null,
     LocationNameEInvoiceLevel_1: provinceName,
     LocationIdEInvoiceLevel_2: wardId?.[0]?.Id ?? null,

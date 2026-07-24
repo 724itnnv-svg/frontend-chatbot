@@ -235,6 +235,8 @@ export async function updateCustomerAddress(
   accessPrivateToken,
   accessToken,
   payload,
+  customerType = "Cá nhân",
+  Organization = "",
 ) {
   try {
     const responseGetCustomer = await axios.get(
@@ -264,6 +266,8 @@ export async function updateCustomerAddress(
         GroupId: groupId,
         CustomerId: responseGetCustomer.data.Data[0].Id,
       })),
+      CustomerType,
+      Organization,
     };
 
     console.log("payloadData", payloadData);
