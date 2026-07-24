@@ -24,6 +24,8 @@ export default function ExcelTable({
   selectedCountInView,
   onUpdateCell, // Callback khi sửa xong 1 ô
   onSaveFile, // Callback khi bấm nút Lưu file
+  cashflowTransDate,
+  onCashflowTransDateChange,
 }) {
   const baseHeaders = useMemo(
     () => getBaseHeaders(headers, rows),
@@ -114,7 +116,19 @@ export default function ExcelTable({
           </p>
         </div>
 
-        <div className="flex w-full flex-wrap justify-stretch gap-2.5 md:w-auto md:justify-end [&>*]:flex-auto md:[&>*]:flex-none">
+        <div className="flex w-full flex-wrap items-end justify-stretch gap-2.5 md:w-auto md:justify-end [&>*]:flex-auto md:[&>*]:flex-none">
+          <label className="grid min-w-[190px] gap-1.5">
+            <span className="text-[11px] font-extrabold uppercase tracking-[0.08em] text-slate-600">
+              Ngày tạo phiếu
+            </span>
+            <input
+              type="date"
+              value={cashflowTransDate}
+              onChange={(event) => onCashflowTransDateChange(event.target.value)}
+              className="min-h-[44px] rounded-[14px] border border-slate-400/20 bg-white/95 px-3 py-[11px] text-xs font-bold text-slate-800 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-200"
+              title="Để trống thì hệ thống sẽ lấy thời điểm hiện tại"
+            />
+          </label>
           <button
             type="button"
             className="cursor-pointer rounded-[14px] border border-slate-400/20 bg-slate-50/95 px-3.5 py-[11px] text-xs font-extrabold text-slate-700 transition hover:-translate-y-px hover:border-sky-400/30 hover:bg-cyan-50 hover:text-teal-700 disabled:cursor-not-allowed disabled:opacity-55"

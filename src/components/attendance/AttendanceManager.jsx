@@ -776,11 +776,11 @@ export default function AttendanceManager() {
 
   const loadPendingCount = useCallback(async () => {
     try {
-      const params = new URLSearchParams();
+      const params = new URLSearchParams({ page: "1", limit: "1" });
       if (from) params.set("from", from);
       if (to) params.set("to", to);
       if (teamFilter) params.set("teamId", normalizeTeam(teamFilter));
-      const res = await api.get(`/attendance/pending-review/count?${params}`);
+      const res = await api.get(`/attendance/pending-review?${params}`);
       setPendingTotal(Number(res.data?.total || 0));
     } catch {
       // Polling/realtime failures stay silent; opening the tab still shows the normal load error.
