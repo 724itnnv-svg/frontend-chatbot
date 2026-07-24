@@ -10,6 +10,20 @@ const currency = new Intl.NumberFormat("vi-VN");
 
 const normalizeText = (value) => String(value ?? "").trim();
 
+const isAgencyCustomerName = (value) =>
+  normalizeText(value).toUpperCase().startsWith("DL");
+
+const getCustomerCode = (row) =>
+  normalizeText(
+    row?.CustomerCode ??
+      row?.customerCode ??
+      row?.Code ??
+      row?.code ??
+      row?.CompareCode ??
+      row?.compareCode ??
+      "",
+  );
+
 const pickFirstNonEmpty = (row, keys = []) => {
   for (const key of keys) {
     const value = normalizeText(row?.[key]);
@@ -177,22 +191,11 @@ const buildEinvoicePayload = (row) => {
   };
 };
 
-const buildLocationSuggestPayloads = (rows = []) =>
-  rows
-    .filter((row) => normalizeText(row?.CustomerDistrictName))
-    .map((row) => ({
-      CustomerId: row?.CustomerId ?? row?.customerId ?? "",
-      CustomerLocationName: row?.CustomerLocationName ?? "",
-      CustomerDistrictName: row?.CustomerDistrictName ?? "",
-      CustomerWardName: row?.CustomerWardName ?? "",
-    }));
-
 const buildCustomerAddressUpdatePayload = async (
   row,
   locationSuggestResult,
   retailer = "kingfarm",
   accessPrivateToken,
-  accessToken,
 ) => {
   const locationV2 = locationSuggestResult?.LocationV2 ?? {};
   const wardV2 = locationSuggestResult?.WardV2 ?? {};
@@ -368,11 +371,17 @@ export default function EinvoicesTab({
   const [eInvoiceStatus, setEInvoiceStatus] = useState("0");
   const [selectedRowIds, setSelectedRowIds] = useState(() => new Set());
   const [hddtStatusMessage, setHddtStatusMessage] = useState("");
+  const [operationProgress, setOperationProgress] = useState({
+    visible: false,
+    label: "",
+    value: 0,
+  });
   const [visibleColumnIds, setVisibleColumnIds] = useState(() =>
     INVOICE_COLUMNS.filter((column) => column.defaultVisible !== false).map(
       (column) => column.id,
     ),
   );
+  const agencyCustomerBackupsRef = React.useRef(new Map());
 
   const queryParams = useMemo(() => {
     if (filterMode === "exact") {
@@ -524,17 +533,100 @@ export default function EinvoicesTab({
     setSelectedRowIds(new Set());
   };
 
+  const resetOperationProgress = () => {
+    setOperationProgress({
+      visible: false,
+      label: "",
+      value: 0,
+    });
+  };
+
+  const updateOperationProgress = (value, label) => {
+    setOperationProgress({
+      visible: true,
+      value: Math.max(0, Math.min(100, Math.round(value))),
+      label,
+    });
+  };
+
+  const restoreTemporaryAgencyCustomers = useCallback(async () => {
+    const backups = Array.from(agencyCustomerBackupsRef.current.values());
+
+    if (backups.length === 0) {
+      return { restoredCount: 0, failedCount: 0 };
+    }
+
+    let restoredCount = 0;
+    let failedCount = 0;
+
+    for (let index = 0; index < backups.length; index += 1) {
+      const backup = backups[index];
+
+      try {
+        await updateCustomerAddress(
+          retailer,
+          accessPrivateToken,
+          accessToken,
+          { Code: backup.Code, CompareCode: backup.Code },
+          backup.CustomerType,
+          backup.Organization,
+        );
+        restoredCount += 1;
+        agencyCustomerBackupsRef.current.delete(backup.Code);
+      } catch {
+        failedCount += 1;
+      }
+    }
+
+    if (failedCount > 0) {
+      setHddtStatusMessage(
+        `Đã hoàn nguyên ${restoredCount}/${backups.length} đại lý, còn ${failedCount} đại lý chưa trả lại được.`,
+      );
+    } else {
+      setHddtStatusMessage(
+        `Đã hoàn nguyên ${restoredCount}/${backups.length} đại lý về trạng thái ban đầu.`,
+      );
+    }
+
+    await fetchOrders();
+
+    return { restoredCount, failedCount };
+  }, [retailer, accessPrivateToken, accessToken, fetchOrders]);
+
   const handleExportHDDT = async () => {
     setHddtStatusMessage(
       `Đã chuẩn bị ${previewPayloadRows.length} dòng cho HDDT.`,
     );
-    const response = await publishEInvoice(
-      retailer,
-      accessPrivateToken,
-      accessToken,
-      previewPayloadRows,
-    );
-    return response.data;
+    updateOperationProgress(10, "Đang chuẩn bị dữ liệu HDDT...");
+
+    try {
+      updateOperationProgress(55, "Đang xuất HDDT...");
+      const response = await publishEInvoice(
+        retailer,
+        accessPrivateToken,
+        accessToken,
+        previewPayloadRows,
+      );
+
+      updateOperationProgress(80, "Đang cập nhật lại trạng thái đơn hàng...");
+      await fetchOrders();
+
+      updateOperationProgress(90, "Đang hoàn nguyên dữ liệu đại lý...");
+      if (agencyCustomerBackupsRef.current.size > 0) {
+        setHddtStatusMessage(
+          "Đang hoàn nguyên thông tin đại lý sau khi xuất HDDT...",
+        );
+        await restoreTemporaryAgencyCustomers();
+      }
+
+      updateOperationProgress(100, "Hoàn tất xuất HDDT.");
+      return response.data;
+    } catch (error) {
+      setHddtStatusMessage(error?.message || "Xuất HDDT thất bại.");
+      throw error;
+    } finally {
+      resetOperationProgress();
+    }
   };
 
   const handleSyncAddress = async () => {
@@ -543,83 +635,102 @@ export default function EinvoicesTab({
       return;
     }
 
-    setHddtStatusMessage("Đang gọi API location-suggest...");
-
-    const locationSuggestPayloads =
-      buildLocationSuggestPayloads(previewPayloadRows);
-
-    const locationSuggestResults = await Promise.all(
-      locationSuggestPayloads.map(async (item) => {
-        try {
-          const result = await getLocationSuggest(
-            retailer,
-            accessPrivateToken,
-            accessToken,
-            item.CustomerLocationName,
-            item.CustomerDistrictName,
-            item.CustomerWardName,
-          );
-
-          return {
-            ...item,
-            result,
-          };
-        } catch (error) {
-          return {
-            ...item,
-            error: error?.message || "Không dò được địa chỉ",
-          };
-        }
-      }),
+    const agencyRows = previewPayloadRows.filter((row) =>
+      isAgencyCustomerName(row?.CustomerName ?? row?.customerName),
     );
 
-    const updatePayloads = (
-      await Promise.all(
-        previewPayloadRows.map(async (row) => {
-          const matchedResult = locationSuggestResults.find(
-            (item) =>
-              normalizeText(item.CustomerId) ===
-              normalizeText(row?.CustomerId ?? row?.customerId ?? ""),
-          );
+    setHddtStatusMessage(
+      agencyRows.length > 0
+        ? `Đang đồng bộ ${previewPayloadRows.length} dòng, trong đó ${agencyRows.length} đơn đại lý DL sẽ được tạm đổi sang Cá nhân...`
+        : `Đang đồng bộ ${previewPayloadRows.length} dòng...`,
+    );
+    updateOperationProgress(0, "Đang đồng bộ địa chỉ...");
 
-          if (
-            !matchedResult?.result?.LocationV2 &&
-            !matchedResult?.result?.WardV2
-          ) {
-            return null;
-          }
+    let successCount = 0;
+    let skippedCount = 0;
 
-          return buildCustomerAddressUpdatePayload(
-            row,
-            matchedResult.result,
-            retailer,
-            accessPrivateToken,
-            accessToken,
-          );
-        }),
-      )
-    ).filter(Boolean);
+    try {
+      for (let index = 0; index < previewPayloadRows.length; index += 1) {
+        const row = previewPayloadRows[index];
+        const currentLabel = `Đang đồng bộ ${index + 1}/${previewPayloadRows.length}...`;
+        updateOperationProgress(
+          (index / previewPayloadRows.length) * 100,
+          currentLabel,
+        );
 
-    const updateResults = await Promise.allSettled(
-      updatePayloads.map((payload) =>
-        updateCustomerAddress(
+        const customerCode = getCustomerCode(row);
+        if (!customerCode) {
+          skippedCount += 1;
+          continue;
+        }
+
+        if (!normalizeText(row?.CustomerDistrictName)) {
+          skippedCount += 1;
+          continue;
+        }
+
+        const locationSuggestResult = await getLocationSuggest(
           retailer,
           accessPrivateToken,
           accessToken,
-          payload,
-        ),
-      ),
-    );
+          row.CustomerLocationName,
+          row.CustomerDistrictName,
+          row.CustomerWardName,
+        );
 
-    const successCount = updateResults.filter(
-      (result) => result.status === "fulfilled",
-    ).length;
+        if (
+          !locationSuggestResult?.LocationV2 ||
+          !locationSuggestResult?.WardV2
+        ) {
+          skippedCount += 1;
+          continue;
+        }
 
-    setHddtStatusMessage(
-      `Đã dò ${locationSuggestResults.length} dòng và cập nhật ${successCount}/${updatePayloads.length} khách hàng.`,
-    );
+        const updatePayload = await buildCustomerAddressUpdatePayload(
+          row,
+          locationSuggestResult,
+          retailer,
+          accessPrivateToken,
+        );
 
-    await fetchOrders();
+        const agencyName = row?.CustomerName ?? row?.customerName;
+        const isAgencyRow = isAgencyCustomerName(agencyName);
+
+        const updateResult = await updateCustomerAddress(
+          retailer,
+          accessPrivateToken,
+          accessToken,
+          updatePayload,
+          isAgencyRow ? "Cá nhân" : "Cá nhân",
+          isAgencyRow ? "" : "",
+        );
+
+        const originalCustomer = updateResult?.originalCustomer;
+        const restoreCode = getCustomerCode(originalCustomer) || customerCode;
+
+        if (isAgencyRow && restoreCode) {
+          agencyCustomerBackupsRef.current.set(restoreCode, {
+            Code: restoreCode,
+            CustomerType: originalCustomer?.CustomerType || "Công ty",
+            Organization: originalCustomer?.Organization || "",
+          });
+        }
+
+        successCount += 1;
+      }
+
+      updateOperationProgress(100, "Hoàn tất đồng bộ địa chỉ.");
+
+      setHddtStatusMessage(
+        skippedCount > 0
+          ? `Đã đồng bộ ${successCount}/${previewPayloadRows.length} dòng, bỏ qua ${skippedCount} dòng không đủ dữ liệu.`
+          : `Đã đồng bộ ${successCount}/${previewPayloadRows.length} dòng.`,
+      );
+
+      await fetchOrders();
+    } finally {
+      resetOperationProgress();
+    }
   };
 
   const exportToExcel = async () => {
@@ -994,6 +1105,21 @@ export default function EinvoicesTab({
         {hddtStatusMessage ? (
           <div className="mt-3 rounded-[16px] border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-600">
             {hddtStatusMessage}
+          </div>
+        ) : null}
+
+        {operationProgress.visible ? (
+          <div className="mt-3 rounded-[16px] border border-slate-200 bg-white px-3 py-3">
+            <div className="mb-2 flex items-center justify-between gap-3 text-xs font-bold text-slate-600">
+              <span>{operationProgress.label || "Đang xử lý..."}</span>
+              <span>{operationProgress.value}%</span>
+            </div>
+            <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-cyan-500 via-sky-500 to-emerald-500 transition-all duration-300"
+                style={{ width: `${operationProgress.value}%` }}
+              />
+            </div>
           </div>
         ) : null}
 

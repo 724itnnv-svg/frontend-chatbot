@@ -71,7 +71,20 @@ export async function createCashFlow(
     });
     return response.data;
   } catch (error) {
-    throw new Error(`Failed to call API with auth: ${error.message}`);
+    const responseStatus =
+      error.response?.data?.error?.ResponseStatus ||
+      error.response?.data?.ResponseStatus ||
+      {};
+    const message =
+      responseStatus.Message ||
+      error.response?.data?.error?.message ||
+      error.response?.data?.message ||
+      error.message;
+    const enhancedError = new Error(message);
+    enhancedError.errorCode = responseStatus.ErrorCode || "";
+    enhancedError.responseStatus = responseStatus;
+    enhancedError.responseData = error.response?.data;
+    throw enhancedError;
   }
 }
 
@@ -239,8 +252,9 @@ export async function updateCustomerAddress(
   Organization = "",
 ) {
   try {
+    const customerCode = payload.Code ?? payload.CompareCode;
     const responseGetCustomer = await axios.get(
-      `https://api-man1.kiotviet.vn/api/customers?format=json&Code=${payload.Code ?? payload.CompareCode}`,
+      `https://api-man1.kiotviet.vn/api/customers?format=json&Code=${customerCode}`,
 
       {
         headers: {
@@ -266,7 +280,7 @@ export async function updateCustomerAddress(
         GroupId: groupId,
         CustomerId: responseGetCustomer.data.Data[0].Id,
       })),
-      CustomerType,
+      CustomerType: customerType,
       Organization,
     };
 
@@ -282,7 +296,10 @@ export async function updateCustomerAddress(
         },
       },
     );
-    return response.data;
+    return {
+      data: response.data,
+      originalCustomer: responseGetCustomer.data?.Data?.[0] ?? null,
+    };
   } catch (error) {
     throw new Error(`Failed to call API with auth: ${error.message}`);
   }

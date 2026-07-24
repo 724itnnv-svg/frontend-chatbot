@@ -48,6 +48,18 @@ const buildRowSummary = (row) => ({
   ship: pickField(row, ["Phí ship NVC thu"]),
 });
 
+const getProblemRowLabel = (row) => {
+  if (row.__orderDeliveryMissingInvoice) {
+    return "Thiếu mã hóa đơn";
+  }
+
+  if (row.__orderDeliveryMoneyMismatch) {
+    return "Tiền Excel > orderDelivery";
+  }
+
+  return "Vận đơn lỗi";
+};
+
 const buildDisplayTitle = (payload) =>
   payload?.Cashflow?.PartnerType === "C" ? "Phiếu thu" : "Phiếu chi";
 
@@ -385,10 +397,10 @@ export default function SelectedRowsPanel({
         <div className="mt-4 rounded-[22px] border border-slate-400/20 bg-white/90 p-[18px] shadow-[0_18px_42px_rgba(15,23,42,0.08)] sm:rounded-3xl">
           <div className={sectionHeadingClass}>
             <div>
-              <h3>Vận đơn thiếu mã hóa đơn</h3>
+              <h3>Vận đơn lỗi</h3>
               <p>
-                {missingInvoiceRows.length} dòng chưa có invoiceId. Các dòng
-                này không được đưa vào payload và cần tạo thủ công trên KiotViet.
+                {missingInvoiceRows.length} dòng không hợp lệ. Các dòng này
+                không được đưa vào payload và cần kiểm tra lại trên KiotViet.
               </p>
             </div>
           </div>
@@ -406,7 +418,9 @@ export default function SelectedRowsPanel({
                         {summary.employee || "Không có nhân viên"}
                       </p>
                     </div>
-                    <span className="inline-flex items-center rounded-full border border-sky-300/30 bg-sky-50 px-2.5 py-[7px] text-[11px] font-extrabold text-sky-700">Thiếu mã hóa đơn</span>
+                    <span className="inline-flex items-center rounded-full border border-sky-300/30 bg-sky-50 px-2.5 py-[7px] text-[11px] font-extrabold text-sky-700">
+                      {getProblemRowLabel(row)}
+                    </span>
                   </div>
 
                   <div className="mt-3 flex flex-wrap gap-2 text-[10px] text-slate-600">
