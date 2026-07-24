@@ -34,13 +34,13 @@ import {
   Wallet,
   Workflow,
   BellRing,
-  ActivitySquare,
   TreePine,
   BrainCircuit,
   Code2,
   MousePointerClick,
   PackageSearch,
   UserRound,
+  FlaskConical,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { canAccessScreen, hasFullAccess } from "../utils/screenAccess";
@@ -73,21 +73,9 @@ const MENU_CONFIG = [
     icon: UserCheck,
   },
   {
-    id: "chatweb",
-    path: "/admin/chatweb",
-    label: "Chatbot Web",
-    icon: BotMessageSquare,
-  },
-  {
     id: "donhang",
     path: "/admin/orders",
     label: "Đơn hàng",
-    icon: ClipboardList,
-  },
-  {
-    id: "donhangWeb",
-    path: "/admin/orders-web",
-    label: "Đơn hàng Web",
     icon: ClipboardList,
   },
   {
@@ -147,60 +135,6 @@ const MENU_CONFIG = [
     icon: Database,
   },
   {
-    id: "admin_chat_v3_file_search",
-    path: "/admin/chat-v3-file-search",
-    label: "File Search Chat V3",
-    icon: Search,
-  },
-  {
-    id: "admin_chat_v3_contexts",
-    path: "/admin/chat-v3-contexts",
-    label: "Ngữ cảnh Chat V3",
-    icon: BrainCircuit,
-  },
-  {
-    id: "admin_chat_v3_rules",
-    path: "/admin/chat-v3-rules",
-    label: "Luật vận hành Chat V3",
-    icon: Settings2,
-  },
-  {
-    id: "admin_chat_v3_try",
-    path: "/admin/chat-v3-try",
-    label: "Chat thử v3",
-    icon: MessageCircle,
-  },
-  {
-    id: "admin_chat_v4_rules",
-    path: "/admin/chat-v4-rules",
-    label: "Quy tắc Chat V4",
-    icon: Settings2,
-  },
-  {
-    id: "admin_chat_v4_function_calls",
-    path: "/admin/chat-v4-function-calls",
-    label: "Function Call V4",
-    icon: Code2,
-  },
-  {
-    id: "admin_chat_v4_contexts",
-    path: "/admin/chat-v4-contexts",
-    label: "Ngữ cảnh Chat V4",
-    icon: BrainCircuit,
-  },
-  {
-    id: "admin_chat_v4_settings",
-    path: "/admin/chat-v4-settings",
-    label: "Cài đặt Chat V4",
-    icon: Settings2,
-  },
-  {
-    id: "admin_chat_v4_simulator",
-    path: "/admin/chat-v4-simulator",
-    label: "Giả lập Event V4",
-    icon: MousePointerClick,
-  },
-  {
     id: "admin_agent",
     path: "/admin/agents",
     label: "Quản trị Agent",
@@ -225,18 +159,6 @@ const MENU_CONFIG = [
     icon: MessageSquareText,
   },
   {
-    id: "admin_chatbot_config",
-    path: "/admin/chatbot-config",
-    label: "Cấu hình ChatBot",
-    icon: Settings2,
-  },
-  {
-    id: "admin_chat_v3_faq",
-    path: "/admin/chat-v3-faqs",
-    label: "Bộ câu hỏi dùng chung",
-    icon: HelpCircle,
-  },
-  {
     id: "admin_faq",
     path: "/admin/faqs",
     label: "FAQ theo Page",
@@ -249,10 +171,11 @@ const MENU_CONFIG = [
     icon: Database,
   },
   {
-    id: "admin_chat_webhook_logs",
-    path: "/admin/chat-webhook-logs",
-    label: "Log Chat Webhook",
-    icon: ActivitySquare,
+    id: "admin_event_simulator",
+    accessId: "admin_dashboard",
+    path: "/admin/event-simulator",
+    label: "Giả lập Event",
+    icon: FlaskConical,
   },
   {
     id: "notifications",
@@ -320,9 +243,7 @@ const MENU_GROUPS = [
       "pages",
       "pagesmessage",
       "customer_care",
-      "chatweb",
       "donhang",
-      "donhangWeb",
       "so_quy",
     ],
   },
@@ -360,18 +281,12 @@ const MENU_GROUPS = [
       "meta_pages",
       "admin_products_tool",
       "admin_vectorstore_tool",
-      "admin_chat_v3_file_search",
-      "admin_chat_v3_contexts",
-      "admin_chat_v3_rules",
-      "admin_chat_v3_try",
       "admin_agent",
       "admin_agent_intent",
       "admin_agent_promo",
       "admin_agent_response_templates",
-      "admin_chatbot_config",
-      "admin_chat_v3_faq",
       "admin_logs",
-      "admin_chat_webhook_logs",
+      "admin_event_simulator",
     ],
   },
   {
@@ -380,12 +295,7 @@ const MENU_GROUPS = [
     icon: BotMessageSquare,
     items: [
       "admin_event_promo",
-      "admin_chat_v4_rules",
       "admin_faq",
-      "admin_chat_v4_function_calls",
-      "admin_chat_v4_contexts",
-      "admin_chat_v4_settings",
-      "admin_chat_v4_simulator",
     ],
   },
   {
@@ -448,7 +358,7 @@ const Sidebar = memo(() => {
   const isFullAdmin = hasFullAccess(user);
 
   const filteredMenus = useMemo(
-    () => MENU_CONFIG.filter((item) => canAccessScreen(user, item.id)),
+    () => MENU_CONFIG.filter((item) => canAccessScreen(user, item.accessId || item.id)),
     [user],
   );
 

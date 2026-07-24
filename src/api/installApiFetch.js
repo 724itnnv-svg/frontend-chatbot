@@ -1,6 +1,6 @@
 import { apiUrl, getConfiguredApiOrigin } from "./baseUrl";
 
-const API_PATH_PREFIXES = ["/api", "/chatweb", "/chatwebpopup"];
+const API_PATH_PREFIXES = ["/api"];
 const EXTRA_API_HEADERS = {
   "ngrok-skip-browser-warning": "true",
 };
