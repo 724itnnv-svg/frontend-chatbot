@@ -1917,12 +1917,22 @@ export default function PayrollManager() {
         body: JSON.stringify({ period, updateFields, rows: importRows.map((row) => ({ ...row, period })) }),
       });
       const data = await res.json();
-      if (!res.ok || data?.success === false) throw new Error(data?.message || "Import thất bại");
+      if (!res.ok || (data?.success === false && !data?.saved)) {
+        const firstError = data?.errors?.[0];
+        const errorDetail = firstError ? ` Dòng ${firstError.row}: ${firstError.message}` : "";
+        throw new Error(`${data?.message || "Import thất bại"}.${errorDetail}`);
+      }
       setImportRows([]);
       setImportColumns([]);
       setSelectedImportColumns(new Set());
       setShowImport(false);
-      setMessage(`Import xong ${data.total || 0} dòng.`);
+      const savedCount = data.saved ?? data.total ?? 0;
+      const totalCount = data.total ?? savedCount;
+      const firstError = data.errors?.[0];
+      const errorSummary = data.errors?.length
+        ? ` Có ${data.errors.length} dòng lỗi${firstError ? ` (dòng ${firstError.row}: ${firstError.message})` : ""}.`
+        : "";
+      setMessage(`Import thành công ${savedCount}/${totalCount} dòng.${errorSummary}`);
       await fetchPayroll();
     } catch (error) {
       console.error(error);
@@ -2863,10 +2873,10 @@ export default function PayrollManager() {
               <Download className="h-4 w-4" />
               Tải mẫu nhập liệu tháng này
             </button>
-            {/* <button onClick={downloadPayrollTemplate} className="inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-50">
+            <button onClick={downloadPayrollTemplate} className="inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-50">
               <FileSpreadsheet className="h-4 w-4" />
               Tải file mẫu đầy đủ cột
-            </button> */}
+            </button>
             <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl bg-sky-600 px-3 py-2 text-sm font-semibold text-white hover:bg-sky-700">
               <UploadCloud className="h-4 w-4" />
               Chọn file Excel
