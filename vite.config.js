@@ -55,6 +55,10 @@ export default defineConfig({
         // nếu backend không dùng https, thường không cần secure
         // secure: false,
       },
+      "/user-avatars": {
+        target: "http://localhost:5000",
+        changeOrigin: true,
+      },
       "/socket.io": {
         target: "http://localhost:5000",
         changeOrigin: true,
