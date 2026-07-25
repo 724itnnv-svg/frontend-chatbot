@@ -22,6 +22,7 @@ export default function UserForm({ user, onClose, onSaved }) {
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
 
   // state cho danh sách page
   const [pages, setPages] = useState([]);
@@ -121,6 +122,44 @@ export default function UserForm({ user, onClose, onSaved }) {
   const handleChange = (e) => {
     const { name, value } = e.target;
     setForm((prev) => ({ ...prev, [name]: name === "code" ? value.trimStart().toUpperCase() : value }));
+  };
+
+  const handleAvatarFileChange = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+
+    if (!/^image\//i.test(file.type)) {
+      setError("Vui lòng chọn file ảnh (jpg, png, webp...)");
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setError("Ảnh đại diện tối đa 5MB");
+      return;
+    }
+
+    try {
+      setUploadingAvatar(true);
+      setError("");
+
+      const formData = new FormData();
+      formData.append("avatar", file);
+
+      const res = await fetch("/api/user/avatar-upload", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Tải ảnh lên thất bại");
+
+      setForm((prev) => ({ ...prev, avatarUrl: data.data.avatarUrl }));
+    } catch (err) {
+      console.error("Lỗi tải ảnh đại diện:", err);
+      setError(err.message || "Không kết nối được server");
+    } finally {
+      setUploadingAvatar(false);
+    }
   };
 
   const getPageId = (page) => String(page?.facebookId || page?.pageId || page?._id || "");
@@ -239,30 +278,48 @@ export default function UserForm({ user, onClose, onSaved }) {
           className="grid grid-cols-1 md:grid-cols-2 gap-4"
           onSubmit={handleSubmit}
         >
-          {/* Avatar (URL) */}
+          {/* Avatar (upload hoặc URL) */}
           <div className="md:col-span-1">
             <label className="block text-xs font-medium text-gray-700 mb-1">
-              Link ảnh đại diện (avatarUrl)
+              Ảnh đại diện
             </label>
+
+            <div className="flex items-center gap-3">
+              {form.avatarUrl && (
+                <img
+                  src={form.avatarUrl}
+                  alt="Avatar preview"
+                  className="w-14 h-14 shrink-0 rounded-full object-cover border"
+                  onError={(e) => (e.target.src = "/images/no-avatar.png")}
+                />
+              )}
+
+              <label
+                className={`inline-flex items-center justify-center rounded-md border px-3 py-2 text-xs font-medium cursor-pointer ${
+                  uploadingAvatar
+                    ? "opacity-60 cursor-not-allowed border-gray-300 text-gray-500"
+                    : "border-emerald-600 text-emerald-700 hover:bg-emerald-50"
+                }`}
+              >
+                {uploadingAvatar ? "Đang tải ảnh..." : "Tải ảnh lên"}
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  disabled={uploadingAvatar}
+                  onChange={handleAvatarFileChange}
+                />
+              </label>
+            </div>
+
             <input
               type="text"
               name="avatarUrl"
               value={form.avatarUrl}
               onChange={handleChange}
-              placeholder="https://example.com/avatar.jpg"
-              className="w-full border rounded-md px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              placeholder="Hoặc dán link ảnh: https://example.com/avatar.jpg"
+              className="w-full border rounded-md px-3 py-2 text-xs mt-2 focus:outline-none focus:ring-2 focus:ring-emerald-500"
             />
-
-            {form.avatarUrl && (
-              <div className="mt-2 flex justify-start">
-                <img
-                  src={form.avatarUrl}
-                  alt="Avatar preview"
-                  className="w-16 h-16 rounded-full object-cover border"
-                  onError={(e) => (e.target.src = "/images/no-avatar.png")}
-                />
-              </div>
-            )}
           </div>
 
           {/* Họ tên */}
@@ -498,7 +555,7 @@ export default function UserForm({ user, onClose, onSaved }) {
             </button>
             <button
               type="submit"
-              disabled={saving}
+              disabled={saving || uploadingAvatar}
               className="px-4 py-1.5 text-xs rounded-md bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-60"
             >
               {saving ? "Đang lưu..." : isEdit ? "Lưu thay đổi" : "Thêm User"}
