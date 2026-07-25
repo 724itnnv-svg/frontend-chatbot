@@ -19,7 +19,7 @@ function toDirectImageUrl(url) {
     url.match(/drive\.google\.com\/file\/d\/([^/?#]+)/)?.[1] ||
     url.match(/[?&]id=([^&#]+)/)?.[1];
   if (driveFileId && /(?:drive|googleusercontent)\.google\.com/.test(url)) {
-    return `https://lh3.googlaeusercontent.com/d/${encodeURIComponent(decodeURIComponent(driveFileId))}`;
+    return `https://lh3.googleusercontent.com/d/${encodeURIComponent(decodeURIComponent(driveFileId))}`;
   }
   return url;
 }
