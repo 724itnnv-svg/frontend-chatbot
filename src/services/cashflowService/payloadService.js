@@ -134,7 +134,7 @@ const buildSinglePayload = ({
   const cashflowCode = invoiceCode
     ? retailer === "abctv"
       ? `${isPairedCashflow ? codePrefix : ""}${invoiceCode}`
-      : `TESTDTYTTTETI${codePrefix}${invoiceCode}`
+      : `${codePrefix}${invoiceCode}`
     : "";
 
   return {
