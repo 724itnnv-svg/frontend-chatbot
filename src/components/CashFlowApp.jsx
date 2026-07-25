@@ -118,22 +118,32 @@ const extractKiotResponseStatus = (error) =>
   error?.response?.data?.ResponseStatus ||
   {};
 
+const extractKiotHttpStatus = (error) =>
+  error?.response?.status || error?.status || "";
+
 const formatKiotErrorMessage = (error) => {
   const responseStatus = extractKiotResponseStatus(error);
+  const httpStatus = extractKiotHttpStatus(error);
   const errorCode = normalizeText(
     responseStatus.ErrorCode ||
       error?.errorCode ||
-      error?.response?.data?.error?.ErrorCode,
+      error?.response?.data?.error?.ErrorCode ||
+      error?.response?.data?.error?.ResponseStatus?.ErrorCode,
   );
   const message =
     normalizeText(
       responseStatus.Message ||
+        error?.response?.data?.error?.ResponseStatus?.Message ||
         error?.response?.data?.error?.message ||
         error?.response?.data?.message ||
         error?.message,
     ) || "Không gửi được payload";
 
-  return errorCode ? `[${errorCode}] ${message}` : message;
+  const parts = [];
+  if (httpStatus) parts.push(`HTTP ${httpStatus}`);
+  if (errorCode) parts.push(errorCode);
+
+  return parts.length > 0 ? `[${parts.join(" | ")}] ${message}` : message;
 };
 
 const buildPayloadErrorSummary = (detailRows = []) => {
@@ -144,15 +154,74 @@ const buildPayloadErrorSummary = (detailRows = []) => {
   }
 
   return failedRows
+    .flatMap((row) =>
+      (row.details || [])
+        .filter((detail) => detail.status === "error")
+        .map((detail) => {
+          const deliveryCode = normalizeText(detail.deliveryCode || "");
+          const detailMessage = normalizeText(
+            detail.message ||
+              detail.Message ||
+              detail.error?.ResponseStatus?.Message ||
+              detail.error?.message ||
+              "Không gửi được payload",
+          );
+          return `${deliveryCode ? `Mã vận đơn ${deliveryCode}: ` : ""}${detailMessage}`;
+        }),
+    )
+    .join("\n");
+};
+
+const buildOrderDeliveryValidationErrorSummary = (rows = []) => {
+  if (rows.length === 0) {
+    return "";
+  }
+
+  return rows
     .map((row) => {
-      const deliveryCode = normalizeText(row.deliveryCode || row.code || "");
-      const detailMessage = normalizeText(
-        row.message || "Không gửi được payload",
-      );
-      return `${deliveryCode ? `Mã vận đơn ${deliveryCode}: ` : ""}${detailMessage}`;
+      const deliveryCode = normalizeText(getOrderDeliveryCode(row));
+      const reasons = [];
+
+      if (row.__orderDeliveryMissingInvoice === true) {
+        reasons.push("thiếu mã hóa đơn");
+      }
+
+      if (row.__orderDeliveryMoneyMismatch === true) {
+        reasons.push("lệch tiền");
+      }
+
+      const reasonText = reasons.join(", ") || "Dữ liệu không hợp lệ";
+      return `${deliveryCode ? `Mã vận đơn ${deliveryCode}: ` : ""}${reasonText}`;
     })
     .join("\n");
 };
+
+const buildFailedOrderDeliveryErrorSummary = (detailRows = []) => {
+  const failedRows = detailRows.filter((row) => row.failed > 0);
+
+  if (failedRows.length === 0) {
+    return "";
+  }
+
+  return failedRows
+    .map((row) => {
+      const deliveryCode = normalizeText(
+        row.details?.find((detail) => detail.deliveryCode)?.deliveryCode ||
+          row.deliveryCode ||
+          "",
+      );
+      const message = normalizeText(row.message || "Không gửi được payload");
+
+      return `${deliveryCode ? `Mã vận đơn ${deliveryCode}: ` : ""}${message}`;
+    })
+    .join("\n");
+};
+
+const mergePayloadErrorSummaries = (...summaries) =>
+  summaries
+    .map((summary) => normalizeText(summary))
+    .filter(Boolean)
+    .join("\n\n");
 
 const sumMoneyColumn = (rows, header) =>
   rows.reduce((total, row) => total + parseMoneyValue(row?.[header]), 0);
@@ -732,10 +801,22 @@ export default function CashFlowApp() {
     let payloads = [];
     let runId = 0;
     let detailRows = [];
+    const orderDeliveryErrorRows = payloadSourceRows.filter(
+      (row) =>
+        row.__orderDeliveryMissingInvoice === true ||
+        row.__orderDeliveryMoneyMismatch === true,
+    );
 
     try {
       setSendingPayloads(true);
       setPayloadError("");
+
+      const preSendErrorSummary = buildOrderDeliveryValidationErrorSummary(
+        orderDeliveryErrorRows,
+      );
+      if (preSendErrorSummary) {
+        setPayloadError(preSendErrorSummary);
+      }
 
       payloadEntries = buildCashflowPayloadEntries(
         payloadReadyRows,
@@ -880,8 +961,17 @@ export default function CashFlowApp() {
 
       detailRows = Array.from(rowResults.values());
       const payloadErrorSummary = buildPayloadErrorSummary(detailRows);
-      if (payloadErrorSummary) {
-        setPayloadError(payloadErrorSummary);
+      const failedOrderDeliverySummary =
+        buildFailedOrderDeliveryErrorSummary(detailRows);
+
+      const mergedPayloadErrorSummary = mergePayloadErrorSummaries(
+        preSendErrorSummary,
+        payloadErrorSummary,
+        failedOrderDeliverySummary,
+      );
+
+      if (mergedPayloadErrorSummary) {
+        setPayloadError(mergedPayloadErrorSummary);
       }
 
       if (successRowIds.size > 0) {
