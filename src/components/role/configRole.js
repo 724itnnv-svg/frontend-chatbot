@@ -12,6 +12,7 @@ const APP_PERMISSIONS = {
         "customer_care",
         "donhang",
         "so_quy",
+        "dia_chi",
       ],
     },
     {
@@ -79,6 +80,7 @@ const APP_PERMISSIONS = {
     { id: "customer_care", name: "Chăm sóc khách hàng" },
     { id: "donhang", name: "Đơn Hàng" },
     { id: "business_stats", name: "Thống kê kinh doanh" },
+    { id: "dia_chi", name: "Địa chỉ" },
     { id: "employee_profiles", name: "Hồ Sơ Nhân Sự" },
     { id: "employee_assets", name: "Kho Tài Sản & Vật Tư" },
     { id: "users", name: "Người Dùng" },

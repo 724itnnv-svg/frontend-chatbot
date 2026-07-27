@@ -282,6 +282,7 @@ export async function updateCustomerAddress(
       })),
       CustomerType: customerType,
       Organization,
+      Name: responseGetCustomer.data.Data[0].Name,
     };
 
     console.log("payloadData", payloadData);

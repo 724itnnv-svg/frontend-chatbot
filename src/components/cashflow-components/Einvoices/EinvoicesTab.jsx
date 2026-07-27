@@ -562,12 +562,18 @@ export default function EinvoicesTab({
     for (let index = 0; index < backups.length; index += 1) {
       const backup = backups[index];
 
+      const payload = {
+        ...backup,
+        Code: backup.Code ?? backup.CompareCode ?? backup.CustomerCode,
+        CompareCode: backup.CompareCode ?? backup.Code ?? backup.CustomerCode,
+      };
+
       try {
         await updateCustomerAddress(
           retailer,
           accessPrivateToken,
           accessToken,
-          { Code: backup.Code, CompareCode: backup.Code },
+          payload,
           backup.CustomerType,
           backup.Organization,
         );
@@ -710,7 +716,9 @@ export default function EinvoicesTab({
 
         if (isAgencyRow && restoreCode) {
           agencyCustomerBackupsRef.current.set(restoreCode, {
+            ...originalCustomer,
             Code: restoreCode,
+            CompareCode: restoreCode,
             CustomerType: originalCustomer?.CustomerType || "Công ty",
             Organization: originalCustomer?.Organization || "",
           });
