@@ -374,7 +374,7 @@ export default function CustomerCareManager() {
                       </div>
                       <span className="shrink-0 rounded-full bg-amber-50 px-2 py-1 text-[11px] font-bold text-amber-700 ring-1 ring-amber-100">{formatHours(item.silentHours)}</span>
                     </div>
-                    {item.adName || item.activeProductName ? <div className="mt-2 truncate rounded-md bg-slate-50 px-2 py-1 text-xs font-semibold text-slate-600">{item.adName || item.activeProductName}</div> : null}
+                    {item.adName ? <div className="mt-2 truncate rounded-md bg-slate-50 px-2 py-1 text-xs font-semibold text-slate-600">{item.adName}</div> : null}
                     <div className="mt-2 text-xs text-slate-400">Tin cuối: {formatDateTime(item.lastMessageAt)}</div>
                   </button>
                 ))}
@@ -449,9 +449,9 @@ export default function CustomerCareManager() {
                   Tin cuối {formatDateTime(selectedCandidate.lastMessageAt)}
                 </span>
               </div>
-              {selectedCandidate.adName || selectedCandidate.activeProductName ? (
+              {selectedCandidate.adName ? (
                 <div className="mt-2 truncate rounded-md bg-slate-50 px-2 py-1 text-xs font-semibold text-slate-600">
-                  {selectedCandidate.adName || selectedCandidate.activeProductName}
+                  {selectedCandidate.adName}
                 </div>
               ) : null}
             </div>

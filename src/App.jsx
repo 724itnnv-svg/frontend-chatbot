@@ -42,9 +42,7 @@ const PageMessage = lazy(() => import("./components/PageMessage"));
 const CustomerCareManager = lazy(
   () => import("./components/CustomerCareManager"),
 );
-const ChatwebManager = lazy(() => import("./components/ChatwebManager"));
 const DonHang = lazy(() => import("./components/DonHang"));
-const DonHangWeb = lazy(() => import("./components/DonHangWeb"));
 const BusinessStats = lazy(() => import("./components/BusinessStats"));
 const UsersPage = lazy(() => import("./components/UserManager"));
 const EmployeeProfileManager = lazy(
@@ -79,22 +77,9 @@ const AgentPromoManage = lazy(
 const AgentResponseTemplatesManager = lazy(
   () => import("./components/agentAI/AgentResponseTemplatesManager"),
 );
-const ChatbotConfigManager = lazy(
-  () => import("./components/chatbotConfig/ChatbotConfigManager"),
-);
 const FAQManager = lazy(() => import("./components/FAQManager"));
-const ChatV3FAQManager = lazy(() => import("./components/ChatV3FAQManager"));
-const ChatV3FileSearchManager = lazy(
-  () => import("./components/chatV3/ChatV3FileSearchManager"),
-);
-const ChatV3ContextManager = lazy(
-  () => import("./components/chatV3/ChatV3ContextManager"),
-);
-const ChatV3RulesManager = lazy(
-  () => import("./components/chatV3/ChatV3RulesManager"),
-);
-const ChatV3TryChat = lazy(() => import("./components/chatV3/ChatV3TryChat"));
 const LogsManage = lazy(() => import("./components/logs/LogsManager"));
+const EventSimulator = lazy(() => import("./components/EventSimulator"));
 const NotificationManager = lazy(
   () => import("./components/NotificationManager"),
 );
@@ -122,24 +107,6 @@ const DuaSapDetailPage = lazy(
   () => import("./components/duasap/DuaSapDetailPage"),
 );
 const DuaSapManager = lazy(() => import("./components/duasap/DuaSapManager"));
-const ChatV4RulesManager = lazy(
-  () => import("./components/chatV4/ChatV4RulesManager"),
-);
-const ChatV4FunctionCallsManager = lazy(
-  () => import("./components/chatV4/ChatV4FunctionCallsManager"),
-);
-const ChatV4ContextManager = lazy(
-  () => import("./components/chatV4/ChatV4ContextManager"),
-);
-const ChatV4SettingsManager = lazy(
-  () => import("./components/chatV4/ChatV4SettingsManager"),
-);
-const ChatV4EventSimulator = lazy(
-  () => import("./components/chatV4/ChatV4EventSimulator"),
-);
-const ChatWebhookLogs = lazy(
-  () => import("./components/chatWebhook/ChatWebhookLogs"),
-);
 
 class ErrorBoundary extends Component {
   constructor(props) {
@@ -223,9 +190,7 @@ const ADMIN_ROUTE_BY_SCREEN = {
   meta_pages: "/admin/meta-pages",
   pagesmessage: "/admin/page-messages",
   customer_care: "/admin/customer-care",
-  chatweb: "/admin/chatweb",
   donhang: "/admin/orders",
-  donhangWeb: "/admin/orders-web",
   business_stats: "/admin/business-stats",
   employee_profiles: "/admin/employee-profiles",
   employee_assets: "/admin/employee-assets",
@@ -242,21 +207,9 @@ const ADMIN_ROUTE_BY_SCREEN = {
   admin_agent_intent: "/admin/agent-intents",
   admin_agent_promo: "/admin/agent-promotions",
   admin_agent_response_templates: "/admin/intent-response-templates",
-  admin_chatbot_config: "/admin/chatbot-config",
   admin_faq: "/admin/faqs",
-  admin_chat_v3_faq: "/admin/chat-v3-faqs",
-  admin_chat_v3_file_search: "/admin/chat-v3-file-search",
-  admin_chat_v3_contexts: "/admin/chat-v3-contexts",
-  admin_chat_v3_rules: "/admin/chat-v3-rules",
-  admin_chat_v3_try: "/admin/chat-v3-try",
-  admin_testcase: "/admin/test-chatbot-v3",
-  admin_chat_v4_rules: "/admin/chat-v4-rules",
-  admin_chat_v4_function_calls: "/admin/chat-v4-function-calls",
-  admin_chat_v4_contexts: "/admin/chat-v4-contexts",
-  admin_chat_v4_settings: "/admin/chat-v4-settings",
-  admin_chat_v4_simulator: "/admin/chat-v4-simulator",
   admin_logs: "/admin/logs",
-  admin_chat_webhook_logs: "/admin/chat-webhook-logs",
+  admin_event_simulator: "/admin/event-simulator",
   notifications: "/admin/notifications",
   attendance: "/admin/attendance",
   attendance_shifts: "/admin/attendance-shifts",
@@ -276,9 +229,7 @@ const adminRoutes = [
     screenId: "customer_care",
     element: <CustomerCareManager />,
   },
-  { path: "chatweb", screenId: "chatweb", element: <ChatwebManager /> },
   { path: "orders", screenId: "donhang", element: <DonHang /> },
-  { path: "orders-web", screenId: "donhangWeb", element: <DonHangWeb /> },
   {
     path: "business-stats",
     screenId: "business_stats",
@@ -348,82 +299,12 @@ const adminRoutes = [
     screenId: "admin_agent_response_templates",
     element: <Navigate to="/admin/intent-response-templates" replace />,
   },
-  {
-    path: "chatbot-config",
-    screenId: "admin_chatbot_config",
-    element: <ChatbotConfigManager />,
-  },
   { path: "faqs", screenId: "admin_faq", element: <FAQManager /> },
-  {
-    path: "chat-v3-faqs",
-    screenId: "admin_chat_v3_faq",
-    element: <ChatV3FAQManager />,
-  },
-  {
-    path: "chat-v3-file-search",
-    screenId: "admin_chat_v3_file_search",
-    element: <ChatV3FileSearchManager />,
-  },
-  {
-    path: "chat-v3-contexts",
-    screenId: "admin_chat_v3_contexts",
-    element: <ChatV3ContextManager />,
-  },
-  {
-    path: "chat-v3-rules",
-    screenId: "admin_chat_v3_rules",
-    element: <ChatV3RulesManager />,
-  },
-  {
-    path: "chat-v3-try",
-    screenId: "admin_chat_v3_try",
-    element: <ChatV3TryChat />,
-  },
-  {
-    path: "test-chatbot-v3",
-    screenId: "admin_testcase",
-    element: <ChatV3TryChat />,
-  },
-  {
-    path: "test-cases",
-    screenId: "admin_testcase",
-    element: <Navigate to="/admin/test-chatbot-v3" replace />,
-  },
-  {
-    path: "test-chat",
-    screenId: "admin_testcase",
-    element: <Navigate to="/admin/test-chatbot-v3" replace />,
-  },
-  {
-    path: "chat-v4-rules",
-    screenId: "admin_chat_v4_rules",
-    element: <ChatV4RulesManager />,
-  },
-  {
-    path: "chat-v4-function-calls",
-    screenId: "admin_chat_v4_function_calls",
-    element: <ChatV4FunctionCallsManager />,
-  },
-  {
-    path: "chat-v4-contexts",
-    screenId: "admin_chat_v4_contexts",
-    element: <ChatV4ContextManager />,
-  },
-  {
-    path: "chat-v4-settings",
-    screenId: "admin_chat_v4_settings",
-    element: <ChatV4SettingsManager />,
-  },
-  {
-    path: "chat-v4-simulator",
-    screenId: "admin_chat_v4_simulator",
-    element: <ChatV4EventSimulator />,
-  },
   { path: "logs", screenId: "admin_logs", element: <LogsManage /> },
   {
-    path: "chat-webhook-logs",
-    screenId: "admin_chat_webhook_logs",
-    element: <ChatWebhookLogs />,
+    path: "event-simulator",
+    screenId: "admin_dashboard",
+    element: <EventSimulator />,
   },
   {
     path: "notifications",

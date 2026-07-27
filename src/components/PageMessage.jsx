@@ -8,7 +8,7 @@ import { ChevronLeft, ChevronRight, FileText, Flag, Image, MessageSquarePlus, Pa
 import { io } from "socket.io-client";
 import { getApiOrigin } from "../api/baseUrl";
 
-const HISTORY_ENDPOINT = "/chatweb/history"; // <- đổi nếu backend khác
+const HISTORY_ENDPOINT = "/api/chat/stats/history";
 const isViteDevServer =
   typeof window !== "undefined" && window.location.port === "5173";
 const SOCKET_URL =
@@ -141,12 +141,12 @@ function PageMessage() {
     value: "",
   });
 
-  // UI giống ChatwebManager
+  // UI quản lý hội thoại Page
   const [selectedChat, setSelectedChat] = useState(null);
   const [currentMessages, setCurrentMessages] = useState([]);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [chatSearch, setChatSearch] = useState("");
-  const [activeThreadId, setActiveThreadId] = useState(null);
+  const [activeConversationId, setActiveConversationId] = useState(null);
   const [mobileTab, setMobileTab] = useState("customers"); // customers | messages
 
   const messageFetchRef = useRef(null);
@@ -392,7 +392,7 @@ function PageMessage() {
     setSelectedUsers({});
     setSelectedChat(null);
     setCurrentMessages([]);
-    setActiveThreadId(null);
+    setActiveConversationId(null);
     setReplyText("");
     setReplyAttachmentUrl("");
     setReplyAttachmentFile(null);
@@ -445,7 +445,7 @@ function PageMessage() {
     }
   };
 
-  // ✅ Search + sort giống ChatwebManager
+  // Tìm kiếm và sắp xếp hội thoại
   const handleLookbackHoursChange = (event) => {
     const nextHours = Number(event.target.value);
     if (!PAGE_MESSAGE_LOOKBACK_OPTIONS.includes(nextHours) || nextHours === lookbackHours) return;
@@ -466,12 +466,12 @@ function PageMessage() {
       : base.filter((c) => {
         const name = (c.userName || userInfo?.[c.user]?.name || "").toLowerCase();
         const adName = (c.adName || "").toLowerCase();
-        const threadId = (c.threadId || "").toLowerCase();
+        const conversationId = (c.conversationId || "").toLowerCase();
         const uid = (c.user || "").toLowerCase();
         return (
           name.includes(q) ||
           adName.includes(q) ||
-          threadId.includes(q) ||
+          conversationId.includes(q) ||
           uid.includes(q)
         );
       });
@@ -483,11 +483,11 @@ function PageMessage() {
     });
   }, [chats, chatSearch, userInfo]);
 
-  // ✅ Chọn khách → load lịch sử theo threadId
+  // Chọn khách và tải lịch sử theo conversationId/page-user.
   const handleSelectChat = async (chat, { pageOverride = null, pageLoadSeq = null } = {}) => {
     const endpoint = buildHistoryEndpoint(chat);
     if (!endpoint) {
-      alert("⚠️ Chat này chưa có threadId để xem lịch sử");
+      alert("Chat này chưa có định danh để xem lịch sử");
       return;
     }
 
@@ -498,11 +498,7 @@ function PageMessage() {
 
     selectedChatRef.current = chat;
     setSelectedChat(chat);   
-    if(!chat.conversationId){
-      setActiveThreadId(chat.threadId || chat.user);
-    }else{
-      setActiveThreadId(chat.conversationId);
-    }
+    setActiveConversationId(chat.conversationId || chat.user);
     setCurrentMessages([]);
     setReplyText("");
     setReplyAttachmentUrl("");
@@ -582,9 +578,6 @@ function PageMessage() {
       if (chat.conversationId && item?.conversationId) {
         return String(item.conversationId) === String(chat.conversationId);
       }
-      if (chat.threadId && item?.threadId) {
-        return String(item.threadId) === String(chat.threadId);
-      }
       return true;
     });
 
@@ -593,13 +586,12 @@ function PageMessage() {
     const nextSelected = {
       ...chat,
       ...latestChat,
-      threadId: latestChat.conversationId || latestChat.threadId || chat.threadId,
       conversationId: latestChat.conversationId || chat.conversationId,
     };
 
     selectedChatRef.current = nextSelected;
     setSelectedChat(nextSelected);
-    setActiveThreadId(nextSelected.conversationId || nextSelected.threadId || nextSelected.user);
+    setActiveConversationId(nextSelected.conversationId || nextSelected.user);
 
     setUserInfo((prev) => ({
       ...prev,
@@ -612,17 +604,6 @@ function PageMessage() {
   };
 
   const buildHistoryEndpoint = (chatOrId) => {
-    const conversationId =
-      typeof chatOrId === "object" ? chatOrId?.conversationId : null;
-    const threadId =
-      typeof chatOrId === "object" ? chatOrId?.threadId : chatOrId;
-
-    if (conversationId) {
-      return `${HISTORY_ENDPOINT}?conversationId=${encodeURIComponent(conversationId)}`;
-    }
-    if (threadId) {
-      return `${HISTORY_ENDPOINT}?threadId=${encodeURIComponent(threadId)}`;
-    }
     if (chatOrId?.page && chatOrId?.user) {
       const params = new URLSearchParams({
         pageId: chatOrId.page,
@@ -730,7 +711,7 @@ function PageMessage() {
     }
   };
 
-  const refreshThreadMessages = async (chatOrId, { retries = 3, delayMs = 800, silent = false } = {}) => {
+  const refreshConversationMessages = async (chatOrId, { retries = 3, delayMs = 800, silent = false } = {}) => {
     const endpoint = buildHistoryEndpoint(chatOrId);
     if (!endpoint) return;
 
@@ -760,7 +741,7 @@ function PageMessage() {
           return;
         }
       } catch (err) {
-        console.error("refreshThreadMessages error:", err);
+        console.error("refreshConversationMessages error:", err);
       }
 
       // ✅ đợi rồi thử lại (đợi webhook/DB kịp cập nhật)
@@ -835,7 +816,6 @@ function PageMessage() {
       ? {
         ...selected,
         ...payload.chat,
-        threadId: payload.chat.conversationId || payload.chat.threadId || selected.threadId,
         conversationId: payload.chat.conversationId || selected.conversationId,
       }
       : selected;
@@ -848,7 +828,7 @@ function PageMessage() {
     }
 
     window.setTimeout(() => {
-      refreshThreadMessages(nextSelected, { retries: 2, delayMs: 300, silent: true });
+      refreshConversationMessages(nextSelected, { retries: 2, delayMs: 300, silent: true });
     }, 150);
   };
 
@@ -1316,8 +1296,8 @@ function PageMessage() {
       setBulkMessage("");
       setImageUrl("");
 
-      if (selectedChat?.threadId || selectedChat?.conversationId) {
-        setTimeout(() => refreshThreadMessages(selectedChat), 800);
+      if (selectedChat?.conversationId) {
+        setTimeout(() => refreshConversationMessages(selectedChat), 800);
       }
     } catch (err) {
       console.error("❌ Lỗi tổng khi gửi bulk:", err);
@@ -1562,7 +1542,6 @@ function PageMessage() {
       const params = new URLSearchParams({ pageId: reportPage.facebookId });
       if (targetChat?.user) params.set("userId", targetChat.user);
       if (targetChat?.conversationId) params.set("conversationId", targetChat.conversationId);
-      if (targetChat?.threadId) params.set("threadId", targetChat.threadId);
 
       const res = await fetch(`/api/message-reports?${params.toString()}`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -1615,7 +1594,6 @@ function PageMessage() {
             userInfo?.[selectedChat.user]?.name ||
             selectedChat.user,
           conversationId: selectedChat.conversationId || "",
-          threadId: selectedChat.threadId || "",
           category: messageReportCategory,
           customCategory: messageReportCustomCategory,
           messages,
@@ -1743,10 +1721,8 @@ function PageMessage() {
     const firstOrder = selectedCustomerOrders[0] || null;
     const firstItem = Array.isArray(firstOrder?.items) ? firstOrder.items[0] : null;
     const productName =
-      selectedChat.activeProductName ||
       selectedChat.productName ||
       firstItem?.productName ||
-      selectedChat.activeSku ||
       firstItem?.sku ||
       "";
 
@@ -1754,19 +1730,18 @@ function PageMessage() {
       customerName:
         selectedChat.userName ||
         userInfo?.[selectedChat.user]?.name ||
-        selectedChat.verifiedCustomerName ||
         selectedChat.user ||
         "Không rõ khách",
       customerId: selectedChat.user || "",
       pageName: selectedPage?.name || selectedChat.pageName || selectedChat.page || "Không rõ Page",
-      conversationId: selectedChat.conversationId || selectedChat.threadId || "",
-      adName: selectedChat.adName || selectedChat.adNameInjected || firstOrder?.adName || "",
-      phoneNumber: selectedChat.phoneNumber || firstOrder?.phoneNumber || "",
-      address: selectedChat.address || firstOrder?.address || "",
+      conversationId: selectedChat.conversationId || "",
+      adName: selectedChat.adName || firstOrder?.adName || "",
+      phoneNumber: firstOrder?.phoneNumber || "",
+      address: firstOrder?.address || "",
       productName,
-      intent: selectedChat.lastIntent || selectedChat.intent || "",
-      stage: selectedChat.consultationStage || "",
-      summary: selectedChat.conversationSummary || selectedChat.summary || "",
+      intent: selectedChat.intent || "",
+      stage: "",
+      summary: selectedChat.summary || "",
       replyMode: chatReplyState.mode === "stopped" ? "Đã dừng tự động" : chatReplyState.mode === "human" ? "Người đang trả lời" : "BOT đang trả lời",
       updatedAt: formatDateTime(selectedChat.updatedAt),
       orderCount: selectedCustomerOrders.length,
@@ -2157,7 +2132,7 @@ function PageMessage() {
                   <input
                     value={chatSearch}
                     onChange={(e) => setChatSearch(e.target.value)}
-                    placeholder="Tìm theo tên / adName / userId / threadId..."
+                    placeholder="Tìm theo tên / adName / userId / conversationId..."
                     className="h-10 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm outline-none transition placeholder:text-slate-400 focus:border-sky-200 focus:bg-white focus:ring-4 focus:ring-sky-100"
                   />
 
@@ -2210,7 +2185,7 @@ function PageMessage() {
                       const u = userInfo[chat.user];
                       const hasOrder = orderedCustomerSet.has(String(chat.user));
                       const isSpam = isSpamChat(chat);
-                      const isActive = activeThreadId === (chat.conversationId || chat.threadId);
+                      const isActive = activeConversationId === (chat.conversationId || chat.user);
 
                       return (
                         <div
@@ -2308,11 +2283,6 @@ function PageMessage() {
                             selectedChat.user}
                         </span>
 
-                        {selectedChat.threadId ? (
-                          <span className="shrink-0 text-xs font-normal text-slate-500">
-                            • {selectedChat.threadId}
-                          </span>
-                        ) : null}
                       </div>
 
                       {/* Dòng 3: Ad name */}

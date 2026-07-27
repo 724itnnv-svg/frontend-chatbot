@@ -76,7 +76,6 @@ function DonHang() {
     try {
       setLoadingChatPopup(true);
 
-      // ✅ 1) lấy threadId theo user + page (API mới)
       const user = String(customerId);
       const page = String(selectedPage.facebookId);
 
@@ -90,25 +89,21 @@ function DonHang() {
 
       if (chatRes.status === 404) {
         setChatPopupError(
-          "Khách này chưa có chat trên page (không tìm thấy threadId).",
+          "Khách này chưa có hội thoại trên Page.",
         );
         return;
       }
       if (!chatRes.ok) throw new Error("Không lấy được chat theo user + page");
 
       const chat = await chatRes.json();
-      const threadId = chat?.threadId;
       const conversationId = chat?.conversationId;
 
-      if (!threadId && !conversationId) {
-        setChatPopupError("Chat có tồn tại nhưng chưa có threadId hoặc conversationId.");
+      if (!conversationId) {
+        setChatPopupError("Chat chưa có conversationId.");
         return;
       }
-      let endpointInfo = `/chatweb/history?threadId=${encodeURIComponent(threadId)}`;
-      if (conversationId) endpointInfo = `/chatweb/history?conversationId=${encodeURIComponent(conversationId)}`;   
+      const endpointInfo = `/api/chat/stats/history?pageId=${encodeURIComponent(page)}&userId=${encodeURIComponent(user)}`;
 
-     
-      // ✅ 2) lấy lịch sử bằng threadId
       const hisRes = await fetch(
         endpointInfo,
         {

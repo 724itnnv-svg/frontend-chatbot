@@ -1127,10 +1127,8 @@ function getMessageText(message) {
 
 function getConversationCustomerName(conversation) {
   return conversation.userName
-    || conversation.verifiedCustomerName
     || conversation.customer?.name
     || conversation.raw?.userName
-    || conversation.raw?.verifiedCustomerName
     || conversation.user
     || conversation.customer?.id
     || "Khach hang";
@@ -1138,9 +1136,7 @@ function getConversationCustomerName(conversation) {
 
 function getConversationExportId(conversation) {
   return conversation.conversationId
-    || conversation.threadId
     || conversation.raw?.conversationId
-    || conversation.raw?.threadId
     || conversation.id
     || conversation._id
     || "";
@@ -1176,13 +1172,9 @@ function buildConversationText(conversation, index) {
     `Khach hang: ${getConversationCustomerName(conversation)} (${conversation.user || conversation.customer?.id || ""})`,
     `Page: ${conversation.page || ""}`,
     `Conversation ID: ${conversation.conversationId || ""}`,
-    `Thread ID: ${conversation.threadId || ""}`,
     `Cap nhat: ${formatDateTime(conversation.updatedAt)}`,
-    `So dien thoai: ${conversation.phoneNumber || conversation.customer?.phoneNumber || ""}`,
-    `Dia chi: ${conversation.address || conversation.customer?.address || ""}`,
-    `San pham dang tu van: ${conversation.activeProductName || conversation.activeSku || ""}`,
-    `Intent cuoi: ${conversation.lastIntent || ""}`,
-    `Tom tat: ${conversation.conversationSummary || ""}`,
+    `So dien thoai: ${conversation.customer?.phoneNumber || ""}`,
+    `Dia chi: ${conversation.customer?.address || ""}`,
     "",
     "-------------------- LICH SU CHAT --------------------",
     "Lich su chat:",
@@ -1198,17 +1190,12 @@ function buildConversationJson(conversation, index) {
     customer: {
       id: conversation.user || null,
       name: getConversationCustomerName(conversation),
-      phoneNumber: conversation.phoneNumber || null,
-      address: conversation.address || null,
+      phoneNumber: conversation.customer?.phoneNumber || null,
+      address: conversation.customer?.address || null,
     },
     page: conversation.page || null,
     conversationId: conversation.conversationId || null,
-    threadId: conversation.threadId || null,
     updatedAt: conversation.updatedAt || null,
-    activeProductName: conversation.activeProductName || null,
-    activeSku: conversation.activeSku || null,
-    lastIntent: conversation.lastIntent || null,
-    summary: conversation.conversationSummary || "",
     chatHistory: conversation.chatHistory || null,
     raw: conversation,
   };
@@ -1235,12 +1222,7 @@ const CONVERSATION_EXPORT_FIELDS = [
   ["customer", "Khách hàng"],
   ["page", "Page"],
   ["conversationId", "Conversation ID"],
-  ["threadId", "Thread ID"],
   ["updatedAt", "Cập nhật"],
-  ["activeProductName", "Sản phẩm tư vấn"],
-  ["activeSku", "SKU"],
-  ["lastIntent", "Intent cuối"],
-  ["summary", "Tóm tắt"],
   ["chatHistory", "Lịch sử chat"],
 ];
 
@@ -1554,9 +1536,9 @@ function createStyledPdfBlob(payloadOrText, title = "Bao cao thong ke kinh doanh
     sectionTitle(`HOI THOAI #${index + 1}`, "0369A1");
     text(`Khach: ${getConversationCustomerName(conversation)} | Page: ${page}`, margin, 9);
     text(`Conversation ID: ${conversationId}`, margin, 8, { color: "64748B" });
-    const phone = conversation.customer?.phoneNumber || rawConversation.phoneNumber || "";
-    const address = conversation.customer?.address || rawConversation.address || "";
-    const summary = conversation.summary || rawConversation.conversationSummary || "";
+    const phone = conversation.customer?.phoneNumber || "";
+    const address = conversation.customer?.address || "";
+    const summary = conversation.summary || "";
     if (phone || address) text(`SDT: ${phone || "N/A"} | Dia chi: ${address || "N/A"}`, margin, 8, { color: "64748B" });
     if (summary) text(`Tom tat: ${summary}`, margin, 8, { color: "64748B" });
     const messages = Array.isArray(chatHistory?.messages) ? chatHistory.messages : [];
@@ -3548,7 +3530,7 @@ export default function BusinessStats() {
                           const customerName = getConversationCustomerName(conversation);
                           const customerCount = Number(conversation.customerMessageCount || 0);
                           const responseCount = Number(conversation.responseMessageCount || 0);
-                          const note = conversation.summary || conversation.conversationSummary || conversation.lastMessage || "";
+                          const note = conversation.summary || conversation.lastMessage || "";
                           return (
                             <tr key={conversation._id || `${conversation.page}-${conversation.user}`} className="hover:bg-slate-50/80">
                               <td className="px-4 py-3">
@@ -3631,7 +3613,7 @@ export default function BusinessStats() {
                           const customerCount = Number(conversation.customerMessageCount || 0);
                           const responseCount = Number(conversation.responseMessageCount || 0);
                           const lastCustomerText = conversation.lastCustomerText || "";
-                          const note = conversation.conversationSummary || conversation.adName || "";
+                          const note = conversation.adName || "";
                           return (
                             <tr key={conversation._id || `${conversation.page}-${conversation.user}`} className="hover:bg-slate-50/80">
                               <td className="px-4 py-3">
