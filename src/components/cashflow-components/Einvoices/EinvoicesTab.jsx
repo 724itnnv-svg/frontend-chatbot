@@ -149,7 +149,9 @@ const splitCustomerLocationName = (value) => {
 const isSelectableEinvoiceRow = (row) =>
   normalizeMoney(
     row?.Total ?? row?.total ?? row?.NewInvoiceTotal ?? row?.Amount ?? 0,
-  ) !== 0 && !hasReturnsValue(row);
+  ) !== 0 &&
+  !hasReturnsValue(row) &&
+  !isAgencyCustomerName(row?.CustomerName ?? row?.customerName);
 
 const buildEinvoicePayload = (row) => {
   const locationParts = splitCustomerLocationName(
@@ -202,8 +204,20 @@ const buildCustomerAddressUpdatePayload = async (
   const streetAddress = normalizeText(
     row?.CustomerAddress ?? row?.customerAddress ?? "",
   );
-  const provinceName = normalizeText(locationV2?.Name ?? "");
-  const districtName = normalizeText(wardV2?.Name ?? "");
+  const provinceName = normalizeText(
+    locationV2?.Name ??
+      row?.CustomerLocationName ??
+      row?.customerLocationName ??
+      "",
+  );
+  const districtName = normalizeText(
+    wardV2?.Name ??
+      row?.CustomerWardName ??
+      row?.customerWardName ??
+      row?.CustomerDistrictName ??
+      row?.customerDistrictName ??
+      "",
+  );
 
   const provinceIds = await getIdAdministrativearea(
     retailer,
@@ -235,8 +249,8 @@ const buildCustomerAddressUpdatePayload = async (
     AddressEInvoiceCombine: [streetAddress, districtName, provinceName]
       .filter(Boolean)
       .join(", "),
-    suggestLocationV2: locationV2,
-    suggestWardV2: wardV2,
+    suggestLocationV2: locationV2 ?? provinceIds?.[0],
+    suggestWardV2: wardV2 ?? wardId?.[0],
     CompareName: row?.CustomerName,
     Code: row?.CustomerCode,
     CompareCode: row?.CustomerCode,
@@ -670,23 +684,23 @@ export default function EinvoicesTab({
           continue;
         }
 
-        if (!normalizeText(row?.CustomerDistrictName)) {
-          skippedCount += 1;
-          continue;
-        }
-
-        const locationSuggestResult = await getLocationSuggest(
-          retailer,
-          accessPrivateToken,
-          accessToken,
-          row.CustomerLocationName,
-          row.CustomerDistrictName,
-          row.CustomerWardName,
+        const hasCustomerDistrictName = Boolean(
+          normalizeText(row?.CustomerDistrictName),
         );
+        const locationSuggestResult = hasCustomerDistrictName
+          ? await getLocationSuggest(
+              retailer,
+              accessPrivateToken,
+              accessToken,
+              row.CustomerLocationName,
+              row.CustomerDistrictName,
+              row.CustomerWardName,
+            )
+          : null;
 
         if (
-          !locationSuggestResult?.LocationV2 ||
-          !locationSuggestResult?.WardV2
+          hasCustomerDistrictName &&
+          (!locationSuggestResult?.LocationV2 || !locationSuggestResult?.WardV2)
         ) {
           skippedCount += 1;
           continue;

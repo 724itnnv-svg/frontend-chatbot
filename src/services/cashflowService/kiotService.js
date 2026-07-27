@@ -283,9 +283,13 @@ export async function updateCustomerAddress(
       CustomerType: customerType,
       Organization,
       Name: responseGetCustomer.data.Data[0].Name,
+      ...(responseGetCustomer.data.Data[0]?.TaxCode
+        ? {
+            TaxCode: responseGetCustomer.data.Data[0].TaxCode,
+          }
+        : {}),
     };
 
-    console.log("payloadData", payloadData);
     const response = await axios.post(
       `https://api-man1.kiotviet.vn/api/customers`,
       { Customer: payloadData },

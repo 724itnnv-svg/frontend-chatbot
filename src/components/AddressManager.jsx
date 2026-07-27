@@ -66,6 +66,8 @@ function normalizeConvertedPayload(payload) {
       confirmQuestion: "",
       notes: "",
       sourceFound: false,
+      phoneOriginal: "",
+      phoneStandardized: "",
     };
   }
 
@@ -85,6 +87,8 @@ function normalizeConvertedPayload(payload) {
       confirmQuestion: "",
       notes: "",
       sourceFound: false,
+      phoneOriginal: "",
+      phoneStandardized: "",
     };
   }
 
@@ -351,6 +355,14 @@ export default function AddressManager() {
                         </span>{" "}
                         {convertedData.wardNew || "-"}
                       </div>
+                      {convertedData.phoneStandardized ? (
+                        <div>
+                          <span className="font-semibold text-cyan-700">
+                            SĐT mới:
+                          </span>{" "}
+                          {convertedData.phoneStandardized}
+                        </div>
+                      ) : null}
                     </div>
                   </div>
 
@@ -388,6 +400,14 @@ export default function AddressManager() {
                         </span>{" "}
                         {convertedData.wardOld || "-"}
                       </div>
+                      {convertedData.phoneOriginal ? (
+                        <div>
+                          <span className="font-semibold text-cyan-700">
+                            SĐT cũ:
+                          </span>{" "}
+                          {convertedData.phoneOriginal}
+                        </div>
+                      ) : null}
                     </div>
                   </div>
                 </div>
