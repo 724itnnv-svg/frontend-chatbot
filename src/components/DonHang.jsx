@@ -12,6 +12,14 @@ import { ChevronLeft, ChevronRight, Copy } from "lucide-react";
 
 import ChatMessagesPanel from "./ChatMessagesPanel";
 
+// Page.teamId -> tên gian hàng Kiot tương ứng (khớp mapping ở backend kiotInvoice.service.js)
+const KIOT_RETAILER_LABELS = {
+  NNV: "NNV TV (nnvtv)",
+  KF: "Kingfarm (kingfarm)",
+  ABC: "ABC TV (abctv)",
+  VN: "Việt Nhật TV (vietnhattv)",
+};
+
 function DonHang() {
   const [pages, setPages] = useState([]);
   const [selectedPage, setSelectedPage] = useState(null);
@@ -42,6 +50,8 @@ function DonHang() {
   const [chatPopupCustomerName, setChatPopupCustomerName] = useState("");
 
   const [copyToast, setCopyToast] = useState("");
+  const [creatingKiotId, setCreatingKiotId] = useState(null);
+  const [kiotConfirmOrder, setKiotConfirmOrder] = useState(null);
 
   const openChatPopupByOrder = async (order) => {
     const customerId = order?.customerId;
@@ -88,9 +98,7 @@ function DonHang() {
       );
 
       if (chatRes.status === 404) {
-        setChatPopupError(
-          "Khách này chưa có hội thoại trên Page.",
-        );
+        setChatPopupError("Khách này chưa có hội thoại trên Page.");
         return;
       }
       if (!chatRes.ok) throw new Error("Không lấy được chat theo user + page");
@@ -104,13 +112,10 @@ function DonHang() {
       }
       const endpointInfo = `/api/chat/stats/history?pageId=${encodeURIComponent(page)}&userId=${encodeURIComponent(user)}`;
 
-      const hisRes = await fetch(
-        endpointInfo,
-        {
-          signal: controller.signal,
-          headers: { Authorization: `Bearer ${token}` }, 
-        },
-      );
+      const hisRes = await fetch(endpointInfo, {
+        signal: controller.signal,
+        headers: { Authorization: `Bearer ${token}` },
+      });
 
       if (!hisRes.ok) throw new Error("Không lấy được lịch sử tin nhắn");
 
@@ -388,7 +393,11 @@ function DonHang() {
       return alert("Vui lòng chọn Page trước khi lưu đơn hàng");
     }
 
-    if (isEditing && roleLower === "user" && form.phoneNumber !== originalPhoneNumber) {
+    if (
+      isEditing &&
+      roleLower === "user" &&
+      form.phoneNumber !== originalPhoneNumber
+    ) {
       return alert("Không được chỉnh sửa số điện thoại của đơn hàng.");
     }
 
@@ -401,18 +410,18 @@ function DonHang() {
     // 2. Xử lý danh sách sản phẩm
     // Bước 2.1: Chỉ lấy những dòng có nhập Tên sản phẩm (loại bỏ dòng trống)
     const activeItems = (form.items || []).filter(
-      (it) => (it.productName || "").trim() !== ""
+      (it) => (it.productName || "").trim() !== "",
     );
 
     // Bước 2.2: Validate SKU
     // Yêu cầu: Nếu có sản phẩm thì bắt buộc phải có SKU
     const itemMissingSku = activeItems.find(
-      (it) => !it.sku || it.sku.trim() === ""
+      (it) => !it.sku || it.sku.trim() === "",
     );
 
     if (itemMissingSku) {
       return alert(
-        `Sản phẩm "${itemMissingSku.productName}" đang thiếu mã SKU. Vui lòng nhập SKU!`
+        `Sản phẩm "${itemMissingSku.productName}" đang thiếu mã SKU. Vui lòng nhập SKU!`,
       );
     }
 
@@ -422,9 +431,7 @@ function DonHang() {
       sku: it.sku.trim(), // Lúc này chắc chắn đã có sku do validate ở trên
       quantity: it.quantity === "" ? 0 : Number(it.quantity || 0),
       price:
-        it.price === "" || it.price == null
-          ? undefined
-          : Number(it.price || 0),
+        it.price === "" || it.price == null ? undefined : Number(it.price || 0),
     }));
 
     // 3. Tạo payload
@@ -490,7 +497,7 @@ function DonHang() {
     setOriginalPhoneNumber(fixedPhone);
 
     // Reset warning ref nếu bạn có dùng chức năng cảnh báo sửa sđt
-    if (typeof phoneEditWarnedRef !== 'undefined') {
+    if (typeof phoneEditWarnedRef !== "undefined") {
       phoneEditWarnedRef.current = false;
     }
 
@@ -509,11 +516,11 @@ function DonHang() {
       items:
         order.items && order.items.length
           ? order.items.map((it) => ({
-            productName: it.productName || "",
-            sku: it.sku || "", // Nếu ko có sku thì để chuỗi rỗng để user nhập
-            quantity: it.quantity ?? 1,
-            price: it.price ?? "",
-          }))
+              productName: it.productName || "",
+              sku: it.sku || "", // Nếu ko có sku thì để chuỗi rỗng để user nhập
+              quantity: it.quantity ?? 1,
+              price: it.price ?? "",
+            }))
           : [], // Nếu không có items thì trả về mảng rỗng
     });
   };
@@ -534,6 +541,53 @@ function DonHang() {
       alert("Có lỗi khi xóa đơn hàng");
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Bấm nút "Tạo đơn Kiot": mở popup xem trước thông tin sẽ gửi lên Kiot
+  const handleCreateKiotOrder = (order) => {
+    if (!order?._id) return;
+
+    if (order.kiotInvoice?.id) {
+      alert(
+        `Đơn này đã tạo hóa đơn Kiot: ${order.kiotInvoice.code || order.kiotInvoice.id}`,
+      );
+      return;
+    }
+
+    setKiotConfirmOrder(order);
+  };
+
+  // Xác nhận trong popup -> mới thực sự gọi API tạo hóa đơn Kiot
+  const confirmCreateKiotOrder = async () => {
+    const order = kiotConfirmOrder;
+    if (!order?._id) return;
+
+    try {
+      setCreatingKiotId(order._id);
+      const res = await fetch(`/api/order/${order._id}/kiot-invoice`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.message || "Lỗi tạo đơn Kiot");
+
+      setOrders((prev) =>
+        prev.map((o) =>
+          o._id === order._id ? { ...o, kiotInvoice: data.kiotInvoice } : o,
+        ),
+      );
+
+      setKiotConfirmOrder(null);
+      setCopyToast(
+        `Đã tạo hóa đơn Kiot: ${data.kiotInvoice?.code || data.kiotInvoice?.id || ""}`,
+      );
+      setTimeout(() => setCopyToast(""), 2000);
+    } catch (err) {
+      console.error("confirmCreateKiotOrder error:", err);
+      alert(err.message || "Có lỗi khi tạo đơn Kiot");
+    } finally {
+      setCreatingKiotId(null);
     }
   };
 
@@ -649,8 +703,8 @@ function DonHang() {
   const rangeLabel =
     from && to
       ? `Từ ${from.toLocaleDateString("vi-VN")} đến ${to.toLocaleDateString(
-        "vi-VN",
-      )}`
+          "vi-VN",
+        )}`
       : "Lọc theo khoảng ngày";
 
   return (
@@ -900,7 +954,10 @@ function DonHang() {
                         {/* --- MỚI: Hiển thị phí ship --- */}
                         {typeof order.shippingFee === "number" && (
                           <p className="mt-1 text-gray-500">
-                            Ship: <span className="font-medium">{order.shippingFee.toLocaleString("vi-VN")}đ</span>
+                            Ship:{" "}
+                            <span className="font-medium">
+                              {order.shippingFee.toLocaleString("vi-VN")}đ
+                            </span>
                           </p>
                         )}
                         {/* ----------------------------- */}
@@ -982,6 +1039,30 @@ function DonHang() {
                     </div>
 
                     <div className="mt-3 flex justify-end gap-3">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleCreateKiotOrder(order);
+                        }}
+                        disabled={creatingKiotId === order._id}
+                        className={
+                          order.kiotInvoice?.id
+                            ? "text-xs text-emerald-600 cursor-default"
+                            : "text-xs text-purple-600 hover:underline disabled:opacity-50"
+                        }
+                        title={
+                          order.kiotInvoice?.id
+                            ? `Đã tạo hóa đơn Kiot: ${order.kiotInvoice.code || order.kiotInvoice.id}`
+                            : "Tạo hóa đơn bán hàng trên KiotViet"
+                        }
+                      >
+                        {creatingKiotId === order._id
+                          ? "Đang tạo..."
+                          : order.kiotInvoice?.id
+                            ? `Đã tạo Kiot (${order.kiotInvoice.code || order.kiotInvoice.id})`
+                            : "Tạo đơn Kiot"}
+                      </button>
+
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
@@ -1089,6 +1170,17 @@ function DonHang() {
           </div>
         </div>
       ) : null}
+
+      <KiotConfirmModal
+        order={kiotConfirmOrder}
+        page={selectedPage}
+        loading={creatingKiotId === kiotConfirmOrder?._id}
+        onClose={() => {
+          if (creatingKiotId) return; // đang gửi lên Kiot, không cho đóng giữa chừng
+          setKiotConfirmOrder(null);
+        }}
+        onConfirm={confirmCreateKiotOrder}
+      />
     </div>
   );
 }
@@ -1168,7 +1260,9 @@ function OrderFormModal({
             <div className="rounded-2xl border border-slate-200 bg-slate-50/60 p-4">
               <div className="mb-3 flex items-center justify-between">
                 <div>
-                  <p className="text-sm font-semibold text-slate-800">Thông tin khách</p>
+                  <p className="text-sm font-semibold text-slate-800">
+                    Thông tin khách
+                  </p>
                   <p className="text-xs text-slate-500">
                     Nhập càng chuẩn, ship càng nhanh 😄
                   </p>
@@ -1416,4 +1510,194 @@ function OrderFormModal({
     </div>
   );
 }
+
+function KiotConfirmModal({ order, page, loading, onClose, onConfirm }) {
+  useEffect(() => {
+    if (!order) return;
+    const onKeyDown = (e) => {
+      if (e.key === "Escape" && !loading) onClose?.();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [order, loading, onClose]);
+
+  if (!order) return null;
+
+  const retailerLabel =
+    KIOT_RETAILER_LABELS[String(page?.teamId || "").toUpperCase()] || null;
+
+  const sendItems = (order.items || []).filter(
+    (it) => (it.sku || "").trim() !== "",
+  );
+  const skippedItems = (order.items || []).filter(
+    (it) => (it.sku || "").trim() === "",
+  );
+
+  const sendTotal = sendItems.reduce((sum, it) => {
+    const qty = Number(it.quantity) > 0 ? Number(it.quantity) : 1;
+    const price =
+      typeof it.price === "number" ? it.price : Number(it.price || 0);
+    return sum + qty * price;
+  }, 0);
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center p-3 md:p-6">
+      <div
+        className="absolute inset-0 bg-slate-900/50"
+        onMouseDown={() => !loading && onClose?.()}
+      />
+
+      <div
+        className="relative w-full max-w-lg overflow-hidden rounded-2xl bg-white shadow-xl ring-1 ring-slate-200"
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <div className="border-b bg-white px-5 py-4">
+          <div className="flex items-center gap-2">
+            <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-purple-600 text-white shadow-sm">
+              🧾
+            </span>
+            <div>
+              <h3 className="text-base font-semibold text-slate-800">
+                Xác nhận tạo hóa đơn Kiot
+              </h3>
+              <p className="text-xs text-slate-500">
+                Kiểm tra lại thông tin trước khi gửi lên KiotViet — hành động
+                này sẽ trừ kho ngay.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="max-h-[65vh] overflow-y-auto px-5 py-4 space-y-4">
+          <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-3 text-sm">
+            <p>
+              <span className="font-semibold text-slate-700">
+                Gian hàng Kiot:{" "}
+              </span>
+              {retailerLabel ? (
+                <span className="text-slate-700">{retailerLabel}</span>
+              ) : (
+                <span className="text-rose-600 font-medium">
+                  Page chưa gán teamId hợp lệ — sẽ tạo hóa đơn thất bại.
+                </span>
+              )}
+            </p>
+            <p className="mt-1">
+              <span className="font-semibold text-slate-700">Khách hàng: </span>
+              {order.customerName || "Khách lẻ"} — {order.phoneNumber}
+            </p>
+            <p className="mt-1">
+              <span className="font-semibold text-slate-700">Địa chỉ: </span>
+              {order.address}
+            </p>
+            {(order.note || order.adName) && (
+              <p className="mt-1">
+                <span className="font-semibold text-slate-700">
+                  Ghi chú gửi lên Kiot:{" "}
+                </span>
+                {[order.note, order.adName ? `QC: ${order.adName}` : null]
+                  .filter(Boolean)
+                  .join(" | ")}
+              </p>
+            )}
+          </div>
+
+          <div>
+            <p className="mb-2 text-sm font-semibold text-slate-800">
+              Sản phẩm sẽ gửi lên Kiot ({sendItems.length})
+            </p>
+            {sendItems.length === 0 ? (
+              <p className="text-xs text-rose-600">
+                Không có sản phẩm nào có SKU — không thể tạo hóa đơn Kiot.
+              </p>
+            ) : (
+              <div className="overflow-hidden rounded-xl border border-slate-200">
+                <table className="w-full text-xs">
+                  <thead className="bg-slate-100 text-slate-600">
+                    <tr>
+                      <th className="px-2 py-1.5 text-left">SKU</th>
+                      <th className="px-2 py-1.5 text-left">Tên</th>
+                      <th className="px-2 py-1.5 text-right">SL</th>
+                      <th className="px-2 py-1.5 text-right">Giá</th>
+                      <th className="px-2 py-1.5 text-right">Thành tiền</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sendItems.map((it, idx) => {
+                      const qty =
+                        Number(it.quantity) > 0 ? Number(it.quantity) : 1;
+                      const price =
+                        typeof it.price === "number"
+                          ? it.price
+                          : Number(it.price || 0);
+                      return (
+                        <tr key={idx} className="border-t border-slate-100">
+                          <td className="px-2 py-1.5 font-mono">{it.sku}</td>
+                          <td className="px-2 py-1.5">{it.productName}</td>
+                          <td className="px-2 py-1.5 text-right">{qty}</td>
+                          <td className="px-2 py-1.5 text-right">
+                            {price.toLocaleString("vi-VN")}đ
+                          </td>
+                          <td className="px-2 py-1.5 text-right font-medium">
+                            {(qty * price).toLocaleString("vi-VN")}đ
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                  <tfoot>
+                    <tr className="border-t border-slate-200 bg-slate-50">
+                      <td
+                        colSpan={4}
+                        className="px-2 py-1.5 text-right font-semibold"
+                      >
+                        Tổng
+                      </td>
+                      <td className="px-2 py-1.5 text-right font-semibold text-emerald-600">
+                        {sendTotal.toLocaleString("vi-VN")}đ
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {skippedItems.length > 0 && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-700">
+              <p className="font-semibold">
+                {skippedItems.length} sản phẩm sẽ bị bỏ qua (thiếu SKU):
+              </p>
+              <ul className="mt-1 list-disc list-inside">
+                {skippedItems.map((it, idx) => (
+                  <li key={idx}>{it.productName || "(không tên)"}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center justify-end gap-2 border-t bg-white px-5 py-4">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={loading}
+            className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+          >
+            Hủy
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={loading || sendItems.length === 0 || !retailerLabel}
+            className="rounded-xl bg-purple-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-purple-700 disabled:opacity-60"
+          >
+            {loading ? "Đang tạo..." : "Xác nhận tạo hóa đơn"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default DonHang;
