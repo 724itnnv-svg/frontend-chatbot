@@ -58,30 +58,6 @@ const COMPUTED_PAYROLL_KEYS = new Set([
   "luongThucLinh",
 ]);
 
-function makeAttendanceSources() {
-  return Array.from({ length: 4 }, (_, index) => ({
-    id: `company-${index + 1}`,
-    company: "",
-    fileName: "",
-    sheetName: "",
-    rows: [],
-    error: "",
-  }));
-}
-
-function getAttendanceLogContext(sources = []) {
-  const sourceFiles = sources
-    .filter((source) => source.fileName || source.sheetName || source.rows?.length)
-    .map((source) => ({
-      company: source.company || "",
-      fileName: source.fileName || "",
-      sheetName: source.sheetName || "",
-      rowCount: source.rows?.length || 0,
-    }));
-
-  return { sourceFiles };
-}
-
 const PAYROLL_COLUMNS = [
   { key: "period", label: "Kỳ lương", width: 120, type: "month", required: true, frozen: true },
   { key: "status", label: "Trạng thái", width: 130, type: "status" },
@@ -89,6 +65,9 @@ const PAYROLL_COLUMNS = [
   { key: "tenNhanVien", label: "Tên nhân viên", width: 190, required: true, frozen: true },
   { key: "khoiPhongBan", label: "Phòng ban", width: 160, required: true },
   { key: "chucVu", label: "Chức vụ", width: 150 },
+  { key: "payrollBankAccount.bankName", label: "Tên ngân hàng", width: 170, profileField: true },
+  { key: "payrollBankAccount.accountHolder", label: "Tên chủ tài khoản", width: 190, profileField: true },
+  { key: "payrollBankAccount.accountNumber", label: "Số tài khoản", width: 170, profileField: true },
   { key: "congTyDongBHXH", label: "Cty đóng BHXH", width: 150, required: true },
   { key: "dataTinhLuong.mucDongBHXH", label: "Mức đóng BHXH", width: 150, type: "number" },
   { key: "dataTinhLuong.luongCoBan", label: "Lương cơ bản", width: 150, type: "number" },
@@ -143,7 +122,7 @@ const PAYROLL_COLUMNS = [
   readOnly: Boolean(column.readOnly || COMPUTED_PAYROLL_KEYS.has(column.key)),
 }));
 
-const TEMPLATE_COLUMNS = PAYROLL_COLUMNS.map((column) => column.key);
+const TEMPLATE_COLUMNS = PAYROLL_COLUMNS.filter((column) => !column.profileField).map((column) => column.key);
 
 // DANH SÁCH CÁC TRƯỜNG BẠN MUỐN ẨN KHỎI FILE NHẬP LIỆU
 const HIDDEN_INPUT_COLUMNS = new Set([
@@ -160,11 +139,11 @@ const HIDDEN_INPUT_COLUMNS = new Set([
 ]);
 
 const INPUT_TEMPLATE_COLUMNS = PAYROLL_COLUMNS.filter(
-  (column) => !COMPUTED_PAYROLL_KEYS.has(column.key) && !HIDDEN_INPUT_COLUMNS.has(column.key)
+  (column) => !column.profileField && !COMPUTED_PAYROLL_KEYS.has(column.key) && !HIDDEN_INPUT_COLUMNS.has(column.key)
 );
 const BULK_EDIT_EXCLUDED_KEYS = new Set(["maNhanVien", "tenNhanVien"]);
 const BULK_EDIT_COLUMNS = PAYROLL_COLUMNS.filter(
-  (column) => !COMPUTED_PAYROLL_KEYS.has(column.key) && !BULK_EDIT_EXCLUDED_KEYS.has(column.key)
+  (column) => !column.profileField && !COMPUTED_PAYROLL_KEYS.has(column.key) && !BULK_EDIT_EXCLUDED_KEYS.has(column.key)
 );
 
 const IMPORT_COLUMN_ALIAS_MAP = new Map(
@@ -552,24 +531,6 @@ function getImportFieldKey(header) {
   return IMPORT_COLUMN_ALIAS_MAP.get(normalizeImportHeader(raw)) || "";
 }
 
-function normalizeNameKey(value) {
-  return String(value ?? "")
-    .trim()
-    .normalize("NFC")
-    .replace(/\s+/g, " ")
-    .toLocaleLowerCase("vi-VN");
-}
-
-function setUniqueMap(map, key, value) {
-  if (!key) return;
-  const existing = map.get(key);
-  map.set(key, existing ? "DUPLICATE" : value);
-}
-
-function roundWorkDays(value) {
-  return Math.round(toNumber(value) * 100) / 100;
-}
-
 function getNextPeriod(value) {
   const [year, month] = String(value || "").split("-").map(Number);
   if (!year || !month) return "";
@@ -584,14 +545,6 @@ function getPreviousPeriod(value) {
   const prevMonth = month === 1 ? 12 : month - 1;
   const prevYear = month === 1 ? year - 1 : year;
   return `${prevYear}-${String(prevMonth).padStart(2, "0")}`;
-}
-
-function isKiotEmployeeCode(value) {
-  const raw = String(value ?? "").trim();
-  if (!raw) return false;
-  const normalized = normalizeKey(raw);
-  if (normalized === "ma nhan vien" || normalized === "stt") return false;
-  return /^[a-z0-9_-]{2,20}$/i.test(raw);
 }
 
 function fmtMoney(value) {
@@ -653,6 +606,7 @@ function normalizePayrollRow(row = {}, fallbackPeriod = "", formulaSettings = DE
     tenNhanVien: row.tenNhanVien || row.employeeName || "",
     khoiPhongBan: row.khoiPhongBan || row.department || "",
     chucVu: row.chucVu || row.position || "",
+    payrollBankAccount: { ...(row.payrollBankAccount || {}) },
     congTyDongBHXH: row.congTyDongBHXH || row.dataTinhLuong?.congTyDongBHXH || "",
     dataTinhLuong: { ...(row.dataTinhLuong || {}) },
     thuNhapTheoNgayCong: { ...(row.thuNhapTheoNgayCong || {}) },
@@ -878,15 +832,21 @@ function loadExcelJS() {
   return excelJsLoadPromise;
 }
 
-async function exportPayrollExcel(rows, columns) {
+async function exportPayrollExcel(rows, columns, bankAccountsByEmployeeCode = new Map()) {
   const ExcelJS = await loadExcelJS();
   const workbook = new ExcelJS.Workbook();
 
+  const payrollColumns = columns.filter((column) => !column.profileField);
+  const bankColumns = [
+    { key: "payrollBankAccount.bankName", label: "Tên ngân hàng", type: "text" },
+    { key: "payrollBankAccount.accountHolder", label: "Tên chủ tài khoản", type: "text" },
+    { key: "payrollBankAccount.accountNumber", label: "Số tài khoản", type: "text" },
+  ];
   const extraColumns = [
     { key: "__dot1ChinhThuc", label: "Lương nhận đợt 1", type: "number" },
     { key: "__dot2ChinhThuc", label: "Lương nhận đợt 2", type: "number" },
   ];
-  const allColumns = [...columns, ...extraColumns];
+  const allColumns = [...payrollColumns, ...bankColumns, ...extraColumns];
 
   // ==========================================
   // 1. SHEET DATA (Chứa toàn bộ dữ liệu gốc)
@@ -900,10 +860,15 @@ async function exportPayrollExcel(rows, columns) {
 
   rows.forEach(row => {
     const rowData = {};
-    columns.forEach(col => {
+    payrollColumns.forEach(col => {
       const value = getDeep(row, col.key);
       rowData[col.key] = col.type === "number" ? roundPayrollNumber(value) : (value ?? "");
     });
+    const employeeCode = String(row.maNhanVien || row.employeeCode || "").trim().toUpperCase();
+    const bankAccount = bankAccountsByEmployeeCode.get(employeeCode) || {};
+    rowData["payrollBankAccount.bankName"] = bankAccount.bankName || "";
+    rowData["payrollBankAccount.accountHolder"] = bankAccount.accountHolder || "";
+    rowData["payrollBankAccount.accountNumber"] = bankAccount.accountNumber || "";
     const { dot1ChinhThuc, dot2ChinhThuc } = calcPayrollDots(row);
     rowData["__dot1ChinhThuc"] = roundPayrollNumber(dot1ChinhThuc);
     rowData["__dot2ChinhThuc"] = roundPayrollNumber(dot2ChinhThuc);
@@ -1175,134 +1140,6 @@ async function exportPayrollQrCards(rows) {
   URL.revokeObjectURL(link.href);
 }
 
-function parseWorkHours(timeStr) {
-  if (!timeStr) return 0;
-
-  // Chuyển về chuỗi, bỏ khoảng trắng thừa và đưa về chữ thường
-  const str = String(timeStr).trim().toLowerCase();
-  if (!str || str === "-") return 0;
-
-  // Regex giải thích: 
-  // (\d+) : Bắt lấy các chữ số (giờ)
-  // \s*h : Đi theo sau là chữ 'h' (có thể có khoảng trắng)
-  // (?: ... )? : Cụm phút có thể có hoặc không
-  // (\d+)\s*p : Bắt lấy các chữ số (phút) đi theo sau là chữ 'p'
-  const match = str.match(/(\d+)\s*h(?:\s*(\d+)\s*p)?/);
-
-  if (match) {
-    const hours = parseInt(match[1], 10) || 0;
-    const minutes = parseInt(match[2], 10) || 0;
-
-    // HƯỚNG 1: Trả về quy đổi số thập phân (Ví dụ: 179h41p -> 179.68)
-    // Rất phù hợp để nhân với lương theo giờ.
-    const decimalHours = hours + (minutes / 60);
-    return Math.round(decimalHours * 100) / 100; // Làm tròn 2 chữ số
-
-    /* // HƯỚNG 2: Nếu bạn muốn giữ nguyên số nguyên để hiển thị hoặc tính toán riêng
-    return {
-      gio: hours,
-      phut: minutes
-    };
-    */
-  }
-
-  // Đề phòng trường hợp Excel tự định dạng nó thành số thuần túy (VD: nhập 176 thay vì 176h)
-  const minuteOnly = str.match(/^(\d+)\s*p$/);
-  if (minuteOnly) {
-    return Math.round((parseInt(minuteOnly[1], 10) / 60) * 100) / 100;
-  }
-
-  const num = Number(str);
-  return isNaN(num) ? 0 : num;
-}
-
-function findKiotTotalColumn(matrix, headerName, headerLimit = 5) {
-  for (let groupRowIndex = 0; groupRowIndex < headerLimit - 1; groupRowIndex += 1) {
-    const groupRow = matrix[groupRowIndex] || [];
-    for (let subRowIndex = groupRowIndex + 1; subRowIndex < headerLimit; subRowIndex += 1) {
-      const subRow = matrix[subRowIndex] || [];
-      let currentGroup = "";
-      for (let col = 0; col < Math.max(groupRow.length, subRow.length); col += 1) {
-        const group = normalizeKey(groupRow[col]);
-        const subHeader = normalizeKey(subRow[col]);
-        if (group) currentGroup = group;
-        if (currentGroup === headerName && subHeader === "tong") return col;
-      }
-    }
-  }
-  return -1;
-}
-
-async function parseKiotAttendanceFile(file) {
-  const buffer = await file.arrayBuffer();
-  const workbook = XLSX.read(buffer, { type: "array" });
-
-  if (workbook.SheetNames.length < 3) {
-    throw new Error("File KiotViet khong co du 3 sheet.");
-  }
-
-  const sheetName = workbook.SheetNames[2];
-  const worksheet = workbook.Sheets[sheetName];
-  const matrix = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: "" });
-
-  // Tăng lên 5 vì header đã đẩy xuống dòng 2, cần nhiều dòng hơn để hợp lệ
-  if (matrix.length < 5) {
-    throw new Error("Sheet 3 khong du du lieu hoac sai cau truc.");
-  }
-
-  // CẬP NHẬT: Header bắt đầu ở dòng thứ 2 (Index 1) và dòng thứ 3 (Index 2)
-  const headerLimit = Math.min(5, matrix.length);
-  const findSimpleColumn = (headerName) => {
-    for (let rowIndex = 0; rowIndex < headerLimit; rowIndex += 1) {
-      const headerRow = matrix[rowIndex] || [];
-      for (let col = 0; col < headerRow.length; col += 1) {
-        if (normalizeKey(headerRow[col]) === headerName) return col;
-      }
-    }
-    return -1;
-  };
-  let maNhanVienIdx = -1;
-  let tenNhanVienIdx = -1;
-  let tongGioLamIdx = -1;
-  let tongGioDiMuonIdx = -1;
-  let tongGioLamThemIdx = -1;
-
-  maNhanVienIdx = findSimpleColumn("ma nhan vien");
-  tenNhanVienIdx = findSimpleColumn("ten nhan vien");
-  tongGioLamIdx = findKiotTotalColumn(matrix, "tong gio lam trong ca", headerLimit);
-  tongGioDiMuonIdx = findKiotTotalColumn(matrix, "tong gio di muon", headerLimit);
-  tongGioLamThemIdx = findKiotTotalColumn(matrix, "tong gio lam them", headerLimit);
-
-  if (maNhanVienIdx === -1 || tenNhanVienIdx === -1 || tongGioLamIdx === -1) {
-    throw new Error("Khong tim thay cot Ma nhan vien, Ten nhan vien hoac Tong gio lam trong ca - Tong.");
-  }
-
-  const seen = new Set();
-  const rows = [];
-
-  // CẬP NHẬT: Bắt đầu lấy dữ liệu từ index 4 (dòng thứ 5) do header bị đẩy xuống
-  const firstDataRowIndex = matrix.findIndex((row) => {
-    return isKiotEmployeeCode(row?.[maNhanVienIdx]);
-  });
-
-  for (let i = Math.max(firstDataRowIndex, 0); i < matrix.length; i += 1) {
-    const row = matrix[i] || [];
-    const maNhanVien = String(row[maNhanVienIdx] ?? "").trim();
-    const tenNhanVien = String(row[tenNhanVienIdx] ?? "").trim();
-    const tongGioLam = parseWorkHours(row[tongGioLamIdx]);
-    const tongGioDiMuon = tongGioDiMuonIdx === -1 ? 0 : parseWorkHours(row[tongGioDiMuonIdx]);
-    const tongGioLamThem = tongGioLamThemIdx === -1 ? 0 : parseWorkHours(row[tongGioLamThemIdx]);
-    const uniqueKey = normalizeKey(maNhanVien || tenNhanVien);
-
-    // Bỏ qua dòng trống hoặc dòng đã tồn tại mã/tên
-    if (!isKiotEmployeeCode(maNhanVien) || !uniqueKey || seen.has(uniqueKey)) continue;
-    seen.add(uniqueKey);
-    rows.push({ maNhanVien, tenNhanVien, tongGioLam, tongGioDiMuon, tongGioLamThem });
-  }
-
-  return { sheetName, rows };
-}
-
 function Modal({ open, title, children, onClose }) {
   if (!open) return null;
   return (
@@ -1344,6 +1181,7 @@ export default function PayrollManager() {
   const [savingIds, setSavingIds] = useState(() => new Set());
   const [selectedRowIds, setSelectedRowIds] = useState(() => new Set());
   const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
   const [message, setMessage] = useState("");
   const [q, setQ] = useState("");
   const [period, setPeriod] = useState("");
@@ -1353,7 +1191,6 @@ export default function PayrollManager() {
   const [sortConfig, setSortConfig] = useState({ key: "tenNhanVien", direction: "asc" });
   const [showImport, setShowImport] = useState(false);
   const [showCommissionImport, setShowCommissionImport] = useState(false);
-  const [showAttendanceImport, setShowAttendanceImport] = useState(false);
   const [showColumns, setShowColumns] = useState(false);
   const [showFormulaSettings, setShowFormulaSettings] = useState(false);
   const [showBulkEdit, setShowBulkEdit] = useState(false);
@@ -1373,9 +1210,7 @@ export default function PayrollManager() {
   const [commissionResult, setCommissionResult] = useState(null);
   const [isCloning, setIsCloning] = useState(false);
   const [isDeletingMonth, setIsDeletingMonth] = useState(false);
-  const [attendanceImporting, setAttendanceImporting] = useState(false);
   const [attendanceHoursPerDay, setAttendanceHoursPerDay] = useState(8);
-  const [attendanceSources, setAttendanceSources] = useState(makeAttendanceSources);
   const [showAttendanceSync, setShowAttendanceSync] = useState(false);
   const [attendanceSyncLoading, setAttendanceSyncLoading] = useState(false);
   const [attendanceSyncApplying, setAttendanceSyncApplying] = useState(false);
@@ -1521,87 +1356,6 @@ export default function PayrollManager() {
     );
   }, [filtered]);
 
-  const attendancePreview = useMemo(() => {
-    // 1. Khởi tạo bộ nhớ tạm (Map) - Đã bỏ Company
-    const codeMap = new Map();
-    const strictNameMap = new Map();
-    const looseNameMap = new Map();
-
-    // 2. Tạo bảng tra cứu từ danh sách gốc (chỉ dùng Mã và Tên)
-    rows.forEach((row) => {
-      const codeKey = normalizeKey(row.maNhanVien);
-      const strictNameKey = normalizeNameKey(row.tenNhanVien);
-      const looseNameKey = normalizeKey(row.tenNhanVien);
-
-      if (codeKey) setUniqueMap(codeMap, codeKey, row);
-      if (strictNameKey) setUniqueMap(strictNameMap, strictNameKey, row);
-      if (looseNameKey) setUniqueMap(looseNameMap, looseNameKey, row);
-    });
-
-    // 3. Đối chiếu dữ liệu Excel tải lên
-    return attendanceSources.flatMap((source) =>
-      source.rows.map((item, index) => {
-        const ngayCong = roundWorkDays(toNumber(item.tongGioLam) / toNumber(attendanceHoursPerDay || 8));
-
-        let matched = null;
-        let statusText = "Khớp";
-
-        // Ưu tiên 1: Khớp theo Mã nhân viên
-        if (item.maNhanVien) {
-          matched = codeMap.get(normalizeKey(item.maNhanVien));
-          if (matched === "DUPLICATE") {
-            statusText = "Trùng mã";
-            matched = null; // Reset lại để không gán nhầm người
-          }
-        }
-
-        // Ưu tiên 2: Khớp theo Tên chính xác (Nếu chưa tìm thấy mã)
-        if (!matched && statusText !== "Trùng mã") {
-          const nameMatch = strictNameMap.get(normalizeNameKey(item.tenNhanVien));
-          if (nameMatch === "DUPLICATE") {
-            statusText = "Trùng tên";
-          } else {
-            matched = nameMatch || null;
-          }
-        }
-
-        // Ưu tiên 3: Khớp theo Tên gần giống (Nếu tên chính xác không có)
-        if (!matched && statusText !== "Trùng tên" && statusText !== "Trùng mã") {
-          const looseNameMatch = looseNameMap.get(normalizeKey(item.tenNhanVien));
-          if (looseNameMatch === "DUPLICATE") {
-            statusText = "Trùng tên gần giống";
-          } else {
-            matched = looseNameMatch || null;
-          }
-        }
-
-        // Chốt trạng thái lỗi cuối cùng (Đã bỏ check "Thiếu công ty")
-        if (!matched && statusText !== "Trùng tên" && statusText !== "Trùng tên gần giống" && statusText !== "Trùng mã") {
-          statusText = "Không tìm thấy";
-        } else if (!toNumber(item.tongGioLam)) {
-          statusText = "Thiếu tổng giờ";
-        }
-
-        return {
-          ...item,
-          sourceId: source.id,
-          sourceIndex: index,
-          congTyDongBHXH: "", // Trả về rỗng vì không còn sử dụng dữ liệu này để map
-          ngayCong,
-          oldNgayCong: matched ? toNumber(getDeep(matched, "thuNhapTheoNgayCong.ngayCong")) : 0,
-          matchedId: matched?._id || "",
-          matchedName: matched?.tenNhanVien || "",
-          statusText,
-        };
-      })
-    );
-  }, [attendanceHoursPerDay, attendanceSources, rows]);
-
-  const validAttendanceRows = useMemo(
-    () => attendancePreview.filter((row) => row.statusText === "Khớp"),
-    [attendancePreview]
-  );
-
   const validAttendanceSyncRows = useMemo(
     () => (attendanceSyncResult?.rows || []).filter((row) => row.statusText === "Khớp"),
     [attendanceSyncResult]
@@ -1648,6 +1402,33 @@ export default function PayrollManager() {
     }
   };
 
+  const handleExportPayroll = async () => {
+    if (exporting) return;
+    setExporting(true);
+    setMessage("");
+    try {
+      const res = await fetch(`/api/payroll/bank-accounts?period=${encodeURIComponent(period)}`, {
+        headers: authHeader,
+      });
+      const data = await res.json();
+      if (!res.ok || data?.success === false) {
+        throw new Error(data?.message || "Không tải được thông tin tài khoản ngân hàng");
+      }
+      const bankAccountsByEmployeeCode = new Map(
+        (data.data || []).map((item) => [
+          String(item.employeeCode || "").trim().toUpperCase(),
+          item,
+        ])
+      );
+      await exportPayrollExcel(sortedRows, visibleColumns, bankAccountsByEmployeeCode);
+    } catch (error) {
+      console.error(error);
+      setMessage(error.message || "Không xuất được bảng lương");
+    } finally {
+      setExporting(false);
+    }
+  };
+
   useEffect(() => {
     if (!period) return;
     localStorage.setItem(STORAGE_PAYROLL_PERIOD, period);
@@ -1659,10 +1440,8 @@ export default function PayrollManager() {
     setCommissionRows([]);
     setCommissionResult(null);
     setCommissionFileName("");
-    setAttendanceSources(makeAttendanceSources());
     setShowImport(false);
     setShowCommissionImport(false);
-    setShowAttendanceImport(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [period, canViewPayroll]);
 
@@ -1700,17 +1479,6 @@ export default function PayrollManager() {
   useEffect(() => {
     localStorage.setItem(STORAGE_COLUMN_ORDER, JSON.stringify(columnOrder));
   }, [columnOrder]);
-
-  useEffect(() => {
-    const companies = Array.from(new Set(rows.map((row) => row.congTyDongBHXH).filter(Boolean))).slice(0, 4);
-    if (!companies.length) return;
-    setAttendanceSources((current) =>
-      current.map((source, index) => ({
-        ...source,
-        company: source.company || companies[index] || "",
-      }))
-    );
-  }, [rows]);
 
   const markSaving = (id, saving) => {
     setSavingIds((current) => {
@@ -2069,82 +1837,6 @@ export default function PayrollManager() {
     }
   };
 
-  const updateAttendanceCompany = (sourceId, company) => {
-    setAttendanceSources((current) =>
-      current.map((source) => (source.id === sourceId ? { ...source, company } : source))
-    );
-  };
-
-  const handleKiotFileUpload = async (sourceId, event) => {
-    const file = event.target.files?.[0];
-    event.target.value = "";
-    if (!file) return;
-
-    try {
-      const parsed = await parseKiotAttendanceFile(file);
-      setAttendanceSources((current) =>
-        current.map((source) =>
-          source.id === sourceId
-            ? { ...source, fileName: file.name, sheetName: parsed.sheetName, rows: parsed.rows, error: "" }
-            : source
-        )
-      );
-      setMessage(`Da doc ${parsed.rows.length} dong tu file ${file.name}.`);
-    } catch (error) {
-      console.error(error);
-      setAttendanceSources((current) =>
-        current.map((source) =>
-          source.id === sourceId
-            ? { ...source, fileName: file.name, sheetName: "", rows: [], error: error.message || "Khong doc duoc file KiotViet." }
-            : source
-        )
-      );
-    }
-  };
-
-  const importAttendance = async () => {
-    if (!canEdit) return;
-    if (!validAttendanceRows.length) return;
-    setAttendanceImporting(true);
-    try {
-      const payloadRows = validAttendanceRows.map((row) => ({
-        _id: row.matchedId,           // THÊM DÒNG NÀY: ID của DB để backend tìm chính xác người
-        maNhanVien: row.maNhanVien,   // Mã nhân viên từ file KiotViet (để update vào DB)
-        tenNhanVien: row.tenNhanVien,
-        congTyDongBHXH: row.congTyDongBHXH,
-        tongGioLam: toNumber(row.tongGioLam),
-        tongGioDiMuon: toNumber(row.tongGioDiMuon),
-        tongGioLamThem: toNumber(row.tongGioLamThem),
-        ngayCong: toNumber(row.ngayCong),
-      }));
-
-      const res = await fetch("/api/payroll/attendance-import", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...authHeader },
-        body: JSON.stringify({
-          period,
-          hoursPerDay: toNumber(attendanceHoursPerDay || 8),
-          rows: payloadRows,
-          logContext: getAttendanceLogContext(attendanceSources),
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok || data?.success === false) {
-        const detail = data?.errors?.[0]?.message ? `: ${data.errors[0].message}` : "";
-        throw new Error((data?.message || "Cập nhật chấm công thất bại") + detail);
-      }
-
-      setShowAttendanceImport(false);
-      setMessage(`Đã cập nhật chấm công KiotViet cho ${data.updated || 0} nhân viên.`);
-      await fetchPayroll();
-    } catch (error) {
-      console.error(error);
-      setMessage(error.message || "Cập nhật chấm công thất bại");
-    } finally {
-      setAttendanceImporting(false);
-    }
-  };
-
   const previewAttendanceSync = async () => {
     if (!canEdit) return;
     if (!period) {
@@ -2496,9 +2188,13 @@ export default function PayrollManager() {
               <RefreshCw className="h-4 w-4" />
               Tải lại
             </button>
-            <button onClick={() => exportPayrollExcel(sortedRows, visibleColumns)} className="inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-50">
+            <button
+              onClick={handleExportPayroll}
+              disabled={exporting}
+              className="inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+            >
               <Download className="h-4 w-4" />
-              Xuất Excel
+              {exporting ? "Đang xuất..." : "Xuất Excel"}
             </button>
             {/* <button
               onClick={() => exportPayrollQrCards(selectedRows.length ? selectedRows : sortedRows)}
@@ -2544,12 +2240,6 @@ export default function PayrollManager() {
               <button onClick={previewAttendanceSync} disabled={attendanceSyncLoading || !rows.length} className="inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-50 disabled:opacity-50">
                 {attendanceSyncLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
                 Lấy chấm công
-              </button>
-            )}
-            {canEdit && (
-              <button onClick={() => setShowAttendanceImport(true)} className="inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-50">
-                <FileSpreadsheet className="h-4 w-4" />
-                Import KiotViet
               </button>
             )}
             {canCreate && (
@@ -3058,109 +2748,6 @@ export default function PayrollManager() {
             <button disabled={!validAttendanceSyncRows.length || attendanceSyncApplying} onClick={applyAttendanceSync} className="inline-flex items-center gap-2 rounded-xl bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700 disabled:opacity-50">
               {attendanceSyncApplying ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
               Cập nhật payroll ({validAttendanceSyncRows.length})
-            </button>
-          </div>
-        </div>
-      </Modal>
-
-      <Modal open={showAttendanceImport} onClose={() => setShowAttendanceImport(false)} title="Import chấm công KiotViet">
-        <div className="space-y-4">
-          <div className="grid gap-3 lg:grid-cols-[180px_1fr]">
-            <label className="text-sm font-semibold text-slate-700">
-              Giờ công / ngày
-              <input
-                type="number"
-                min="1"
-                value={attendanceHoursPerDay}
-                onChange={(event) => setAttendanceHoursPerDay(toNumber(event.target.value) || 8)}
-                className="mt-1 w-full rounded-xl border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-sky-100"
-              />
-            </label>
-            <div className="rounded-xl border bg-slate-50 px-3 py-2 text-sm text-slate-600">
-              Mỗi file KiotViet sẽ đọc sheet thứ 3, lấy cột Mã nhân viên, Tên nhân viên và Tổng giờ làm trong ca - Tổng. Hệ thống quy đổi tổng giờ thành ngày công và cập nhật bảng lương tháng {period}.
-            </div>
-          </div>
-
-          <div className="grid gap-3 lg:grid-cols-2">
-            {attendanceSources.map((source, index) => (
-              <div key={source.id} className="rounded-xl border p-3">
-                <div className="mb-2 flex items-center justify-between gap-2">
-                  <div className="text-sm font-semibold text-slate-800">Công ty {index + 1}</div>
-                  <span className="text-xs text-slate-500">{source.rows.length} dòng</span>
-                </div>
-                <input
-                  value={source.company}
-                  onChange={(event) => updateAttendanceCompany(source.id, event.target.value)}
-                  placeholder="Nhập tên công ty đóng BHXH"
-                  className="mb-2 w-full rounded-xl border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-sky-100"
-                />
-                <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl bg-sky-600 px-3 py-2 text-sm font-semibold text-white hover:bg-sky-700">
-                  <UploadCloud className="h-4 w-4" />
-                  Chọn file KiotViet
-                  <input type="file" accept=".xlsx,.xls" onChange={(event) => handleKiotFileUpload(source.id, event)} className="hidden" />
-                </label>
-                {source.fileName ? (
-                  <div className="mt-2 text-xs text-slate-500">
-                    {source.fileName}{source.sheetName ? ` - ${source.sheetName}` : ""}
-                  </div>
-                ) : null}
-                {source.error ? <div className="mt-2 rounded-lg bg-rose-50 px-2 py-1 text-xs text-rose-700">{source.error}</div> : null}
-              </div>
-            ))}
-          </div>
-
-          {attendancePreview.length > 0 ? (
-            <div className="overflow-hidden rounded-xl border">
-              <div className="flex flex-wrap items-center justify-between gap-2 border-b bg-slate-50 px-3 py-2 text-sm font-semibold">
-                <span>Preview {attendancePreview.length} dòng, hợp lệ {validAttendanceRows.length} dòng</span>
-                <span className="text-xs text-slate-500">Chỉ cập nhật dòng có trạng thái Khớp</span>
-              </div>
-              <div className="max-h-96 overflow-auto">
-                <table className="w-full text-left text-xs">
-                  <thead className="sticky top-0 bg-slate-100">
-                    <tr>
-                      <th className="px-3 py-2">Công ty</th>
-                      <th className="px-3 py-2">Mã NV</th>
-                      <th className="px-3 py-2">Tên file Kiot</th>
-                      <th className="px-3 py-2">Tên bảng lương</th>
-                      <th className="px-3 py-2 text-right">Tổng giờ</th>
-                      <th className="px-3 py-2 text-right">Đi muộn</th>
-                      <th className="px-3 py-2 text-right">Làm thêm</th>
-                      <th className="px-3 py-2 text-right">Ngày công cũ</th>
-                      <th className="px-3 py-2 text-right">Ngày công mới</th>
-                      <th className="px-3 py-2">Trạng thái</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {attendancePreview.map((row) => (
-                      <tr key={`${row.sourceId}-${row.sourceIndex}-${row.maNhanVien}`} className="border-t">
-                        <td className="px-3 py-2">{row.congTyDongBHXH}</td>
-                        <td className="px-3 py-2 font-mono">{row.maNhanVien}</td>
-                        <td className="px-3 py-2">{row.tenNhanVien}</td>
-                        <td className="px-3 py-2">{row.matchedName || "-"}</td>
-                        <td className="px-3 py-2 text-right">{toNumber(row.tongGioLam)}</td>
-                        <td className="px-3 py-2 text-right">{toNumber(row.tongGioDiMuon)}</td>
-                        <td className="px-3 py-2 text-right">{toNumber(row.tongGioLamThem)}</td>
-                        <td className="px-3 py-2 text-right">{row.oldNgayCong}</td>
-                        <td className="px-3 py-2 text-right font-semibold">{row.ngayCong}</td>
-                        <td className="px-3 py-2">
-                          <span className={`rounded-full px-2 py-1 text-[11px] font-semibold ${row.statusText === "Khớp" ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>
-                            {row.statusText}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          ) : null}
-
-          <div className="flex justify-end gap-2">
-            <button onClick={() => setShowAttendanceImport(false)} className="rounded-xl border bg-white px-4 py-2 text-sm font-semibold hover:bg-slate-50">Đóng</button>
-            <button disabled={!validAttendanceRows.length || attendanceImporting} onClick={importAttendance} className="inline-flex items-center gap-2 rounded-xl bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700 disabled:opacity-50">
-              {attendanceImporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-              Cập nhật ngày công ({validAttendanceRows.length})
             </button>
           </div>
         </div>

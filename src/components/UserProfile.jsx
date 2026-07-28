@@ -12,6 +12,7 @@ import {
     Save,
     Shield,
     Sun,
+    Upload,
     UserRound,
     Waves,
 } from "lucide-react";
@@ -46,6 +47,7 @@ export default function UserProfile() {
 
     const [showPassword, setShowPassword] = useState(false);
     const [savingProfile, setSavingProfile] = useState(false);
+    const [uploadingAvatar, setUploadingAvatar] = useState(false);
     const [savingPassword, setSavingPassword] = useState(false);
     const [profileMessage, setProfileMessage] = useState("");
     const [passwordMessage, setPasswordMessage] = useState("");
@@ -87,6 +89,44 @@ export default function UserProfile() {
     const handleProfileChange = (e) => {
         const { name, value } = e.target;
         setProfileForm((prev) => ({ ...prev, [name]: value }));
+    };
+
+    const handleAvatarFileChange = async (e) => {
+        const file = e.target.files?.[0];
+        e.target.value = "";
+        if (!file) return;
+
+        if (!/^image\//i.test(file.type)) {
+            setErrorProfile("Vui lòng chọn file ảnh (jpg, png, webp...)");
+            return;
+        }
+        if (file.size > 5 * 1024 * 1024) {
+            setErrorProfile("Ảnh đại diện tối đa 5MB");
+            return;
+        }
+
+        try {
+            setUploadingAvatar(true);
+            setErrorProfile("");
+            setProfileMessage("");
+
+            const formData = new FormData();
+            formData.append("avatar", file);
+
+            const res = await fetch("/api/user/avatar-upload", {
+                method: "POST",
+                headers: { Authorization: `Bearer ${token}` },
+                body: formData,
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data?.message || "Tải ảnh lên thất bại");
+
+            setProfileForm((prev) => ({ ...prev, avatarUrl: data.data.avatarUrl }));
+        } catch (err) {
+            setErrorProfile(err.message || "Không kết nối được server");
+        } finally {
+            setUploadingAvatar(false);
+        }
     };
 
     const handlePasswordChange = (e) => {
@@ -311,8 +351,24 @@ export default function UserProfile() {
                                                 )}&background=0ea5e9&color=ffffff&size=128`;
                                             }}
                                         />
-                                        <p className="mt-3 text-center text-xs leading-5 text-slate-500">
-                                            Dán đường dẫn ảnh hợp lệ để thay ảnh đại diện.
+                                        <label
+                                            className={`mt-3 flex h-9 w-full cursor-pointer items-center justify-center gap-2 rounded-2xl border text-xs font-semibold transition ${uploadingAvatar
+                                                    ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400"
+                                                    : "border-cyan-200 bg-white text-cyan-700 hover:bg-cyan-50"
+                                                }`}
+                                        >
+                                            <Upload size={14} />
+                                            {uploadingAvatar ? "Đang tải ảnh..." : "Tải ảnh lên"}
+                                            <input
+                                                type="file"
+                                                accept="image/*"
+                                                className="hidden"
+                                                disabled={uploadingAvatar}
+                                                onChange={handleAvatarFileChange}
+                                            />
+                                        </label>
+                                        <p className="mt-2 text-center text-xs leading-5 text-slate-500">
+                                            Hoặc dán đường dẫn ảnh ở ô bên cạnh.
                                         </p>
                                     </div>
 
@@ -417,7 +473,7 @@ export default function UserProfile() {
                                     <div className="flex justify-end pt-2">
                                         <button
                                             type="submit"
-                                            disabled={savingProfile}
+                                            disabled={savingProfile || uploadingAvatar}
                                             className="inline-flex h-11 items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-cyan-600 via-sky-500 to-amber-400 px-4 text-sm font-semibold text-white shadow-[0_16px_32px_-20px_rgba(8,145,178,0.95)] transition hover:brightness-105 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
                                         >
                                             <Save size={16} />

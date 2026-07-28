@@ -71,7 +71,20 @@ export async function createCashFlow(
     });
     return response.data;
   } catch (error) {
-    throw new Error(`Failed to call API with auth: ${error.message}`);
+    const responseStatus =
+      error.response?.data?.error?.ResponseStatus ||
+      error.response?.data?.ResponseStatus ||
+      {};
+    const message =
+      responseStatus.Message ||
+      error.response?.data?.error?.message ||
+      error.response?.data?.message ||
+      error.message;
+    const enhancedError = new Error(message);
+    enhancedError.errorCode = responseStatus.ErrorCode || "";
+    enhancedError.responseStatus = responseStatus;
+    enhancedError.responseData = error.response?.data;
+    throw enhancedError;
   }
 }
 
@@ -194,6 +207,184 @@ export async function getListOrder(
         Authorization: `Bearer ${token}`,
       },
     });
+    return response.data;
+  } catch (error) {
+    throw new Error(`Failed to call API with auth: ${error.message}`);
+  }
+}
+
+export async function getLocationSuggest(
+  retailer = "kingfarm",
+  accessPrivateToken,
+  accessToken,
+  provinceName,
+  districtName,
+  wardName,
+) {
+  try {
+    const response = await axios.get(`${tokenURL}/location-suggest`, {
+      params: {
+        retailer,
+        accessPrivateToken,
+        accessToken,
+        provinceName,
+        districtName,
+        wardName,
+      },
+
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    return response.data;
+  } catch (error) {
+    throw new Error(`Failed to call API with auth: ${error.message}`);
+  }
+}
+
+export async function updateCustomerAddress(
+  retailer = "kingfarm",
+  accessPrivateToken,
+  accessToken,
+  payload,
+  customerType = "Cá nhân",
+  Organization = "",
+) {
+  try {
+    const customerCode = payload.Code ?? payload.CompareCode;
+    const responseGetCustomer = await axios.get(
+      `https://api-man1.kiotviet.vn/api/customers?format=json&Code=${customerCode}`,
+
+      {
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessPrivateToken}`,
+          retailer,
+        },
+      },
+    );
+
+    let payloadData = {
+      ...payload,
+      CustomerGroupNames: responseGetCustomer.data.Data[0].CustomerGroupNames,
+      CustomerGroupIds: responseGetCustomer.data.Data[0].CustomerGroupIds,
+      EmployeeInChargeNames:
+        responseGetCustomer.data.Data[0].EmployeeInChargeNames,
+      EmployeeInChargeIds: responseGetCustomer.data.Data[0].EmployeeInChargeIds,
+      EmployeeInCharges: responseGetCustomer.data.Data[0].EmployeeInCharges,
+      Groups: responseGetCustomer.data.Data[0].Groups,
+      CustomerGroupDetails: (
+        responseGetCustomer.data.Data[0].CustomerGroupIds || []
+      ).map((groupId) => ({
+        GroupId: groupId,
+        CustomerId: responseGetCustomer.data.Data[0].Id,
+      })),
+      CustomerType: customerType,
+      Organization,
+    };
+
+    console.log("payloadData", payloadData);
+    const response = await axios.post(
+      `https://api-man1.kiotviet.vn/api/customers`,
+      { Customer: payloadData },
+      {
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessPrivateToken}`,
+          retailer,
+        },
+      },
+    );
+    return {
+      data: response.data,
+      originalCustomer: responseGetCustomer.data?.Data?.[0] ?? null,
+    };
+  } catch (error) {
+    throw new Error(`Failed to call API with auth: ${error.message}`);
+  }
+}
+
+export async function getIdAdministrativearea(
+  retailer = "kingfarm",
+  accessPrivateToken,
+  data,
+  level,
+  provinceName = "",
+) {
+  try {
+    const tokenToUse = accessPrivateToken;
+
+    if (!tokenToUse) {
+      throw new Error("Thiếu access token");
+    }
+
+    if (!data) {
+      throw new Error("Thiếu dữ liệu tìm kiếm");
+    }
+
+    if (![1, 2].includes(Number(level))) {
+      throw new Error("Level chỉ nhận giá trị 1 hoặc 2");
+    }
+
+    if (Number(level) === 2 && !provinceName) {
+      throw new Error("Level 2 bắt buộc phải có provinceName");
+    }
+
+    const url =
+      "https://api-man1.kiotviet.vn/api/administrativearea/autocomplete";
+
+    const headers = {
+      Accept: "application/json, text/plain, */*",
+      Retailer: retailer,
+      Authorization: `Bearer ${tokenToUse}`,
+    };
+
+    const response = await axios.get(url, {
+      params: {
+        tearm: data,
+        lname: Number(level) === 2 ? provinceName : "",
+        level: Number(level),
+      },
+      headers,
+    });
+
+    return response.data;
+  } catch (error) {
+    const message =
+      error.response?.data?.error?.ResponseStatus?.Message ||
+      error.response?.data?.ResponseStatus?.Message ||
+      error.response?.data?.message ||
+      error.message;
+
+    throw new Error(`Failed to call administrative area API: ${message}`);
+  }
+}
+
+export async function publishEInvoice(
+  retailer = "kingfarm",
+  accessPrivateToken,
+  accessToken,
+  payload,
+) {
+  try {
+    const response = await axios.post(
+      `${tokenURL}/publishEInvoice`,
+      {},
+      {
+        params: {
+          retailer,
+          accessPrivateToken,
+          accessToken,
+          payload,
+        },
+
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+      },
+    );
     return response.data;
   } catch (error) {
     throw new Error(`Failed to call API with auth: ${error.message}`);

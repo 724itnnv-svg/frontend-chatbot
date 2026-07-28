@@ -99,6 +99,130 @@ const parseMoneyValue = (value) => {
   return Number.isFinite(number) ? number : 0;
 };
 
+const getExcelMoneyValue = (row = {}) =>
+  parseMoneyValue(row["Tiền thu hộ(VNĐ)"] ?? row["Tiền hàng"] ?? row["(1)"]);
+
+const getOrderDeliveryMoneyValue = (orderDelivery = {}) =>
+  parseMoneyValue(orderDelivery.TotalCod);
+
+const isOrderDeliveryMoneyMismatch = (row = {}, orderDelivery = {}) => {
+  const excelMoneyValue = getExcelMoneyValue(row);
+  const orderDeliveryMoneyValue = getOrderDeliveryMoneyValue(orderDelivery);
+
+  return excelMoneyValue > 0 && excelMoneyValue > orderDeliveryMoneyValue;
+};
+
+const extractKiotResponseStatus = (error) =>
+  error?.responseStatus ||
+  error?.response?.data?.error?.ResponseStatus ||
+  error?.response?.data?.ResponseStatus ||
+  {};
+
+const extractKiotHttpStatus = (error) =>
+  error?.response?.status || error?.status || "";
+
+const formatKiotErrorMessage = (error) => {
+  const responseStatus = extractKiotResponseStatus(error);
+  const httpStatus = extractKiotHttpStatus(error);
+  const errorCode = normalizeText(
+    responseStatus.ErrorCode ||
+      error?.errorCode ||
+      error?.response?.data?.error?.ErrorCode ||
+      error?.response?.data?.error?.ResponseStatus?.ErrorCode,
+  );
+  const message =
+    normalizeText(
+      responseStatus.Message ||
+        error?.response?.data?.error?.ResponseStatus?.Message ||
+        error?.response?.data?.error?.message ||
+        error?.response?.data?.message ||
+        error?.message,
+    ) || "Không gửi được payload";
+
+  const parts = [];
+  if (httpStatus) parts.push(`HTTP ${httpStatus}`);
+  if (errorCode) parts.push(errorCode);
+
+  return parts.length > 0 ? `[${parts.join(" | ")}] ${message}` : message;
+};
+
+const buildPayloadErrorSummary = (detailRows = []) => {
+  const failedRows = detailRows.filter((row) => row.status === "Thất bại");
+
+  if (failedRows.length === 0) {
+    return "";
+  }
+
+  return failedRows
+    .flatMap((row) =>
+      (row.details || [])
+        .filter((detail) => detail.status === "error")
+        .map((detail) => {
+          const deliveryCode = normalizeText(detail.deliveryCode || "");
+          const detailMessage = normalizeText(
+            detail.message ||
+              detail.Message ||
+              detail.error?.ResponseStatus?.Message ||
+              detail.error?.message ||
+              "Không gửi được payload",
+          );
+          return `${deliveryCode ? `Mã vận đơn ${deliveryCode}: ` : ""}${detailMessage}`;
+        }),
+    )
+    .join("\n");
+};
+
+const buildOrderDeliveryValidationErrorSummary = (rows = []) => {
+  if (rows.length === 0) {
+    return "";
+  }
+
+  return rows
+    .map((row) => {
+      const deliveryCode = normalizeText(getOrderDeliveryCode(row));
+      const reasons = [];
+
+      if (row.__orderDeliveryMissingInvoice === true) {
+        reasons.push("thiếu mã hóa đơn");
+      }
+
+      if (row.__orderDeliveryMoneyMismatch === true) {
+        reasons.push("lệch tiền");
+      }
+
+      const reasonText = reasons.join(", ") || "Dữ liệu không hợp lệ";
+      return `${deliveryCode ? `Mã vận đơn ${deliveryCode}: ` : ""}${reasonText}`;
+    })
+    .join("\n");
+};
+
+const buildFailedOrderDeliveryErrorSummary = (detailRows = []) => {
+  const failedRows = detailRows.filter((row) => row.failed > 0);
+
+  if (failedRows.length === 0) {
+    return "";
+  }
+
+  return failedRows
+    .map((row) => {
+      const deliveryCode = normalizeText(
+        row.details?.find((detail) => detail.deliveryCode)?.deliveryCode ||
+          row.deliveryCode ||
+          "",
+      );
+      const message = normalizeText(row.message || "Không gửi được payload");
+
+      return `${deliveryCode ? `Mã vận đơn ${deliveryCode}: ` : ""}${message}`;
+    })
+    .join("\n");
+};
+
+const mergePayloadErrorSummaries = (...summaries) =>
+  summaries
+    .map((summary) => normalizeText(summary))
+    .filter(Boolean)
+    .join("\n\n");
+
 const sumMoneyColumn = (rows, header) =>
   rows.reduce((total, row) => total + parseMoneyValue(row?.[header]), 0);
 
@@ -119,6 +243,7 @@ const stripOrderDeliveryData = (row) => {
     __orderDelivery,
     __orderDeliveryLoaded,
     __orderDeliveryMissingInvoice,
+    __orderDeliveryMoneyMismatch,
     ...rest
   } = row || {};
   return rest;
@@ -148,6 +273,10 @@ const mergeOrderDeliveryIntoRow = (row, orderDelivery) => ({
   __orderDeliveryLoaded: true,
   __orderDeliveryMissingInvoice: !normalizeText(
     orderDelivery.invoiceId || orderDelivery.invoiceIdCode,
+  ),
+  __orderDeliveryMoneyMismatch: isOrderDeliveryMoneyMismatch(
+    row,
+    orderDelivery,
   ),
 });
 
@@ -502,7 +631,9 @@ export default function CashFlowApp() {
     () =>
       payloadSourceRows.filter(
         (row) =>
-          hasCashflowInvoiceId(row) && !row.__orderDeliveryMissingInvoice,
+          hasCashflowInvoiceId(row) &&
+          !row.__orderDeliveryMissingInvoice &&
+          !row.__orderDeliveryMoneyMismatch,
       ),
     [payloadSourceRows],
   );
@@ -510,7 +641,9 @@ export default function CashFlowApp() {
   const missingInvoiceRows = useMemo(
     () =>
       payloadSourceRows.filter(
-        (row) => row.__orderDeliveryMissingInvoice === true,
+        (row) =>
+          row.__orderDeliveryMissingInvoice === true ||
+          row.__orderDeliveryMoneyMismatch === true,
       ),
     [payloadSourceRows],
   );
@@ -667,10 +800,23 @@ export default function CashFlowApp() {
     let payloadEntries = [];
     let payloads = [];
     let runId = 0;
+    let detailRows = [];
+    const orderDeliveryErrorRows = payloadSourceRows.filter(
+      (row) =>
+        row.__orderDeliveryMissingInvoice === true ||
+        row.__orderDeliveryMoneyMismatch === true,
+    );
 
     try {
       setSendingPayloads(true);
       setPayloadError("");
+
+      const preSendErrorSummary = buildOrderDeliveryValidationErrorSummary(
+        orderDeliveryErrorRows,
+      );
+      if (preSendErrorSummary) {
+        setPayloadError(preSendErrorSummary);
+      }
 
       payloadEntries = buildCashflowPayloadEntries(
         payloadReadyRows,
@@ -698,11 +844,11 @@ export default function CashFlowApp() {
           type: missingInvoiceRows.length > 0 ? "warning" : "warning",
           title:
             missingInvoiceRows.length > 0
-              ? "Có dòng thiếu mã hóa đơn"
+              ? "Có vận đơn lỗi"
               : "Không có dòng chưa gửi",
           message:
             missingInvoiceRows.length > 0
-              ? `Có ${missingInvoiceRows.length} vận đơn thiếu mã hóa đơn. Xem danh sách bên phải để tự tạo KiotViet.`
+              ? `Có ${missingInvoiceRows.length} vận đơn lỗi. Xem danh sách bên phải để kiểm tra mã hóa đơn hoặc tiền Excel.`
               : "Các dòng đang chọn đều đã gửi Kiot rồi.",
         });
         return;
@@ -715,6 +861,9 @@ export default function CashFlowApp() {
       }
 
       const results = [];
+      const rowById = new Map(
+        payloadSourceRows.map((row) => [row.__rowId, row]),
+      );
 
       for (let index = 0; index < payloadEntries.length; index += 1) {
         const entry = payloadEntries[index];
@@ -754,6 +903,11 @@ export default function CashFlowApp() {
 
         const entryResult = results[index];
         const isFulfilled = entryResult?.status === "fulfilled";
+        const sourceRow = rowById.get(entry.rowId) || null;
+        const deliveryCode =
+          getOrderDeliveryCode(sourceRow) ||
+          normalizeText(entry.payload?.invoiceId || entry.payload?.InvoiceId);
+        const errorMessage = formatKiotErrorMessage(entryResult?.reason);
         const existing = rowResults.get(entry.rowId) || {
           rowId: entry.rowId,
           summary: null,
@@ -771,6 +925,7 @@ export default function CashFlowApp() {
             label: entry.label,
             status: "success",
             message: "Thành công",
+            deliveryCode,
           });
         } else {
           existing.failed += 1;
@@ -778,14 +933,17 @@ export default function CashFlowApp() {
             kind: entry.kind,
             label: entry.label,
             status: "error",
-            message: entryResult?.reason?.message || "Lỗi khi gửi payload",
+            deliveryCode,
+            errorCode: entryResult?.reason?.errorCode || "",
+            message: deliveryCode
+              ? `${deliveryCode}: ${errorMessage}`
+              : errorMessage,
           });
         }
 
         rowResults.set(entry.rowId, existing);
       });
 
-      const detailRows = [];
       const successRowIds = new Set();
 
       rowResults.forEach((rowData) => {
@@ -800,6 +958,21 @@ export default function CashFlowApp() {
               : `Đã gửi ${rowData.succeeded}/${rowData.payloadCount} payload, ${rowData.failed} lỗi`,
         });
       });
+
+      detailRows = Array.from(rowResults.values());
+      const payloadErrorSummary = buildPayloadErrorSummary(detailRows);
+      const failedOrderDeliverySummary =
+        buildFailedOrderDeliveryErrorSummary(detailRows);
+
+      const mergedPayloadErrorSummary = mergePayloadErrorSummaries(
+        preSendErrorSummary,
+        payloadErrorSummary,
+        failedOrderDeliverySummary,
+      );
+
+      if (mergedPayloadErrorSummary) {
+        setPayloadError(mergedPayloadErrorSummary);
+      }
 
       if (successRowIds.size > 0) {
         setAllRows((currentRows) =>
@@ -833,7 +1006,7 @@ export default function CashFlowApp() {
         details: detailRows,
       };
     } catch (error) {
-      const errorMessage = error.message || "Không gửi được payload";
+      const errorMessage = formatKiotErrorMessage(error);
       setPayloadError(errorMessage);
       addToast({
         type: "error",
@@ -1144,7 +1317,7 @@ export default function CashFlowApp() {
           )}
 
           {payloadError && (
-            <div className="mx-auto mb-4 max-w-[1600px] rounded-[18px] border border-red-400/30 bg-red-50/95 px-4 py-3.5 text-[13px] font-bold text-red-700 shadow-[0_18px_40px_rgba(185,28,28,0.08)] backdrop-blur-xl">
+            <div className="mx-auto mb-4 max-w-[1600px] rounded-[18px] border border-red-400/30 bg-red-50/95 px-4 py-3.5 text-[13px] font-bold text-red-700 shadow-[0_18px_40px_rgba(185,28,28,0.08)] backdrop-blur-xl whitespace-pre-wrap">
               {payloadError}
             </div>
           )}

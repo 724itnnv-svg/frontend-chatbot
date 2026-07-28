@@ -1,11 +1,28 @@
-import React, { useEffect, useMemo, useState } from "react";
-import ExcelJS from "exceljs";
-import { saveAs } from "file-saver";
-import { getListOrder } from "../../../services/cashflowService/kiotService";
-
+﻿import React, { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  getListOrder,
+  getLocationSuggest,
+  updateCustomerAddress,
+  getIdAdministrativearea,
+  publishEInvoice,
+} from "../../../services/cashflowService/kiotService";
 const currency = new Intl.NumberFormat("vi-VN");
 
 const normalizeText = (value) => String(value ?? "").trim();
+
+const isAgencyCustomerName = (value) =>
+  normalizeText(value).toUpperCase().startsWith("DL");
+
+const getCustomerCode = (row) =>
+  normalizeText(
+    row?.CustomerCode ??
+      row?.customerCode ??
+      row?.Code ??
+      row?.code ??
+      row?.CompareCode ??
+      row?.compareCode ??
+      "",
+  );
 
 const pickFirstNonEmpty = (row, keys = []) => {
   for (const key of keys) {
@@ -41,11 +58,6 @@ const formatDisplayDate = (value) => {
     year: "numeric",
   }).format(date);
 };
-
-const sanitizeFileName = (value) =>
-  normalizeText(value)
-    .replace(/[\\/:*?"<>|]+/g, "-")
-    .replace(/\s+/g, "-");
 
 const pad2 = (value) => String(value).padStart(2, "0");
 
@@ -104,6 +116,147 @@ const getFirstEInvoice = (row) => {
   return {};
 };
 
+const hasReturnsValue = (row) => {
+  const returnsValue = row?.Returns;
+
+  if (Array.isArray(returnsValue)) {
+    return returnsValue.length > 0;
+  }
+
+  return returnsValue != null && returnsValue !== "";
+};
+
+const splitCustomerLocationName = (value) => {
+  const text = normalizeText(value);
+
+  if (!text) {
+    return { province: "", district: "" };
+  }
+
+  const normalized = text.replace(/\s*-\s*/g, " - ");
+  const separatorIndex = normalized.lastIndexOf(" - ");
+
+  if (separatorIndex === -1) {
+    return { province: normalized, district: "" };
+  }
+
+  return {
+    province: normalized.slice(0, separatorIndex).trim(),
+    district: normalized.slice(separatorIndex + 3).trim(),
+  };
+};
+
+const isSelectableEinvoiceRow = (row) =>
+  normalizeMoney(
+    row?.Total ?? row?.total ?? row?.NewInvoiceTotal ?? row?.Amount ?? 0,
+  ) !== 0 && !hasReturnsValue(row);
+
+const buildEinvoicePayload = (row) => {
+  const locationParts = splitCustomerLocationName(
+    row?.CustomerLocationName ?? row?.customerLocationName ?? "",
+  );
+  const originalLocationName =
+    row?.CustomerLocationName ?? row?.customerLocationName ?? "";
+  const originalWardName = row?.CustomerWardName ?? row?.customerWardName ?? "";
+
+  return {
+    CustomerId: row?.CustomerId ?? row?.customerId ?? "",
+    Id: row?.Id ?? row?.id ?? "",
+    BranchId: row?.BranchId ?? row?.branchId ?? "",
+    Code: row?.Code ?? row?.code ?? "",
+    Total:
+      row?.Total ??
+      row?.total ??
+      row?.NewInvoiceTotal ??
+      row?.Amount ??
+      row?.amount ??
+      0,
+    SoldById: row?.SoldById ?? row?.soldById ?? "",
+    CustomerName: row?.CustomerName ?? row?.customerName ?? "",
+    CustomerContactNumber:
+      row?.CustomerContactNumber ?? row?.customerContactNumber ?? "",
+    CustomerAddress: row?.CustomerAddress ?? row?.customerAddress ?? "",
+    CustomerLocationName: locationParts.province || originalLocationName,
+    CustomerWardName: originalWardName,
+    CustomerDistrictName: locationParts.district,
+    PartnerDeliveryId: row?.PartnerDeliveryId ?? row?.partnerDeliveryId ?? "",
+    Returns: row?.Returns ?? [],
+    InvoiceDeliveryCode: row?.InvoiceDeliveryCode ?? "",
+    CustomerCode: row?.CustomerCode ?? "",
+    GivenName: row?.SoldBy?.GivenName ?? "",
+    CompareSoldById: row?.CompareSoldById,
+    UsingCod: 1,
+    OriginStatus: 1,
+    ValidateMessage: null,
+  };
+};
+
+const buildCustomerAddressUpdatePayload = async (
+  row,
+  locationSuggestResult,
+  retailer = "kingfarm",
+  accessPrivateToken,
+) => {
+  const locationV2 = locationSuggestResult?.LocationV2 ?? {};
+  const wardV2 = locationSuggestResult?.WardV2 ?? {};
+  const streetAddress = normalizeText(
+    row?.CustomerAddress ?? row?.customerAddress ?? "",
+  );
+  const provinceName = normalizeText(locationV2?.Name ?? "");
+  const districtName = normalizeText(wardV2?.Name ?? "");
+
+  const provinceIds = await getIdAdministrativearea(
+    retailer,
+    accessPrivateToken,
+    provinceName,
+    1,
+  );
+  const wardId = await getIdAdministrativearea(
+    retailer,
+    accessPrivateToken,
+    districtName,
+    2,
+    provinceName,
+  );
+
+  return {
+    Id: row?.CustomerId ?? row?.CustomerId ?? "",
+    CustomerId: row?.CustomerId ?? row?.customerId ?? "",
+    AddressEInvoice:
+      [streetAddress, districtName, provinceName].filter(Boolean).join(", ") ||
+      "Bán cho người tiêu dùng",
+    LocationIdEInvoiceLevel_1: provinceIds?.[0]?.Id ?? null,
+    LocationNameEInvoiceLevel_1: provinceName,
+    LocationIdEInvoiceLevel_2: wardId?.[0]?.Id ?? null,
+    LocationNameEInvoiceLevel_2: districtName,
+    LocationSuggessName: [districtName, provinceName]
+      .filter(Boolean)
+      .join(" - "),
+    AddressEInvoiceCombine: [streetAddress, districtName, provinceName]
+      .filter(Boolean)
+      .join(", "),
+    suggestLocationV2: locationV2,
+    suggestWardV2: wardV2,
+    CompareName: row?.CustomerName,
+    Code: row?.CustomerCode,
+    CompareCode: row?.CustomerCode,
+    Name: row?.CustomerName,
+    LocationId: locationV2.Id,
+    WardId: wardV2.Id,
+    WardName: districtName,
+    LocationName: provinceName,
+    ContactNumber: row?.CustomerContactNumber,
+    templocEInvoiceLevel_1: provinceName,
+    templocEInvoiceLevel_2: districtName,
+    temploc: provinceName,
+    LocationItemsEInvoice: {
+      1: provinceIds?.[0],
+      2: wardId?.[0],
+    },
+    ContactNumberEInvoice: row?.CustomerContactNumber,
+  };
+};
+
 const INVOICE_COLUMNS = [
   {
     id: "InvoiceDeliveryCode",
@@ -153,7 +306,7 @@ const INVOICE_COLUMNS = [
   {
     id: "address",
     label: "Địa chỉ",
-    defaultVisible: false,
+    defaultVisible: true,
     getValue: (row) =>
       [row.CustomerAddress, row.CustomerWardName, row.CustomerLocationName]
         .filter(Boolean)
@@ -216,12 +369,19 @@ export default function EinvoicesTab({
     getLocalDateInputValue(new Date()),
   );
   const [eInvoiceStatus, setEInvoiceStatus] = useState("0");
-  const [activeRowId, setActiveRowId] = useState("");
+  const [selectedRowIds, setSelectedRowIds] = useState(() => new Set());
+  const [hddtStatusMessage, setHddtStatusMessage] = useState("");
+  const [operationProgress, setOperationProgress] = useState({
+    visible: false,
+    label: "",
+    value: 0,
+  });
   const [visibleColumnIds, setVisibleColumnIds] = useState(() =>
     INVOICE_COLUMNS.filter((column) => column.defaultVisible !== false).map(
       (column) => column.id,
     ),
   );
+  const agencyCustomerBackupsRef = React.useRef(new Map());
 
   const queryParams = useMemo(() => {
     if (filterMode === "exact") {
@@ -231,64 +391,61 @@ export default function EinvoicesTab({
     return {};
   }, [filterMode, exactFromDate, exactToDate]);
 
-  useEffect(() => {
-    let ignore = false;
-
-    async function loadOrders() {
-      if (!retailer || !accessPrivateToken || !accessToken) {
-        setApiRows([]);
-        setError("");
-        setLoading(false);
-        return;
-      }
-
-      setLoading(true);
+  const fetchOrders = useCallback(async () => {
+    if (!retailer || !accessPrivateToken || !accessToken) {
+      setApiRows([]);
       setError("");
-
-      try {
-        const response = await getListOrder(
-          retailer,
-          accessPrivateToken,
-          accessToken,
-          filterMode === "exact" ? "day" : timeRange,
-          eInvoiceStatus,
-          queryParams,
-        );
-        const directRows = response?.data ?? response;
-
-        if (ignore) return;
-
-        setApiRows(
-          Array.isArray(directRows)
-            ? directRows.slice(1).map((row, index) => ({
-                ...row,
-                __rowId:
-                  row?.__rowId ??
-                  row?.Id ??
-                  row?.id ??
-                  row?.Code ??
-                  `row-${index}`,
-              }))
-            : [],
-        );
-      } catch (err) {
-        if (!ignore) {
-          setApiRows([]);
-          setError(err?.message || "Không lấy được danh sách đơn hàng");
-        }
-      } finally {
-        if (!ignore) {
-          setLoading(false);
-        }
-      }
+      setLoading(false);
+      return;
     }
 
-    loadOrders();
+    setLoading(true);
+    setError("");
 
-    return () => {
-      ignore = true;
-    };
+    try {
+      const response = await getListOrder(
+        retailer,
+        accessPrivateToken,
+        accessToken,
+        filterMode === "exact" ? "day" : timeRange,
+        eInvoiceStatus,
+        queryParams,
+      );
+      const directRows = response?.data ?? response;
+
+      setApiRows(
+        Array.isArray(directRows)
+          ? directRows.slice(1).map((row, index) => ({
+              ...row,
+              __rowId:
+                row?.__rowId ??
+                row?.Id ??
+                row?.id ??
+                row?.Code ??
+                `row-${index}`,
+            }))
+          : [],
+      );
+    } catch (err) {
+      setApiRows([]);
+      setError(err?.message || "Không lấy được danh sách đơn hàng");
+    } finally {
+      setLoading(false);
+    }
   }, [
+    retailer,
+    accessPrivateToken,
+    accessToken,
+    filterMode,
+    timeRange,
+    eInvoiceStatus,
+    queryParams,
+  ]);
+
+  useEffect(() => {
+    fetchOrders();
+  }, [
+    fetchOrders,
     retailer,
     accessPrivateToken,
     accessToken,
@@ -302,27 +459,31 @@ export default function EinvoicesTab({
 
   const visibleRows = apiRows;
   const hasNoInvoices = !loading && !error && visibleRows.length === 0;
-  const activeRow = useMemo(
-    () => visibleRows.find((row) => row.__rowId === activeRowId) || null,
-    [activeRowId, visibleRows],
+  const selectableRows = useMemo(
+    () => visibleRows.filter((row) => isSelectableEinvoiceRow(row)),
+    [visibleRows],
   );
-  const activeRowRawData = useMemo(() => {
-    if (!activeRow) return null;
-
-    const { __rowId, ...rawRow } = activeRow;
-    return rawRow;
-  }, [activeRow]);
+  const selectedRows = useMemo(
+    () => visibleRows.filter((row) => selectedRowIds.has(row.__rowId)),
+    [selectedRowIds, visibleRows],
+  );
+  const selectedPayloadRows = useMemo(
+    () =>
+      selectedRows
+        .filter((row) => isSelectableEinvoiceRow(row))
+        .map((row) => buildEinvoicePayload(row)),
+    [selectedRows],
+  );
+  const previewPayloadRows =
+    selectedPayloadRows.length > 0
+      ? selectedPayloadRows
+      : selectableRows.map((row) => buildEinvoicePayload(row));
+  const isPublishedEinvoiceTab = String(eInvoiceStatus) === "6";
   const visibleColumns = useMemo(
     () =>
       INVOICE_COLUMNS.filter((column) => visibleColumnIds.includes(column.id)),
     [visibleColumnIds],
   );
-
-  useEffect(() => {
-    if (activeRowId && !activeRow) {
-      setActiveRowId("");
-    }
-  }, [activeRow, activeRowId]);
 
   const toggleColumn = (columnId) => {
     setVisibleColumnIds((current) =>
@@ -333,91 +494,249 @@ export default function EinvoicesTab({
   };
 
   const handleSelectRow = (rowId) => {
-    setActiveRowId((current) => (current === rowId ? "" : rowId));
+    setSelectedRowIds((current) => {
+      const next = new Set(current);
+      if (next.has(rowId)) {
+        next.delete(rowId);
+      } else {
+        next.add(rowId);
+      }
+      return next;
+    });
+  };
+
+  const handleSelectAllVisibleRows = () => {
+    const selectableIds = visibleRows
+      .filter((row) => isSelectableEinvoiceRow(row))
+      .map((row) => row.__rowId);
+
+    if (selectableIds.length === 0) return;
+
+    const allSelected = selectableIds.every((rowId) =>
+      selectedRowIds.has(rowId),
+    );
+
+    setSelectedRowIds((current) => {
+      const next = new Set(current);
+
+      if (allSelected) {
+        selectableIds.forEach((rowId) => next.delete(rowId));
+      } else {
+        selectableIds.forEach((rowId) => next.add(rowId));
+      }
+
+      return next;
+    });
+  };
+
+  const handleClearSelectedRows = () => {
+    setSelectedRowIds(new Set());
+  };
+
+  const resetOperationProgress = () => {
+    setOperationProgress({
+      visible: false,
+      label: "",
+      value: 0,
+    });
+  };
+
+  const updateOperationProgress = (value, label) => {
+    setOperationProgress({
+      visible: true,
+      value: Math.max(0, Math.min(100, Math.round(value))),
+      label,
+    });
+  };
+
+  const restoreTemporaryAgencyCustomers = useCallback(async () => {
+    const backups = Array.from(agencyCustomerBackupsRef.current.values());
+
+    if (backups.length === 0) {
+      return { restoredCount: 0, failedCount: 0 };
+    }
+
+    let restoredCount = 0;
+    let failedCount = 0;
+
+    for (let index = 0; index < backups.length; index += 1) {
+      const backup = backups[index];
+
+      try {
+        await updateCustomerAddress(
+          retailer,
+          accessPrivateToken,
+          accessToken,
+          { Code: backup.Code, CompareCode: backup.Code },
+          backup.CustomerType,
+          backup.Organization,
+        );
+        restoredCount += 1;
+        agencyCustomerBackupsRef.current.delete(backup.Code);
+      } catch {
+        failedCount += 1;
+      }
+    }
+
+    if (failedCount > 0) {
+      setHddtStatusMessage(
+        `Đã hoàn nguyên ${restoredCount}/${backups.length} đại lý, còn ${failedCount} đại lý chưa trả lại được.`,
+      );
+    } else {
+      setHddtStatusMessage(
+        `Đã hoàn nguyên ${restoredCount}/${backups.length} đại lý về trạng thái ban đầu.`,
+      );
+    }
+
+    await fetchOrders();
+
+    return { restoredCount, failedCount };
+  }, [retailer, accessPrivateToken, accessToken, fetchOrders]);
+
+  const handleExportHDDT = async () => {
+    setHddtStatusMessage(
+      `Đã chuẩn bị ${previewPayloadRows.length} dòng cho HDDT.`,
+    );
+    updateOperationProgress(10, "Đang chuẩn bị dữ liệu HDDT...");
+
+    try {
+      updateOperationProgress(55, "Đang xuất HDDT...");
+      const response = await publishEInvoice(
+        retailer,
+        accessPrivateToken,
+        accessToken,
+        previewPayloadRows,
+      );
+
+      updateOperationProgress(80, "Đang cập nhật lại trạng thái đơn hàng...");
+      await fetchOrders();
+
+      updateOperationProgress(90, "Đang hoàn nguyên dữ liệu đại lý...");
+      if (agencyCustomerBackupsRef.current.size > 0) {
+        setHddtStatusMessage(
+          "Đang hoàn nguyên thông tin đại lý sau khi xuất HDDT...",
+        );
+        await restoreTemporaryAgencyCustomers();
+      }
+
+      updateOperationProgress(100, "Hoàn tất xuất HDDT.");
+      return response.data;
+    } catch (error) {
+      setHddtStatusMessage(error?.message || "Xuất HDDT thất bại.");
+      throw error;
+    } finally {
+      resetOperationProgress();
+    }
+  };
+
+  const handleSyncAddress = async () => {
+    if (previewPayloadRows.length === 0) {
+      setHddtStatusMessage("Không có dòng hợp lệ để đồng bộ địa chỉ.");
+      return;
+    }
+
+    const agencyRows = previewPayloadRows.filter((row) =>
+      isAgencyCustomerName(row?.CustomerName ?? row?.customerName),
+    );
+
+    setHddtStatusMessage(
+      agencyRows.length > 0
+        ? `Đang đồng bộ ${previewPayloadRows.length} dòng, trong đó ${agencyRows.length} đơn đại lý DL sẽ được tạm đổi sang Cá nhân...`
+        : `Đang đồng bộ ${previewPayloadRows.length} dòng...`,
+    );
+    updateOperationProgress(0, "Đang đồng bộ địa chỉ...");
+
+    let successCount = 0;
+    let skippedCount = 0;
+
+    try {
+      for (let index = 0; index < previewPayloadRows.length; index += 1) {
+        const row = previewPayloadRows[index];
+        const currentLabel = `Đang đồng bộ ${index + 1}/${previewPayloadRows.length}...`;
+        updateOperationProgress(
+          (index / previewPayloadRows.length) * 100,
+          currentLabel,
+        );
+
+        const customerCode = getCustomerCode(row);
+        if (!customerCode) {
+          skippedCount += 1;
+          continue;
+        }
+
+        if (!normalizeText(row?.CustomerDistrictName)) {
+          skippedCount += 1;
+          continue;
+        }
+
+        const locationSuggestResult = await getLocationSuggest(
+          retailer,
+          accessPrivateToken,
+          accessToken,
+          row.CustomerLocationName,
+          row.CustomerDistrictName,
+          row.CustomerWardName,
+        );
+
+        if (
+          !locationSuggestResult?.LocationV2 ||
+          !locationSuggestResult?.WardV2
+        ) {
+          skippedCount += 1;
+          continue;
+        }
+
+        const updatePayload = await buildCustomerAddressUpdatePayload(
+          row,
+          locationSuggestResult,
+          retailer,
+          accessPrivateToken,
+        );
+
+        const agencyName = row?.CustomerName ?? row?.customerName;
+        const isAgencyRow = isAgencyCustomerName(agencyName);
+
+        const updateResult = await updateCustomerAddress(
+          retailer,
+          accessPrivateToken,
+          accessToken,
+          updatePayload,
+          isAgencyRow ? "Cá nhân" : "Cá nhân",
+          isAgencyRow ? "" : "",
+        );
+
+        const originalCustomer = updateResult?.originalCustomer;
+        const restoreCode = getCustomerCode(originalCustomer) || customerCode;
+
+        if (isAgencyRow && restoreCode) {
+          agencyCustomerBackupsRef.current.set(restoreCode, {
+            Code: restoreCode,
+            CustomerType: originalCustomer?.CustomerType || "Công ty",
+            Organization: originalCustomer?.Organization || "",
+          });
+        }
+
+        successCount += 1;
+      }
+
+      updateOperationProgress(100, "Hoàn tất đồng bộ địa chỉ.");
+
+      setHddtStatusMessage(
+        skippedCount > 0
+          ? `Đã đồng bộ ${successCount}/${previewPayloadRows.length} dòng, bỏ qua ${skippedCount} dòng không đủ dữ liệu.`
+          : `Đã đồng bộ ${successCount}/${previewPayloadRows.length} dòng.`,
+      );
+
+      await fetchOrders();
+    } finally {
+      resetOperationProgress();
+    }
   };
 
   const exportToExcel = async () => {
-    const workbook = new ExcelJS.Workbook();
-    const worksheet = workbook.addWorksheet("HoaDonDienTu");
-
-    const columns = [
-      { header: "STT", key: "stt", width: 10 },
-      ...visibleColumns.map((column) => ({
-        header: column.label,
-        key: column.id,
-        width:
-          column.id === "customer"
-            ? 30
-            : column.id === "amount"
-              ? 18
-              : column.id === "created_date"
-                ? 16
-                : 24,
-      })),
-    ];
-
-    worksheet.columns = columns;
-
-    const headerRow = worksheet.getRow(1);
-    headerRow.font = { bold: true, color: { argb: "FFFFFFFF" } };
-    headerRow.alignment = { vertical: "middle", horizontal: "center" };
-    headerRow.fill = {
-      type: "pattern",
-      pattern: "solid",
-      fgColor: { argb: "FF0F172A" },
-    };
-    headerRow.height = 22;
-
-    visibleRows.forEach((row, index) => {
-      const excelRow = worksheet.addRow({ stt: index + 1 });
-
-      visibleColumns.forEach((column) => {
-        const rawValue = column.getValue(row, index);
-
-        if (column.id === "amount") {
-          excelRow.getCell(column.id).value = Number(rawValue || 0);
-          excelRow.getCell(column.id).numFmt = "#,##0";
-          excelRow.getCell(column.id).alignment = { horizontal: "right" };
-          return;
-        }
-
-        if (column.id === "created_date") {
-          const dateValue = formatExcelDate(rawValue);
-          excelRow.getCell(column.id).value = dateValue;
-          excelRow.getCell(column.id).numFmt = "dd/mm/yyyy";
-          excelRow.getCell(column.id).alignment = { horizontal: "center" };
-          return;
-        }
-
-        excelRow.getCell(column.id).value = column.render
-          ? column.render(rawValue, row, index)
-          : rawValue || "";
-      });
-    });
-
-    worksheet.eachRow((row, rowNumber) => {
-      row.alignment = { vertical: "middle" };
-      row.height = rowNumber === 1 ? 22 : 20;
-      row.eachCell((cell, colNumber) => {
-        cell.border = {
-          top: { style: "thin", color: { argb: "FFE2E8F0" } },
-          left: { style: "thin", color: { argb: "FFE2E8F0" } },
-          bottom: { style: "thin", color: { argb: "FFE2E8F0" } },
-          right: { style: "thin", color: { argb: "FFE2E8F0" } },
-        };
-        if (rowNumber > 1 && colNumber === 1) {
-          cell.alignment = { vertical: "middle", horizontal: "center" };
-        }
-      });
-    });
-
-    const buffer = await workbook.xlsx.writeBuffer();
-    const fileName = `hoa-don-dien-tu-${sanitizeFileName(retailer || "cong-ty")}-${new Date().toISOString().slice(0, 10)}.xlsx`;
-    saveAs(
-      new Blob([buffer], {
-        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;charset=UTF-8",
-      }),
-      fileName,
+    console.log("Excel payload", previewPayloadRows);
+    setHddtStatusMessage(
+      `Đã log ${previewPayloadRows.length} dòng payload Excel.`,
     );
   };
 
@@ -457,13 +776,29 @@ export default function EinvoicesTab({
             </h2>
           </div>
 
-          <button
-            type="button"
-            onClick={onSwitchToCashflow}
-            className="rounded-[16px] border border-sky-300/30 bg-sky-50 px-4 py-2.5 text-sm font-extrabold text-sky-700 transition hover:bg-sky-100"
-          >
-            Quay về sổ quỹ
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={handleSelectAllVisibleRows}
+              className="rounded-[16px] border border-slate-300/40 bg-slate-50 px-4 py-2.5 text-sm font-extrabold text-slate-700 transition hover:bg-slate-100"
+            >
+              Chọn tất cả hợp lệ
+            </button>
+            <button
+              type="button"
+              onClick={handleClearSelectedRows}
+              className="rounded-[16px] border border-slate-300/40 bg-slate-50 px-4 py-2.5 text-sm font-extrabold text-slate-700 transition hover:bg-slate-100"
+            >
+              Bỏ chọn tất cả
+            </button>
+            <button
+              type="button"
+              onClick={onSwitchToCashflow}
+              className="rounded-[16px] border border-sky-300/30 bg-sky-50 px-4 py-2.5 text-sm font-extrabold text-sky-700 transition hover:bg-sky-100"
+            >
+              Quay về sổ quỹ
+            </button>
+          </div>
         </div>
 
         <div className="mb-4 flex flex-wrap items-center gap-2">
@@ -644,7 +979,7 @@ export default function EinvoicesTab({
                 {hasNoInvoices ? (
                   <tr>
                     <td
-                      colSpan={visibleColumns.length}
+                      colSpan={visibleColumns.length + 1}
                       className="px-4 py-10 text-center text-sm font-semibold text-slate-500"
                     >
                       Không có hóa đơn nào trong khoảng thời gian đã chọn.
@@ -652,19 +987,28 @@ export default function EinvoicesTab({
                   </tr>
                 ) : (
                   visibleRows.map((row, index) => {
-                    const isSelected = row.__rowId === activeRowId;
+                    const isSelected = selectedRowIds.has(row.__rowId);
+                    const isSelectable = isSelectableEinvoiceRow(row);
                     return (
                       <tr
                         key={row.id || index}
-                        className="border-t border-slate-100"
+                        className={`border-t border-slate-100 ${!isSelectable ? "opacity-55" : ""}`}
                       >
                         <td className="px-4 py-4 text-slate-700">
                           <input
                             type="checkbox"
                             checked={isSelected}
-                            onChange={() => handleSelectRow(row.__rowId)}
+                            onChange={() =>
+                              isSelectable ? handleSelectRow(row.__rowId) : null
+                            }
                             className="h-4 w-4 cursor-pointer rounded border-slate-300 text-sky-600 focus:ring-sky-300"
                             aria-label={`Chọn dòng ${index + 1}`}
+                            disabled={!isSelectable}
+                            title={
+                              isSelectable
+                                ? "Chọn dòng"
+                                : "Dòng có Returns hoặc Total = 0 nên không thể chọn"
+                            }
                           />
                         </td>
                         {visibleColumns.map((column) => {
@@ -724,13 +1068,23 @@ export default function EinvoicesTab({
             Khu này để mình gắn các nút xuất, đồng bộ và đối soát sau này.
           </p>
         </div>
-
         <div className="grid gap-3">
           <button
             type="button"
-            className="rounded-[18px] border border-emerald-300/30 bg-emerald-50 px-4 py-3.5 text-left text-sm font-extrabold text-emerald-800 transition hover:bg-emerald-100"
+            onClick={handleExportHDDT}
+            disabled={isPublishedEinvoiceTab}
+            title={
+              isPublishedEinvoiceTab
+                ? "Không thể xuất HDDT khi đang ở trạng thái Đã phát hành"
+                : "Xuất hóa đơn điện tử"
+            }
+            className={`rounded-[18px] border px-4 py-3.5 text-left text-sm font-extrabold transition ${
+              isPublishedEinvoiceTab
+                ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400"
+                : "border-emerald-300/30 bg-emerald-50 text-emerald-800 hover:bg-emerald-100"
+            }`}
           >
-            Tải lại danh sách
+            Xuất HDDT
           </button>
           <button
             type="button"
@@ -741,55 +1095,69 @@ export default function EinvoicesTab({
           </button>
           <button
             type="button"
+            onClick={handleSyncAddress}
             className="rounded-[18px] border border-sky-300/30 bg-sky-50 px-4 py-3.5 text-left text-sm font-extrabold text-sky-800 transition hover:bg-sky-100"
           >
-            Đối soát đơn hàng
-          </button>
-          <button
-            type="button"
-            className="rounded-[18px] border border-slate-300/40 bg-slate-50 px-4 py-3.5 text-left text-sm font-extrabold text-slate-700 transition hover:bg-slate-100"
-          >
-            Cấu hình mẫu xuất
+            Đồng bộ địa chỉ
           </button>
         </div>
+
+        {hddtStatusMessage ? (
+          <div className="mt-3 rounded-[16px] border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-600">
+            {hddtStatusMessage}
+          </div>
+        ) : null}
+
+        {operationProgress.visible ? (
+          <div className="mt-3 rounded-[16px] border border-slate-200 bg-white px-3 py-3">
+            <div className="mb-2 flex items-center justify-between gap-3 text-xs font-bold text-slate-600">
+              <span>{operationProgress.label || "Đang xử lý..."}</span>
+              <span>{operationProgress.value}%</span>
+            </div>
+            <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-cyan-500 via-sky-500 to-emerald-500 transition-all duration-300"
+                style={{ width: `${operationProgress.value}%` }}
+              />
+            </div>
+          </div>
+        ) : null}
 
         <div className="mt-5 rounded-[20px] border border-slate-200/90 bg-gradient-to-b from-slate-50 to-white p-4">
           <div className="mb-2 flex items-center justify-between gap-3">
             <div className="text-[11px] font-extrabold uppercase tracking-[0.16em] text-slate-500">
-              Dữ liệu dòng chọn
+              Payload đã chọn
             </div>
             <span className="rounded-full border border-sky-300/30 bg-sky-50 px-2.5 py-1 text-[11px] font-extrabold text-sky-700">
-              {activeRowRawData ? "Đã chọn" : "Chưa chọn"}
+              {previewPayloadRows.length > 0
+                ? `${previewPayloadRows.length} payload`
+                : "Chưa có dữ liệu"}
             </span>
           </div>
 
-          {activeRow ? (
+          {previewPayloadRows.length > 0 ? (
             <div className="mb-3 grid gap-2 text-xs text-slate-600">
               <div>
-                <span className="font-bold text-slate-500">Mã vận đơn: </span>
-                {activeRow.InvoiceDeliveryCode ||
-                  activeRow.Code ||
-                  activeRow["Mã đơn GHN"] ||
-                  "-"}
+                <span className="font-bold text-slate-500">
+                  Dòng đang hiển thị:{" "}
+                </span>
+                {previewPayloadRows.length}
               </div>
               <div>
-                <span className="font-bold text-slate-500">Mã hóa đơn: </span>
-                {activeRow.Code ||
-                  getFirstEInvoice(activeRow).EInvoiceNumber ||
-                  "-"}
+                <span className="font-bold text-slate-500">Điều kiện: </span>
+                Nếu chưa tick dòng nào thì tự hiện tất cả dòng hợp lệ
               </div>
             </div>
           ) : (
             <p className="m-0 mb-3 text-sm leading-7 text-slate-500">
-              Tick một dòng ở bảng bên trái để xem dữ liệu trả ra từ
-              getListOrder.
+              Chưa có dòng hợp lệ để hiển thị payload.
             </p>
           )}
 
           <pre className="m-0 max-h-72 overflow-auto rounded-[18px] border border-slate-200/90 bg-slate-900 p-3.5 text-[11px] leading-[1.6] text-blue-100">
-            {activeRowRawData
-              ? JSON.stringify(activeRowRawData, null, 2)
-              : "{}"}
+            {previewPayloadRows.length > 0
+              ? JSON.stringify(previewPayloadRows, null, 2)
+              : "[]"}
           </pre>
         </div>
       </aside>

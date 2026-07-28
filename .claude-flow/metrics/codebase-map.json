@@ -1,0 +1,11 @@
+{
+  "timestamp": "2026-07-24T09:57:17.173Z",
+  "projectRoot": "E:\\KhanhData\\Documents\\nnvwebadmin\\fullstack\\frontend-chatbot",
+  "structure": {
+    "hasPackageJson": true,
+    "hasTsConfig": false,
+    "hasClaudeConfig": true,
+    "hasClaudeFlow": true
+  },
+  "scannedAt": 1784887037173
+}

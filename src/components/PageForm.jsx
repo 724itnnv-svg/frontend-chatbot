@@ -190,6 +190,7 @@ export default function PageForm({ page, onClose, onSaved, mode = "admin" }) {
               className={inputCls}
             >
               <option value="">Chọn Team</option>
+              <option value="ALL">All Company</option>
               <option value="NNV">Nông Nghiệp Việt</option>
               <option value="ABC">ABC</option>
               <option value="KF">KingFarm</option>
