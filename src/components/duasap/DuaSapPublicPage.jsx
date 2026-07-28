@@ -1,14 +1,19 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
-import { Search, MapPin, Leaf, ChevronRight, TreePine, AlertCircle, Loader2, Plus, X, Link, Save, Trash2 } from "lucide-react";
+import { Search, MapPin, Leaf, ChevronRight, TreePine, AlertCircle, Loader2, Plus, X, Link, Save, Trash2, Upload } from "lucide-react";
 import { apiUrl } from "../../api/baseUrl";
 import { useAuth } from "../../context/AuthContext";
 import { canAccessScreen } from "../../utils/screenAccess";
+import {
+  resolveDuaSapImageUrl,
+  uploadDuaSapImages,
+} from "../../utils/duaSapImageUpload";
 
 function toDirectImageUrl(url) {
   if (!url) return url;
   if (/^data:image\//i.test(url)) return url;
+  if (String(url).startsWith("/api/")) return resolveDuaSapImageUrl(url);
   const driveFileId =
     url.match(/drive\.google\.com\/file\/d\/([^/?#]+)/)?.[1] ||
     url.match(/[?&]id=([^&#]+)/)?.[1];
@@ -86,6 +91,7 @@ export default function DuaSapPublicPage() {
   const auth = useAuth() || {};
   const user = auth.user || null;
   const api = auth.api;
+  const token = auth.token;
   const canManage = Boolean(user && api && canAccessScreen(user, "dua_sap"));
 
   // Khôi phục snapshot từ sessionStorage nếu user vừa bấm "về danh sách"
@@ -111,6 +117,7 @@ export default function DuaSapPublicPage() {
   const [imageDraftUrls, setImageDraftUrls] = useState([]);
   const [imageError, setImageError] = useState("");
   const [savingImage, setSavingImage] = useState(false);
+  const [uploadingImages, setUploadingImages] = useState(false);
   const sentinelRef = useRef(null);
   // Bỏ qua lần fetch đầu tiên nếu đang khôi phục từ sessionStorage
   const skipFetchRef = useRef(isRestoring);
@@ -272,6 +279,23 @@ export default function DuaSapPublicPage() {
   function removeImageUrl(idx) {
     setImageDraftUrls((prev) => prev.filter((_, i) => i !== idx));
     setImageError("");
+  }
+
+  async function handleImageFiles(event) {
+    const files = Array.from(event.target.files || []);
+    event.target.value = "";
+    if (!files.length || !imageTree || uploadingImages) return;
+
+    try {
+      setUploadingImages(true);
+      setImageError("");
+      const urls = await uploadDuaSapImages(files, imageTree.loai || "cay_giong", token);
+      setImageDraftUrls((current) => Array.from(new Set([...current, ...urls])));
+    } catch (error) {
+      setImageError(error.message || "Không thể tải ảnh lên Google Drive");
+    } finally {
+      setUploadingImages(false);
+    }
   }
 
   async function saveImageUrls() {
@@ -573,7 +597,24 @@ export default function DuaSapPublicPage() {
             </div>
             <div className="p-5 space-y-4">
               <div>
-                <label className="block text-xs font-semibold text-gray-600 mb-1">Ảnh cây (URL hoặc base64)</label>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">
+                  {imageTree.loai === "ong_nghiem" ? "Ảnh ống nghiệm" : "Ảnh cây dừa"}
+                </label>
+                <div className="mb-2 flex items-center gap-2">
+                  <label className={`inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700 transition ${uploadingImages ? "cursor-not-allowed opacity-60" : "cursor-pointer hover:bg-emerald-100"}`}>
+                    {uploadingImages ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+                    {uploadingImages ? "Đang tải lên..." : "Chọn ảnh từ máy"}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      disabled={uploadingImages}
+                      onChange={handleImageFiles}
+                      className="hidden"
+                    />
+                  </label>
+                  <span className="text-[11px] text-gray-400">Tối đa 10MB mỗi ảnh</span>
+                </div>
                 <div className="flex gap-2">
                   <div className="relative flex-1">
                     <Link size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
@@ -627,7 +668,7 @@ export default function DuaSapPublicPage() {
                 </button>
                 <button
                   onClick={saveImageUrls}
-                  disabled={savingImage}
+                  disabled={savingImage || uploadingImages}
                   className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2.5 rounded-xl text-sm font-semibold transition disabled:opacity-60"
                 >
                   {savingImage ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
