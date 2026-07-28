@@ -53,6 +53,7 @@ const EmployeeAssetManager = lazy(
 );
 const RolePage = lazy(() => import("./components/role/RoleList"));
 const UserProfile = lazy(() => import("./components/UserProfile"));
+const AddressManager = lazy(() => import("./components/AddressManager"));
 const CommissionOnlineCalculator = lazy(
   () => import("./components/calculators/CommissionOnlineCalculator"),
 );
@@ -218,6 +219,7 @@ const ADMIN_ROUTE_BY_SCREEN = {
   payroll: "/admin/payroll",
   dua_sap: "/admin/dua-sap",
   so_quy: "/admin/so-quy",
+  dia_chi: "/admin/dia-chi",
 };
 
 const adminRoutes = [
@@ -334,6 +336,7 @@ const adminRoutes = [
   { path: "payroll", screenId: "payroll", element: <PayrollManager /> },
   { path: "dua-sap", screenId: "dua_sap", element: <DuaSapManager /> },
   { path: "so-quy", screenId: "so_quy", element: <CashFlowApp /> },
+  { path: "dia-chi", screenId: "dia_chi", element: <AddressManager /> },
 ];
 
 // Guard cho trang độc lập: chưa login → /login?redirect=<current>
