@@ -6,6 +6,8 @@ import {
   getIdAdministrativearea,
   publishEInvoice,
 } from "../../../services/cashflowService/kiotService";
+import * as XLSX from "xlsx";
+import { useRef } from "react";
 const currency = new Intl.NumberFormat("vi-VN");
 
 const normalizeText = (value) => String(value ?? "").trim();
@@ -101,12 +103,24 @@ const FILTER_MODE_OPTIONS = [
   { value: "exact", label: "Tùy chỉnh" },
 ];
 
+const ROWS_PER_PAGE_OPTIONS = [15, 30, 50, 100];
+
 const EINVOICE_STATUS_OPTIONS = [
   { value: 0, label: "Chưa phát hành" },
   { value: 6, label: "Đã phát hành" },
 ];
 
 const coalesceValue = (row, keys = []) => pickFirstNonEmpty(row, keys);
+
+const mapOrderRows = (response) => {
+  const directRows = response?.data ?? response;
+  if (!Array.isArray(directRows)) return [];
+
+  return directRows.slice(1).map((row, index) => ({
+    ...row,
+    __rowId: row?.__rowId ?? row?.Id ?? row?.id ?? row?.Code ?? `row-${index}`,
+  }));
+};
 
 const getRowDisplayLabel = (row, index) => {
   const code =
@@ -134,7 +148,9 @@ const normalizeFailedRow = (item, index) => {
   }
 
   return {
-    label: normalizeText(item?.label ?? item?.rowLabel ?? item?.name) || `Dòng ${index + 1}`,
+    label:
+      normalizeText(item?.label ?? item?.rowLabel ?? item?.name) ||
+      `Dòng ${index + 1}`,
     reason:
       normalizeText(item?.reason ?? item?.message ?? item?.error) ||
       "Không xác định được lỗi",
@@ -153,8 +169,9 @@ const extractOperationResult = (response, fallbackTotal = 0) => {
   const successCountRaw = payload?.successCount ?? payload?.okCount;
   const skippedCountRaw = payload?.skippedCount ?? payload?.ignoredCount ?? 0;
 
-  const failedCount =
-    Number.isFinite(Number(failedCountRaw)) ? Number(failedCountRaw) : failedRows.length;
+  const failedCount = Number.isFinite(Number(failedCountRaw))
+    ? Number(failedCountRaw)
+    : failedRows.length;
   const successCount = Number.isFinite(Number(successCountRaw))
     ? Number(successCountRaw)
     : Math.max(0, fallbackTotal - failedCount);
@@ -252,6 +269,7 @@ const buildEinvoicePayload = (row) => {
     UsingCod: 1,
     OriginStatus: 1,
     ValidateMessage: null,
+    EInvoiceNumber: row?.EInvoiceNumber,
   };
 };
 
@@ -438,6 +456,7 @@ export default function EinvoicesTab({
   const [error, setError] = useState("");
   const [filterMode, setFilterMode] = useState("range");
   const [timeRange, setTimeRange] = useState("month");
+  const [rowsPerPage, setRowsPerPage] = useState(15);
   const [exactFromDate, setExactFromDate] = useState(() =>
     getLocalDateInputValue(new Date()),
   );
@@ -453,74 +472,110 @@ export default function EinvoicesTab({
     label: "",
     value: 0,
   });
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
   const [visibleColumnIds, setVisibleColumnIds] = useState(() =>
     INVOICE_COLUMNS.filter((column) => column.defaultVisible !== false).map(
       (column) => column.id,
     ),
   );
+  const listContainerRef = useRef(null);
   const agencyCustomerBackupsRef = React.useRef(new Map());
 
-  const queryParams = useMemo(() => {
+  const baseQueryParams = useMemo(() => {
     if (filterMode === "exact") {
-      return buildExactDateParams(exactFromDate, exactToDate);
+      return {
+        ...buildExactDateParams(exactFromDate, exactToDate),
+      };
     }
 
     return {};
   }, [filterMode, exactFromDate, exactToDate]);
 
-  const fetchOrders = useCallback(async () => {
-    if (!retailer || !accessPrivateToken || !accessToken) {
-      setApiRows([]);
-      setError("");
-      setLoading(false);
-      return;
-    }
+  const fetchOrders = useCallback(
+    async ({ skip = 0, append = false } = {}) => {
+      if (!retailer || !accessPrivateToken || !accessToken) {
+        if (!append) {
+          setApiRows([]);
+          setError("");
+        }
+        setLoading(false);
+        setLoadingMore(false);
+        setHasMore(false);
+        return;
+      }
 
-    setLoading(true);
-    setError("");
+      if (append) {
+        setLoadingMore(true);
+      } else {
+        setLoading(true);
+        setError("");
+      }
 
-    try {
-      const response = await getListOrder(
-        retailer,
-        accessPrivateToken,
-        accessToken,
-        filterMode === "exact" ? "day" : timeRange,
-        eInvoiceStatus,
-        queryParams,
-      );
-      const directRows = response?.data ?? response;
+      try {
+        const response = await getListOrder(
+          retailer,
+          accessPrivateToken,
+          accessToken,
+          filterMode === "exact" ? "day" : timeRange,
+          eInvoiceStatus,
+          {
+            ...baseQueryParams,
+            top: rowsPerPage,
+            skip,
+          },
+        );
 
-      setApiRows(
-        Array.isArray(directRows)
-          ? directRows.slice(1).map((row, index) => ({
-              ...row,
-              __rowId:
-                row?.__rowId ??
-                row?.Id ??
-                row?.id ??
-                row?.Code ??
-                `row-${index}`,
-            }))
-          : [],
-      );
-    } catch (err) {
-      setApiRows([]);
-      setError(err?.message || "Không lấy được danh sách đơn hàng");
-    } finally {
-      setLoading(false);
-    }
-  }, [
-    retailer,
-    accessPrivateToken,
-    accessToken,
-    filterMode,
-    timeRange,
-    eInvoiceStatus,
-    queryParams,
-  ]);
+        const nextRows = mapOrderRows(response);
+        setHasMore(nextRows.length >= rowsPerPage);
+
+        setApiRows((current) => {
+          if (!append) return nextRows;
+
+          const merged = [...current, ...nextRows];
+          const unique = [];
+          const seen = new Set();
+
+          merged.forEach((row) => {
+            const key = row.__rowId;
+            if (seen.has(key)) return;
+            seen.add(key);
+            unique.push(row);
+          });
+
+          return unique;
+        });
+      } catch (err) {
+        if (!append) {
+          setApiRows([]);
+          setError(err?.message || "Không lấy được danh sách đơn hàng");
+        }
+        setHasMore(false);
+      } finally {
+        setLoading(false);
+        setLoadingMore(false);
+      }
+    },
+    [
+      retailer,
+      accessPrivateToken,
+      accessToken,
+      filterMode,
+      timeRange,
+      eInvoiceStatus,
+      baseQueryParams,
+      rowsPerPage,
+    ],
+  );
 
   useEffect(() => {
-    fetchOrders();
+    setApiRows([]);
+    setSelectedRowIds(new Set());
+    setLastOperationResult(null);
+    setHddtStatusMessage("");
+    setError("");
+    setHasMore(true);
+    fetchOrders({ skip: 0, append: false });
   }, [
     fetchOrders,
     retailer,
@@ -531,11 +586,12 @@ export default function EinvoicesTab({
     exactFromDate,
     exactToDate,
     eInvoiceStatus,
-    queryParams,
+    rowsPerPage,
   ]);
 
   const visibleRows = apiRows;
-  const hasNoInvoices = !loading && !error && visibleRows.length === 0;
+  const hasNoInvoices =
+    !loading && !loadingMore && !error && visibleRows.length === 0;
   const selectableRows = useMemo(
     () => visibleRows.filter((row) => isSelectableEinvoiceRow(row)),
     [visibleRows],
@@ -609,6 +665,35 @@ export default function EinvoicesTab({
   const handleClearSelectedRows = () => {
     setSelectedRowIds(new Set());
   };
+
+  const loadMoreOrders = useCallback(() => {
+    if (loading || loadingMore || !hasMore) return;
+    fetchOrders({ skip: apiRows.length, append: true });
+  }, [apiRows.length, fetchOrders, hasMore, loading, loadingMore]);
+
+  const handleListScroll = useCallback(
+    (event) => {
+      const el = event.currentTarget;
+      if (loading || loadingMore || !hasMore) return;
+
+      const distanceToBottom =
+        el.scrollHeight - (el.scrollTop + el.clientHeight);
+
+      if (distanceToBottom <= 180) {
+        loadMoreOrders();
+      }
+    },
+    [hasMore, loadMoreOrders, loading, loadingMore],
+  );
+
+  useEffect(() => {
+    const el = listContainerRef.current;
+    if (!el || loading || loadingMore || !hasMore) return;
+
+    if (el.scrollHeight <= el.clientHeight + 80) {
+      loadMoreOrders();
+    }
+  }, [hasMore, loadMoreOrders, loading, loadingMore, visibleRows.length]);
 
   const resetOperationProgress = () => {
     setOperationProgress({
@@ -808,7 +893,8 @@ export default function EinvoicesTab({
 
           if (
             hasCustomerDistrictName &&
-            (!locationSuggestResult?.LocationV2 || !locationSuggestResult?.WardV2)
+            (!locationSuggestResult?.LocationV2 ||
+              !locationSuggestResult?.WardV2)
           ) {
             failedCount += 1;
             failedRows.push({
@@ -887,7 +973,9 @@ export default function EinvoicesTab({
         title: "Đồng bộ địa chỉ",
         totalCount: previewPayloadRows.length,
         successCount,
-        failedCount: failedCount + Math.max(0, previewPayloadRows.length - successCount - failedCount),
+        failedCount:
+          failedCount +
+          Math.max(0, previewPayloadRows.length - successCount - failedCount),
         skippedCount: 0,
         failedRows: failedRows.length
           ? failedRows
@@ -905,10 +993,85 @@ export default function EinvoicesTab({
   };
 
   const exportToExcel = async () => {
-    console.log("Excel payload", previewPayloadRows);
-    setHddtStatusMessage(
-      `Đã log ${previewPayloadRows.length} dòng payload Excel.`,
-    );
+    if (!retailer || !accessPrivateToken || !accessToken) {
+      setHddtStatusMessage("Thiếu thông tin xác thực, không thể xuất Excel.");
+      return;
+    }
+
+    setHddtStatusMessage("Đang tải toàn bộ dữ liệu để xuất Excel...");
+
+    const exportBatchSize = Math.max(rowsPerPage, 100);
+    const exportRowsSource = [];
+    const seenRowIds = new Set();
+    let skip = 0;
+    let hasMoreRows = true;
+
+    try {
+      while (hasMoreRows) {
+        const response = await getListOrder(
+          retailer,
+          accessPrivateToken,
+          accessToken,
+          filterMode === "exact" ? "day" : timeRange,
+          eInvoiceStatus,
+          {
+            ...baseQueryParams,
+            top: exportBatchSize,
+            skip,
+          },
+        );
+
+        const nextRows = mapOrderRows(response);
+        const newRows = nextRows.filter((row) => {
+          if (seenRowIds.has(row.__rowId)) return false;
+          seenRowIds.add(row.__rowId);
+          return true;
+        });
+
+        exportRowsSource.push(...newRows);
+
+        if (nextRows.length < exportBatchSize) {
+          hasMoreRows = false;
+        } else {
+          skip += exportBatchSize;
+        }
+      }
+
+      const exportRows = exportRowsSource.map((row, index) => {
+        const exportRow = {
+          STT: index + 1,
+        };
+
+        visibleColumns.forEach((column) => {
+          const rawValue = column.getValue ? column.getValue(row) : row?.[column.id];
+          const displayValue = column.render
+            ? column.render(rawValue, row)
+            : rawValue;
+
+          exportRow[column.label] = displayValue ?? "";
+        });
+
+        return exportRow;
+      });
+
+      if (exportRows.length === 0) {
+        setHddtStatusMessage("Không có dữ liệu để xuất Excel.");
+        return;
+      }
+
+      const worksheet = XLSX.utils.json_to_sheet(exportRows);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Einvoices");
+
+      const fileName = `einvoices_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      XLSX.writeFile(workbook, fileName);
+
+      setHddtStatusMessage(`Đã xuất ${exportRows.length} dòng ra file Excel.`);
+    } catch (error) {
+      setHddtStatusMessage(
+        error?.message || "Không thể tải đủ dữ liệu để xuất Excel.",
+      );
+    }
   };
 
   const summary = useMemo(() => {
@@ -1064,6 +1227,23 @@ export default function EinvoicesTab({
               ))}
             </select>
           </label>
+
+          <label className="grid gap-2 lg:w-[170px]">
+            <span className="text-[11px] font-extrabold uppercase tracking-[0.16em] text-slate-500">
+              Hiển thị
+            </span>
+            <select
+              value={rowsPerPage}
+              onChange={(event) => setRowsPerPage(Number(event.target.value))}
+              className="h-11 rounded-[14px] border border-slate-300 bg-white px-3 text-sm font-bold text-slate-800 outline-none focus:border-sky-400 focus:ring-2 focus:ring-sky-200"
+            >
+              {ROWS_PER_PAGE_OPTIONS.map((option) => (
+                <option key={option} value={option}>
+                  {option} dòng
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
 
         <div className="mb-4 flex flex-wrap gap-2">
@@ -1129,7 +1309,11 @@ export default function EinvoicesTab({
             </p>
           </div>
 
-          <div className="max-h-[68vh] overflow-auto">
+          <div
+            ref={listContainerRef}
+            onScroll={handleListScroll}
+            className="max-h-[68vh] overflow-auto"
+          >
             <table className="min-w-[1200px] w-full border-separate border-spacing-0 text-left">
               <thead>
                 <tr className="bg-slate-50 text-[11px] uppercase tracking-[0.14em] text-slate-500">
@@ -1226,6 +1410,20 @@ export default function EinvoicesTab({
                 )}
               </tbody>
             </table>
+
+            {loadingMore ? (
+              <div className="border-t border-slate-200 px-4 py-3 text-center text-xs font-semibold text-slate-500">
+                Đang tải thêm dòng...
+              </div>
+            ) : hasMore && visibleRows.length > 0 ? (
+              <div className="border-t border-slate-200 px-4 py-3 text-center text-xs font-semibold text-slate-400">
+                Kéo xuống để tải thêm
+              </div>
+            ) : visibleRows.length > 0 ? (
+              <div className="border-t border-slate-200 px-4 py-3 text-center text-xs font-semibold text-slate-400">
+                Đã tải hết dữ liệu
+              </div>
+            ) : null}
           </div>
         </div>
       </div>
