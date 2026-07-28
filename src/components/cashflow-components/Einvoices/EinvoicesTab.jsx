@@ -108,6 +108,68 @@ const EINVOICE_STATUS_OPTIONS = [
 
 const coalesceValue = (row, keys = []) => pickFirstNonEmpty(row, keys);
 
+const getRowDisplayLabel = (row, index) => {
+  const code =
+    getCustomerCode(row) ||
+    normalizeText(
+      row?.InvoiceDeliveryCode ??
+        row?.InvoiceNumber ??
+        row?.EInvoiceNumber ??
+        row?.Code ??
+        row?.id ??
+        "",
+    );
+  const name = normalizeText(row?.CustomerName ?? row?.customerName ?? "");
+  const fallback = `Dòng ${index + 1}`;
+
+  return [code || fallback, name].filter(Boolean).join(" - ");
+};
+
+const normalizeFailedRow = (item, index) => {
+  if (typeof item === "string") {
+    return {
+      label: `Dòng ${index + 1}`,
+      reason: item,
+    };
+  }
+
+  return {
+    label: normalizeText(item?.label ?? item?.rowLabel ?? item?.name) || `Dòng ${index + 1}`,
+    reason:
+      normalizeText(item?.reason ?? item?.message ?? item?.error) ||
+      "Không xác định được lỗi",
+  };
+};
+
+const extractOperationResult = (response, fallbackTotal = 0) => {
+  const payload = response?.data ?? response ?? {};
+  const failedRows = Array.isArray(payload?.failedRows)
+    ? payload.failedRows.map(normalizeFailedRow)
+    : Array.isArray(payload?.errors)
+      ? payload.errors.map(normalizeFailedRow)
+      : [];
+
+  const failedCountRaw = payload?.failedCount ?? payload?.errorCount;
+  const successCountRaw = payload?.successCount ?? payload?.okCount;
+  const skippedCountRaw = payload?.skippedCount ?? payload?.ignoredCount ?? 0;
+
+  const failedCount =
+    Number.isFinite(Number(failedCountRaw)) ? Number(failedCountRaw) : failedRows.length;
+  const successCount = Number.isFinite(Number(successCountRaw))
+    ? Number(successCountRaw)
+    : Math.max(0, fallbackTotal - failedCount);
+  const skippedCount = Number.isFinite(Number(skippedCountRaw))
+    ? Number(skippedCountRaw)
+    : 0;
+
+  return {
+    successCount,
+    failedCount,
+    skippedCount,
+    failedRows,
+  };
+};
+
 const getFirstEInvoice = (row) => {
   if (Array.isArray(row?.EInvoices) && row.EInvoices.length > 0) {
     return row.EInvoices[0] || {};
@@ -385,6 +447,7 @@ export default function EinvoicesTab({
   const [eInvoiceStatus, setEInvoiceStatus] = useState("0");
   const [selectedRowIds, setSelectedRowIds] = useState(() => new Set());
   const [hddtStatusMessage, setHddtStatusMessage] = useState("");
+  const [lastOperationResult, setLastOperationResult] = useState(null);
   const [operationProgress, setOperationProgress] = useState({
     visible: false,
     label: "",
@@ -614,6 +677,7 @@ export default function EinvoicesTab({
   }, [retailer, accessPrivateToken, accessToken, fetchOrders]);
 
   const handleExportHDDT = async () => {
+    setLastOperationResult(null);
     setHddtStatusMessage(
       `Đã chuẩn bị ${previewPayloadRows.length} dòng cho HDDT.`,
     );
@@ -628,21 +692,58 @@ export default function EinvoicesTab({
         previewPayloadRows,
       );
 
+      const exportResult = extractOperationResult(
+        response,
+        previewPayloadRows.length,
+      );
+
       updateOperationProgress(80, "Đang cập nhật lại trạng thái đơn hàng...");
       await fetchOrders();
 
+      let restoreResult = { restoredCount: 0, failedCount: 0 };
       updateOperationProgress(90, "Đang hoàn nguyên dữ liệu đại lý...");
       if (agencyCustomerBackupsRef.current.size > 0) {
         setHddtStatusMessage(
           "Đang hoàn nguyên thông tin đại lý sau khi xuất HDDT...",
         );
-        await restoreTemporaryAgencyCustomers();
+        restoreResult = await restoreTemporaryAgencyCustomers();
       }
 
+      setLastOperationResult({
+        type: "export",
+        title: "Xuất HDDT",
+        totalCount: previewPayloadRows.length,
+        successCount: exportResult.successCount,
+        failedCount: exportResult.failedCount,
+        skippedCount: exportResult.skippedCount,
+        failedRows: exportResult.failedRows,
+        extraNote:
+          restoreResult.failedCount > 0
+            ? `Hoàn nguyên đại lý còn ${restoreResult.failedCount} dòng chưa trả lại được.`
+            : "",
+      });
+      setHddtStatusMessage(
+        exportResult.failedCount > 0
+          ? `Xuất HDDT xong: ${exportResult.successCount}/${previewPayloadRows.length} dòng thành công, ${exportResult.failedCount} dòng thất bại.`
+          : `Xuất HDDT xong: ${exportResult.successCount}/${previewPayloadRows.length} dòng thành công.`,
+      );
       updateOperationProgress(100, "Hoàn tất xuất HDDT.");
       return response.data;
     } catch (error) {
       setHddtStatusMessage(error?.message || "Xuất HDDT thất bại.");
+      setLastOperationResult({
+        type: "export",
+        title: "Xuất HDDT",
+        totalCount: previewPayloadRows.length,
+        successCount: 0,
+        failedCount: previewPayloadRows.length,
+        skippedCount: 0,
+        failedRows: previewPayloadRows.map((row, index) => ({
+          label: getRowDisplayLabel(row, index),
+          reason: error?.message || "Xuất HDDT thất bại",
+        })),
+        extraNote: "",
+      });
       throw error;
     } finally {
       resetOperationProgress();
@@ -650,6 +751,7 @@ export default function EinvoicesTab({
   };
 
   const handleSyncAddress = async () => {
+    setLastOperationResult(null);
     if (previewPayloadRows.length === 0) {
       setHddtStatusMessage("Không có dòng hợp lệ để đồng bộ địa chỉ.");
       return;
@@ -667,7 +769,8 @@ export default function EinvoicesTab({
     updateOperationProgress(0, "Đang đồng bộ địa chỉ...");
 
     let successCount = 0;
-    let skippedCount = 0;
+    let failedCount = 0;
+    const failedRows = [];
 
     try {
       for (let index = 0; index < previewPayloadRows.length; index += 1) {
@@ -678,78 +781,124 @@ export default function EinvoicesTab({
           currentLabel,
         );
 
-        const customerCode = getCustomerCode(row);
-        if (!customerCode) {
-          skippedCount += 1;
-          continue;
-        }
+        try {
+          const customerCode = getCustomerCode(row);
+          if (!customerCode) {
+            failedCount += 1;
+            failedRows.push({
+              label: getRowDisplayLabel(row, index),
+              reason: "Thiếu mã khách hàng (Code/CompareCode).",
+            });
+            continue;
+          }
 
-        const hasCustomerDistrictName = Boolean(
-          normalizeText(row?.CustomerDistrictName),
-        );
-        const locationSuggestResult = hasCustomerDistrictName
-          ? await getLocationSuggest(
-              retailer,
-              accessPrivateToken,
-              accessToken,
-              row.CustomerLocationName,
-              row.CustomerDistrictName,
-              row.CustomerWardName,
-            )
-          : null;
+          const hasCustomerDistrictName = Boolean(
+            normalizeText(row?.CustomerDistrictName),
+          );
+          const locationSuggestResult = hasCustomerDistrictName
+            ? await getLocationSuggest(
+                retailer,
+                accessPrivateToken,
+                accessToken,
+                row.CustomerLocationName,
+                row.CustomerDistrictName,
+                row.CustomerWardName,
+              )
+            : null;
 
-        if (
-          hasCustomerDistrictName &&
-          (!locationSuggestResult?.LocationV2 || !locationSuggestResult?.WardV2)
-        ) {
-          skippedCount += 1;
-          continue;
-        }
+          if (
+            hasCustomerDistrictName &&
+            (!locationSuggestResult?.LocationV2 || !locationSuggestResult?.WardV2)
+          ) {
+            failedCount += 1;
+            failedRows.push({
+              label: getRowDisplayLabel(row, index),
+              reason: "Không tìm được gợi ý địa chỉ để đồng bộ.",
+            });
+            continue;
+          }
 
-        const updatePayload = await buildCustomerAddressUpdatePayload(
-          row,
-          locationSuggestResult,
-          retailer,
-          accessPrivateToken,
-        );
+          const updatePayload = await buildCustomerAddressUpdatePayload(
+            row,
+            locationSuggestResult,
+            retailer,
+            accessPrivateToken,
+          );
 
-        const agencyName = row?.CustomerName ?? row?.customerName;
-        const isAgencyRow = isAgencyCustomerName(agencyName);
+          const agencyName = row?.CustomerName ?? row?.customerName;
+          const isAgencyRow = isAgencyCustomerName(agencyName);
 
-        const updateResult = await updateCustomerAddress(
-          retailer,
-          accessPrivateToken,
-          accessToken,
-          updatePayload,
-          isAgencyRow ? "Cá nhân" : "Cá nhân",
-          isAgencyRow ? "" : "",
-        );
+          const updateResult = await updateCustomerAddress(
+            retailer,
+            accessPrivateToken,
+            accessToken,
+            updatePayload,
+            isAgencyRow ? "Cá nhân" : "Cá nhân",
+            isAgencyRow ? "" : "",
+          );
 
-        const originalCustomer = updateResult?.originalCustomer;
-        const restoreCode = getCustomerCode(originalCustomer) || customerCode;
+          const originalCustomer = updateResult?.originalCustomer;
+          const restoreCode = getCustomerCode(originalCustomer) || customerCode;
 
-        if (isAgencyRow && restoreCode) {
-          agencyCustomerBackupsRef.current.set(restoreCode, {
-            ...originalCustomer,
-            Code: restoreCode,
-            CompareCode: restoreCode,
-            CustomerType: originalCustomer?.CustomerType || "Công ty",
-            Organization: originalCustomer?.Organization || "",
+          if (isAgencyRow && restoreCode) {
+            agencyCustomerBackupsRef.current.set(restoreCode, {
+              ...originalCustomer,
+              Code: restoreCode,
+              CompareCode: restoreCode,
+              CustomerType: originalCustomer?.CustomerType || "Công ty",
+              Organization: originalCustomer?.Organization || "",
+            });
+          }
+
+          successCount += 1;
+        } catch (error) {
+          failedCount += 1;
+          failedRows.push({
+            label: getRowDisplayLabel(row, index),
+            reason: error?.message || "Đồng bộ địa chỉ thất bại.",
           });
         }
-
-        successCount += 1;
       }
 
       updateOperationProgress(100, "Hoàn tất đồng bộ địa chỉ.");
 
+      setLastOperationResult({
+        type: "sync",
+        title: "Đồng bộ địa chỉ",
+        totalCount: previewPayloadRows.length,
+        successCount,
+        failedCount,
+        skippedCount: 0,
+        failedRows,
+        extraNote: "",
+      });
+
       setHddtStatusMessage(
-        skippedCount > 0
-          ? `Đã đồng bộ ${successCount}/${previewPayloadRows.length} dòng, bỏ qua ${skippedCount} dòng không đủ dữ liệu.`
+        failedCount > 0
+          ? `Đã đồng bộ ${successCount}/${previewPayloadRows.length} dòng, thất bại ${failedCount} dòng.`
           : `Đã đồng bộ ${successCount}/${previewPayloadRows.length} dòng.`,
       );
 
       await fetchOrders();
+    } catch (error) {
+      setHddtStatusMessage(error?.message || "Đồng bộ địa chỉ thất bại.");
+      setLastOperationResult({
+        type: "sync",
+        title: "Đồng bộ địa chỉ",
+        totalCount: previewPayloadRows.length,
+        successCount,
+        failedCount: failedCount + Math.max(0, previewPayloadRows.length - successCount - failedCount),
+        skippedCount: 0,
+        failedRows: failedRows.length
+          ? failedRows
+          : [
+              {
+                label: "Chưa xác định",
+                reason: error?.message || "Đồng bộ địa chỉ thất bại.",
+              },
+            ],
+        extraNote: "",
+      });
     } finally {
       resetOperationProgress();
     }
@@ -1127,6 +1276,59 @@ export default function EinvoicesTab({
         {hddtStatusMessage ? (
           <div className="mt-3 rounded-[16px] border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-600">
             {hddtStatusMessage}
+          </div>
+        ) : null}
+
+        {lastOperationResult ? (
+          <div className="mt-3 rounded-[18px] border border-cyan-200/60 bg-gradient-to-b from-cyan-50 to-white p-4 shadow-[0_16px_36px_rgba(14,165,233,0.08)]">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <div className="text-[11px] font-extrabold uppercase tracking-[0.16em] text-cyan-700">
+                  Kết quả {lastOperationResult.title}
+                </div>
+                <div className="mt-1 text-sm font-bold text-slate-900">
+                  Tổng: {lastOperationResult.totalCount}
+                </div>
+                {lastOperationResult.extraNote ? (
+                  <div className="mt-1 text-xs leading-6 text-slate-500">
+                    {lastOperationResult.extraNote}
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-700">
+                  Thành công: {lastOperationResult.successCount}
+                </span>
+                <span className="rounded-full border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-bold text-rose-700">
+                  Thất bại: {lastOperationResult.failedCount}
+                </span>
+                {lastOperationResult.skippedCount > 0 ? (
+                  <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-bold text-amber-700">
+                    Bỏ qua: {lastOperationResult.skippedCount}
+                  </span>
+                ) : null}
+              </div>
+            </div>
+
+            {lastOperationResult.failedRows.length > 0 ? (
+              <div className="mt-4 rounded-[16px] border border-rose-200/70 bg-white p-3">
+                <div className="mb-2 text-xs font-extrabold uppercase tracking-[0.16em] text-rose-700">
+                  Dòng thất bại
+                </div>
+                <div className="max-h-48 space-y-2 overflow-auto pr-1">
+                  {lastOperationResult.failedRows.map((item, index) => (
+                    <div
+                      key={`${item.label}-${index}`}
+                      className="rounded-2xl border border-rose-100 bg-rose-50/70 px-3 py-2 text-xs leading-6 text-rose-800"
+                    >
+                      <div className="font-semibold">{item.label}</div>
+                      <div className="text-rose-700/90">{item.reason}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
           </div>
         ) : null}
 
