@@ -10,11 +10,16 @@ import {
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import QRCode from "qrcode";
+import {
+  resolveDuaSapImageUrl,
+  uploadDuaSapImages,
+} from "../../utils/duaSapImageUpload";
 
 // ─── Google Drive URL normalizer ─────────────────────────────────────────────
 function toDirectImageUrl(url) {
   if (!url) return url;
   if (/^data:image\//i.test(url)) return url;
+  if (String(url).startsWith("/api/")) return resolveDuaSapImageUrl(url);
   const driveFileId =
     url.match(/drive\.google\.com\/file\/d\/([^/?#]+)/)?.[1] ||
     url.match(/[?&]id=([^&#]+)/)?.[1];
@@ -588,9 +593,14 @@ const ACTION_LABEL = {
   them_cay: { label: "Thêm cây", cls: "bg-emerald-100 text-emerald-700" },
   sua_cay: { label: "Sửa cây", cls: "bg-blue-100 text-blue-700" },
   xoa_cay: { label: "Xóa cây", cls: "bg-red-100 text-red-700" },
+  them_cay_hang_loat: { label: "Thêm hàng loạt", cls: "bg-emerald-100 text-emerald-700" },
+  cap_nhat_hang_loat: { label: "Sửa hàng loạt", cls: "bg-sky-100 text-sky-700" },
+  xoa_cay_hang_loat: { label: "Xóa hàng loạt", cls: "bg-red-100 text-red-700" },
   them_ban_ghi: { label: "Thêm bản ghi", cls: "bg-teal-100 text-teal-700" },
   sua_ban_ghi: { label: "Sửa bản ghi", cls: "bg-indigo-100 text-indigo-700" },
   xoa_ban_ghi: { label: "Xóa bản ghi", cls: "bg-rose-100 text-rose-700" },
+  sua_ban_ghi_hang_loat: { label: "Sửa bản ghi hàng loạt", cls: "bg-indigo-100 text-indigo-700" },
+  xoa_ban_ghi_hang_loat: { label: "Xóa bản ghi hàng loạt", cls: "bg-rose-100 text-rose-700" },
   them_anh: { label: "Thêm ảnh", cls: "bg-amber-100 text-amber-700" },
   xoa_anh: { label: "Xóa ảnh", cls: "bg-orange-100 text-orange-700" },
   them_cham_soc: { label: "Chăm sóc", cls: "bg-lime-100 text-lime-700" },
@@ -605,6 +615,258 @@ function fmtDateTime(d) {
       hour: "2-digit", minute: "2-digit", second: "2-digit",
     });
   } catch { return d; }
+}
+
+function formatLogValue(value, field) {
+  if (value === null || value === undefined || value === "") return "—";
+  if (field === "loai") {
+    return value === "ong_nghiem" ? "Trong ống nghiệm" : value === "cay_giong" ? "Cây giống" : String(value);
+  }
+  if (field === "trangThai") {
+    return (TRANG_THAI_OPTIONS.find((item) => item.value === value)
+      || TRANG_THAI_ONG_NGHIEM_OPTIONS.find((item) => item.value === value))?.label
+      || String(value);
+  }
+  if (field === "anhUrl" && Array.isArray(value)) {
+    return value.length ? `${value.length} ảnh:\n${value.join("\n")}` : "Không có ảnh";
+  }
+  if (Array.isArray(value) || typeof value === "object") {
+    try { return JSON.stringify(value, null, 2); }
+    catch { return String(value); }
+  }
+  if (typeof value === "boolean") return value ? "Có" : "Không";
+  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}T/.test(value)) return fmtDateTime(value);
+  return String(value);
+}
+
+function LogChangeDetails({ log }) {
+  const directChanges = Array.isArray(log.changes) ? log.changes : [];
+  const bulkChanges = Array.isArray(log.snapshot?.itemChanges)
+    ? log.snapshot.itemChanges.flatMap((item) =>
+      (item.changes || []).map((change) => ({ ...change, maCay: item.maCay })))
+    : [];
+  const changes = directChanges.length ? directChanges : bulkChanges;
+  if (!changes.length) return null;
+
+  return (
+    <details className="mt-2">
+      <summary className="cursor-pointer select-none text-xs font-semibold text-blue-700 hover:text-blue-800">
+        Xem {changes.length} trường thay đổi
+      </summary>
+      <div className="mt-2 max-h-80 space-y-2 overflow-y-auto pr-1">
+        {changes.map((change, index) => (
+          <div key={`${change.maCay || ""}-${change.field}-${index}`} className="rounded-lg border border-gray-100 bg-white p-2.5">
+            <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-gray-700">
+              {change.maCay && <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-emerald-700">{change.maCay}</span>}
+              <span>{change.label || change.field}</span>
+              <span className="font-normal text-gray-400">({change.field})</span>
+            </div>
+            <div className="grid gap-2 sm:grid-cols-[1fr_auto_1fr] sm:items-start">
+              <div>
+                <div className="mb-1 text-[10px] font-semibold uppercase text-red-400">Trước</div>
+                <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-md bg-red-50 p-2 font-sans text-[11px] text-red-700">
+                  {formatLogValue(change.before, change.field)}
+                </pre>
+              </div>
+              <span className="hidden pt-7 text-gray-300 sm:block">→</span>
+              <div>
+                <div className="mb-1 text-[10px] font-semibold uppercase text-emerald-500">Sau</div>
+                <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-md bg-emerald-50 p-2 font-sans text-[11px] text-emerald-700">
+                  {formatLogValue(change.after, change.field)}
+                </pre>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </details>
+  );
+}
+
+function excelDate(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString("vi-VN");
+}
+
+function excelValue(value) {
+  if (value === null || value === undefined) return "";
+  const text = typeof value === "object" ? JSON.stringify(value) : String(value);
+  return text.length > 32000 ? `${text.slice(0, 32000)}…` : text;
+}
+
+function appendJsonSheet(workbook, name, rows, fallbackHeaders) {
+  const sheet = rows.length
+    ? XLSX.utils.json_to_sheet(rows)
+    : XLSX.utils.aoa_to_sheet([fallbackHeaders]);
+  const headers = rows.length ? Object.keys(rows[0]) : fallbackHeaders;
+  sheet["!cols"] = headers.map((header) => {
+    const maxLength = Math.max(
+      String(header).length,
+      ...rows.slice(0, 500).map((row) => String(row[header] ?? "").length),
+    );
+    return { wch: Math.min(Math.max(maxLength + 2, 12), 60) };
+  });
+  sheet["!autofilter"] = rows.length
+    ? { ref: sheet["!ref"] }
+    : undefined;
+  XLSX.utils.book_append_sheet(workbook, sheet, name);
+}
+
+function exportDuaSapWorkbook({ trees = [], records = [], logs = [] }, fileScope = "tat-ca") {
+  const exportedMacays = new Set(trees.map((tree) => tree.maCay));
+  const treeRows = trees.map((tree) => ({
+    "ID hệ thống": tree._id || "",
+    "Mã cây/ống nghiệm": tree.maCay,
+    "Loại": tree.loai === "ong_nghiem" ? "Ống nghiệm" : "Cây dừa",
+    "Vị trí": tree.viTri || "",
+    "Khu vực / Lô": tree.khuVuc || "",
+    "Giống": tree.giong || "",
+    "Tên giống / Dòng": tree.tenGiong || "",
+    "Ngày trồng / Ngày cấy": excelDate(tree.ngayTrong),
+    "Trạng thái": getTinhTrangLabel(tree.trangThai) || tree.trangThai || "",
+    "Vĩ độ": tree.toaDo?.lat ?? "",
+    "Kinh độ": tree.toaDo?.lng ?? "",
+    "Số ảnh": tree.anhUrl?.length || 0,
+    "Danh sách URL ảnh": (tree.anhUrl || []).join("\n"),
+    "Ghi chú": tree.ghiChu || "",
+    "Ngày tạo": excelDate(tree.createdAt),
+    "Cập nhật lần cuối": excelDate(tree.updatedAt),
+    "Dữ liệu JSON đầy đủ": excelValue(tree),
+  }));
+
+  const recordRows = records.map((record) => ({
+    "ID bản ghi": record._id || "",
+    "ID cây/ống nghiệm": record.duaSapId || "",
+    "Mã cây/ống nghiệm": record.maCay,
+    "Kỳ theo dõi": record.kyTheoDoiNhan || `T${record.thangBatDau}-T${record.thangKetThuc}/${record.nam}`,
+    "Tháng bắt đầu": record.thangBatDau,
+    "Tháng kết thúc": record.thangKetThuc,
+    "Năm": record.nam,
+    "Tình trạng": getTinhTrangLabel(record.tinhTrangCay) || record.tinhTrangCay || "",
+    "Số tàu": record.soTau ?? "",
+    "Số hoa": record.soHoa ?? "",
+    "Ngày ra cây dự kiến": excelDate(record.ngayRaCayDuKien),
+    "Ngày ra cây thực tế": excelDate(record.ngayRaCayThucTe),
+    "Yêu cầu / Đề xuất": record.yeuCauDeXuat || "",
+    "Người ghi nhận": record.nguoiGhiNhan || "",
+    "ID người ghi nhận": record.userId || "",
+    "Ghi chú": record.ghiChu || "",
+    "Số lần phun thuốc": record.lichPhunThuoc?.length || 0,
+    "Số lần bón phân": record.lichBonPhan?.length || 0,
+    "Ngày tạo": excelDate(record.createdAt),
+    "Cập nhật lần cuối": excelDate(record.updatedAt),
+    "Dữ liệu JSON đầy đủ": excelValue(record),
+  }));
+
+  const productionRows = records.flatMap((record) => [
+    ...(record.sanLuongDuKien || []).map((item) => ({
+      "Mã cây": record.maCay,
+      "Kỳ theo dõi": record.kyTheoDoiNhan || `T${record.thangBatDau}-T${record.thangKetThuc}/${record.nam}`,
+      "Loại sản lượng": "Dự kiến",
+      "Tháng": item.thang,
+      "Năm": item.nam,
+      "Số lượng": item.soLuong ?? "",
+    })),
+    ...(record.sanLuongThucTe || []).map((item) => ({
+      "Mã cây": record.maCay,
+      "Kỳ theo dõi": record.kyTheoDoiNhan || `T${record.thangBatDau}-T${record.thangKetThuc}/${record.nam}`,
+      "Loại sản lượng": "Thực tế",
+      "Tháng": item.thang,
+      "Năm": item.nam,
+      "Số lượng": item.soLuong ?? "",
+    })),
+  ]);
+
+  const scheduleRows = records.flatMap((record) => [
+    ...(record.lichPhunThuoc || []).map((item) => ({
+      "Mã cây/ống nghiệm": record.maCay,
+      "Kỳ theo dõi": record.kyTheoDoiNhan || `T${record.thangBatDau}-T${record.thangKetThuc}/${record.nam}`,
+      "Loại lịch": "Phun thuốc",
+      "Ngày": excelDate(item.ngay),
+      "Sản phẩm": item.sanPham || "",
+      "Liều lượng": item.lieuLuong || "",
+      "Ghi chú": item.ghiChu || "",
+    })),
+    ...(record.lichBonPhan || []).map((item) => ({
+      "Mã cây/ống nghiệm": record.maCay,
+      "Kỳ theo dõi": record.kyTheoDoiNhan || `T${record.thangBatDau}-T${record.thangKetThuc}/${record.nam}`,
+      "Loại lịch": "Bón phân",
+      "Ngày": excelDate(item.ngay),
+      "Sản phẩm": item.sanPham || "",
+      "Liều lượng": item.lieuLuong || "",
+      "Ghi chú": item.ghiChu || "",
+    })),
+  ]);
+
+  const careRows = trees.flatMap((tree) => (tree.lichSuChamSoc || []).map((item) => ({
+    "Mã cây/ống nghiệm": tree.maCay,
+    "Ngày": excelDate(item.ngay),
+    "Loại chăm sóc": item.loai || "",
+    "Sản phẩm": item.sanPham || "",
+    "Liều lượng": item.lieuLuong || "",
+    "Người thực hiện": item.nguoiThucHien || "",
+    "Ghi chú": item.ghiChu || "",
+  })));
+
+  const logRows = logs.map((log) => {
+    const relatedMacays = log.maCay
+      ? [log.maCay]
+      : (log.snapshot?.macays || log.snapshot?.itemChanges?.map((item) => item.maCay) || [])
+          .filter((maCay) => exportedMacays.has(maCay));
+    return {
+      "ID nhật ký": log._id || "",
+      "Thời gian": excelDate(log.timestamp),
+      "Mã cây/ống nghiệm": relatedMacays.join(", "),
+      "Hành động": ACTION_LABEL[log.action]?.label || log.action,
+      "Người thực hiện": log.userName || "Hệ thống",
+      "Mô tả": log.detail || "",
+      "Số trường thay đổi": log.changes?.length
+        || log.snapshot?.itemChanges?.reduce((sum, item) => sum + (item.changes?.length || 0), 0)
+        || 0,
+      "Dữ liệu trước": excelValue(log.beforeSnapshot),
+      "Dữ liệu sau": excelValue(log.afterSnapshot || log.snapshot),
+    };
+  });
+
+  const changeRows = logs.flatMap((log) => {
+    const base = {
+      "Thời gian": excelDate(log.timestamp),
+      "Hành động": ACTION_LABEL[log.action]?.label || log.action,
+      "Người thực hiện": log.userName || "Hệ thống",
+    };
+    if (Array.isArray(log.changes) && log.changes.length) {
+      return log.changes.map((change) => ({
+        ...base,
+        "Mã cây/ống nghiệm": log.maCay || change.maCay || "",
+        "Trường": change.label || change.field,
+        "Tên trường kỹ thuật": change.field,
+        "Giá trị trước": excelValue(change.before),
+        "Giá trị sau": excelValue(change.after),
+      }));
+    }
+    if (!Array.isArray(log.snapshot?.itemChanges)) return [];
+    return log.snapshot.itemChanges
+      .filter((item) => exportedMacays.has(item.maCay))
+      .flatMap((item) => (item.changes || []).map((change) => ({
+        ...base,
+        "Mã cây/ống nghiệm": item.maCay,
+        "Trường": change.label || change.field,
+        "Tên trường kỹ thuật": change.field,
+        "Giá trị trước": excelValue(change.before),
+        "Giá trị sau": excelValue(change.after),
+      })));
+  });
+
+  const workbook = XLSX.utils.book_new();
+  appendJsonSheet(workbook, "Cay_Ong_nghiem", treeRows, ["Mã cây/ống nghiệm", "Loại"]);
+  appendJsonSheet(workbook, "Ban_ghi_theo_doi", recordRows, ["Mã cây/ống nghiệm", "Kỳ theo dõi"]);
+  appendJsonSheet(workbook, "San_luong_thang", productionRows, ["Mã cây", "Tháng", "Số lượng"]);
+  appendJsonSheet(workbook, "Lich_phun_bon", scheduleRows, ["Mã cây/ống nghiệm", "Loại lịch", "Ngày"]);
+  appendJsonSheet(workbook, "Cham_soc_tong_hop", careRows, ["Mã cây/ống nghiệm", "Ngày", "Loại chăm sóc"]);
+  appendJsonSheet(workbook, "Nhat_ky", logRows, ["Thời gian", "Mã cây/ống nghiệm", "Hành động"]);
+  appendJsonSheet(workbook, "Chi_tiet_thay_doi", changeRows, ["Thời gian", "Mã cây/ống nghiệm", "Trường", "Giá trị trước", "Giá trị sau"]);
+  XLSX.writeFile(workbook, `dua-sap-${fileScope}-${new Date().toISOString().slice(0, 10)}.xlsx`);
 }
 
 function LogModal({ onClose, api }) {
@@ -645,7 +907,7 @@ function LogModal({ onClose, api }) {
   return (
     <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
       <div
-        className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col"
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-6xl max-h-[90vh] flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -755,8 +1017,9 @@ function LogModal({ onClose, api }) {
                         <span className="font-bold text-emerald-700 text-xs">{log.maCay || "—"}</span>
                       </td>
                       <td className="px-4 py-2.5 text-xs text-gray-600">{log.userName || "—"}</td>
-                      <td className="px-4 py-2.5 text-xs text-gray-500 max-w-xs truncate" title={log.detail}>
-                        {log.detail || "—"}
+                      <td className="px-4 py-2.5 text-xs text-gray-500">
+                        <div>{log.detail || "—"}</div>
+                        <LogChangeDetails log={log} />
                       </td>
                     </tr>
                   );
@@ -1012,11 +1275,11 @@ function Textarea({ ...props }) {
 }
 
 // ─── Modal wrapper ────────────────────────────────────────────────────────────
-function Modal({ title, onClose, children, wide }) {
+function Modal({ title, onClose, children, wide, xwide }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
       <div
-        className={`bg-white rounded-2xl shadow-2xl w-full ${wide ? "max-w-2xl" : "max-w-lg"} max-h-[90vh] overflow-y-auto`}
+        className={`bg-white rounded-2xl shadow-2xl w-full ${xwide ? "max-w-6xl" : wide ? "max-w-2xl" : "max-w-lg"} max-h-[90vh] overflow-y-auto`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 sticky top-0 bg-white z-10">
@@ -1033,6 +1296,7 @@ function Modal({ title, onClose, children, wide }) {
 
 // ─── Form cây ────────────────────────────────────────────────────────────────
 function TreeForm({ initial, onSave, onClose, saving }) {
+  const { token } = useAuth();
   const [form, setForm] = useState(() => ({
     maCay: "", viTri: "", khuVuc: "",
     giong: "", tenGiong: "",
@@ -1045,6 +1309,7 @@ function TreeForm({ initial, onSave, onClose, saving }) {
   const [urlInput, setUrlInput] = useState("");
   const [urlError, setUrlError] = useState("");
   const [imgErrors, setImgErrors] = useState({});
+  const [uploadingImages, setUploadingImages] = useState(false);
 
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
   const isON = form.loai === "ong_nghiem";
@@ -1065,6 +1330,26 @@ function TreeForm({ initial, onSave, onClose, saving }) {
   const removeUrl = (idx) => {
     set("anhUrl", (form.anhUrl || []).filter((_, i) => i !== idx));
     setImgErrors((prev) => { const n = { ...prev }; delete n[idx]; return n; });
+  };
+
+  const handleImageFiles = async (event) => {
+    const files = Array.from(event.target.files || []);
+    event.target.value = "";
+    if (!files.length || uploadingImages) return;
+
+    try {
+      setUploadingImages(true);
+      setUrlError("");
+      const urls = await uploadDuaSapImages(files, form.loai, token);
+      setForm((current) => ({
+        ...current,
+        anhUrl: Array.from(new Set([...(current.anhUrl || []), ...urls])),
+      }));
+    } catch (error) {
+      setUrlError(error.message || "Không thể tải ảnh lên Google Drive");
+    } finally {
+      setUploadingImages(false);
+    }
   };
 
   return (
@@ -1131,7 +1416,22 @@ function TreeForm({ initial, onSave, onClose, saving }) {
 
       {/* Ảnh cây */}
       <div>
-        <Label>{isON ? "Ảnh ống nghiệm (URL hoặc base64)" : "Ảnh cây (URL hoặc base64)"}</Label>
+        <Label>{isON ? "Ảnh ống nghiệm" : "Ảnh cây dừa"}</Label>
+        <div className="mb-2 flex items-center gap-2">
+          <label className={`inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700 transition ${uploadingImages ? "cursor-not-allowed opacity-60" : "cursor-pointer hover:bg-emerald-100"}`}>
+            {uploadingImages ? <Loader2 size={15} className="animate-spin" /> : <Upload size={15} />}
+            {uploadingImages ? "Đang tải lên..." : "Chọn ảnh từ máy"}
+            <input
+              type="file"
+              accept="image/*"
+              multiple
+              disabled={uploadingImages}
+              onChange={handleImageFiles}
+              className="hidden"
+            />
+          </label>
+          <span className="text-xs text-gray-400">Tối đa 10MB mỗi ảnh</span>
+        </div>
         <div className="flex gap-2">
           <div className="flex-1 relative">
             <Link size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
@@ -1183,14 +1483,14 @@ function TreeForm({ initial, onSave, onClose, saving }) {
           </div>
         )}
         {(form.anhUrl || []).length === 0 && (
-          <p className="text-xs text-gray-400 mt-1">Chưa có ảnh nào. Nhập URL và nhấn Thêm.</p>
+          <p className="text-xs text-gray-400 mt-1">Chưa có ảnh nào. Chọn ảnh từ máy hoặc nhập URL.</p>
         )}
       </div>
 
       <div className="flex gap-3 pt-2 justify-end">
         <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-gray-500 hover:text-gray-700 transition">Hủy</button>
         <button
-          type="submit" disabled={saving}
+          type="submit" disabled={saving || uploadingImages}
           className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2 rounded-xl text-sm font-medium transition disabled:opacity-60"
         >
           {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
@@ -2046,6 +2346,533 @@ function RecordForm({ maCay, loai = "cay_giong", initial, onSave, onClose, savin
   );
 }
 
+// ─── Sửa nhiều bản ghi theo dõi ──────────────────────────────────────────────
+function BulkRecordUpdateForm({ count, loai, onSave, onClose, saving }) {
+  const isOngNghiem = loai === "ong_nghiem";
+  const isMixed = loai === "mixed";
+  const [enabled, setEnabled] = useState(new Set());
+  const [values, setValues] = useState({
+    kyTheoDoiNhan: "",
+    tinhTrangCay: "",
+    soTau: "",
+    soHoa: "",
+    ngayRaCayDuKien: "",
+    ngayRaCayThucTe: "",
+    yeuCauDeXuat: "",
+    lichPhunThuoc: [],
+    lichBonPhan: [],
+    nguoiGhiNhan: "",
+    ghiChu: "",
+  });
+  const [scheduleModes, setScheduleModes] = useState({
+    lichPhunThuoc: "append",
+    lichBonPhan: "append",
+  });
+  const [formError, setFormError] = useState("");
+
+  const fields = [
+    { key: "kyTheoDoiNhan", label: "Nhãn hiển thị kỳ", type: "text" },
+    ...(!isMixed ? [{
+      key: "tinhTrangCay",
+      label: "Tình trạng",
+      type: "select",
+      options: isOngNghiem
+        ? TINH_TRANG_ONG_NGHIEM_OPTIONS.map((item) => ({ value: item.value, label: item.label }))
+        : TINH_TRANG_OPTIONS.map((item) => ({ value: item, label: `Cấp ${item}` })),
+    }] : []),
+    ...(!isOngNghiem && !isMixed ? [
+      { key: "soTau", label: "Số tàu", type: "number" },
+      { key: "soHoa", label: "Số hoa", type: "number" },
+    ] : isOngNghiem ? [
+      { key: "ngayRaCayDuKien", label: "Ngày ra cây dự kiến", type: "date" },
+      { key: "ngayRaCayThucTe", label: "Ngày ra cây thực tế", type: "date" },
+      { key: "yeuCauDeXuat", label: "Yêu cầu / Đề xuất", type: "textarea" },
+    ] : []),
+    { key: "lichPhunThuoc", label: "Lịch phun thuốc", type: "schedule", color: "blue" },
+    { key: "lichBonPhan", label: "Lịch bón phân", type: "schedule", color: "amber" },
+    { key: "nguoiGhiNhan", label: "Người ghi nhận", type: "text" },
+    { key: "ghiChu", label: "Ghi chú kỳ", type: "textarea" },
+  ];
+
+  function toggleField(key) {
+    setEnabled((current) => {
+      const next = new Set(current);
+      next.has(key) ? next.delete(key) : next.add(key);
+      return next;
+    });
+  }
+
+  function submit(event) {
+    event.preventDefault();
+    if (!enabled.size) return;
+    setFormError("");
+    const payload = {};
+    for (const key of enabled) {
+      const field = fields.find((item) => item.key === key);
+      const rawValue = values[key];
+      if (field?.type === "schedule") {
+        if (scheduleModes[key] === "append" && rawValue.length === 0) {
+          setFormError(`Vui lòng thêm ít nhất một dòng cho ${field.label.toLowerCase()}`);
+          return;
+        }
+        if (rawValue.some((item) => !item.ngay)) {
+          setFormError(`Mỗi dòng trong ${field.label.toLowerCase()} phải có ngày`);
+          return;
+        }
+        payload[key] = rawValue;
+        continue;
+      }
+      if (field?.type === "number") payload[key] = rawValue === "" ? null : Number(rawValue);
+      else if (field?.type === "date") payload[key] = rawValue || null;
+      else payload[key] = rawValue;
+    }
+    const enabledScheduleModes = Object.fromEntries(
+      [...enabled]
+        .filter((key) => key === "lichPhunThuoc" || key === "lichBonPhan")
+        .map((key) => [key, scheduleModes[key]]),
+    );
+    onSave(payload, enabledScheduleModes);
+  }
+
+  function addScheduleRow(key) {
+    setValues((current) => ({
+      ...current,
+      [key]: [...current[key], { ngay: "", sanPham: "", lieuLuong: "", ghiChu: "" }],
+    }));
+  }
+
+  function updateScheduleRow(key, index, field, value) {
+    setValues((current) => {
+      const rows = [...current[key]];
+      rows[index] = { ...rows[index], [field]: value };
+      return { ...current, [key]: rows };
+    });
+  }
+
+  function removeScheduleRow(key, index) {
+    setValues((current) => ({
+      ...current,
+      [key]: current[key].filter((_, rowIndex) => rowIndex !== index),
+    }));
+  }
+
+  return (
+    <form onSubmit={submit} className="space-y-4">
+      <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-700">
+        Chỉ các trường được đánh dấu mới được áp dụng cho <strong>{count} bản ghi</strong>.
+        Để trống một trường đã đánh dấu sẽ xóa giá trị hiện tại của trường đó.
+      </div>
+      <div className="space-y-3">
+        {fields.map((field) => {
+          const isEnabled = enabled.has(field.key);
+          return (
+            <div key={field.key} className={`rounded-xl border p-3 transition ${isEnabled ? "border-emerald-200 bg-emerald-50/40" : "border-gray-100 bg-gray-50/50"}`}>
+              <label className="mb-2 flex cursor-pointer items-center gap-2 text-sm font-medium text-gray-700">
+                <input
+                  type="checkbox"
+                  checked={isEnabled}
+                  onChange={() => toggleField(field.key)}
+                  className="h-4 w-4 accent-emerald-600"
+                />
+                {field.label}
+              </label>
+              {field.type === "schedule" ? (
+                <div className={isEnabled ? "" : "pointer-events-none opacity-50"}>
+                  <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                    <Select
+                      disabled={!isEnabled}
+                      value={scheduleModes[field.key]}
+                      onChange={(event) => setScheduleModes((current) => ({
+                        ...current,
+                        [field.key]: event.target.value,
+                      }))}
+                    >
+                      <option value="append">Thêm vào lịch hiện có</option>
+                      <option value="replace">Thay thế toàn bộ lịch</option>
+                    </Select>
+                    <button
+                      type="button"
+                      disabled={!isEnabled}
+                      onClick={() => addScheduleRow(field.key)}
+                      className={`flex items-center gap-1 text-xs font-medium ${field.color === "blue" ? "text-blue-600" : "text-amber-600"}`}
+                    >
+                      <Plus size={12} /> Thêm dòng
+                    </button>
+                  </div>
+                  <ChamSocRows
+                    rows={values[field.key]}
+                    bg={field.color === "blue" ? "bg-blue-50" : "bg-amber-50"}
+                    onUpdate={(index, name, value) => updateScheduleRow(field.key, index, name, value)}
+                    onRemove={(index) => removeScheduleRow(field.key, index)}
+                  />
+                  {isEnabled && scheduleModes[field.key] === "replace" && values[field.key].length === 0 && (
+                    <p className="mt-1 text-xs text-red-500">Lưu danh sách rỗng sẽ xóa toàn bộ lịch hiện tại.</p>
+                  )}
+                </div>
+              ) : field.type === "select" ? (
+                <Select
+                  disabled={!isEnabled}
+                  value={values[field.key]}
+                  onChange={(event) => setValues((current) => ({ ...current, [field.key]: event.target.value }))}
+                >
+                  <option value="">— Xóa giá trị —</option>
+                  {field.options.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </Select>
+              ) : field.type === "textarea" ? (
+                <Textarea
+                  disabled={!isEnabled}
+                  value={values[field.key]}
+                  onChange={(event) => setValues((current) => ({ ...current, [field.key]: event.target.value }))}
+                />
+              ) : (
+                <Input
+                  disabled={!isEnabled}
+                  type={field.type}
+                  min={field.type === "number" ? 0 : undefined}
+                  value={values[field.key]}
+                  onChange={(event) => setValues((current) => ({ ...current, [field.key]: event.target.value }))}
+                />
+              )}
+            </div>
+          );
+        })}
+      </div>
+      {formError && <p className="text-sm text-red-500">{formError}</p>}
+      <div className="flex justify-end gap-3 pt-2">
+        <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-gray-500 hover:text-gray-700">
+          Hủy
+        </button>
+        <button
+          type="submit"
+          disabled={saving || !enabled.size}
+          className="flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+        >
+          {saving ? <Loader2 size={14} className="animate-spin" /> : <Edit2 size={14} />}
+          Cập nhật {count} bản ghi
+        </button>
+      </div>
+    </form>
+  );
+}
+
+// ─── So sánh bản ghi của nhiều cây/ống nghiệm ────────────────────────────────
+function BulkRecordCompare({ macays, trees, onClose }) {
+  const { api } = useAuth();
+  const currentYear = new Date().getFullYear();
+  const [filters, setFilters] = useState({ nam: currentYear, thang: "" });
+  const [applied, setApplied] = useState({ nam: currentYear, thang: "" });
+  const [compareRecords, setCompareRecords] = useState([]);
+  const [loadingCompare, setLoadingCompare] = useState(true);
+  const [compareError, setCompareError] = useState("");
+  const [truncated, setTruncated] = useState(false);
+  const [selected, setSelected] = useState(new Set());
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const macayKey = macays.join("|");
+
+  const loadRecords = useCallback(async () => {
+    setLoadingCompare(true);
+    setCompareError("");
+    try {
+      const response = await api.post("/dua-sap-record/bulk-query", {
+        macays,
+        nam: applied.nam,
+        thang: applied.thang,
+      });
+      setCompareRecords(response.data?.data || []);
+      setTruncated(Boolean(response.data?.truncated));
+      setSelected(new Set());
+    } catch (error) {
+      setCompareRecords([]);
+      setCompareError(error.response?.data?.message || "Không thể tải dữ liệu so sánh.");
+    } finally {
+      setLoadingCompare(false);
+    }
+  }, [api, macayKey, applied.nam, applied.thang]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => { loadRecords(); }, [loadRecords]);
+
+  const treeMap = new Map(trees.map((tree) => [tree.maCay, tree]));
+  const recordsByTree = new Map();
+  for (const record of compareRecords) {
+    if (!recordsByTree.has(record.maCay)) recordsByTree.set(record.maCay, []);
+    recordsByTree.get(record.maCay).push(record);
+  }
+  const rows = macays.flatMap((maCay) => {
+    const matched = recordsByTree.get(maCay) || [];
+    return matched.length
+      ? matched.map((record) => ({ maCay, tree: treeMap.get(maCay), record }))
+      : [{ maCay, tree: treeMap.get(maCay), record: null }];
+  });
+  const visibleRecordIds = rows.filter((row) => row.record).map((row) => row.record._id);
+  const allVisibleSelected = visibleRecordIds.length > 0
+    && visibleRecordIds.every((id) => selected.has(id));
+
+  function toggleRecord(id) {
+    setSelected((current) => {
+      const next = new Set(current);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
+
+  function toggleAllVisible() {
+    setSelected(allVisibleSelected ? new Set() : new Set(visibleRecordIds));
+  }
+
+  function getSelectedType() {
+    const types = new Set(compareRecords
+      .filter((record) => selected.has(record._id))
+      .map((record) => treeMap.get(record.maCay)?.loai || "cay_giong"));
+    if (types.size > 1) return "mixed";
+    return [...types][0] || "mixed";
+  }
+
+  async function updateSelected(payload, scheduleModes) {
+    setSaving(true);
+    try {
+      const response = await api.put("/dua-sap-record/bulk", {
+        ids: [...selected],
+        payload,
+        scheduleModes,
+      });
+      const { updated = 0, failed = 0, results = [] } = response.data;
+      setEditing(false);
+      await loadRecords();
+      if (failed > 0) {
+        const errors = results
+          .filter((item) => item.status !== "updated")
+          .map((item) => `${item.id}: ${item.reason || "Không thể cập nhật"}`)
+          .join("\n");
+        alert(`Đã cập nhật ${updated} bản ghi.\nKhông thể cập nhật ${failed} bản ghi:\n${errors}`);
+      }
+    } catch (error) {
+      alert(error.response?.data?.message || "Lỗi khi cập nhật bản ghi hàng loạt.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function deleteSelected() {
+    if (!window.confirm(`Xóa ${selected.size} bản ghi đã chọn trên nhiều cây/ống nghiệm? Hành động này không thể hoàn tác.`)) return;
+    setDeleting(true);
+    try {
+      const response = await api.delete("/dua-sap-record/bulk", {
+        data: { ids: [...selected] },
+      });
+      const { deleted = 0, failed = 0, results = [] } = response.data;
+      await loadRecords();
+      if (failed > 0) {
+        const errors = results
+          .filter((item) => item.status !== "deleted")
+          .map((item) => `${item.id}: ${item.reason || "Không thể xóa"}`)
+          .join("\n");
+        alert(`Đã xóa ${deleted} bản ghi.\nKhông thể xóa ${failed} bản ghi:\n${errors}`);
+      }
+    } catch (error) {
+      alert(error.response?.data?.message || "Lỗi khi xóa bản ghi hàng loạt.");
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  if (editing) {
+    return (
+      <BulkRecordUpdateForm
+        count={selected.size}
+        loai={getSelectedType()}
+        onSave={updateSelected}
+        onClose={() => setEditing(false)}
+        saving={saving}
+      />
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-end gap-3 rounded-xl border border-gray-100 bg-gray-50 p-3">
+        <div>
+          <Label>Năm</Label>
+          <Input
+            type="number"
+            min={2000}
+            max={2200}
+            value={filters.nam}
+            onChange={(event) => setFilters((current) => ({ ...current, nam: event.target.value }))}
+          />
+        </div>
+        <div>
+          <Label>Tháng cần so sánh</Label>
+          <Select
+            value={filters.thang}
+            onChange={(event) => setFilters((current) => ({ ...current, thang: event.target.value }))}
+          >
+            <option value="">Tất cả các kỳ</option>
+            {THANG_OPTIONS.map((month) => <option key={month} value={month}>Tháng {month}</option>)}
+          </Select>
+        </div>
+        <button
+          type="button"
+          onClick={() => setApplied({ nam: filters.nam, thang: filters.thang })}
+          className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"
+        >
+          So sánh
+        </button>
+        <div className="ml-auto text-right text-xs text-gray-500">
+          <div><strong>{macays.length}</strong> cây/ống nghiệm</div>
+          <div><strong>{compareRecords.length}</strong> bản ghi phù hợp</div>
+        </div>
+      </div>
+
+      {selected.size > 0 && (
+        <div className="flex flex-wrap items-center gap-2 rounded-xl bg-indigo-700 px-4 py-2.5 text-sm text-white">
+          <strong>{selected.size} bản ghi đã chọn</strong>
+          <div className="flex-1" />
+          <button
+            type="button"
+            onClick={() => setEditing(true)}
+            className="flex items-center gap-1.5 rounded-lg bg-blue-500 px-3 py-1.5 hover:bg-blue-600"
+          >
+            <Edit2 size={13} /> Sửa hàng loạt
+          </button>
+          <button
+            type="button"
+            disabled={deleting}
+            onClick={deleteSelected}
+            className="flex items-center gap-1.5 rounded-lg bg-red-500 px-3 py-1.5 hover:bg-red-600 disabled:opacity-60"
+          >
+            {deleting ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
+            Xóa hàng loạt
+          </button>
+          <button type="button" onClick={() => setSelected(new Set())} className="rounded-lg bg-white/10 px-3 py-1.5 hover:bg-white/20">
+            Bỏ chọn
+          </button>
+        </div>
+      )}
+
+      {truncated && (
+        <div className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">
+          Kết quả vượt quá 5.000 bản ghi. Hãy chọn tháng cụ thể để thu hẹp dữ liệu.
+        </div>
+      )}
+
+      {loadingCompare ? (
+        <div className="flex items-center justify-center py-16 text-sm text-gray-400">
+          <Loader2 size={20} className="mr-2 animate-spin text-emerald-500" />
+          Đang tải bảng so sánh...
+        </div>
+      ) : compareError ? (
+        <div className="py-12 text-center text-sm text-red-500">{compareError}</div>
+      ) : (
+        <div className="overflow-x-auto rounded-xl border border-gray-100">
+          <table className="min-w-[1050px] w-full text-xs">
+            <thead className="bg-gray-50 text-gray-500">
+              <tr>
+                <th className="px-3 py-2.5 text-left">
+                  <input
+                    type="checkbox"
+                    checked={allVisibleSelected}
+                    disabled={!visibleRecordIds.length}
+                    onChange={toggleAllVisible}
+                    className="h-4 w-4 accent-indigo-600"
+                    aria-label="Chọn tất cả bản ghi đang hiển thị"
+                  />
+                </th>
+                <th className="px-3 py-2.5 text-left">Mã</th>
+                <th className="px-3 py-2.5 text-left">Loại</th>
+                <th className="px-3 py-2.5 text-left">Kỳ theo dõi</th>
+                <th className="px-3 py-2.5 text-left">Tình trạng</th>
+                <th className="px-3 py-2.5 text-left">Chỉ số cây</th>
+                <th className="px-3 py-2.5 text-left">Sản lượng</th>
+                <th className="px-3 py-2.5 text-left">Ngày ra cây</th>
+                <th className="px-3 py-2.5 text-left">Phun / Bón</th>
+                <th className="px-3 py-2.5 text-left">Ghi chú / Đề xuất</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {rows.map(({ maCay, tree, record }, index) => (
+                <tr
+                  key={record?._id || `${maCay}-empty-${index}`}
+                  className={record && selected.has(record._id) ? "bg-indigo-50/60" : "hover:bg-gray-50"}
+                >
+                  <td className="px-3 py-3">
+                    {record && (
+                      <input
+                        type="checkbox"
+                        checked={selected.has(record._id)}
+                        onChange={() => toggleRecord(record._id)}
+                        className="h-4 w-4 accent-indigo-600"
+                      />
+                    )}
+                  </td>
+                  <td className="px-3 py-3 font-bold text-emerald-700">{maCay}</td>
+                  <td className="px-3 py-3">
+                    {tree?.loai === "ong_nghiem" ? "Ống nghiệm" : "Cây dừa"}
+                  </td>
+                  {record ? (
+                    <>
+                      <td className="px-3 py-3">
+                        <div className="font-semibold text-gray-700">
+                          {record.kyTheoDoiNhan || `T${record.thangBatDau}–T${record.thangKetThuc}/${record.nam}`}
+                        </div>
+                        <div className="text-[10px] text-gray-400">
+                          T{record.thangBatDau}–T{record.thangKetThuc}/{record.nam}
+                        </div>
+                      </td>
+                      <td className="px-3 py-3">{getTinhTrangLabel(record.tinhTrangCay) || "—"}</td>
+                      <td className="px-3 py-3">
+                        {tree?.loai === "ong_nghiem"
+                          ? "—"
+                          : `Tàu: ${record.soTau ?? "—"} · Hoa: ${record.soHoa ?? "—"}`}
+                      </td>
+                      <td className="px-3 py-3">
+                        {tree?.loai === "ong_nghiem" ? "—" : (() => {
+                          const selectedMonth = applied.thang ? Number(applied.thang) : null;
+                          const expected = selectedMonth
+                            ? record.sanLuongDuKien?.find((item) => item.thang === selectedMonth)?.soLuong
+                            : record.sanLuongDuKien?.reduce((sum, item) => sum + (Number(item.soLuong) || 0), 0);
+                          const actual = selectedMonth
+                            ? record.sanLuongThucTe?.find((item) => item.thang === selectedMonth)?.soLuong
+                            : record.sanLuongThucTe?.reduce((sum, item) => sum + (Number(item.soLuong) || 0), 0);
+                          return `DK: ${expected ?? "—"} · TT: ${actual ?? "—"}`;
+                        })()}
+                      </td>
+                      <td className="px-3 py-3">
+                        {tree?.loai === "ong_nghiem"
+                          ? `DK: ${record.ngayRaCayDuKien ? fmt(record.ngayRaCayDuKien) : "—"} · TT: ${record.ngayRaCayThucTe ? fmt(record.ngayRaCayThucTe) : "—"}`
+                          : "—"}
+                      </td>
+                      <td className="px-3 py-3">
+                        {record.lichPhunThuoc?.length || 0} / {record.lichBonPhan?.length || 0}
+                      </td>
+                      <td className="max-w-xs px-3 py-3">
+                        <div className="line-clamp-2">{record.yeuCauDeXuat || record.ghiChu || "—"}</div>
+                      </td>
+                    </>
+                  ) : (
+                    <td colSpan={7} className="px-3 py-4 italic text-amber-600">
+                      Không có bản ghi phù hợp với tháng/năm đang lọc
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <div className="flex justify-end">
+        <button type="button" onClick={onClose} className="rounded-lg border border-gray-200 px-4 py-2 text-sm text-gray-600 hover:bg-gray-50">
+          Đóng
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ─── Tạo bản ghi hàng loạt ───────────────────────────────────────────────────
 function BulkCreateRecordModal({ macays, trees, onClose, onDone }) {
   const { api, user } = useAuth();
@@ -2409,6 +3236,10 @@ export default function DuaSapManager() {
   const [showRecordForm, setShowRecordForm] = useState(false);
   const [editingRecord, setEditingRecord] = useState(null);
   const [savingRecord, setSavingRecord] = useState(false);
+  const [selectedRecords, setSelectedRecords] = useState(new Set());
+  const [showBulkRecordUpdate, setShowBulkRecordUpdate] = useState(false);
+  const [savingBulkRecords, setSavingBulkRecords] = useState(false);
+  const [deletingBulkRecords, setDeletingBulkRecords] = useState(false);
 
   // Confirm delete
   const [confirmDelete, setConfirmDelete] = useState(null);
@@ -2427,6 +3258,7 @@ export default function DuaSapManager() {
   // PDF export (xuất cây đang hiển thị trên trang hiện tại)
   const [exportingPDF, setExportingPDF] = useState(false);
   const [exportProgress, setExportProgress] = useState({ done: 0, total: 0 });
+  const [exportingExcel, setExportingExcel] = useState(false);
 
   async function handleExportPDF() {
     if (!trees.length || exportingPDF) return;
@@ -2442,6 +3274,40 @@ export default function DuaSapManager() {
     }
   }
 
+  async function handleFullExcelExport(macays = null) {
+    if (exportingExcel) return;
+    setExportingExcel(true);
+    try {
+      const response = await api.post("/dua-sap/export-data", {
+        ...(Array.isArray(macays) && macays.length
+          ? { macays }
+          : {
+              filters: {
+                search,
+                trangThai: filterTrangThai,
+                loai: filterLoai,
+                viTri: filterViTri,
+                khuVuc: filterKhuVuc,
+                giong: filterGiong,
+              },
+            }),
+      });
+      const exportData = response.data?.data || {};
+      if (!exportData.trees?.length) {
+        alert("Không có cây/ống nghiệm nào phù hợp để xuất.");
+        return;
+      }
+      exportDuaSapWorkbook(
+        exportData,
+        Array.isArray(macays) && macays.length ? `${macays.length}-muc-da-chon` : "du-lieu-dang-loc",
+      );
+    } catch (error) {
+      alert(error.response?.data?.message || "Lỗi khi xuất Excel đầy đủ.");
+    } finally {
+      setExportingExcel(false);
+    }
+  }
+
   // Import Excel
   const [showImport, setShowImport] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -2454,6 +3320,7 @@ export default function DuaSapManager() {
   const [showBulkUpdate, setShowBulkUpdate] = useState(false);
   const [showBulkSchedule, setShowBulkSchedule] = useState(false);
   const [showBulkCreateRecord, setShowBulkCreateRecord] = useState(false);
+  const [showRecordCompare, setShowRecordCompare] = useState(false);
 
   // Selection
   const [selectedTrees, setSelectedTrees] = useState(new Set());
@@ -2464,6 +3331,8 @@ export default function DuaSapManager() {
 
   const allSelected = trees.length > 0 && trees.every((t) => selectedTrees.has(t.maCay));
   const someSelected = selectedTrees.size > 0;
+  const allRecordsSelected = records.length > 0
+    && records.every((record) => selectedRecords.has(record._id));
 
   // Dọn selection khi danh sách cây thay đổi (filter/trang)
   useEffect(() => {
@@ -2602,6 +3471,7 @@ export default function DuaSapManager() {
     try {
       const r = await api.get("/dua-sap-record", { params: { maCay } });
       setRecords(r.data.data || []);
+      setSelectedRecords(new Set());
     } catch {
       setRecords([]);
     } finally {
@@ -2613,8 +3483,10 @@ export default function DuaSapManager() {
     if (expandedMaCay === maCay) {
       setExpandedMaCay(null);
       setRecords([]);
+      setSelectedRecords(new Set());
     } else {
       setExpandedMaCay(maCay);
+      setSelectedRecords(new Set());
       fetchRecords(maCay);
     }
   }
@@ -2705,6 +3577,70 @@ export default function DuaSapManager() {
     }
   }
 
+  function toggleSelectRecord(id) {
+    setSelectedRecords((current) => {
+      const next = new Set(current);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
+
+  function toggleSelectAllRecords() {
+    setSelectedRecords(
+      allRecordsSelected ? new Set() : new Set(records.map((record) => record._id)),
+    );
+  }
+
+  async function updateBulkRecords(payload, scheduleModes) {
+    if (!selectedRecords.size) return;
+    setSavingBulkRecords(true);
+    try {
+      const response = await api.put("/dua-sap-record/bulk", {
+        ids: [...selectedRecords],
+        payload,
+        scheduleModes,
+      });
+      const { updated = 0, failed = 0, results = [] } = response.data;
+      setShowBulkRecordUpdate(false);
+      await fetchRecords(expandedMaCay);
+      if (failed > 0) {
+        const errors = results
+          .filter((item) => item.status !== "updated")
+          .map((item) => `${item.id}: ${item.reason || "Không thể cập nhật"}`)
+          .join("\n");
+        alert(`Đã cập nhật ${updated} bản ghi.\nKhông thể cập nhật ${failed} bản ghi:\n${errors}`);
+      }
+    } catch (error) {
+      alert(error.response?.data?.message || "Lỗi khi cập nhật bản ghi hàng loạt.");
+    } finally {
+      setSavingBulkRecords(false);
+    }
+  }
+
+  async function deleteBulkRecords() {
+    if (!selectedRecords.size) return;
+    if (!window.confirm(`Xóa ${selectedRecords.size} bản ghi theo dõi đã chọn? Hành động này không thể hoàn tác.`)) return;
+    setDeletingBulkRecords(true);
+    try {
+      const response = await api.delete("/dua-sap-record/bulk", {
+        data: { ids: [...selectedRecords] },
+      });
+      const { deleted = 0, failed = 0, results = [] } = response.data;
+      await fetchRecords(expandedMaCay);
+      if (failed > 0) {
+        const errors = results
+          .filter((item) => item.status !== "deleted")
+          .map((item) => `${item.id}: ${item.reason || "Không thể xóa"}`)
+          .join("\n");
+        alert(`Đã xóa ${deleted} bản ghi.\nKhông thể xóa ${failed} bản ghi:\n${errors}`);
+      }
+    } catch (error) {
+      alert(error.response?.data?.message || "Lỗi khi xóa bản ghi hàng loạt.");
+    } finally {
+      setDeletingBulkRecords(false);
+    }
+  }
+
   return (
     <div className="p-4 sm:p-6 max-w-6xl mx-auto">
       {/* Header */}
@@ -2745,6 +3681,17 @@ export default function DuaSapManager() {
                 <QrCode size={15} /> Xuất PDF QR
               </>
             )}
+          </button>
+          <button
+            onClick={() => handleFullExcelExport()}
+            disabled={exportingExcel}
+            className="flex items-center gap-1.5 rounded-xl bg-green-50 px-4 py-2 text-sm text-green-700 transition hover:bg-green-100 disabled:opacity-50"
+            title="Xuất toàn bộ cây/ống nghiệm đang lọc, bản ghi và nhật ký"
+          >
+            {exportingExcel
+              ? <Loader2 size={15} className="animate-spin" />
+              : <Download size={15} />}
+            Xuất Excel đầy đủ
           </button>
           <button
             onClick={() => { setImportResult(null); setShowImport(true); }}
@@ -2918,6 +3865,12 @@ export default function DuaSapManager() {
             <Droplets size={13} /> Cập nhật lịch theo kỳ
           </button>
           <button
+            onClick={() => setShowRecordCompare(true)}
+            className="flex items-center gap-1.5 bg-violet-500 hover:bg-violet-600 px-3 py-1.5 rounded-lg transition"
+          >
+            <ClipboardList size={13} /> So sánh bản ghi
+          </button>
+          <button
             onClick={() => setShowBulkCreateRecord(true)}
             className="flex items-center gap-1.5 bg-emerald-500 hover:bg-emerald-600 px-3 py-1.5 rounded-lg transition"
           >
@@ -2931,6 +3884,16 @@ export default function DuaSapManager() {
             {exportingPDF
               ? <><Loader2 size={13} className="animate-spin" /> {exportProgress.done}/{exportProgress.total}</>
               : <><QrCode size={13} /> Xuất QR PDF</>}
+          </button>
+          <button
+            onClick={() => handleFullExcelExport([...selectedTrees])}
+            disabled={exportingExcel}
+            className="flex items-center gap-1.5 bg-green-500 hover:bg-green-600 px-3 py-1.5 rounded-lg transition disabled:opacity-50"
+          >
+            {exportingExcel
+              ? <Loader2 size={13} className="animate-spin" />
+              : <Download size={13} />}
+            Xuất Excel
           </button>
           <button
             onClick={deleteBulk}
@@ -3067,17 +4030,52 @@ export default function DuaSapManager() {
                       <tr>
                         <td colSpan={7} className="bg-emerald-50/40 px-4 py-4 border-b border-emerald-100">
                           <div className="max-w-3xl">
-                            <div className="flex items-center justify-between mb-3">
+                            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                               <h4 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
                                 <ClipboardList size={15} className="text-emerald-500" />
                                 Bản ghi theo dõi — {tree.maCay}
                               </h4>
-                              <button
-                                onClick={() => { setEditingRecord(null); setShowRecordForm(true); }}
-                                className="flex items-center gap-1.5 text-xs bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg transition"
-                              >
-                                <Plus size={12} /> Thêm kỳ
-                              </button>
+                              <div className="flex flex-wrap items-center gap-2">
+                                {records.length > 0 && (
+                                  <label className="flex cursor-pointer items-center gap-1.5 text-xs text-gray-500">
+                                    <input
+                                      type="checkbox"
+                                      checked={allRecordsSelected}
+                                      onChange={toggleSelectAllRecords}
+                                      className="h-4 w-4 accent-emerald-600"
+                                    />
+                                    Chọn tất cả
+                                  </label>
+                                )}
+                                {selectedRecords.size > 0 && (
+                                  <>
+                                    <button
+                                      type="button"
+                                      onClick={() => setShowBulkRecordUpdate(true)}
+                                      className="flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs text-white transition hover:bg-indigo-700"
+                                    >
+                                      <Edit2 size={12} /> Sửa {selectedRecords.size}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      disabled={deletingBulkRecords}
+                                      onClick={deleteBulkRecords}
+                                      className="flex items-center gap-1.5 rounded-lg bg-red-500 px-3 py-1.5 text-xs text-white transition hover:bg-red-600 disabled:opacity-60"
+                                    >
+                                      {deletingBulkRecords
+                                        ? <Loader2 size={12} className="animate-spin" />
+                                        : <Trash2 size={12} />}
+                                      Xóa {selectedRecords.size}
+                                    </button>
+                                  </>
+                                )}
+                                <button
+                                  onClick={() => { setEditingRecord(null); setShowRecordForm(true); }}
+                                  className="flex items-center gap-1.5 text-xs bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg transition"
+                                >
+                                  <Plus size={12} /> Thêm kỳ
+                                </button>
+                              </div>
                             </div>
 
                             {loadingRecords ? (
@@ -3090,8 +4088,18 @@ export default function DuaSapManager() {
                             ) : (
                               <div className="space-y-2">
                                 {records.map((rec) => (
-                                  <div key={rec._id} className="bg-white rounded-xl border border-gray-100 shadow-sm px-4 py-3">
+                                  <div
+                                    key={rec._id}
+                                    className={`rounded-xl border bg-white px-4 py-3 shadow-sm transition ${selectedRecords.has(rec._id) ? "border-indigo-300 ring-1 ring-indigo-100" : "border-gray-100"}`}
+                                  >
                                     <div className="flex items-start justify-between gap-3">
+                                      <input
+                                        type="checkbox"
+                                        checked={selectedRecords.has(rec._id)}
+                                        onChange={() => toggleSelectRecord(rec._id)}
+                                        className="mt-1 h-4 w-4 shrink-0 accent-indigo-600"
+                                        aria-label={`Chọn bản ghi ${rec.kyTheoDoiNhan || rec._id}`}
+                                      />
                                       <div className="flex-1 min-w-0">
                                         <div className="flex items-center gap-2 flex-wrap">
                                           <span className="font-semibold text-sm text-gray-800">
@@ -3278,6 +4286,21 @@ export default function DuaSapManager() {
         </Modal>
       )}
 
+      {/* Modal: So sánh bản ghi của nhiều cây/ống nghiệm */}
+      {showRecordCompare && someSelected && (
+        <Modal
+          title={`So sánh bản ghi theo tháng — ${selectedTrees.size} cây/ống nghiệm`}
+          onClose={() => setShowRecordCompare(false)}
+          xwide
+        >
+          <BulkRecordCompare
+            macays={[...selectedTrees]}
+            trees={trees}
+            onClose={() => setShowRecordCompare(false)}
+          />
+        </Modal>
+      )}
+
       {/* Modal: Tạo bản ghi hàng loạt */}
       {showBulkCreateRecord && someSelected && (
         <Modal
@@ -3334,6 +4357,22 @@ export default function DuaSapManager() {
             onSave={saveRecord}
             onClose={() => { setShowRecordForm(false); setEditingRecord(null); }}
             saving={savingRecord}
+          />
+        </Modal>
+      )}
+
+      {/* Modal: Sửa nhiều bản ghi theo dõi */}
+      {showBulkRecordUpdate && expandedMaCay && selectedRecords.size > 0 && (
+        <Modal
+          title={`Sửa ${selectedRecords.size} bản ghi — ${expandedMaCay}`}
+          onClose={() => setShowBulkRecordUpdate(false)}
+        >
+          <BulkRecordUpdateForm
+            count={selectedRecords.size}
+            loai={trees.find((tree) => tree.maCay === expandedMaCay)?.loai || "cay_giong"}
+            onSave={updateBulkRecords}
+            onClose={() => setShowBulkRecordUpdate(false)}
+            saving={savingBulkRecords}
           />
         </Modal>
       )}

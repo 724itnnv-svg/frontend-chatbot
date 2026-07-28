@@ -6,11 +6,15 @@ import {
   TrendingUp, TrendingDown, Minus, AlertCircle, Loader2,
   TreePine, CheckCircle2, ClipboardList, StickyNote,
   ImageOff, X, ChevronLeft, ChevronRight, ZoomIn, Pencil,
-  Plus, Trash2, Link,
+  Plus, Trash2, Link, Upload, History,
 } from "lucide-react";
 import { apiUrl } from "../../api/baseUrl";
 import { useAuth } from "../../context/AuthContext";
 import { canAccessScreen } from "../../utils/screenAccess";
+import {
+  resolveDuaSapImageUrl,
+  uploadDuaSapImages,
+} from "../../utils/duaSapImageUpload";
 
 
 const TINH_TRANG_CONFIG = {
@@ -53,6 +57,7 @@ function fmtShort(dateStr) {
 function toDirectImageUrl(url) {
   if (!url) return url;
   if (/^data:image\//i.test(url)) return url;
+  if (String(url).startsWith("/api/")) return resolveDuaSapImageUrl(url);
   const driveFileId =
     url.match(/drive\.google\.com\/file\/d\/([^/?#]+)/)?.[1] ||
     url.match(/[?&]id=([^&#]+)/)?.[1];
@@ -430,7 +435,7 @@ const TINH_TRANG_ONG_NGHIEM_OPTIONS = [
 ];
 
 function EditModal({ treeData, onClose, onSaved }) {
-  const { api } = useAuth();
+  const { api, token } = useAuth();
   const now = new Date();
   const curMonth = now.getMonth() + 1;
   const curYear = now.getFullYear();
@@ -450,6 +455,7 @@ function EditModal({ treeData, onClose, onSaved }) {
   const [urlInput, setUrlInput] = useState("");
   const [urlError, setUrlError] = useState("");
   const [imgErrors, setImgErrors] = useState({});
+  const [uploadingImages, setUploadingImages] = useState(false);
 
   /* ── Record form (tháng hiện tại) ── */
   const [currentRecord, setCurrentRecord] = useState(null);
@@ -503,6 +509,26 @@ function EditModal({ treeData, onClose, onSaved }) {
       delete next[idx];
       return next;
     });
+  }
+
+  async function handleImageFiles(event) {
+    const files = Array.from(event.target.files || []);
+    event.target.value = "";
+    if (!files.length || uploadingImages) return;
+
+    try {
+      setUploadingImages(true);
+      setUrlError("");
+      const urls = await uploadDuaSapImages(files, treeData.loai, token);
+      setTf((current) => ({
+        ...current,
+        anhUrl: Array.from(new Set([...(current.anhUrl || []), ...urls])),
+      }));
+    } catch (error) {
+      setUrlError(error.message || "Không thể tải ảnh lên Google Drive");
+    } finally {
+      setUploadingImages(false);
+    }
   }
 
   const [saving, setSaving] = useState(false);
@@ -661,6 +687,21 @@ function EditModal({ treeData, onClose, onSaved }) {
               </div>
               <div className="col-span-2">
                 <label className={lbl}>{isOngNghiem ? "Ảnh ống nghiệm" : "Ảnh cây dừa"}</label>
+                <div className="mb-2 flex items-center gap-2">
+                  <label className={`inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700 transition ${uploadingImages ? "cursor-not-allowed opacity-60" : "cursor-pointer hover:bg-emerald-100"}`}>
+                    {uploadingImages ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+                    {uploadingImages ? "Đang tải lên..." : "Chọn ảnh từ máy"}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      disabled={uploadingImages}
+                      onChange={handleImageFiles}
+                      className="hidden"
+                    />
+                  </label>
+                  <span className="text-[11px] text-gray-400">Tối đa 10MB mỗi ảnh</span>
+                </div>
                 <div className="flex gap-2">
                   <div className="relative flex-1">
                     <Link size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
@@ -891,7 +932,7 @@ function EditModal({ treeData, onClose, onSaved }) {
               Hủy
             </button>
             <button
-              type="button" onClick={handleSave} disabled={saving}
+              type="button" onClick={handleSave} disabled={saving || uploadingImages}
               className="flex-1 flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white py-2.5 rounded-xl text-sm font-medium transition disabled:opacity-60"
             >
               {saving ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
@@ -901,6 +942,186 @@ function EditModal({ treeData, onClose, onSaved }) {
         </div>
       </div>
     </div>
+  );
+}
+
+const HISTORY_ACTION_LABELS = {
+  them_cay: "Thêm cây/ống nghiệm",
+  sua_cay: "Sửa cây/ống nghiệm",
+  xoa_cay: "Xóa cây/ống nghiệm",
+  them_cay_hang_loat: "Thêm hàng loạt",
+  cap_nhat_hang_loat: "Sửa hàng loạt",
+  xoa_cay_hang_loat: "Xóa hàng loạt",
+  them_ban_ghi: "Thêm bản ghi",
+  sua_ban_ghi: "Sửa bản ghi",
+  xoa_ban_ghi: "Xóa bản ghi",
+  sua_ban_ghi_hang_loat: "Sửa bản ghi hàng loạt",
+  xoa_ban_ghi_hang_loat: "Xóa bản ghi hàng loạt",
+  them_anh: "Thêm ảnh",
+  xoa_anh: "Xóa ảnh",
+  them_cham_soc: "Thêm chăm sóc",
+  import: "Import dữ liệu",
+};
+
+function formatHistoryValue(value, field) {
+  if (value === null || value === undefined || value === "") return "—";
+  if (field === "loai") {
+    return value === "ong_nghiem" ? "Trong ống nghiệm" : value === "cay_giong" ? "Cây giống" : String(value);
+  }
+  if (field === "trangThai" || field === "tinhTrangCay") {
+    return TINH_TRANG_CONFIG[value]?.label || String(value);
+  }
+  if (field === "anhUrl" && Array.isArray(value)) {
+    return value.length ? `${value.length} ảnh:\n${value.join("\n")}` : "Không có ảnh";
+  }
+  if (Array.isArray(value) || typeof value === "object") {
+    try { return JSON.stringify(value, null, 2); }
+    catch { return String(value); }
+  }
+  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}T/.test(value)) {
+    return new Date(value).toLocaleString("vi-VN");
+  }
+  return String(value);
+}
+
+function getTreeLogChanges(log, maCay) {
+  const directChanges = Array.isArray(log.changes) ? log.changes : [];
+  if (directChanges.length) return directChanges;
+  if (!Array.isArray(log.snapshot?.itemChanges)) return [];
+  return log.snapshot.itemChanges
+    .filter((item) => item.maCay === maCay)
+    .flatMap((item) => item.changes || []);
+}
+
+function UpdateHistory({ api, maCay, refreshKey }) {
+  const [logs, setLogs] = useState([]);
+  const [loadingHistory, setLoadingHistory] = useState(true);
+  const [historyError, setHistoryError] = useState("");
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const limit = 10;
+
+  useEffect(() => {
+    let active = true;
+    setLoadingHistory(true);
+    setHistoryError("");
+    api.get("/dua-sap-log", { params: { maCay, page, limit } })
+      .then((response) => {
+        if (!active) return;
+        setLogs(response.data?.data || []);
+        setTotal(response.data?.total || 0);
+      })
+      .catch(() => {
+        if (!active) return;
+        setLogs([]);
+        setHistoryError("Không thể tải lịch sử cập nhật.");
+      })
+      .finally(() => {
+        if (active) setLoadingHistory(false);
+      });
+    return () => { active = false; };
+  }, [api, maCay, page, refreshKey]);
+
+  const totalPages = Math.max(1, Math.ceil(total / limit));
+
+  return (
+    <section>
+      <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-gray-500">
+        <History size={15} className="text-emerald-500" />
+        Lịch sử cập nhật ({total})
+      </h2>
+      <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
+        {loadingHistory ? (
+          <div className="flex items-center justify-center py-10 text-sm text-gray-400">
+            <Loader2 size={18} className="mr-2 animate-spin text-emerald-500" />
+            Đang tải lịch sử...
+          </div>
+        ) : historyError ? (
+          <div className="px-5 py-8 text-center text-sm text-red-500">{historyError}</div>
+        ) : logs.length === 0 ? (
+          <div className="px-5 py-8 text-center text-sm text-gray-400">Chưa có lịch sử cập nhật.</div>
+        ) : (
+          <div className="divide-y divide-gray-100">
+            {logs.map((log) => {
+              const changes = getTreeLogChanges(log, maCay);
+              return (
+                <article key={log._id} className="px-5 py-4">
+                  <div className="flex flex-wrap items-start gap-2">
+                    <div className="mr-auto">
+                      <div className="text-sm font-semibold text-gray-800">
+                        {HISTORY_ACTION_LABELS[log.action] || log.action}
+                      </div>
+                      <div className="mt-0.5 text-xs text-gray-400">
+                        {log.userName || "Hệ thống"} · {new Date(log.timestamp).toLocaleString("vi-VN")}
+                      </div>
+                    </div>
+                    {changes.length > 0 && (
+                      <span className="rounded-full bg-blue-50 px-2 py-1 text-[10px] font-semibold text-blue-700">
+                        {changes.length} trường thay đổi
+                      </span>
+                    )}
+                  </div>
+                  {log.detail && <p className="mt-2 text-xs text-gray-500">{log.detail}</p>}
+                  {changes.length > 0 && (
+                    <details className="mt-3">
+                      <summary className="cursor-pointer select-none text-xs font-semibold text-emerald-700">
+                        Xem giá trị trước và sau
+                      </summary>
+                      <div className="mt-2 space-y-2">
+                        {changes.map((change, index) => (
+                          <div key={`${change.field}-${index}`} className="rounded-xl border border-gray-100 bg-gray-50 p-3">
+                            <div className="mb-2 text-xs font-semibold text-gray-700">
+                              {change.label || change.field}
+                            </div>
+                            <div className="grid gap-2 sm:grid-cols-2">
+                              <div>
+                                <div className="mb-1 text-[10px] font-semibold uppercase text-red-400">Trước</div>
+                                <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-red-50 p-2 font-sans text-[11px] text-red-700">
+                                  {formatHistoryValue(change.before, change.field)}
+                                </pre>
+                              </div>
+                              <div>
+                                <div className="mb-1 text-[10px] font-semibold uppercase text-emerald-500">Sau</div>
+                                <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-emerald-50 p-2 font-sans text-[11px] text-emerald-700">
+                                  {formatHistoryValue(change.after, change.field)}
+                                </pre>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </details>
+                  )}
+                </article>
+              );
+            })}
+          </div>
+        )}
+        {totalPages > 1 && (
+          <div className="flex items-center justify-between border-t border-gray-100 px-5 py-3">
+            <span className="text-xs text-gray-400">Trang {page}/{totalPages}</span>
+            <div className="flex gap-1">
+              <button
+                type="button"
+                disabled={page === 1 || loadingHistory}
+                onClick={() => setPage((current) => Math.max(1, current - 1))}
+                className="rounded-lg border border-gray-200 p-1.5 text-gray-500 disabled:opacity-40"
+              >
+                <ChevronLeft size={14} />
+              </button>
+              <button
+                type="button"
+                disabled={page === totalPages || loadingHistory}
+                onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
+                className="rounded-lg border border-gray-200 p-1.5 text-gray-500 disabled:opacity-40"
+              >
+                <ChevronRight size={14} />
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -914,6 +1135,7 @@ export default function DuaSapDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [showEdit, setShowEdit] = useState(false);
+  const [historyVersion, setHistoryVersion] = useState(0);
 
   function fetchData() {
     // Đảm bảo maCay có giá trị trước khi fetch
@@ -1163,6 +1385,11 @@ export default function DuaSapDetailPage() {
             </div>
           )}
         </section>
+
+        {/* Lịch sử chỉnh sửa — chỉ dành cho người có quyền quản lý */}
+        {canManage && auth.api && (
+          <UpdateHistory api={auth.api} maCay={data.maCay} refreshKey={historyVersion} />
+        )}
       </main>
 
       <footer className="text-center py-6 text-xs text-gray-400 border-t border-gray-100 mt-8">
@@ -1186,7 +1413,11 @@ export default function DuaSapDetailPage() {
         <EditModal
           treeData={data}
           onClose={() => setShowEdit(false)}
-          onSaved={() => { setShowEdit(false); fetchData(); }}
+          onSaved={() => {
+            setShowEdit(false);
+            setHistoryVersion((current) => current + 1);
+            fetchData();
+          }}
         />
       )}
     </div>

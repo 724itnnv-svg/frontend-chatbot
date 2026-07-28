@@ -11,10 +11,10 @@ import {
     Mail,
     Save,
     Shield,
-    Sun,
+    ShieldCheck,
+    Sparkles,
     Upload,
     UserRound,
-    Waves,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 
@@ -239,8 +239,8 @@ export default function UserProfile() {
 
     if (!user) {
         return (
-            <div className="min-h-screen bg-sky-50 p-4">
-                <div className="rounded-2xl border border-sky-100 bg-white px-4 py-3 text-sm text-slate-500 shadow-sm">
+            <div className="min-h-screen bg-[#F3F8FF] p-4">
+                <div className="rounded-2xl border border-[#DCE9FB] bg-white px-4 py-3 text-sm text-slate-500 shadow-sm">
                     Không tìm thấy thông tin người dùng. Vui lòng đăng nhập lại.
                 </div>
             </div>
@@ -250,55 +250,64 @@ export default function UserProfile() {
     const displayName = user.fullName || user.name || user.email || "Người dùng";
     const roleLabel = isAdmin ? "ADMIN" : "USER";
     const inputClass =
-        "w-full rounded-2xl border border-sky-100 bg-white px-3 py-2.5 text-sm text-slate-800 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100";
+        "w-full rounded-2xl border border-[#DCE9FB] bg-white px-3 py-2.5 text-sm text-[#0B1E3D] shadow-sm outline-none transition placeholder:text-slate-400 focus:border-[#1D6FE0] focus:ring-4 focus:ring-[#1D6FE0]/10";
     const mutedInputClass =
         "w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-500 shadow-sm outline-none";
 
     return (
-        <div className="relative min-h-screen overflow-x-hidden bg-gradient-to-br from-cyan-50 via-white to-amber-50 text-slate-800">
-            <div className="absolute inset-x-0 top-0 h-48 bg-gradient-to-b from-cyan-100/80 via-sky-50/70 to-transparent" />
-            <div className="absolute inset-x-0 bottom-0 h-40 bg-gradient-to-t from-amber-100/60 via-white/20 to-transparent" />
+        <div className="profile-premium relative min-h-screen overflow-x-hidden bg-[#F3F8FF] text-[#28374C]">
+            {/* Ambient aurora backdrop — signature element, alive but unobtrusive */}
+            <div className="pointer-events-none absolute inset-0 overflow-hidden">
+                <div className="aurora-veil absolute inset-0" />
+                <div className="aurora-blob absolute -left-24 -top-24 h-96 w-96 rounded-full bg-[#BFE0FF] opacity-60 blur-3xl" />
+                <div className="aurora-blob delay-1 absolute -right-20 top-10 h-80 w-80 rounded-full bg-[#E7C878] opacity-25 blur-3xl" />
+                <div className="aurora-blob delay-2 absolute bottom-[-6rem] left-1/3 h-96 w-96 rounded-full bg-[#DCEBFF] opacity-70 blur-3xl" />
+                <div className="aurora-blob delay-3 absolute right-1/4 bottom-[-4rem] h-72 w-72 rounded-full bg-[#9CCBFF] opacity-30 blur-3xl" />
+            </div>
 
             <div className="relative z-10 mx-auto max-w-5xl px-4 py-6 md:px-6 md:py-8">
-                <header className="overflow-hidden rounded-[28px] border border-white/70 bg-white/80 shadow-[0_22px_60px_-38px_rgba(8,145,178,0.75)] backdrop-blur-xl">
-                    <div className="h-1.5 bg-gradient-to-r from-cyan-400 via-sky-400 to-amber-300" />
+                <header className="overflow-hidden rounded-[28px] border border-white/70 bg-white/85 shadow-[0_22px_60px_-38px_rgba(11,30,61,0.35)] backdrop-blur-xl">
+                    <div className="h-[3px] bg-[linear-gradient(90deg,#1D6FE0_0%,#7CC3FF_35%,#E7C878_65%,#1D6FE0_100%)]" />
                     <div className="grid gap-5 p-5 md:grid-cols-[1fr_auto] md:items-center md:p-6">
                         <div className="flex min-w-0 items-center gap-4">
                             <div className="relative shrink-0">
-                                <div className="absolute -inset-1 rounded-[26px] bg-gradient-to-br from-cyan-300 via-sky-300 to-amber-200 opacity-80" />
-                                <img
-                                    src={avatarPreview}
-                                    alt="Avatar"
-                                    className="relative h-20 w-20 rounded-[24px] border border-white object-cover shadow-[0_14px_30px_-18px_rgba(8,145,178,0.85)]"
-                                    onError={(e) => {
-                                        e.currentTarget.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(
-                                            avatarName,
-                                        )}&background=0ea5e9&color=ffffff&size=128`;
-                                    }}
-                                />
+                                <div className="avatar-ring h-[88px] w-[88px] rounded-[26px] p-[3px]">
+                                    <div className="h-full w-full rounded-[23px] bg-white p-[3px]">
+                                        <img
+                                            src={avatarPreview}
+                                            alt="Avatar"
+                                            className="h-full w-full rounded-[20px] object-cover"
+                                            onError={(e) => {
+                                                e.currentTarget.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(
+                                                    avatarName,
+                                                )}&background=1D6FE0&color=ffffff&size=128`;
+                                            }}
+                                        />
+                                    </div>
+                                </div>
                             </div>
 
                             <div className="min-w-0">
                                 <div className="mb-2 flex flex-wrap items-center gap-2">
                                     <span
                                         className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-semibold ${isAdmin
-                                                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                                                : "border-sky-200 bg-sky-50 text-sky-700"
+                                                ? "border-[#F0DDA6] bg-[#FBF3DF] text-[#9C7A1E]"
+                                                : "border-[#CFE3FF] bg-[#EEF6FF] text-[#1D6FE0]"
                                             }`}
                                     >
-                                        <BadgeCheck size={13} />
+                                        {isAdmin ? <Sparkles size={13} /> : <BadgeCheck size={13} />}
                                         {roleLabel}
                                     </span>
-                                    <span className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-700">
-                                        <Sun size={13} />
-                                        Hồ sơ
+                                    <span className="inline-flex items-center gap-1 rounded-full border border-[#CFE3FF] bg-white px-2.5 py-1 text-[11px] font-semibold text-[#1D6FE0]">
+                                        <ShieldCheck size={13} />
+                                        Hồ sơ đã xác thực
                                     </span>
                                 </div>
-                                <h1 className="truncate text-2xl font-semibold tracking-tight text-slate-950 md:text-3xl">
+                                <h1 className="truncate font-display text-2xl font-extrabold tracking-tight text-[#0B1E3D] md:text-3xl">
                                     {displayName}
                                 </h1>
                                 <p className="mt-1 flex min-w-0 items-center gap-2 text-sm text-slate-500">
-                                    <Mail size={15} className="shrink-0 text-cyan-600" />
+                                    <Mail size={15} className="shrink-0 text-[#1D6FE0]" />
                                     <span className="truncate">{user.email || "Chưa có email"}</span>
                                 </p>
                             </div>
@@ -319,20 +328,20 @@ export default function UserProfile() {
                 </header>
 
                 <main className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1.1fr)_minmax(320px,0.9fr)]">
-                    <section className="overflow-hidden rounded-[28px] border border-white/70 bg-white/88 shadow-[0_18px_55px_-40px_rgba(8,145,178,0.8)] backdrop-blur-xl">
-                        <div className="border-b border-sky-100/80 bg-gradient-to-r from-cyan-50/85 via-white to-amber-50/70 px-5 py-4">
+                    <section className="overflow-hidden rounded-[28px] border border-white/70 bg-white/88 shadow-[0_18px_55px_-40px_rgba(11,30,61,0.4)] backdrop-blur-xl">
+                        <div className="border-b border-[#DCE9FB] bg-[linear-gradient(90deg,#EEF6FF_0%,#FFFFFF_55%,#FBF6EA_100%)] px-5 py-4">
                             <div className="flex items-start justify-between gap-3">
                                 <div>
-                                    <h2 className="flex items-center gap-2 text-base font-semibold text-slate-950">
-                                        <UserRound size={18} className="text-cyan-600" />
+                                    <h2 className="flex items-center gap-2 font-display text-base font-bold text-[#0B1E3D]">
+                                        <UserRound size={18} className="text-[#1D6FE0]" />
                                         Thông tin cá nhân
                                     </h2>
                                     <p className="mt-1 text-xs text-slate-500">
                                         Cập nhật tên hiển thị và ảnh đại diện tài khoản.
                                     </p>
                                 </div>
-                                <div className="hidden h-10 w-10 items-center justify-center rounded-2xl border border-cyan-100 bg-white text-cyan-600 shadow-sm sm:flex">
-                                    <Waves size={19} />
+                                <div className="hidden h-10 w-10 items-center justify-center rounded-2xl border border-[#CFE3FF] bg-white text-[#1D6FE0] shadow-sm sm:flex">
+                                    <Sparkles size={18} />
                                 </div>
                             </div>
                         </div>
@@ -340,21 +349,21 @@ export default function UserProfile() {
                         <form onSubmit={handleSaveProfile} className="p-5 md:p-6">
                             <div className="grid gap-6 md:grid-cols-[220px_1fr]">
                                 <div className="space-y-4">
-                                    <div className="rounded-[24px] border border-cyan-100 bg-gradient-to-br from-cyan-50 via-white to-amber-50 p-4">
+                                    <div className="rounded-[24px] border border-[#DCE9FB] bg-[linear-gradient(160deg,#EEF6FF_0%,#FFFFFF_60%,#FBF6EA_100%)] p-4">
                                         <img
                                             src={avatarPreview}
                                             alt="Avatar preview"
-                                            className="mx-auto h-28 w-28 rounded-[24px] border border-white object-cover shadow-[0_18px_34px_-24px_rgba(8,145,178,0.9)]"
+                                            className="mx-auto h-28 w-28 rounded-[24px] border border-white object-cover shadow-[0_18px_34px_-24px_rgba(11,30,61,0.45)]"
                                             onError={(e) => {
                                                 e.currentTarget.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(
                                                     avatarName,
-                                                )}&background=0ea5e9&color=ffffff&size=128`;
+                                                )}&background=1D6FE0&color=ffffff&size=128`;
                                             }}
                                         />
                                         <label
                                             className={`mt-3 flex h-9 w-full cursor-pointer items-center justify-center gap-2 rounded-2xl border text-xs font-semibold transition ${uploadingAvatar
                                                     ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400"
-                                                    : "border-cyan-200 bg-white text-cyan-700 hover:bg-cyan-50"
+                                                    : "border-[#CFE3FF] bg-white text-[#1D6FE0] hover:bg-[#EEF6FF]"
                                                 }`}
                                         >
                                             <Upload size={14} />
@@ -385,7 +394,7 @@ export default function UserProfile() {
                                                 {managedPages.map((p) => (
                                                     <span
                                                         key={p._id}
-                                                        className="rounded-full border border-sky-100 bg-sky-50 px-2.5 py-1 text-xs font-medium text-sky-700"
+                                                        className="rounded-full border border-[#CFE3FF] bg-[#EEF6FF] px-2.5 py-1 text-xs font-medium text-[#1D6FE0]"
                                                         title={p.facebookId}
                                                     >
                                                         {p.name}
@@ -474,7 +483,7 @@ export default function UserProfile() {
                                         <button
                                             type="submit"
                                             disabled={savingProfile || uploadingAvatar}
-                                            className="inline-flex h-11 items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-cyan-600 via-sky-500 to-amber-400 px-4 text-sm font-semibold text-white shadow-[0_16px_32px_-20px_rgba(8,145,178,0.95)] transition hover:brightness-105 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
+                                            className="btn-shine inline-flex h-11 items-center justify-center gap-2 rounded-2xl bg-[linear-gradient(90deg,#1653B0_0%,#1D6FE0_55%,#3B93FF_100%)] px-4 text-sm font-semibold text-white shadow-[0_16px_32px_-20px_rgba(29,111,224,0.85)] transition hover:brightness-105 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
                                         >
                                             <Save size={16} />
                                             {savingProfile ? "Đang lưu..." : "Lưu thay đổi"}
@@ -485,12 +494,12 @@ export default function UserProfile() {
                         </form>
                     </section>
 
-                    <section className="overflow-hidden rounded-[28px] border border-white/70 bg-white/88 shadow-[0_18px_55px_-40px_rgba(8,145,178,0.8)] backdrop-blur-xl">
-                        <div className="border-b border-sky-100/80 bg-gradient-to-r from-white via-cyan-50/80 to-amber-50/70 px-5 py-4">
+                    <section className="overflow-hidden rounded-[28px] border border-white/70 bg-white/88 shadow-[0_18px_55px_-40px_rgba(11,30,61,0.4)] backdrop-blur-xl">
+                        <div className="border-b border-[#DCE9FB] bg-[linear-gradient(90deg,#FFFFFF_0%,#EEF6FF_55%,#FBF6EA_100%)] px-5 py-4">
                             <div className="flex items-start justify-between gap-3">
                                 <div>
-                                    <h2 className="flex items-center gap-2 text-base font-semibold text-slate-950">
-                                        <KeyRound size={18} className="text-cyan-600" />
+                                    <h2 className="flex items-center gap-2 font-display text-base font-bold text-[#0B1E3D]">
+                                        <KeyRound size={18} className="text-[#1D6FE0]" />
                                         Đổi mật khẩu
                                     </h2>
                                     <p className="mt-1 text-xs text-slate-500">
@@ -500,7 +509,7 @@ export default function UserProfile() {
                                 <button
                                     type="button"
                                     onClick={() => setShowPassword((v) => !v)}
-                                    className="inline-flex h-10 items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-cyan-200 hover:bg-cyan-50"
+                                    className="inline-flex h-10 items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-[#CFE3FF] hover:bg-[#EEF6FF]"
                                     title={showPassword ? "Ẩn mật khẩu" : "Hiện mật khẩu"}
                                 >
                                     {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
@@ -555,7 +564,7 @@ export default function UserProfile() {
                             <button
                                 type="submit"
                                 disabled={savingPassword}
-                                className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-2xl bg-slate-900 px-4 text-sm font-semibold text-white shadow-[0_16px_32px_-22px_rgba(15,23,42,0.9)] transition hover:bg-slate-800 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
+                                className="btn-shine inline-flex h-11 w-full items-center justify-center gap-2 rounded-2xl bg-[#0B1E3D] px-4 text-sm font-semibold text-white shadow-[0_16px_32px_-22px_rgba(11,30,61,0.9)] transition hover:bg-[#122A4E] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
                             >
                                 <Shield size={16} />
                                 {savingPassword ? "Đang đổi..." : "Đổi mật khẩu"}
