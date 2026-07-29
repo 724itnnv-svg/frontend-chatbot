@@ -6,6 +6,8 @@ import {
   getIdAdministrativearea,
   publishEInvoice,
 } from "../../../services/cashflowService/kiotService";
+import * as XLSX from "xlsx";
+import { useRef } from "react";
 const currency = new Intl.NumberFormat("vi-VN");
 
 const normalizeText = (value) => String(value ?? "").trim();
@@ -101,12 +103,89 @@ const FILTER_MODE_OPTIONS = [
   { value: "exact", label: "Tùy chỉnh" },
 ];
 
+const ROWS_PER_PAGE_OPTIONS = [15, 30, 50, 100];
+
 const EINVOICE_STATUS_OPTIONS = [
   { value: 0, label: "Chưa phát hành" },
   { value: 6, label: "Đã phát hành" },
 ];
 
 const coalesceValue = (row, keys = []) => pickFirstNonEmpty(row, keys);
+
+const mapOrderRows = (response) => {
+  const directRows = response?.data ?? response;
+  if (!Array.isArray(directRows)) return [];
+
+  return directRows.slice(1).map((row, index) => ({
+    ...row,
+    __rowId: row?.__rowId ?? row?.Id ?? row?.id ?? row?.Code ?? `row-${index}`,
+  }));
+};
+
+const getRowDisplayLabel = (row, index) => {
+  const code =
+    getCustomerCode(row) ||
+    normalizeText(
+      row?.InvoiceDeliveryCode ??
+        row?.InvoiceNumber ??
+        row?.EInvoiceNumber ??
+        row?.Code ??
+        row?.id ??
+        "",
+    );
+  const name = normalizeText(row?.CustomerName ?? row?.customerName ?? "");
+  const fallback = `Dòng ${index + 1}`;
+
+  return [code || fallback, name].filter(Boolean).join(" - ");
+};
+
+const normalizeFailedRow = (item, index) => {
+  if (typeof item === "string") {
+    return {
+      label: `Dòng ${index + 1}`,
+      reason: item,
+    };
+  }
+
+  return {
+    label:
+      normalizeText(item?.label ?? item?.rowLabel ?? item?.name) ||
+      `Dòng ${index + 1}`,
+    reason:
+      normalizeText(item?.reason ?? item?.message ?? item?.error) ||
+      "Không xác định được lỗi",
+  };
+};
+
+const extractOperationResult = (response, fallbackTotal = 0) => {
+  const payload = response?.data ?? response ?? {};
+  const failedRows = Array.isArray(payload?.failedRows)
+    ? payload.failedRows.map(normalizeFailedRow)
+    : Array.isArray(payload?.errors)
+      ? payload.errors.map(normalizeFailedRow)
+      : [];
+
+  const failedCountRaw = payload?.failedCount ?? payload?.errorCount;
+  const successCountRaw = payload?.successCount ?? payload?.okCount;
+  const skippedCountRaw = payload?.skippedCount ?? payload?.ignoredCount ?? 0;
+
+  const failedCount = Number.isFinite(Number(failedCountRaw))
+    ? Number(failedCountRaw)
+    : failedRows.length;
+  const successCount = Number.isFinite(Number(successCountRaw))
+    ? Number(successCountRaw)
+    : Math.max(0, fallbackTotal - failedCount);
+  const skippedCount = Number.isFinite(Number(skippedCountRaw))
+    ? Number(skippedCountRaw)
+    : 0;
+
+  return {
+    successCount,
+    failedCount,
+    skippedCount,
+    failedRows,
+  };
+};
 
 const getFirstEInvoice = (row) => {
   if (Array.isArray(row?.EInvoices) && row.EInvoices.length > 0) {
@@ -190,6 +269,7 @@ const buildEinvoicePayload = (row) => {
     UsingCod: 1,
     OriginStatus: 1,
     ValidateMessage: null,
+    EInvoiceNumber: row?.EInvoiceNumber,
   };
 };
 
@@ -376,6 +456,7 @@ export default function EinvoicesTab({
   const [error, setError] = useState("");
   const [filterMode, setFilterMode] = useState("range");
   const [timeRange, setTimeRange] = useState("month");
+  const [rowsPerPage, setRowsPerPage] = useState(15);
   const [exactFromDate, setExactFromDate] = useState(() =>
     getLocalDateInputValue(new Date()),
   );
@@ -385,79 +466,116 @@ export default function EinvoicesTab({
   const [eInvoiceStatus, setEInvoiceStatus] = useState("0");
   const [selectedRowIds, setSelectedRowIds] = useState(() => new Set());
   const [hddtStatusMessage, setHddtStatusMessage] = useState("");
+  const [lastOperationResult, setLastOperationResult] = useState(null);
   const [operationProgress, setOperationProgress] = useState({
     visible: false,
     label: "",
     value: 0,
   });
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
   const [visibleColumnIds, setVisibleColumnIds] = useState(() =>
     INVOICE_COLUMNS.filter((column) => column.defaultVisible !== false).map(
       (column) => column.id,
     ),
   );
+  const listContainerRef = useRef(null);
   const agencyCustomerBackupsRef = React.useRef(new Map());
 
-  const queryParams = useMemo(() => {
+  const baseQueryParams = useMemo(() => {
     if (filterMode === "exact") {
-      return buildExactDateParams(exactFromDate, exactToDate);
+      return {
+        ...buildExactDateParams(exactFromDate, exactToDate),
+      };
     }
 
     return {};
   }, [filterMode, exactFromDate, exactToDate]);
 
-  const fetchOrders = useCallback(async () => {
-    if (!retailer || !accessPrivateToken || !accessToken) {
-      setApiRows([]);
-      setError("");
-      setLoading(false);
-      return;
-    }
+  const fetchOrders = useCallback(
+    async ({ skip = 0, append = false } = {}) => {
+      if (!retailer || !accessPrivateToken || !accessToken) {
+        if (!append) {
+          setApiRows([]);
+          setError("");
+        }
+        setLoading(false);
+        setLoadingMore(false);
+        setHasMore(false);
+        return;
+      }
 
-    setLoading(true);
-    setError("");
+      if (append) {
+        setLoadingMore(true);
+      } else {
+        setLoading(true);
+        setError("");
+      }
 
-    try {
-      const response = await getListOrder(
-        retailer,
-        accessPrivateToken,
-        accessToken,
-        filterMode === "exact" ? "day" : timeRange,
-        eInvoiceStatus,
-        queryParams,
-      );
-      const directRows = response?.data ?? response;
+      try {
+        const response = await getListOrder(
+          retailer,
+          accessPrivateToken,
+          accessToken,
+          filterMode === "exact" ? "day" : timeRange,
+          eInvoiceStatus,
+          {
+            ...baseQueryParams,
+            top: rowsPerPage,
+            skip,
+          },
+        );
 
-      setApiRows(
-        Array.isArray(directRows)
-          ? directRows.slice(1).map((row, index) => ({
-              ...row,
-              __rowId:
-                row?.__rowId ??
-                row?.Id ??
-                row?.id ??
-                row?.Code ??
-                `row-${index}`,
-            }))
-          : [],
-      );
-    } catch (err) {
-      setApiRows([]);
-      setError(err?.message || "Không lấy được danh sách đơn hàng");
-    } finally {
-      setLoading(false);
-    }
-  }, [
-    retailer,
-    accessPrivateToken,
-    accessToken,
-    filterMode,
-    timeRange,
-    eInvoiceStatus,
-    queryParams,
-  ]);
+        const nextRows = mapOrderRows(response);
+        setHasMore(nextRows.length >= rowsPerPage);
+
+        setApiRows((current) => {
+          if (!append) return nextRows;
+
+          const merged = [...current, ...nextRows];
+          const unique = [];
+          const seen = new Set();
+
+          merged.forEach((row) => {
+            const key = row.__rowId;
+            if (seen.has(key)) return;
+            seen.add(key);
+            unique.push(row);
+          });
+
+          return unique;
+        });
+      } catch (err) {
+        if (!append) {
+          setApiRows([]);
+          setError(err?.message || "Không lấy được danh sách đơn hàng");
+        }
+        setHasMore(false);
+      } finally {
+        setLoading(false);
+        setLoadingMore(false);
+      }
+    },
+    [
+      retailer,
+      accessPrivateToken,
+      accessToken,
+      filterMode,
+      timeRange,
+      eInvoiceStatus,
+      baseQueryParams,
+      rowsPerPage,
+    ],
+  );
 
   useEffect(() => {
-    fetchOrders();
+    setApiRows([]);
+    setSelectedRowIds(new Set());
+    setLastOperationResult(null);
+    setHddtStatusMessage("");
+    setError("");
+    setHasMore(true);
+    fetchOrders({ skip: 0, append: false });
   }, [
     fetchOrders,
     retailer,
@@ -468,11 +586,12 @@ export default function EinvoicesTab({
     exactFromDate,
     exactToDate,
     eInvoiceStatus,
-    queryParams,
+    rowsPerPage,
   ]);
 
   const visibleRows = apiRows;
-  const hasNoInvoices = !loading && !error && visibleRows.length === 0;
+  const hasNoInvoices =
+    !loading && !loadingMore && !error && visibleRows.length === 0;
   const selectableRows = useMemo(
     () => visibleRows.filter((row) => isSelectableEinvoiceRow(row)),
     [visibleRows],
@@ -547,6 +666,35 @@ export default function EinvoicesTab({
     setSelectedRowIds(new Set());
   };
 
+  const loadMoreOrders = useCallback(() => {
+    if (loading || loadingMore || !hasMore) return;
+    fetchOrders({ skip: apiRows.length, append: true });
+  }, [apiRows.length, fetchOrders, hasMore, loading, loadingMore]);
+
+  const handleListScroll = useCallback(
+    (event) => {
+      const el = event.currentTarget;
+      if (loading || loadingMore || !hasMore) return;
+
+      const distanceToBottom =
+        el.scrollHeight - (el.scrollTop + el.clientHeight);
+
+      if (distanceToBottom <= 180) {
+        loadMoreOrders();
+      }
+    },
+    [hasMore, loadMoreOrders, loading, loadingMore],
+  );
+
+  useEffect(() => {
+    const el = listContainerRef.current;
+    if (!el || loading || loadingMore || !hasMore) return;
+
+    if (el.scrollHeight <= el.clientHeight + 80) {
+      loadMoreOrders();
+    }
+  }, [hasMore, loadMoreOrders, loading, loadingMore, visibleRows.length]);
+
   const resetOperationProgress = () => {
     setOperationProgress({
       visible: false,
@@ -614,6 +762,7 @@ export default function EinvoicesTab({
   }, [retailer, accessPrivateToken, accessToken, fetchOrders]);
 
   const handleExportHDDT = async () => {
+    setLastOperationResult(null);
     setHddtStatusMessage(
       `Đã chuẩn bị ${previewPayloadRows.length} dòng cho HDDT.`,
     );
@@ -628,21 +777,58 @@ export default function EinvoicesTab({
         previewPayloadRows,
       );
 
+      const exportResult = extractOperationResult(
+        response,
+        previewPayloadRows.length,
+      );
+
       updateOperationProgress(80, "Đang cập nhật lại trạng thái đơn hàng...");
       await fetchOrders();
 
+      let restoreResult = { restoredCount: 0, failedCount: 0 };
       updateOperationProgress(90, "Đang hoàn nguyên dữ liệu đại lý...");
       if (agencyCustomerBackupsRef.current.size > 0) {
         setHddtStatusMessage(
           "Đang hoàn nguyên thông tin đại lý sau khi xuất HDDT...",
         );
-        await restoreTemporaryAgencyCustomers();
+        restoreResult = await restoreTemporaryAgencyCustomers();
       }
 
+      setLastOperationResult({
+        type: "export",
+        title: "Xuất HDDT",
+        totalCount: previewPayloadRows.length,
+        successCount: exportResult.successCount,
+        failedCount: exportResult.failedCount,
+        skippedCount: exportResult.skippedCount,
+        failedRows: exportResult.failedRows,
+        extraNote:
+          restoreResult.failedCount > 0
+            ? `Hoàn nguyên đại lý còn ${restoreResult.failedCount} dòng chưa trả lại được.`
+            : "",
+      });
+      setHddtStatusMessage(
+        exportResult.failedCount > 0
+          ? `Xuất HDDT xong: ${exportResult.successCount}/${previewPayloadRows.length} dòng thành công, ${exportResult.failedCount} dòng thất bại.`
+          : `Xuất HDDT xong: ${exportResult.successCount}/${previewPayloadRows.length} dòng thành công.`,
+      );
       updateOperationProgress(100, "Hoàn tất xuất HDDT.");
       return response.data;
     } catch (error) {
       setHddtStatusMessage(error?.message || "Xuất HDDT thất bại.");
+      setLastOperationResult({
+        type: "export",
+        title: "Xuất HDDT",
+        totalCount: previewPayloadRows.length,
+        successCount: 0,
+        failedCount: previewPayloadRows.length,
+        skippedCount: 0,
+        failedRows: previewPayloadRows.map((row, index) => ({
+          label: getRowDisplayLabel(row, index),
+          reason: error?.message || "Xuất HDDT thất bại",
+        })),
+        extraNote: "",
+      });
       throw error;
     } finally {
       resetOperationProgress();
@@ -650,6 +836,7 @@ export default function EinvoicesTab({
   };
 
   const handleSyncAddress = async () => {
+    setLastOperationResult(null);
     if (previewPayloadRows.length === 0) {
       setHddtStatusMessage("Không có dòng hợp lệ để đồng bộ địa chỉ.");
       return;
@@ -667,7 +854,8 @@ export default function EinvoicesTab({
     updateOperationProgress(0, "Đang đồng bộ địa chỉ...");
 
     let successCount = 0;
-    let skippedCount = 0;
+    let failedCount = 0;
+    const failedRows = [];
 
     try {
       for (let index = 0; index < previewPayloadRows.length; index += 1) {
@@ -678,88 +866,212 @@ export default function EinvoicesTab({
           currentLabel,
         );
 
-        const customerCode = getCustomerCode(row);
-        if (!customerCode) {
-          skippedCount += 1;
-          continue;
-        }
+        try {
+          const customerCode = getCustomerCode(row);
+          if (!customerCode) {
+            failedCount += 1;
+            failedRows.push({
+              label: getRowDisplayLabel(row, index),
+              reason: "Thiếu mã khách hàng (Code/CompareCode).",
+            });
+            continue;
+          }
 
-        const hasCustomerDistrictName = Boolean(
-          normalizeText(row?.CustomerDistrictName),
-        );
-        const locationSuggestResult = hasCustomerDistrictName
-          ? await getLocationSuggest(
-              retailer,
-              accessPrivateToken,
-              accessToken,
-              row.CustomerLocationName,
-              row.CustomerDistrictName,
-              row.CustomerWardName,
-            )
-          : null;
+          const hasCustomerDistrictName = Boolean(
+            normalizeText(row?.CustomerDistrictName),
+          );
+          const locationSuggestResult = hasCustomerDistrictName
+            ? await getLocationSuggest(
+                retailer,
+                accessPrivateToken,
+                accessToken,
+                row.CustomerLocationName,
+                row.CustomerDistrictName,
+                row.CustomerWardName,
+              )
+            : null;
 
-        if (
-          hasCustomerDistrictName &&
-          (!locationSuggestResult?.LocationV2 || !locationSuggestResult?.WardV2)
-        ) {
-          skippedCount += 1;
-          continue;
-        }
+          if (
+            hasCustomerDistrictName &&
+            (!locationSuggestResult?.LocationV2 ||
+              !locationSuggestResult?.WardV2)
+          ) {
+            failedCount += 1;
+            failedRows.push({
+              label: getRowDisplayLabel(row, index),
+              reason: "Không tìm được gợi ý địa chỉ để đồng bộ.",
+            });
+            continue;
+          }
 
-        const updatePayload = await buildCustomerAddressUpdatePayload(
-          row,
-          locationSuggestResult,
-          retailer,
-          accessPrivateToken,
-        );
+          const updatePayload = await buildCustomerAddressUpdatePayload(
+            row,
+            locationSuggestResult,
+            retailer,
+            accessPrivateToken,
+          );
 
-        const agencyName = row?.CustomerName ?? row?.customerName;
-        const isAgencyRow = isAgencyCustomerName(agencyName);
+          const agencyName = row?.CustomerName ?? row?.customerName;
+          const isAgencyRow = isAgencyCustomerName(agencyName);
 
-        const updateResult = await updateCustomerAddress(
-          retailer,
-          accessPrivateToken,
-          accessToken,
-          updatePayload,
-          isAgencyRow ? "Cá nhân" : "Cá nhân",
-          isAgencyRow ? "" : "",
-        );
+          const updateResult = await updateCustomerAddress(
+            retailer,
+            accessPrivateToken,
+            accessToken,
+            updatePayload,
+            isAgencyRow ? "Cá nhân" : "Cá nhân",
+            isAgencyRow ? "" : "",
+          );
 
-        const originalCustomer = updateResult?.originalCustomer;
-        const restoreCode = getCustomerCode(originalCustomer) || customerCode;
+          const originalCustomer = updateResult?.originalCustomer;
+          const restoreCode = getCustomerCode(originalCustomer) || customerCode;
 
-        if (isAgencyRow && restoreCode) {
-          agencyCustomerBackupsRef.current.set(restoreCode, {
-            ...originalCustomer,
-            Code: restoreCode,
-            CompareCode: restoreCode,
-            CustomerType: originalCustomer?.CustomerType || "Công ty",
-            Organization: originalCustomer?.Organization || "",
+          if (isAgencyRow && restoreCode) {
+            agencyCustomerBackupsRef.current.set(restoreCode, {
+              ...originalCustomer,
+              Code: restoreCode,
+              CompareCode: restoreCode,
+              CustomerType: originalCustomer?.CustomerType || "Công ty",
+              Organization: originalCustomer?.Organization || "",
+            });
+          }
+
+          successCount += 1;
+        } catch (error) {
+          failedCount += 1;
+          failedRows.push({
+            label: getRowDisplayLabel(row, index),
+            reason: error?.message || "Đồng bộ địa chỉ thất bại.",
           });
         }
-
-        successCount += 1;
       }
 
       updateOperationProgress(100, "Hoàn tất đồng bộ địa chỉ.");
 
+      setLastOperationResult({
+        type: "sync",
+        title: "Đồng bộ địa chỉ",
+        totalCount: previewPayloadRows.length,
+        successCount,
+        failedCount,
+        skippedCount: 0,
+        failedRows,
+        extraNote: "",
+      });
+
       setHddtStatusMessage(
-        skippedCount > 0
-          ? `Đã đồng bộ ${successCount}/${previewPayloadRows.length} dòng, bỏ qua ${skippedCount} dòng không đủ dữ liệu.`
+        failedCount > 0
+          ? `Đã đồng bộ ${successCount}/${previewPayloadRows.length} dòng, thất bại ${failedCount} dòng.`
           : `Đã đồng bộ ${successCount}/${previewPayloadRows.length} dòng.`,
       );
 
       await fetchOrders();
+    } catch (error) {
+      setHddtStatusMessage(error?.message || "Đồng bộ địa chỉ thất bại.");
+      setLastOperationResult({
+        type: "sync",
+        title: "Đồng bộ địa chỉ",
+        totalCount: previewPayloadRows.length,
+        successCount,
+        failedCount:
+          failedCount +
+          Math.max(0, previewPayloadRows.length - successCount - failedCount),
+        skippedCount: 0,
+        failedRows: failedRows.length
+          ? failedRows
+          : [
+              {
+                label: "Chưa xác định",
+                reason: error?.message || "Đồng bộ địa chỉ thất bại.",
+              },
+            ],
+        extraNote: "",
+      });
     } finally {
       resetOperationProgress();
     }
   };
 
   const exportToExcel = async () => {
-    console.log("Excel payload", previewPayloadRows);
-    setHddtStatusMessage(
-      `Đã log ${previewPayloadRows.length} dòng payload Excel.`,
-    );
+    if (!retailer || !accessPrivateToken || !accessToken) {
+      setHddtStatusMessage("Thiếu thông tin xác thực, không thể xuất Excel.");
+      return;
+    }
+
+    setHddtStatusMessage("Đang tải toàn bộ dữ liệu để xuất Excel...");
+
+    const exportBatchSize = Math.max(rowsPerPage, 100);
+    const exportRowsSource = [];
+    const seenRowIds = new Set();
+    let skip = 0;
+    let hasMoreRows = true;
+
+    try {
+      while (hasMoreRows) {
+        const response = await getListOrder(
+          retailer,
+          accessPrivateToken,
+          accessToken,
+          filterMode === "exact" ? "day" : timeRange,
+          eInvoiceStatus,
+          {
+            ...baseQueryParams,
+            top: exportBatchSize,
+            skip,
+          },
+        );
+
+        const nextRows = mapOrderRows(response);
+        const newRows = nextRows.filter((row) => {
+          if (seenRowIds.has(row.__rowId)) return false;
+          seenRowIds.add(row.__rowId);
+          return true;
+        });
+
+        exportRowsSource.push(...newRows);
+
+        if (nextRows.length < exportBatchSize) {
+          hasMoreRows = false;
+        } else {
+          skip += exportBatchSize;
+        }
+      }
+
+      const exportRows = exportRowsSource.map((row, index) => {
+        const exportRow = {
+          STT: index + 1,
+        };
+
+        visibleColumns.forEach((column) => {
+          const rawValue = column.getValue ? column.getValue(row) : row?.[column.id];
+          const displayValue = column.render
+            ? column.render(rawValue, row)
+            : rawValue;
+
+          exportRow[column.label] = displayValue ?? "";
+        });
+
+        return exportRow;
+      });
+
+      if (exportRows.length === 0) {
+        setHddtStatusMessage("Không có dữ liệu để xuất Excel.");
+        return;
+      }
+
+      const worksheet = XLSX.utils.json_to_sheet(exportRows);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Einvoices");
+
+      const fileName = `einvoices_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      XLSX.writeFile(workbook, fileName);
+
+      setHddtStatusMessage(`Đã xuất ${exportRows.length} dòng ra file Excel.`);
+    } catch (error) {
+      setHddtStatusMessage(
+        error?.message || "Không thể tải đủ dữ liệu để xuất Excel.",
+      );
+    }
   };
 
   const summary = useMemo(() => {
@@ -915,6 +1227,23 @@ export default function EinvoicesTab({
               ))}
             </select>
           </label>
+
+          <label className="grid gap-2 lg:w-[170px]">
+            <span className="text-[11px] font-extrabold uppercase tracking-[0.16em] text-slate-500">
+              Hiển thị
+            </span>
+            <select
+              value={rowsPerPage}
+              onChange={(event) => setRowsPerPage(Number(event.target.value))}
+              className="h-11 rounded-[14px] border border-slate-300 bg-white px-3 text-sm font-bold text-slate-800 outline-none focus:border-sky-400 focus:ring-2 focus:ring-sky-200"
+            >
+              {ROWS_PER_PAGE_OPTIONS.map((option) => (
+                <option key={option} value={option}>
+                  {option} dòng
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
 
         <div className="mb-4 flex flex-wrap gap-2">
@@ -980,7 +1309,11 @@ export default function EinvoicesTab({
             </p>
           </div>
 
-          <div className="max-h-[68vh] overflow-auto">
+          <div
+            ref={listContainerRef}
+            onScroll={handleListScroll}
+            className="max-h-[68vh] overflow-auto"
+          >
             <table className="min-w-[1200px] w-full border-separate border-spacing-0 text-left">
               <thead>
                 <tr className="bg-slate-50 text-[11px] uppercase tracking-[0.14em] text-slate-500">
@@ -1077,6 +1410,20 @@ export default function EinvoicesTab({
                 )}
               </tbody>
             </table>
+
+            {loadingMore ? (
+              <div className="border-t border-slate-200 px-4 py-3 text-center text-xs font-semibold text-slate-500">
+                Đang tải thêm dòng...
+              </div>
+            ) : hasMore && visibleRows.length > 0 ? (
+              <div className="border-t border-slate-200 px-4 py-3 text-center text-xs font-semibold text-slate-400">
+                Kéo xuống để tải thêm
+              </div>
+            ) : visibleRows.length > 0 ? (
+              <div className="border-t border-slate-200 px-4 py-3 text-center text-xs font-semibold text-slate-400">
+                Đã tải hết dữ liệu
+              </div>
+            ) : null}
           </div>
         </div>
       </div>
@@ -1127,6 +1474,59 @@ export default function EinvoicesTab({
         {hddtStatusMessage ? (
           <div className="mt-3 rounded-[16px] border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-600">
             {hddtStatusMessage}
+          </div>
+        ) : null}
+
+        {lastOperationResult ? (
+          <div className="mt-3 rounded-[18px] border border-cyan-200/60 bg-gradient-to-b from-cyan-50 to-white p-4 shadow-[0_16px_36px_rgba(14,165,233,0.08)]">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <div className="text-[11px] font-extrabold uppercase tracking-[0.16em] text-cyan-700">
+                  Kết quả {lastOperationResult.title}
+                </div>
+                <div className="mt-1 text-sm font-bold text-slate-900">
+                  Tổng: {lastOperationResult.totalCount}
+                </div>
+                {lastOperationResult.extraNote ? (
+                  <div className="mt-1 text-xs leading-6 text-slate-500">
+                    {lastOperationResult.extraNote}
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-700">
+                  Thành công: {lastOperationResult.successCount}
+                </span>
+                <span className="rounded-full border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-bold text-rose-700">
+                  Thất bại: {lastOperationResult.failedCount}
+                </span>
+                {lastOperationResult.skippedCount > 0 ? (
+                  <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-bold text-amber-700">
+                    Bỏ qua: {lastOperationResult.skippedCount}
+                  </span>
+                ) : null}
+              </div>
+            </div>
+
+            {lastOperationResult.failedRows.length > 0 ? (
+              <div className="mt-4 rounded-[16px] border border-rose-200/70 bg-white p-3">
+                <div className="mb-2 text-xs font-extrabold uppercase tracking-[0.16em] text-rose-700">
+                  Dòng thất bại
+                </div>
+                <div className="max-h-48 space-y-2 overflow-auto pr-1">
+                  {lastOperationResult.failedRows.map((item, index) => (
+                    <div
+                      key={`${item.label}-${index}`}
+                      className="rounded-2xl border border-rose-100 bg-rose-50/70 px-3 py-2 text-xs leading-6 text-rose-800"
+                    >
+                      <div className="font-semibold">{item.label}</div>
+                      <div className="text-rose-700/90">{item.reason}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
           </div>
         ) : null}
 
