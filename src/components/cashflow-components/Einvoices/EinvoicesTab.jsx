@@ -1043,7 +1043,9 @@ export default function EinvoicesTab({
         };
 
         visibleColumns.forEach((column) => {
-          const rawValue = column.getValue ? column.getValue(row) : row?.[column.id];
+          const rawValue = column.getValue
+            ? column.getValue(row)
+            : row?.[column.id];
           const displayValue = column.render
             ? column.render(rawValue, row)
             : rawValue;
@@ -1433,9 +1435,6 @@ export default function EinvoicesTab({
           <h3 className="m-0 text-lg font-black text-slate-900">
             Tác vụ nhanh
           </h3>
-          <p className="mt-1.5 text-xs leading-[1.55] text-slate-500">
-            Khu này để mình gắn các nút xuất, đồng bộ và đối soát sau này.
-          </p>
         </div>
         <div className="grid gap-3">
           <button
