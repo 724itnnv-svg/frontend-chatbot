@@ -53,7 +53,7 @@ const EmployeeAssetManager = lazy(
 );
 const RolePage = lazy(() => import("./components/role/RoleList"));
 const UserProfile = lazy(() => import("./components/UserProfile"));
-const AddressManager = lazy(() => import("./components/AddressManager"));
+const AddressManager = lazy(() => import("./address/AddressManager"));
 const CommissionOnlineCalculator = lazy(
   () => import("./components/calculators/CommissionOnlineCalculator"),
 );
