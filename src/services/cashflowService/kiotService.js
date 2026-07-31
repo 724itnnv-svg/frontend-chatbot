@@ -550,13 +550,12 @@ export async function publishEInvoice(
   try {
     const response = await axios.post(
       `${tokenURL}/publishEInvoice`,
-      {},
+      { payload },
       {
         params: {
           retailer,
           accessPrivateToken,
           accessToken,
-          payload,
         },
 
         headers: {
