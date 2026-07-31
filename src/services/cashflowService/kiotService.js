@@ -286,6 +286,14 @@ export async function updateCustomerAddress(
       },
     );
 
+    if (
+      responseGetCustomer.data.Data[0].NameEInvoice ===
+      "Bán cho người tiêu dùng"
+    ) {
+      delete payloadData.AddressEInvoice;
+      delete payloadData.ContactNumberEInvoice;
+    }
+
     let payloadData = {
       ...payload,
       CustomerGroupNames: responseGetCustomer.data.Data[0].CustomerGroupNames,
@@ -309,15 +317,8 @@ export async function updateCustomerAddress(
             TaxCode: responseGetCustomer.data.Data[0].TaxCode,
           }
         : {}),
+      NameEInvoice: responseGetCustomer.data.Data[0].NameEInvoice,
     };
-
-    if (
-      responseGetCustomer.data.Data[0].NameEInvoice ===
-      "Bán cho người tiêu dùng"
-    ) {
-      delete payloadData.AddressEInvoice;
-      delete payloadData.ContactNumberEInvoice;
-    }
 
     const response = await axios.post(
       `https://api-man1.kiotviet.vn/api/customers`,
