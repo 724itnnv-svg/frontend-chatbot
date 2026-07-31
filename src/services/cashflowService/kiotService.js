@@ -5,7 +5,28 @@ const tokenURL = "/api/cashflow";
 
 const token = localStorage.getItem("token");
 
-// console.log("check", tokenURL);
+const RETAILER_CONFIG = {
+  kingfarm: {
+    branchId: 1000016475,
+    retailerId: 500846218,
+  },
+  vietnhattv: {
+    branchId: 1000016463,
+    retailerId: 500846204,
+  },
+  abctv: {
+    branchId: 1000016450,
+    retailerId: 500846190,
+  },
+  nnvtv: {
+    branchId: 1000016413,
+    retailerId: 500846150,
+  },
+};
+
+export function getRetailerConfig(retailer) {
+  return RETAILER_CONFIG[retailer] || null;
+}
 
 export async function getEmployeesByRetailer(
   retailer = "kingfarm",
@@ -242,7 +263,7 @@ export async function getLocationSuggest(
     throw new Error(`Failed to call API with auth: ${error.message}`);
   }
 }
-
+//update customer
 export async function updateCustomerAddress(
   retailer = "kingfarm",
   accessPrivateToken,
@@ -290,6 +311,14 @@ export async function updateCustomerAddress(
         : {}),
     };
 
+    if (
+      responseGetCustomer.data.Data[0].NameEInvoice ===
+      "Bán cho người tiêu dùng"
+    ) {
+      delete payloadData.AddressEInvoice;
+      delete payloadData.ContactNumberEInvoice;
+    }
+
     const response = await axios.post(
       `https://api-man1.kiotviet.vn/api/customers`,
       { Customer: payloadData },
@@ -307,6 +336,152 @@ export async function updateCustomerAddress(
     };
   } catch (error) {
     throw new Error(`Failed to call API with auth: ${error.message}`);
+  }
+}
+
+// add customer
+export async function addNewCustomer(
+  retailer = "kingfarm",
+  accessPrivateToken,
+  accessToken,
+  payload,
+) {
+  try {
+    console.log("payload", payload);
+    const response = await axios.post(
+      `https://api-man1.kiotviet.vn/api/customers`,
+      payload,
+      {
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessPrivateToken}`,
+          retailer,
+        },
+      },
+    );
+    return {
+      data: response.data,
+    };
+  } catch (error) {
+    throw new Error(`Failed to call API with auth: ${error.message}`);
+  }
+}
+//get customerGroup
+export async function getCustomerGroup(
+  retailer = "kingfarm",
+  accessPrivateToken,
+) {
+  try {
+    const response = await axios.get(
+      `https://api-man1.kiotviet.vn/api/customers/group`,
+
+      {
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessPrivateToken}`,
+          retailer,
+        },
+      },
+    );
+    return response.data.Data;
+  } catch (error) {
+    throw new Error(`Failed to call API with auth: ${error.message}`);
+  }
+}
+
+export async function getCustomerByPhoneNumber(
+  retailer = "kingfarm",
+  accessPrivateToken,
+  phoneNumber,
+) {
+  try {
+    if (!accessPrivateToken) {
+      throw new Error("Thiếu accessPrivateToken");
+    }
+
+    if (!phoneNumber) {
+      throw new Error("Thiếu số điện thoại");
+    }
+
+    const keyword = String(phoneNumber).trim();
+
+    // Tránh lỗi OData nếu keyword có dấu nháy đơn
+    const safeKeyword = keyword.replace(/'/g, "''");
+
+    const filter = `(
+      (
+        substringof('${safeKeyword}',Code)
+        or endswith(ContactNumber,'${safeKeyword}')
+        or substringof('${safeKeyword}',ContactNumber)
+        or substringof('${safeKeyword}',SearchNumber)
+        or substringof('${safeKeyword}',Name)
+        or substringof('${safeKeyword}',TaxCode)
+        or substringof('${safeKeyword}',Organization)
+      )
+      and IsActive eq true
+    )`.replace(/\s+/g, " ");
+
+    const params = new URLSearchParams();
+
+    params.append("format", "json");
+
+    // Includes được truyền lặp lại giống URL gốc
+    params.append("Includes", "TotalInvoiced");
+    params.append("Includes", "Location");
+    params.append("Includes", "WardName");
+    params.append("Includes", "CustomerToManageByUsers");
+
+    params.append("ForManageScreen", "true");
+    params.append("ForSummaryRow", "true");
+    params.append("UsingTotalApi", "true");
+    params.append("UsingStoreProcedure", "false");
+    params.append("SwitchToOrmLite", "true");
+
+    params.append("$inlinecount", "allpages");
+    params.append("GroupId", "0");
+
+    params.append("DateFilterType", "alltime");
+    params.append("NewCustomerDateFilterType", "alltime");
+    params.append("NewCustomerLastTradingDateFilterType", "alltime");
+    params.append("CustomerBirthDateFilterType", "alltime");
+
+    params.append("FindString", keyword);
+    params.append("IsActive", "true");
+
+    params.append("InvoiceCode", "");
+    params.append("Comments", "");
+    params.append("Address", "");
+    params.append("EmailKeyword", "");
+
+    params.append("ForCustomerManagement", "true");
+    params.append("$top", "15");
+    params.append("$filter", filter);
+
+    const response = await axios.get(
+      "https://api-man1.kiotviet.vn/api/customers",
+      {
+        params,
+
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessPrivateToken}`,
+          Retailer: retailer,
+        },
+      },
+    );
+
+    return response.data?.Data[1] ?? [];
+  } catch (error) {
+    const apiMessage =
+      error.response?.data?.ResponseStatus?.Message ||
+      error.response?.data?.responseStatus?.message ||
+      error.response?.data?.message ||
+      error.message;
+
+    throw new Error(
+      `Lấy khách hàng theo số điện thoại thất bại: ${apiMessage}`,
+    );
   }
 }
 
@@ -393,5 +568,31 @@ export async function publishEInvoice(
     return response.data;
   } catch (error) {
     throw new Error(`Failed to call API with auth: ${error.message}`);
+  }
+}
+
+export async function getUserInKiot(retailer = "kingfarm", accessPrivateToken) {
+  try {
+    const url = "https://api-man1.kiotviet.vn/api/users";
+
+    const headers = {
+      Accept: "application/json, text/plain, */*",
+      Retailer: retailer,
+      Authorization: `Bearer ${accessPrivateToken}`,
+    };
+
+    const response = await axios.get(url, {
+      headers,
+    });
+
+    return response.data;
+  } catch (error) {
+    const message =
+      error.response?.data?.error?.ResponseStatus?.Message ||
+      error.response?.data?.ResponseStatus?.Message ||
+      error.response?.data?.message ||
+      error.message;
+
+    throw new Error(`Failed to call administrative area API: ${message}`);
   }
 }

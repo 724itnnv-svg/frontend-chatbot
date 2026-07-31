@@ -8,6 +8,7 @@ import {
 } from "../../../services/cashflowService/kiotService";
 import * as XLSX from "xlsx";
 import { useRef } from "react";
+import { convertAddress } from "../../../address/addressApi";
 const currency = new Intl.NumberFormat("vi-VN");
 
 const normalizeText = (value) => String(value ?? "").trim();
@@ -222,6 +223,58 @@ const splitCustomerLocationName = (value) => {
   return {
     province: normalized.slice(0, separatorIndex).trim(),
     district: normalized.slice(separatorIndex + 3).trim(),
+  };
+};
+
+const buildAddressConvertQuery = (row) =>
+  [
+    row?.CustomerAddress ?? row?.customerAddress ?? "",
+    row?.CustomerWardName ?? row?.customerWardName ?? "",
+    row?.CustomerDistrictName ?? row?.customerDistrictName ?? "",
+    row?.CustomerLocationName ?? row?.customerLocationName ?? "",
+  ]
+    .map(normalizeText)
+    .filter(Boolean)
+    .join(", ");
+
+const buildFallbackLocationSuggestResult = (conversionResult) => {
+  const boundaries = Array.isArray(conversionResult?.result?.boundaries)
+    ? conversionResult.result.boundaries
+    : [];
+  const provinceBoundary = boundaries.find((item) => Number(item?.type) === 0);
+  const wardBoundary = boundaries.find((item) => Number(item?.type) === 2);
+
+  if (!provinceBoundary && !wardBoundary) {
+    return null;
+  }
+
+  return {
+    LocationV2: provinceBoundary
+      ? {
+          Id: provinceBoundary.id ?? null,
+          Name:
+            provinceBoundary.full_name ||
+            provinceBoundary.name ||
+            provinceBoundary.prefix ||
+            "",
+          Prefix: provinceBoundary.prefix || "",
+          FullName: provinceBoundary.full_name || "",
+        }
+      : null,
+    WardV2: wardBoundary
+      ? {
+          Id: wardBoundary.id ?? null,
+          Name:
+            wardBoundary.full_name ||
+            wardBoundary.name ||
+            wardBoundary.prefix ||
+            "",
+          Prefix: wardBoundary.prefix || "",
+          FullName: wardBoundary.full_name || "",
+        }
+      : null,
+    __source: "convertAddress",
+    __conversion: conversionResult,
   };
 };
 
@@ -891,10 +944,27 @@ export default function EinvoicesTab({
               )
             : null;
 
+          let resolvedLocationSuggestResult = locationSuggestResult;
           if (
             hasCustomerDistrictName &&
             (!locationSuggestResult?.LocationV2 ||
               !locationSuggestResult?.WardV2)
+          ) {
+            const addressConvertQuery = buildAddressConvertQuery(row);
+            if (addressConvertQuery) {
+              const convertedAddress = await convertAddress(
+                addressConvertQuery,
+                "old-new",
+              );
+              resolvedLocationSuggestResult =
+                buildFallbackLocationSuggestResult(convertedAddress);
+            }
+          }
+
+          if (
+            hasCustomerDistrictName &&
+            (!resolvedLocationSuggestResult?.LocationV2 ||
+              !resolvedLocationSuggestResult?.WardV2)
           ) {
             failedCount += 1;
             failedRows.push({
@@ -906,7 +976,7 @@ export default function EinvoicesTab({
 
           const updatePayload = await buildCustomerAddressUpdatePayload(
             row,
-            locationSuggestResult,
+            resolvedLocationSuggestResult,
             retailer,
             accessPrivateToken,
           );
@@ -1043,7 +1113,9 @@ export default function EinvoicesTab({
         };
 
         visibleColumns.forEach((column) => {
-          const rawValue = column.getValue ? column.getValue(row) : row?.[column.id];
+          const rawValue = column.getValue
+            ? column.getValue(row)
+            : row?.[column.id];
           const displayValue = column.render
             ? column.render(rawValue, row)
             : rawValue;
@@ -1433,9 +1505,6 @@ export default function EinvoicesTab({
           <h3 className="m-0 text-lg font-black text-slate-900">
             Tác vụ nhanh
           </h3>
-          <p className="mt-1.5 text-xs leading-[1.55] text-slate-500">
-            Khu này để mình gắn các nút xuất, đồng bộ và đối soát sau này.
-          </p>
         </div>
         <div className="grid gap-3">
           <button

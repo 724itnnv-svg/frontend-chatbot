@@ -79,6 +79,12 @@ const MENU_CONFIG = [
     icon: ClipboardList,
   },
   {
+    id: "tao_don_hang",
+    path: "/admin/tao-don-hang",
+    label: "Tạo đơn hàng",
+    icon: ClipboardList,
+  },
+  {
     id: "business_stats",
     path: "/admin/business-stats",
     label: "Thống kê kinh doanh",
@@ -250,6 +256,7 @@ const MENU_GROUPS = [
       "pagesmessage",
       "customer_care",
       "donhang",
+      "tao_don_hang",
       "so_quy",
       "dia_chi",
     ],
