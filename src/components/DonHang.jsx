@@ -516,11 +516,11 @@ function DonHang() {
       items:
         order.items && order.items.length
           ? order.items.map((it) => ({
-              productName: it.productName || "",
-              sku: it.sku || "", // Nếu ko có sku thì để chuỗi rỗng để user nhập
-              quantity: it.quantity ?? 1,
-              price: it.price ?? "",
-            }))
+            productName: it.productName || "",
+            sku: it.sku || "", // Nếu ko có sku thì để chuỗi rỗng để user nhập
+            quantity: it.quantity ?? 1,
+            price: it.price ?? "",
+          }))
           : [], // Nếu không có items thì trả về mảng rỗng
     });
   };
@@ -548,6 +548,7 @@ function DonHang() {
   const handleCreateKiotOrder = (order) => {
     if (!order?._id) return;
 
+
     if (order.kiotInvoice?.id) {
       alert(
         `Đơn này đã tạo hóa đơn Kiot: ${order.kiotInvoice.code || order.kiotInvoice.id}`,
@@ -562,6 +563,10 @@ function DonHang() {
   const confirmCreateKiotOrder = async () => {
     const order = kiotConfirmOrder;
     if (!order?._id) return;
+
+    alert(`Bùmmmmmm, chức năng đang được phát triển vui lòng thử lại sau!`);
+
+    return;
 
     try {
       setCreatingKiotId(order._id);
@@ -703,8 +708,8 @@ function DonHang() {
   const rangeLabel =
     from && to
       ? `Từ ${from.toLocaleDateString("vi-VN")} đến ${to.toLocaleDateString(
-          "vi-VN",
-        )}`
+        "vi-VN",
+      )}`
       : "Lọc theo khoảng ngày";
 
   return (
