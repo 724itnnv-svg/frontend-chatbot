@@ -15,8 +15,9 @@ import {
   getCustomerByPhoneNumber,
   getIdAdministrativearea,
   getRetailerConfig,
+  getUserInKiot,
 } from "../services/cashflowService/kiotService";
-
+import { useAuth } from "../context/AuthContext";
 const RETAILERS = [
   { id: "nnvtv", label: "Công ty Phân Bón Nông Nghiệp Việt" },
   { id: "kingfarm", label: "Công ty Phân Bón Kingfarm" },
@@ -118,6 +119,28 @@ function normalizeDisplayText(value = "") {
     .replace(/\u00A0/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function normalizeNameForCompare(value = "") {
+  return normalizeDisplayText(value)
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function getKiotUserDisplayName(user = {}) {
+  return (
+    user?.CompareGivenName ||
+    user?.GivenName ||
+    user?.FullName ||
+    user?.fullName ||
+    user?.Name ||
+    user?.name ||
+    ""
+  );
 }
 
 function stripProvincePrefixDisplay(value = "") {
@@ -323,11 +346,21 @@ function buildNewCustomerPayload({ parsed, selectedGroupId, customerType }) {
       LocationId: null,
       LastLocation: "",
       WardId: null,
+      ...(matchedKiotUser && {
+        CreatedName:
+          matchedKiotUser.CompareGivenName || matchedKiotUser.GivenName,
+
+        CreatedBy: matchedKiotUser.Id,
+      }),
       NameEInvoice: invoiceName,
       AddressEInvoice: resolvedAddress || address,
       AdministrativeAreaIdEInvoice: null,
       AdministrativeAreaId: null,
       RetailerId: null,
+      EmployeeInChargeIds: matchedKiotUser ? [matchedKiotUser.Id] : [],
+      EmployeeInChargeNames: matchedKiotUser
+        ? [matchedKiotUser.CompareGivenName || matchedKiotUser.GivenName]
+        : [],
       CustomerGroupDetails: selectedGroupId
         ? [{ GroupId: selectedGroupId }]
         : [],
@@ -347,6 +380,7 @@ async function buildNewCustomerPayloadV2({
   customerType,
   retailer,
   accessPrivateToken,
+  matchedKiotUser,
 }) {
   void parseAddressParts;
   void buildLocationNameFromParts;
@@ -399,6 +433,16 @@ async function buildNewCustomerPayloadV2({
       AdministrativeAreaIdEInvoice: invoiceAddressDetails.districtId,
       AdministrativeAreaId: null,
       RetailerId: retailerId,
+      ...(matchedKiotUser && {
+        CreatedName:
+          matchedKiotUser.CompareGivenName || matchedKiotUser.GivenName,
+
+        CreatedBy: matchedKiotUser.Id,
+      }),
+      EmployeeInChargeIds: matchedKiotUser ? [matchedKiotUser.Id] : [],
+      EmployeeInChargeNames: matchedKiotUser
+        ? [matchedKiotUser.CompareGivenName || matchedKiotUser.GivenName]
+        : [],
       ContactNumberEInvoice: phoneNumber,
       LocationItemsEInvoice: {
         1: invoiceAddressDetails.provinceRows[0] || null,
@@ -524,9 +568,11 @@ export default function TaoDonHang() {
   const [copied, setCopied] = useState(false);
   const [accessToken, setAccessToken] = useState("");
   const [accessPrivateToken, setAccessPrivateToken] = useState("");
+  const [kiotUsers, setKiotUsers] = useState([]);
+  const [matchedKiotUser, setMatchedKiotUser] = useState(null);
   const [tokenLoading, setTokenLoading] = useState(false);
   const [tokenError, setTokenError] = useState("");
-
+  const { user } = useAuth() || {};
   const selectedRetailer = useMemo(
     () =>
       RETAILERS.find(
@@ -536,6 +582,27 @@ export default function TaoDonHang() {
       ) || RETAILERS[0],
     [selectedRetailerId],
   );
+  const normalizedUserFullName = normalizeNameForCompare(user?.fullName);
+  const kiotUserInfoList = useMemo(() => {
+    if (!matchedKiotUser) return [];
+
+    return [
+      {
+        label: "CompareGivenName",
+        value: matchedKiotUser?.CompareGivenName || "",
+      },
+      { label: "GivenName", value: matchedKiotUser?.GivenName || "" },
+      {
+        label: "Tên hiển thị",
+        value: getKiotUserDisplayName(matchedKiotUser),
+      },
+      {
+        label: "UserId",
+        value: matchedKiotUser?.Id || matchedKiotUser?.UserId || "",
+      },
+      { label: "Retailer", value: selectedRetailerId },
+    ].filter((item) => String(item.value || "").trim());
+  }, [matchedKiotUser, selectedRetailerId]);
 
   const customerTypeOptions = useMemo(
     () => getCustomerTypeOptions(selectedRetailerId),
@@ -570,11 +637,40 @@ export default function TaoDonHang() {
           getAccessToken(selectedRetailerId),
           getAccessPrivateToken(selectedRetailerId),
         ]);
+        const getUsserr = await getUserInKiot(
+          selectedRetailerId,
+          nextPrivateToken,
+        );
+        console.log("getUsserr", getUsserr);
+        const nextKiotUsers = Array.isArray(getUsserr?.Data)
+          ? getUsserr.Data
+          : Array.isArray(getUsserr)
+            ? getUsserr
+            : [];
+        const matchedUser = nextKiotUsers.find((item) => {
+          const compareGivenName = normalizeNameForCompare(
+            item?.CompareGivenName,
+          );
+
+          const givenName = normalizeNameForCompare(item?.GivenName);
+
+          return (
+            (normalizedUserFullName &&
+              compareGivenName === normalizedUserFullName) ||
+            (normalizedUserFullName && givenName === normalizedUserFullName) ||
+            (normalizedUserFullName &&
+              compareGivenName.includes(normalizedUserFullName)) ||
+            (normalizedUserFullName &&
+              givenName.includes(normalizedUserFullName))
+          );
+        });
 
         if (!active) return;
-
+        console.log("matchedUser", matchedUser);
         setAccessToken(nextAccessToken || "");
         setAccessPrivateToken(nextPrivateToken || "");
+        setKiotUsers(nextKiotUsers);
+        setMatchedKiotUser(matchedUser || null);
       } catch (error) {
         if (!active) return;
         console.error("loadTokens error:", error);
@@ -591,7 +687,7 @@ export default function TaoDonHang() {
     return () => {
       active = false;
     };
-  }, [selectedRetailerId]);
+  }, [selectedRetailerId, normalizedUserFullName]);
 
   const handleReset = () => {
     setSelectedRetailerId("nnvtv");
@@ -664,6 +760,7 @@ export default function TaoDonHang() {
         customerType,
         retailer: selectedRetailerId,
         accessPrivateToken,
+        matchedKiotUser,
       });
 
       const createResponse = await addNewCustomer(
@@ -867,6 +964,16 @@ export default function TaoDonHang() {
                         : "Đã sẵn sàng"}
                   </div>
                 </div>
+                <div>
+                  <div className="font-semibold text-slate-900">
+                    Người dùng Kiot khớp
+                  </div>
+                  <div className="text-xs text-slate-500">
+                    {matchedKiotUser
+                      ? getKiotUserDisplayName(matchedKiotUser)
+                      : "Chưa tìm thấy theo fullName"}
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -881,6 +988,42 @@ export default function TaoDonHang() {
                 <FieldCard label="Địa chỉ cũ" value={parsed.oldAddress} />
                 <FieldCard label="Địa chỉ mới" value={parsed.newAddress} />
                 <FieldCard label="NVC" value={parsed.nvc} />
+              </div>
+
+              <div className="mt-4 rounded-2xl border border-cyan-100 bg-cyan-50/60 px-4 py-3">
+                <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-cyan-700">
+                  Thông tin người dùng Kiot
+                </div>
+                <div className="mt-2 grid gap-2">
+                  <div className="text-sm font-semibold text-slate-900">
+                    {user?.fullName || "Chưa có fullName"}
+                  </div>
+                  <div className="text-xs text-slate-500">
+                    Tổng số user trong Data: {kiotUsers.length}
+                  </div>
+                  {matchedKiotUser ? (
+                    <div className="mt-2 grid gap-2">
+                      {kiotUserInfoList.map((item) => (
+                        <div
+                          key={item.label}
+                          className="rounded-xl border border-white bg-white px-3 py-2 text-sm"
+                        >
+                          <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-400">
+                            {item.label}
+                          </div>
+                          <div className="mt-1 break-words text-slate-800">
+                            {item.value}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-sm text-slate-600">
+                      Không tìm thấy user khớp theo{" "}
+                      <code>CompareGivenName</code> hoặc <code>GivenName</code>.
+                    </div>
+                  )}
+                </div>
               </div>
 
               <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-3">

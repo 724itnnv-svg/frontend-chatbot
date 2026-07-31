@@ -570,3 +570,29 @@ export async function publishEInvoice(
     throw new Error(`Failed to call API with auth: ${error.message}`);
   }
 }
+
+export async function getUserInKiot(retailer = "kingfarm", accessPrivateToken) {
+  try {
+    const url = "https://api-man1.kiotviet.vn/api/users";
+
+    const headers = {
+      Accept: "application/json, text/plain, */*",
+      Retailer: retailer,
+      Authorization: `Bearer ${accessPrivateToken}`,
+    };
+
+    const response = await axios.get(url, {
+      headers,
+    });
+
+    return response.data;
+  } catch (error) {
+    const message =
+      error.response?.data?.error?.ResponseStatus?.Message ||
+      error.response?.data?.ResponseStatus?.Message ||
+      error.response?.data?.message ||
+      error.message;
+
+    throw new Error(`Failed to call administrative area API: ${message}`);
+  }
+}
