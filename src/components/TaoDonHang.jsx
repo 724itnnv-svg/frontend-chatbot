@@ -43,8 +43,8 @@ function getCustomerTypeOptions(retailerId) {
   }
 
   return [
-    { value: "dai_ly", label: "Đại lý" },
     { value: "khach_le", label: "Khách lẻ" },
+    { value: "dai_ly", label: "Đại lý" },
   ];
 }
 
@@ -141,6 +141,19 @@ function getKiotUserDisplayName(user = {}) {
     user?.name ||
     ""
   );
+}
+
+function mapTeamIdToRetailerId(teamId = "") {
+  const normalizedTeamId = String(teamId || "")
+    .trim()
+    .toUpperCase();
+
+  if (normalizedTeamId === "NNV") return "nnvtv";
+  if (normalizedTeamId === "KF") return "kingfarm";
+  if (normalizedTeamId === "ABC") return "abctv";
+  if (normalizedTeamId === "VN") return "vietnhattv";
+
+  return "kingfarm";
 }
 
 function stripProvincePrefixDisplay(value = "") {
@@ -312,7 +325,12 @@ function pickCustomerGroupName(customerType) {
   return "Đại lý";
 }
 
-function buildNewCustomerPayload({ parsed, selectedGroupId, customerType }) {
+function buildNewCustomerPayload({
+  parsed,
+  selectedGroupId,
+  customerType,
+  matchedKiotUser = null,
+}) {
   const customerName = String(parsed.customerName || "").trim();
   const phoneNumber = String(parsed.phoneNumber || "").trim();
   const address = String(parsed.newAddress || parsed.oldAddress || "").trim();
@@ -461,6 +479,280 @@ async function buildNewCustomerPayloadV2({
   };
 }
 
+function extractCustomerRecord(response, fallback = null) {
+  const candidate =
+    response?.Data?.[0] ||
+    response?.data?.Data?.[0] ||
+    response?.data?.data?.[0] ||
+    response?.Customer ||
+    response?.customer ||
+    response?.Data ||
+    response?.data?.Data ||
+    response?.data?.customer ||
+    response;
+
+  if (candidate && Object.keys(candidate || {}).length > 0) {
+    return candidate;
+  }
+
+  return fallback;
+}
+
+function buildInvoiceDetailLines(items = []) {
+  return items
+    .map((item) => {
+      const quantity = Number(item?.quantity || 0) || 0;
+      const unitPrice = Number(item?.price || 0) || 0;
+      const lineTotal = quantity * unitPrice;
+
+      return {
+        BasePrice: unitPrice,
+        IsLotSerialControl: false,
+        IsBatchExpireControl: false,
+        IsRewardPoint: true,
+        Note: null,
+        Price: unitPrice,
+        PriceAfterTax: lineTotal,
+        ProductId: item?.productId ?? null,
+        Quantity: quantity,
+        ProductCode: item?.sku || "",
+        Weight: item?.weight ?? 0,
+        DiscountAfterTax: null,
+        ProductName: item?.productName || "",
+        SalePromotionId: null,
+        OriginPrice: unitPrice,
+        PriceByPromotion: null,
+        ProductFormulaHistoryId: null,
+        PromotionParentProductId: null,
+        ProductBatchExpireId: null,
+        CategoryId: item?.categoryId ?? null,
+        MasterProductId: item?.masterProductId ?? item?.productId ?? null,
+        Unit: item?.unit || "",
+        Uuid:
+          globalThis?.crypto?.randomUUID?.() ||
+          `tmp-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        SupplyPromotionTypes: "",
+        Formulas: null,
+        AllocationDiscount: 0,
+        InvoiceDetailTaxs: [],
+        DetailTaxIds: [],
+        IsUndeclaredTax: null,
+      };
+    })
+    .filter(
+      (item) => item.Quantity > 0 || item.ProductName || item.ProductCode,
+    );
+}
+
+function buildInvoicePayload({
+  customer,
+  parsed,
+  retailer,
+  matchedKiotUser,
+  selectedShippingPartner,
+}) {
+  const retailerConfig = getRetailerConfig(retailer);
+  const branchId = retailerConfig?.branchId ?? null;
+  const retailerId = retailerConfig?.retailerId ?? null;
+  const customerId =
+    customer?.Id ?? customer?.id ?? customer?.CustomerId ?? null;
+  const customerCode =
+    customer?.Code || customer?.CompareCode || customer?.CustomerCode || "";
+  const customerName =
+    customer?.Name ||
+    customer?.CompareName ||
+    customer?.CustomerName ||
+    parsed?.customerName ||
+    "";
+  const invoiceAddress = String(
+    parsed?.newAddress || parsed?.oldAddress || "",
+  ).trim();
+  const deliveryParts = parseVietnamAddressParts(invoiceAddress);
+  const deliveryAddressText = [
+    deliveryParts.street,
+    deliveryParts.ward,
+    deliveryParts.district,
+    deliveryParts.province,
+  ]
+    .map((value) => normalizeDisplayText(value))
+    .filter(Boolean)
+    .join(", ");
+  const invoiceDetails = buildInvoiceDetailLines(parsed?.items || []);
+  const totalBeforeDiscount = invoiceDetails.reduce(
+    (sum, item) =>
+      sum + Number(item.OriginPrice || 0) * Number(item.Quantity || 0),
+    0,
+  );
+  const totalProductPrice = invoiceDetails.reduce(
+    (sum, item) => sum + Number(item.PriceAfterTax || 0),
+    0,
+  );
+  const soldBy = matchedKiotUser ? { ...matchedKiotUser } : null;
+  const soldById = matchedKiotUser?.Id ?? matchedKiotUser?.UserId ?? null;
+  const partnerCode = String(selectedShippingPartner || "")
+    .trim()
+    .toUpperCase();
+  const partnerName =
+    partnerCode === "VTPFW"
+      ? "Viettel Post FW"
+      : partnerCode === "GHN"
+        ? "Giao hàng nhanh"
+        : selectedShippingPartner;
+
+  return {
+    Invoice: {
+      BranchId: branchId,
+      RetailerId: retailerId,
+      UpdateInvoiceId: 0,
+      UpdateReturnId: 0,
+      IsChangeNormalToShippingDelivery: false,
+      CustomerId: customerId,
+      SoldById: soldById,
+      SoldBy: soldBy,
+      Seller: soldBy,
+      SaleChannelId: 0,
+      PriceBookId: retailerConfig?.priceBookId ?? 0,
+      OrderCode: "",
+      Code: `Hóa đơn ${customerName || customerCode || customerId || "1"}`,
+      DiscountAfterTax: 0,
+      DiscountRatioAfterTax: 0,
+      DiscountByPromotion: 0,
+      DiscountByPromotionAfterTax: 0,
+      DiscountByPromotionValue: 0,
+      DiscountByPromotionRatio: 0,
+      DiscountByCouponAfterTax: 0,
+      InvoiceDetails: invoiceDetails,
+      InvoiceOrderSurcharges: [],
+      InvoicePromotions: [],
+      InvoiceSupplierPromotions: [],
+      UsingCod: 1,
+      Payments: [],
+      Status: 3,
+      Total: totalProductPrice,
+      TotalTax: 0,
+      EnableVATToggle: true,
+      IsTaxReductionEnabled: false,
+      IsApplyTaxReduction: false,
+      RoundAmount: null,
+      Surcharge: 0,
+      Type: 1,
+      Uuid:
+        globalThis?.crypto?.randomUUID?.() ||
+        `tmp-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      addToAccount: "0",
+      addToAccountSurplus: "0",
+      addToAccountAllocation: "0",
+      addToAccountPaymentAllocation: "0",
+      PayingAmount: 0,
+      TotalBeforeDiscount: totalBeforeDiscount,
+      ProductDiscount: 0,
+      DebugUuid:
+        globalThis?.crypto?.randomUUID?.() ||
+        `tmp-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      InvoiceWarranties: [],
+      IsUsingProductVAT: true,
+      PricingMode: 0,
+      CreatedBy: soldById,
+      DeliveryDetail: {
+        Type: 0,
+        TypeName: "",
+        Status: 1,
+        Address: deliveryParts.street || invoiceAddress,
+        ContactNumber: parsed?.phoneNumber || "",
+        Receiver: parsed?.customerName || "",
+        DeliveryBy: 0,
+        LocationId: deliveryParts.province || null,
+        LocationName: buildLocationNameFromParts({
+          province: deliveryParts.province,
+          district: deliveryParts.district,
+        }),
+        WardName: deliveryParts.ward || "",
+        CustomerId: customerId,
+        CustomerCode: customerCode,
+        BranchTakingAddressId: null,
+        BranchTakingAddressStr: "",
+        AdministrativeAreaId: null,
+        WardId: null,
+        Weight: 0,
+        Height: 0,
+        Width: 0,
+        Length: 0,
+        AddressInforDelivery: deliveryAddressText || invoiceAddress,
+        IsChangeGBH: false,
+        LastLocation: buildLocationNameFromParts({
+          province: deliveryParts.province,
+          district: deliveryParts.district,
+        }),
+        LastWard: deliveryParts.ward || "",
+        PackageType: 0,
+        Paymenter: 0,
+        TotalProductPrice: totalProductPrice,
+        TotalReceiverPay: totalProductPrice,
+        UseDefaultPartner: false,
+        UsingOfBilling: false,
+        UsingPriceCod: 1,
+        ChangeExpectedDelivery: false,
+        WeightInput: 0,
+        PackageTypeObj: {
+          Value: 0,
+          Name: "gram",
+        },
+        MaterialType: "cm",
+        WidthInput: 0,
+        HeightInput: 0,
+        LengthInput: 0,
+        Price: null,
+        Comments: null,
+        ExpectedDelivery: null,
+        DeliveryCode: null,
+        PartnerCode: partnerCode,
+        PartnerName: partnerName,
+        PartnerDelivery: {
+          IdOld: 0,
+          TotalInvoiced: 0,
+          CompareCode: partnerCode,
+          CompareName: partnerName,
+          Id: 0,
+          RetailerId: retailerId,
+          Type: 0,
+          Code: partnerCode,
+          Name: partnerName,
+          ContactNumber: "",
+          Address: "",
+          Email: "",
+          Comments: "",
+          CreatedDate: new Date().toISOString(),
+          CreatedBy: soldById || 0,
+          ModifiedDate: new Date().toISOString(),
+          Debt: 0,
+          ModifiedBy: null,
+          Uuid: null,
+          LocationId: null,
+          LocationName: "",
+          WardName: "",
+          isActive: true,
+          isDeleted: false,
+          SearchNumber: "",
+          IsOmniChannel: null,
+          AdministrativeAreaId: null,
+          PartnerDeliveryGroupDetails: [],
+          ImageForMobile: "",
+        },
+        ServiceCodeText: null,
+        ServiceCode: "0",
+        ServiceAdd: null,
+        PartnerDeliveryImage: "",
+        Description: "",
+        ServiceAddInfor: null,
+        FeeShip: 0,
+        SenderPaymentFee: 0,
+        RecipientPaymentFee: 0,
+        TotalRecipientPayment: totalProductPrice,
+      },
+    },
+  };
+}
+
 function parseRawOrder(rawText = "") {
   const result = {
     customerName: "",
@@ -561,18 +853,22 @@ function FieldCard({ label, value, placeholder = "Chưa có dữ liệu" }) {
 }
 
 export default function TaoDonHang() {
-  const [selectedRetailerId, setSelectedRetailerId] = useState("kingfarm");
   const [selectedShippingPartner, setSelectedShippingPartner] = useState("GHN");
-  const [customerType, setCustomerType] = useState("dai_ly");
+  const [customerType, setCustomerType] = useState("khach_le");
   const [rawText, setRawText] = useState(SAMPLE_TEXT);
   const [copied, setCopied] = useState(false);
   const [accessToken, setAccessToken] = useState("");
   const [accessPrivateToken, setAccessPrivateToken] = useState("");
   const [kiotUsers, setKiotUsers] = useState([]);
   const [matchedKiotUser, setMatchedKiotUser] = useState(null);
+  const [preparedInvoicePayload, setPreparedInvoicePayload] = useState(null);
   const [tokenLoading, setTokenLoading] = useState(false);
   const [tokenError, setTokenError] = useState("");
   const { user } = useAuth() || {};
+  const selectedRetailerId = useMemo(
+    () => mapTeamIdToRetailerId(user?.teamId),
+    [user?.teamId],
+  );
   const selectedRetailer = useMemo(
     () =>
       RETAILERS.find(
@@ -616,6 +912,15 @@ export default function TaoDonHang() {
       "",
     [customerType, customerTypeOptions],
   );
+
+  useEffect(() => {
+    if (
+      customerTypeOptions.length > 0 &&
+      !customerTypeOptions.some((item) => item.value === customerType)
+    ) {
+      setCustomerType(customerTypeOptions[0]?.value || "");
+    }
+  }, [customerType, customerTypeOptions]);
 
   const shippingLabel =
     SHIPPING_PARTNERS.find((item) => item.id === selectedShippingPartner)
@@ -690,7 +995,6 @@ export default function TaoDonHang() {
   }, [selectedRetailerId, normalizedUserFullName]);
 
   const handleReset = () => {
-    setSelectedRetailerId("nnvtv");
     setSelectedShippingPartner("GHN");
     setCustomerType("dai_ly");
     setRawText(SAMPLE_TEXT);
@@ -710,14 +1014,12 @@ export default function TaoDonHang() {
   const handleCreateOrder = async () => {
     const phoneNumber = String(parsed.phoneNumber || "").trim();
     if (!phoneNumber) {
-      console.warn("Không tìm thấy số điện thoại trong dữ liệu thô.");
+      console.warn("No phone number found in parsed data.");
       return;
     }
 
     if (!accessPrivateToken) {
-      console.warn(
-        "Chưa có accessPrivateToken để gọi getCustomerByPhoneNumber.",
-      );
+      console.warn("Missing accessPrivateToken for customer lookup.");
       return;
     }
 
@@ -728,14 +1030,7 @@ export default function TaoDonHang() {
         phoneNumber,
       );
 
-      const foundCustomer = Array.isArray(response)
-        ? response
-        : response?.Data?.[0] || response;
-
-      if (foundCustomer && Object.keys(foundCustomer || {}).length > 0) {
-        console.log("Khách hàng đã tồn tại:", foundCustomer);
-        return;
-      }
+      const foundCustomer = extractCustomerRecord(response, null);
 
       const groupsResponse = await getCustomerGroup(
         selectedRetailerId,
@@ -752,27 +1047,49 @@ export default function TaoDonHang() {
           normalizeLookupText(targetGroupName),
       );
 
-      console.log("parsed", parsed);
+      let customerRecord = foundCustomer;
+      if (customerRecord && Object.keys(customerRecord || {}).length > 0) {
+        console.log("Customer already exists:", customerRecord);
+      } else {
+        const payload = await buildNewCustomerPayloadV2({
+          parsed,
+          selectedGroupId: targetGroup?.Id || targetGroup?.GroupId || null,
+          customerType,
+          retailer: selectedRetailerId,
+          accessPrivateToken,
+          matchedKiotUser,
+        });
 
-      const payload = await buildNewCustomerPayloadV2({
+        const createResponse = await addNewCustomer(
+          selectedRetailerId,
+          accessPrivateToken,
+          accessToken,
+          payload,
+          targetGroupName,
+          "",
+        );
+
+        console.log("addNewCustomer response:", createResponse);
+        customerRecord = extractCustomerRecord(createResponse, null);
+      }
+
+      if (!customerRecord) {
+        console.warn(
+          "Cannot build invoice payload because customer is missing.",
+        );
+        return;
+      }
+
+      const invoicePayload = buildInvoicePayload({
+        customer: customerRecord,
         parsed,
-        selectedGroupId: targetGroup?.Id || targetGroup?.GroupId || null,
-        customerType,
         retailer: selectedRetailerId,
-        accessPrivateToken,
         matchedKiotUser,
+        selectedShippingPartner,
       });
 
-      const createResponse = await addNewCustomer(
-        selectedRetailerId,
-        accessPrivateToken,
-        accessToken,
-        payload,
-        targetGroupName,
-        "",
-      );
-
-      console.log("addNewCustomer response:", createResponse);
+      setPreparedInvoicePayload(invoicePayload);
+      console.log("preparedInvoicePayload", invoicePayload);
     } catch (error) {
       console.error("create customer flow error:", error);
     }
@@ -831,32 +1148,18 @@ export default function TaoDonHang() {
 
             <div className="space-y-4 px-5 py-5">
               <div className="grid gap-3 md:grid-cols-3">
-                <label className="block space-y-2">
-                  <span className="text-xs font-semibold text-slate-600">
-                    Retailer
-                  </span>
-                  <select
-                    value={selectedRetailerId}
-                    onChange={(e) => {
-                      const next = e.target.value;
-                      setSelectedRetailerId(next);
-                      const nextOptions = getCustomerTypeOptions(next);
-                      if (
-                        !nextOptions.some((item) => item.value === customerType)
-                      ) {
-                        setCustomerType(nextOptions[0]?.value || "");
-                      }
-                    }}
-                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100"
-                  >
-                    {RETAILERS.map((item) => (
-                      <option key={item.id} value={item.id}>
-                        {item.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-
+                <div className="rounded-xl border border-cyan-100 bg-cyan-50/70 px-3 py-2.5 text-sm text-cyan-900 md:col-span-1">
+                  <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-cyan-700">
+                    Công ty hiện tại
+                  </div>
+                  <div className="mt-1 font-semibold">
+                    {selectedRetailer.label}
+                  </div>
+                  <div className="text-xs text-cyan-700/80">
+                    Team: {user?.teamId || "Chưa có"} - Retailer:{" "}
+                    {selectedRetailerId}
+                  </div>
+                </div>
                 <label className="block space-y-2">
                   <span className="text-xs font-semibold text-slate-600">
                     Đối tác giao hàng
@@ -1024,6 +1327,27 @@ export default function TaoDonHang() {
                     </div>
                   )}
                 </div>
+              </div>
+
+              <div className="mt-4 rounded-2xl border border-amber-100 bg-amber-50/70 px-4 py-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-amber-700">
+                    Payload hóa đơn
+                  </div>
+                  <div className="text-xs text-amber-700/80">
+                    {preparedInvoicePayload ? "Đã chuẩn bị" : "Chưa có"}
+                  </div>
+                </div>
+                {preparedInvoicePayload ? (
+                  <pre className="mt-3 max-h-72 overflow-auto rounded-xl bg-white p-3 text-[11px] leading-5 text-slate-700">
+                    {JSON.stringify(preparedInvoicePayload, null, 2)}
+                  </pre>
+                ) : (
+                  <div className="mt-2 text-sm text-slate-600">
+                    Bấm <b>Tạo đơn hàng</b> để tìm/tạo khách hàng và dựng
+                    payload hóa đơn theo mẫu.
+                  </div>
+                )}
               </div>
 
               <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-3">
