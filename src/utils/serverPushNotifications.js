@@ -32,14 +32,13 @@ async function createPushChannels() {
 }
 
 async function sendDeviceTokenToServer(fcmToken) {
-  const authToken = localStorage.getItem("token");
-  if (!authToken || !fcmToken) return;
+  if (!fcmToken) return;
 
   const res = await fetch(apiUrl("/api/notifications/device-token"), {
     method: "POST",
+    credentials: "include",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${authToken}`,
       "ngrok-skip-browser-warning": "true",
     },
     body: JSON.stringify({
