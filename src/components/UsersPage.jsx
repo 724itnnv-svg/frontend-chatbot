@@ -6,27 +6,9 @@ import { useAuth } from "../context/AuthContext";
 
 
 const MASTER_EMAIL = "khanh@gmail.com";
-const MASTER_PASS = "khanhz2003";
 
 function requireMasterPassword(user, actionCallback) {
-  // Nếu không phải tài khoản đặc biệt -> cho chạy luôn
-  if (user.email?.toLowerCase() !== MASTER_EMAIL) {
-    actionCallback();
-    return;
-  }
-
-  const input = window.prompt(
-    "Đây là tài khoản đặc biệt.\nVui lòng nhập mật khẩu quản trị để tiếp tục:"
-  );
-
-  // user bấm Cancel
-  if (input === null) return;
-
-  if (input === MASTER_PASS) {
-    actionCallback();
-  } else {
-    alert("Sai mật khẩu, không được phép thao tác với tài khoản này.");
-  }
+  actionCallback(user);
 }
 
 export default function UsersPage() {
@@ -64,7 +46,7 @@ export default function UsersPage() {
         return;
       }
 
-      setUsers(data);
+      setUsers(Array.isArray(data?.data) ? data.data : []);
     } catch (err) {
       console.error("Lỗi fetch users:", err);
       setListError("Không kết nối được server");

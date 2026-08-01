@@ -961,6 +961,7 @@ export default function AttendanceManager() {
     if (!token) return undefined;
 
     const socket = io(ATTENDANCE_SOCKET_URL, {
+      withCredentials: true,
       auth: { token },
       transports: ["polling", "websocket"],
       reconnection: true,

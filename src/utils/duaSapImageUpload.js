@@ -1,6 +1,6 @@
 import { getApiBaseUrl } from "../api/baseUrl";
 
-const MAX_IMAGE_SIZE = 10 * 1024 * 1024;
+const MAX_IMAGE_SIZE = 100 * 1024 * 1024;
 
 export function resolveDuaSapImageUrl(url) {
   const normalizedUrl = String(url || "").trim();

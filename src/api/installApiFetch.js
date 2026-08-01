@@ -23,12 +23,22 @@ export function installApiFetch() {
   if (window.__apiFetchInstalled) return;
 
   const originalFetch = window.fetch.bind(window);
+  const configuredOrigin = getConfiguredApiOrigin();
   window.__apiFetchInstalled = true;
 
   window.fetch = (input, init = {}) => {
     if (typeof input === "string" && shouldRewrite(input)) {
       return originalFetch(apiUrl(input), {
         ...init,
+        credentials: "include",
+        headers: mergeApiHeaders(init.headers),
+      });
+    }
+
+    if (typeof input === "string" && configuredOrigin && input.startsWith(`${configuredOrigin}/api`)) {
+      return originalFetch(input, {
+        ...init,
+        credentials: "include",
         headers: mergeApiHeaders(init.headers),
       });
     }

@@ -1,5 +1,5 @@
 ﻿// src/components/UserManager.jsx
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import UserForm from "./UserForm";
 import defaultAvatar from "../assets/default-avatar.png";
 import { useAuth } from "../context/AuthContext";
@@ -10,21 +10,9 @@ import JSZip from "jszip";
 import { saveAs } from "file-saver";
 
 const MASTER_EMAIL = "khanh@gmail.com";
-const MASTER_PASS = "khanhz2003";
 
 function requireMasterPassword(user, actionCallback) {
-  if (user.email?.toLowerCase() !== MASTER_EMAIL) {
-    actionCallback();
-    return;
-  }
-
-  const input = window.prompt(
-    "Đây là tài khoản đặc biệt.\nVui lòng nhập mật khẩu quản trị để tiếp tục:"
-  );
-  if (input === null) return;
-
-  if (input === MASTER_PASS) actionCallback();
-  else alert("Sai mật khẩu, không được phép thao tác với tài khoản này.");
+  actionCallback(user);
 }
 
 export default function UsersPage() {
@@ -59,6 +47,20 @@ export default function UsersPage() {
   const [ccLinkLocationId, setCcLinkLocationId] = useState("");
   const [ccLinkLoading, setCcLinkLoading] = useState(false);
   const [importSummary, setImportSummary] = useState(null);
+  const [pagination, setPagination] = useState({
+    page: 1,
+    limit: 20,
+    total: 0,
+    totalPages: 1,
+  });
+  const [facets, setFacets] = useState({ roles: [], teamIds: [] });
+  const [userStats, setUserStats] = useState({
+    total: 0,
+    approved: 0,
+    pending: 0,
+    hasCode: 0,
+    hasPhone: 0,
+  });
   const [filters, setFilters] = useState({
     search: "",
     role: "all",
@@ -68,12 +70,22 @@ export default function UsersPage() {
     sortBy: "newest",
   });
 
-  const fetchUsers = async () => {
+  const fetchUsers = useCallback(async () => {
     try {
       setLoadingList(true);
       setListError("");
 
-      const res = await fetch(`/api/user`, {
+      const params = new URLSearchParams({
+        page: String(pagination.page),
+        limit: String(pagination.limit),
+        search: filters.search,
+        role: filters.role,
+        teamId: filters.teamId,
+        approveStatus: filters.approveStatus,
+        codeStatus: filters.codeStatus,
+        sortBy: filters.sortBy,
+      });
+      const res = await fetch(`/api/user?${params.toString()}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
 
@@ -87,13 +99,18 @@ export default function UsersPage() {
           : [];
 
       setUsers(list);
+      if (payload?.pagination) {
+        setPagination((previous) => ({ ...previous, ...payload.pagination }));
+      }
+      if (payload?.facets) setFacets(payload.facets);
+      if (payload?.stats) setUserStats(payload.stats);
     } catch (err) {
       console.error("Lỗi fetch users:", err);
       setListError("Không kết nối được server");
     } finally {
       setLoadingList(false);
     }
-  };
+  }, [filters, pagination.limit, pagination.page, token]);
 
   const fetchWorkLocations = async () => {
     try {
@@ -132,11 +149,17 @@ export default function UsersPage() {
   };
 
   useEffect(() => {
-    fetchUsers();
     fetchPages();
     fetchWorkLocations();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      void fetchUsers();
+    }, filters.search ? 300 : 0);
+    return () => clearTimeout(timer);
+  }, [fetchUsers, filters.search]);
 
   const handleAdd = () => {
     setEditingUser(null);
@@ -265,67 +288,9 @@ export default function UsersPage() {
       .replace(/\s+/g, " ")
       .trim();
 
-  const normalizeText = (value) => normalizeHeader(value);
-
-  const uniqueRoles = useMemo(() => {
-    return Array.from(new Set(users.map((user) => String(user.role || "").trim()).filter(Boolean))).sort((a, b) =>
-      a.localeCompare(b)
-    );
-  }, [users]);
-
-  const uniqueTeams = useMemo(() => {
-    return Array.from(new Set(users.map((user) => String(user.teamId || "").trim()).filter(Boolean))).sort((a, b) =>
-      a.localeCompare(b)
-    );
-  }, [users]);
-
-  const userStats = useMemo(() => {
-    return users.reduce(
-      (acc, user) => {
-        acc.total += 1;
-        if (user.approveStatus === 1) acc.approved += 1;
-        else acc.pending += 1;
-        if (String(user.code || "").trim()) acc.hasCode += 1;
-        if (String(user.phone || "").trim()) acc.hasPhone += 1;
-        return acc;
-      },
-      { total: 0, approved: 0, pending: 0, hasCode: 0, hasPhone: 0 }
-    );
-  }, [users]);
-
-  const filteredUsers = useMemo(() => {
-    const keyword = normalizeText(filters.search);
-    const result = users.filter((user) => {
-      const haystack = normalizeText([
-        user.fullName,
-        user.email,
-        user.phone,
-        user.code,
-        user.role,
-        user.teamId,
-      ].join(" "));
-      const matchesKeyword = !keyword || haystack.includes(keyword);
-      const matchesRole = filters.role === "all" || String(user.role || "") === filters.role;
-      const matchesTeam = filters.teamId === "all" || String(user.teamId || "") === filters.teamId;
-      const matchesApprove =
-        filters.approveStatus === "all" || String(user.approveStatus ?? 0) === filters.approveStatus;
-      const hasCode = Boolean(String(user.code || "").trim());
-      const matchesCode =
-        filters.codeStatus === "all" ||
-        (filters.codeStatus === "hasCode" && hasCode) ||
-        (filters.codeStatus === "missingCode" && !hasCode);
-
-      return matchesKeyword && matchesRole && matchesTeam && matchesApprove && matchesCode;
-    });
-
-    return [...result].sort((a, b) => {
-      if (filters.sortBy === "nameAsc") return String(a.fullName || "").localeCompare(String(b.fullName || ""));
-      if (filters.sortBy === "nameDesc") return String(b.fullName || "").localeCompare(String(a.fullName || ""));
-      if (filters.sortBy === "roleAsc") return String(a.role || "").localeCompare(String(b.role || ""));
-      if (filters.sortBy === "oldest") return new Date(a.createdAt || 0) - new Date(b.createdAt || 0);
-      return new Date(b.createdAt || 0) - new Date(a.createdAt || 0);
-    });
-  }, [filters, users]);
+  const uniqueRoles = facets.roles || [];
+  const uniqueTeams = facets.teamIds || [];
+  const filteredUsers = users;
 
   const hasActiveFilters = useMemo(() => {
     return Boolean(
@@ -339,10 +304,12 @@ export default function UsersPage() {
   }, [filters]);
 
   const updateFilter = (name, value) => {
+    setPagination((previous) => ({ ...previous, page: 1 }));
     setFilters((prev) => ({ ...prev, [name]: value }));
   };
 
   const resetFilters = () => {
+    setPagination((previous) => ({ ...previous, page: 1 }));
     setFilters({
       search: "",
       role: "all",
@@ -858,7 +825,13 @@ export default function UsersPage() {
 
           <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div className="text-xs text-slate-500">
-              Đang hiển thị <b className="text-slate-800">{filteredUsers.length}</b>/<b className="text-slate-800">{users.length}</b> user.
+              Đang hiển thị{" "}
+              <b className="text-slate-800">
+                {pagination.total ? (pagination.page - 1) * pagination.limit + 1 : 0}
+                {"–"}
+                {Math.min(pagination.page * pagination.limit, pagination.total)}
+              </b>
+              /<b className="text-slate-800">{pagination.total}</b> user phù hợp.
             </div>
             <div className="flex flex-col gap-2 sm:flex-row">
               <select
@@ -1119,6 +1092,58 @@ export default function UsersPage() {
               </table>
             </div>
           )}
+        </div>
+
+        <div className="mt-4 flex flex-col gap-3 rounded-2xl border border-cyan-100 bg-white/80 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-2 text-sm text-slate-600">
+            <span>Số dòng:</span>
+            <select
+              value={pagination.limit}
+              onChange={(event) =>
+                setPagination((previous) => ({
+                  ...previous,
+                  page: 1,
+                  limit: Number(event.target.value),
+                }))
+              }
+              className="rounded-xl border border-cyan-100 bg-white px-2 py-1.5 outline-none focus:border-cyan-300"
+            >
+              <option value={10}>10</option>
+              <option value={20}>20</option>
+              <option value={50}>50</option>
+            </select>
+          </div>
+          <div className="flex items-center justify-end gap-2">
+            <button
+              type="button"
+              disabled={loadingList || pagination.page <= 1}
+              onClick={() =>
+                setPagination((previous) => ({
+                  ...previous,
+                  page: Math.max(1, previous.page - 1),
+                }))
+              }
+              className="rounded-xl border border-cyan-100 bg-white px-3 py-1.5 text-sm font-semibold text-cyan-700 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Trước
+            </button>
+            <span className="min-w-[110px] text-center text-sm text-slate-600">
+              Trang <b>{pagination.page}</b>/{pagination.totalPages}
+            </span>
+            <button
+              type="button"
+              disabled={loadingList || pagination.page >= pagination.totalPages}
+              onClick={() =>
+                setPagination((previous) => ({
+                  ...previous,
+                  page: Math.min(previous.totalPages, previous.page + 1),
+                }))
+              }
+              className="rounded-xl border border-cyan-100 bg-white px-3 py-1.5 text-sm font-semibold text-cyan-700 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Sau
+            </button>
+          </div>
         </div>
 
         {/* Modal sửa user */}
