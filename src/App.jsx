@@ -43,6 +43,7 @@ const CustomerCareManager = lazy(
   () => import("./components/CustomerCareManager"),
 );
 const DonHang = lazy(() => import("./components/DonHang"));
+const TaoDonHang = lazy(() => import("./components/TaoDonHang"));
 const BusinessStats = lazy(() => import("./components/BusinessStats"));
 const UsersPage = lazy(() => import("./components/UserManager"));
 const EmployeeProfileManager = lazy(
@@ -192,6 +193,7 @@ const ADMIN_ROUTE_BY_SCREEN = {
   pagesmessage: "/admin/page-messages",
   customer_care: "/admin/customer-care",
   donhang: "/admin/orders",
+  tao_don_hang: "/admin/tao-don-hang",
   business_stats: "/admin/business-stats",
   employee_profiles: "/admin/employee-profiles",
   employee_assets: "/admin/employee-assets",
@@ -232,6 +234,11 @@ const adminRoutes = [
     element: <CustomerCareManager />,
   },
   { path: "orders", screenId: "donhang", element: <DonHang /> },
+  {
+    path: "tao-don-hang",
+    screenId: "tao_don_hang",
+    element: <TaoDonHang />,
+  },
   {
     path: "business-stats",
     screenId: "business_stats",
@@ -460,6 +467,14 @@ export default function App() {
         <Routes>
           <Route path="/" element={<HomeRoute />} />
           <Route path="/user" element={<UserDashboard />} />
+          <Route
+            path="/tao-don-hang"
+            element={
+              <RequireAuth>
+                <TaoDonHang />
+              </RequireAuth>
+            }
+          />
 
           <Route path="/forgot-password" element={<ForgotPassword />} />
           <Route path="/reset-password" element={<ResetPassword />} />
