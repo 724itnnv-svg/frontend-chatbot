@@ -15,6 +15,8 @@ import {
   getCustomerByPhoneNumber,
   getIdAdministrativearea,
   getRetailerConfig,
+  getPartnerDelivery,
+  getProductByCode,
   getUserInKiot,
 } from "../services/cashflowService/kiotService";
 import { useAuth } from "../context/AuthContext";
@@ -30,8 +32,8 @@ const SHIPPING_PARTNERS = [
   { id: "VTPFW", label: "Viettel Post FW (VTPFW)" },
 ];
 
-const SAMPLE_TEXT = `Khách hàng: Thanh Bình
-SĐT: 0984384778
+const SAMPLE_TEXT = `Khách hàng: Thành
+SĐT: 0964294979
 Địa chỉ cũ: 27/19 Ấp Tân Hưng, Xã Tân Hạnh, Huyện Long Hồ, Tỉnh Vĩnh Long
 Địa chỉ mới: Ấp Tân hưng, Phường Tân Hạnh, Vĩnh Long
 1 Xô Siêu Phục Hồi 30-10-10+TE 22kg  - ONNV110 (giá 859.000₫/xô)
@@ -498,58 +500,266 @@ function extractCustomerRecord(response, fallback = null) {
   return fallback;
 }
 
-function buildInvoiceDetailLines(items = []) {
-  return items
-    .map((item) => {
-      const quantity = Number(item?.quantity || 0) || 0;
-      const unitPrice = Number(item?.price || 0) || 0;
-      const lineTotal = quantity * unitPrice;
+const roundMoney = (value) => Math.round(Number(value || 0) * 100) / 100;
 
-      return {
-        BasePrice: unitPrice,
-        IsLotSerialControl: false,
-        IsBatchExpireControl: false,
-        IsRewardPoint: true,
-        Note: null,
-        Price: unitPrice,
-        PriceAfterTax: lineTotal,
-        ProductId: item?.productId ?? null,
-        Quantity: quantity,
-        ProductCode: item?.sku || "",
-        Weight: item?.weight ?? 0,
-        DiscountAfterTax: null,
-        ProductName: item?.productName || "",
-        SalePromotionId: null,
-        OriginPrice: unitPrice,
-        PriceByPromotion: null,
-        ProductFormulaHistoryId: null,
-        PromotionParentProductId: null,
-        ProductBatchExpireId: null,
-        CategoryId: item?.categoryId ?? null,
-        MasterProductId: item?.masterProductId ?? item?.productId ?? null,
-        Unit: item?.unit || "",
-        Uuid:
-          globalThis?.crypto?.randomUUID?.() ||
-          `tmp-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-        SupplyPromotionTypes: "",
-        Formulas: null,
-        AllocationDiscount: 0,
-        InvoiceDetailTaxs: [],
-        DetailTaxIds: [],
-        IsUndeclaredTax: null,
-      };
-    })
+function normalizeProductTaxRate(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : 0;
+}
+
+function getProductPriceBook(product, customerType) {
+  const priceBooks = Array.isArray(product?.priceBooks)
+    ? product.priceBooks
+    : [];
+  const normalizedCustomerType = String(customerType || "").toLowerCase();
+
+  if (normalizedCustomerType === "khach_le") {
+    const targetName = normalizeDisplayText("Bảng giá Khách lẻ").toLowerCase();
+    const matched = priceBooks.find(
+      (item) =>
+        normalizeDisplayText(item?.priceBookName).toLowerCase() ===
+          targetName && item?.isActive !== false,
+    );
+    if (matched) return matched;
+  }
+
+  return null;
+}
+
+function getProductTaxInfo(product) {
+  const saleTax = product?.saleTax || {};
+  const productTax = Array.isArray(product?.productTaxs)
+    ? product.productTaxs[0] || {}
+    : {};
+  const source = productTax?.id != null ? productTax : saleTax;
+  const taxRate = normalizeProductTaxRate(source?.value ?? source?.rate ?? 0);
+  return {
+    taxId: source?.taxId ?? source?.id ?? null,
+    taxName: source?.name || source?.taxname || "VAT",
+    taxRate,
+  };
+}
+
+function buildInvoiceDetailTaxs({
+  taxId,
+  taxName,
+  taxRate,
+  baseAmount,
+  taxedAmount,
+}) {
+  if (!taxRate) return [];
+
+  const detailTax = roundMoney((baseAmount * taxRate) / 100);
+  return [
+    {
+      TaxId: taxId ?? 0,
+      DetailTax: detailTax,
+      OldDetailTax: detailTax,
+      PriceAfterTax: roundMoney(taxedAmount),
+      ViewDiscountAfterTax: 0,
+      DiscountAfterTax: 0,
+      DiscountRatioAfterTax: 0,
+      DiscountByPromotionAfterTax: 0,
+      AllocationDiscountAfterTax: 0,
+      TaxByUser: {
+        CountryId: 1,
+        Id: taxId ?? 0,
+        Name: taxName,
+        Type: 1,
+        Value: taxRate,
+        OldValue: taxRate,
+        OldName: taxName,
+      },
+    },
+  ];
+}
+
+function buildInvoiceDetailLine({ item, product, customerType }) {
+  const quantity = Number(item?.quantity || 0) || 0;
+  const productId = product?.id ?? item?.productId ?? null;
+  const productCode = product?.code || item?.sku || "";
+  const productName =
+    product?.fullName || product?.name || item?.productName || "";
+  const unit = product?.unit || item?.unit || "";
+  const weight = product?.weight ?? item?.weight ?? 0;
+  const categoryId = product?.categoryId ?? item?.categoryId ?? null;
+  const masterProductId =
+    product?.id ?? item?.masterProductId ?? item?.productId ?? null;
+  const priceBook = getProductPriceBook(product, customerType);
+  const customerLePriceBook = getProductPriceBook(product, "khach_le");
+  const outsidePrice =
+    Number(product?.price ?? product?.basePrice ?? item?.price ?? 0) || 0;
+  const selectedUnitPrice =
+    String(customerType || "").toLowerCase() === "khach_le"
+      ? Number(priceBook?.price ?? customerLePriceBook?.price ?? outsidePrice) ||
+        0
+      : outsidePrice > 0
+        ? outsidePrice
+        : Number(customerLePriceBook?.price ?? 0) || 0;
+  const baseAmount = roundMoney(selectedUnitPrice * quantity);
+  const { taxId, taxName, taxRate } = getProductTaxInfo(product);
+  const lineTax = roundMoney((baseAmount * taxRate) / 100);
+  const priceAfterTax = roundMoney(baseAmount + lineTax);
+
+  return {
+    BasePrice: selectedUnitPrice,
+    IsLotSerialControl: Boolean(product?.isLotSerialControl),
+    IsBatchExpireControl: Boolean(product?.isBatchExpireControl),
+    IsRewardPoint: product?.isRewardPoint ?? true,
+    Note: null,
+    Price: selectedUnitPrice,
+    PriceAfterTax: priceAfterTax,
+    ProductId: productId,
+    Quantity: quantity,
+    ProductCode: productCode,
+    Weight: weight,
+    DiscountAfterTax: null,
+    ProductName: productName,
+    SalePromotionId: null,
+    OriginPrice: selectedUnitPrice,
+    PriceByPromotion: null,
+    ProductFormulaHistoryId: null,
+    PromotionParentProductId: null,
+    ProductBatchExpireId: null,
+    CategoryId: categoryId,
+    MasterProductId: masterProductId,
+    Unit: unit,
+    Uuid:
+      globalThis?.crypto?.randomUUID?.() ||
+      `tmp-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    SupplyPromotionTypes: "",
+    Formulas: null,
+    AllocationDiscount: 0,
+    InvoiceDetailTaxs: buildInvoiceDetailTaxs({
+      taxId,
+      taxName,
+      taxRate,
+      baseAmount,
+      taxedAmount: priceAfterTax,
+    }),
+    DetailTaxIds: taxRate
+      ? [
+          {
+            CountryId: 1,
+            Id: taxId ?? 0,
+            Name: taxName,
+            Type: 1,
+            Value: taxRate,
+            OldValue: taxRate,
+            OldName: taxName,
+          },
+        ]
+      : [],
+    IsUndeclaredTax: null,
+    __meta: {
+      priceBookId: priceBook?.priceBookId ?? null,
+      baseAmount,
+      lineTax,
+      priceAfterTax,
+    },
+  };
+}
+
+async function buildInvoiceDetailLines(
+  items = [],
+  { retailer, accessPrivateToken, accessToken, customerType },
+) {
+  const uniqueCodes = [
+    ...new Set(
+      items.map((item) => String(item?.sku || "").trim()).filter(Boolean),
+    ),
+  ];
+
+  const productEntries = await Promise.all(
+    uniqueCodes.map(async (code) => {
+      try {
+        const product = await getProductByCode(
+          retailer,
+          accessPrivateToken,
+          accessToken,
+          code,
+        );
+        return [code, product];
+      } catch (error) {
+        console.error("getProductByCode error:", code, error);
+        return [code, null];
+      }
+    }),
+  );
+
+  const productMap = new Map(productEntries);
+
+  const lines = items
+    .map((item) =>
+      buildInvoiceDetailLine({
+        item,
+        product: productMap.get(String(item?.sku || "").trim()) || null,
+        customerType,
+      }),
+    )
     .filter(
       (item) => item.Quantity > 0 || item.ProductName || item.ProductCode,
     );
+
+  const totalBeforeDiscount = lines.reduce(
+    (sum, item) => sum + Number(item.__meta?.baseAmount || 0),
+    0,
+  );
+  const totalTax = lines.reduce(
+    (sum, item) => sum + Number(item.__meta?.lineTax || 0),
+    0,
+  );
+  const totalAfterTax = lines.reduce(
+    (sum, item) => sum + Number(item.__meta?.priceAfterTax || 0),
+    0,
+  );
+  const priceBookId =
+    lines.find((item) => item.__meta?.priceBookId != null)?.__meta
+      ?.priceBookId ?? null;
+
+  return {
+    lines: lines.map((item) => {
+      const { __meta: meta, ...nextItem } = item;
+      void meta;
+      return nextItem;
+    }),
+    totalBeforeDiscount: roundMoney(totalBeforeDiscount),
+    totalTax: roundMoney(totalTax),
+    totalAfterTax: roundMoney(totalAfterTax),
+    priceBookId,
+  };
 }
 
-function buildInvoicePayload({
+function normalizePartnerDeliveryText(value = "") {
+  return normalizeDisplayText(value).toLowerCase();
+}
+
+function getSelectedPartnerDelivery(partnerDeliveries = [], selected = "") {
+  const selectedCode = normalizePartnerDeliveryText(selected);
+  if (!selectedCode) return null;
+
+  return (
+    partnerDeliveries.find(
+      (item) =>
+        normalizePartnerDeliveryText(item?.code) === selectedCode ||
+        normalizePartnerDeliveryText(item?.name) === selectedCode ||
+        normalizePartnerDeliveryText(item?.code).includes(selectedCode) ||
+        normalizePartnerDeliveryText(item?.name).includes(selectedCode),
+    ) || null
+  );
+}
+
+async function buildInvoicePayload({
   customer,
   parsed,
   retailer,
   matchedKiotUser,
   selectedShippingPartner,
+  partnerDeliveries,
+  partnerDeliveryRecord,
+  accessToken,
+  customerType,
+  accessPrivateToken,
 }) {
   const retailerConfig = getRetailerConfig(retailer);
   const branchId = retailerConfig?.branchId ?? null;
@@ -577,27 +787,33 @@ function buildInvoicePayload({
     .map((value) => normalizeDisplayText(value))
     .filter(Boolean)
     .join(", ");
-  const invoiceDetails = buildInvoiceDetailLines(parsed?.items || []);
-  const totalBeforeDiscount = invoiceDetails.reduce(
-    (sum, item) =>
-      sum + Number(item.OriginPrice || 0) * Number(item.Quantity || 0),
-    0,
+  const invoiceDetailsResult = await buildInvoiceDetailLines(
+    parsed?.items || [],
+    {
+      retailer,
+      accessPrivateToken,
+      accessToken,
+      customerType,
+    },
   );
-  const totalProductPrice = invoiceDetails.reduce(
-    (sum, item) => sum + Number(item.PriceAfterTax || 0),
-    0,
-  );
+  const invoiceDetails = invoiceDetailsResult.lines || [];
+  const totalBeforeDiscount = invoiceDetailsResult.totalBeforeDiscount || 0;
+  const totalTax = invoiceDetailsResult.totalTax || 0;
+  const totalProductPrice = invoiceDetailsResult.totalAfterTax || 0;
   const soldBy = matchedKiotUser ? { ...matchedKiotUser } : null;
   const soldById = matchedKiotUser?.Id ?? matchedKiotUser?.UserId ?? null;
-  const partnerCode = String(selectedShippingPartner || "")
-    .trim()
-    .toUpperCase();
+  const selectedPartnerDelivery = partnerDeliveryRecord
+    ? partnerDeliveryRecord
+    : getSelectedPartnerDelivery(partnerDeliveries, selectedShippingPartner);
+  const partnerCode =
+    selectedPartnerDelivery?.code ||
+    String(selectedShippingPartner || "")
+      .trim()
+      .toUpperCase();
   const partnerName =
-    partnerCode === "VTPFW"
-      ? "Viettel Post FW"
-      : partnerCode === "GHN"
-        ? "Giao hàng nhanh"
-        : selectedShippingPartner;
+    selectedPartnerDelivery?.name ||
+    selectedPartnerDelivery?.code ||
+    selectedShippingPartner;
 
   return {
     Invoice: {
@@ -611,7 +827,12 @@ function buildInvoicePayload({
       SoldBy: soldBy,
       Seller: soldBy,
       SaleChannelId: 0,
-      PriceBookId: retailerConfig?.priceBookId ?? 0,
+      PriceBookId:
+        customerType === "khach_le"
+          ? (invoiceDetailsResult.priceBookId ??
+            retailerConfig?.priceBookId ??
+            0)
+          : (retailerConfig?.priceBookId ?? 0),
       OrderCode: "",
       Code: `Hóa đơn ${customerName || customerCode || customerId || "1"}`,
       DiscountAfterTax: 0,
@@ -629,7 +850,7 @@ function buildInvoicePayload({
       Payments: [],
       Status: 3,
       Total: totalProductPrice,
-      TotalTax: 0,
+      TotalTax: totalTax,
       EnableVATToggle: true,
       IsTaxReductionEnabled: false,
       IsApplyTaxReduction: false,
@@ -707,37 +928,84 @@ function buildInvoicePayload({
         DeliveryCode: null,
         PartnerCode: partnerCode,
         PartnerName: partnerName,
-        PartnerDelivery: {
-          IdOld: 0,
-          TotalInvoiced: 0,
-          CompareCode: partnerCode,
-          CompareName: partnerName,
-          Id: 0,
-          RetailerId: retailerId,
-          Type: 0,
-          Code: partnerCode,
-          Name: partnerName,
-          ContactNumber: "",
-          Address: "",
-          Email: "",
-          Comments: "",
-          CreatedDate: new Date().toISOString(),
-          CreatedBy: soldById || 0,
-          ModifiedDate: new Date().toISOString(),
-          Debt: 0,
-          ModifiedBy: null,
-          Uuid: null,
-          LocationId: null,
-          LocationName: "",
-          WardName: "",
-          isActive: true,
-          isDeleted: false,
-          SearchNumber: "",
-          IsOmniChannel: null,
-          AdministrativeAreaId: null,
-          PartnerDeliveryGroupDetails: [],
-          ImageForMobile: "",
-        },
+        PartnerDelivery: selectedPartnerDelivery
+          ? {
+              ...selectedPartnerDelivery,
+              IdOld: selectedPartnerDelivery?.IdOld ?? 0,
+              TotalInvoiced: selectedPartnerDelivery?.TotalInvoiced ?? 0,
+              CompareCode:
+                selectedPartnerDelivery?.CompareCode || partnerCode || "",
+              CompareName:
+                selectedPartnerDelivery?.CompareName || partnerName || "",
+              Id:
+                selectedPartnerDelivery?.id ?? selectedPartnerDelivery?.Id ?? 0,
+              RetailerId: selectedPartnerDelivery?.retailerId ?? retailerId,
+              Type: selectedPartnerDelivery?.Type ?? 0,
+              Code: partnerCode,
+              Name: partnerName,
+              CustomName:
+                selectedPartnerDelivery?.CustomName ||
+                selectedPartnerDelivery?.name ||
+                partnerName,
+              ContactNumber: selectedPartnerDelivery?.ContactNumber || "",
+              Address: selectedPartnerDelivery?.Address || "",
+              Email: selectedPartnerDelivery?.Email || "",
+              Comments: selectedPartnerDelivery?.Comments || "",
+              CreatedDate:
+                selectedPartnerDelivery?.CreatedDate ||
+                new Date().toISOString(),
+              CreatedBy: soldById || selectedPartnerDelivery?.CreatedBy || 0,
+              ModifiedDate:
+                selectedPartnerDelivery?.ModifiedDate ||
+                new Date().toISOString(),
+              Debt: selectedPartnerDelivery?.Debt ?? 0,
+              ModifiedBy: selectedPartnerDelivery?.ModifiedBy ?? null,
+              Uuid: selectedPartnerDelivery?.Uuid ?? null,
+              LocationId: selectedPartnerDelivery?.LocationId ?? null,
+              LocationName: selectedPartnerDelivery?.LocationName || "",
+              WardName: selectedPartnerDelivery?.WardName || "",
+              isActive: selectedPartnerDelivery?.isActive ?? true,
+              isDeleted: selectedPartnerDelivery?.isDeleted ?? false,
+              SearchNumber: selectedPartnerDelivery?.SearchNumber || "",
+              IsOmniChannel: selectedPartnerDelivery?.IsOmniChannel ?? null,
+              AdministrativeAreaId:
+                selectedPartnerDelivery?.AdministrativeAreaId ?? null,
+              PartnerDeliveryGroupDetails:
+                selectedPartnerDelivery?.PartnerDeliveryGroupDetails || [],
+              ImageForMobile: selectedPartnerDelivery?.ImageForMobile || "",
+            }
+          : {
+              IdOld: 0,
+              TotalInvoiced: 0,
+              CompareCode: partnerCode,
+              CompareName: partnerName,
+              Id: 0,
+              RetailerId: retailerId,
+              Type: 0,
+              Code: partnerCode,
+              Name: partnerName,
+              CustomName: partnerName,
+              ContactNumber: "",
+              Address: "",
+              Email: "",
+              Comments: "",
+              CreatedDate: new Date().toISOString(),
+              CreatedBy: soldById || 0,
+              ModifiedDate: new Date().toISOString(),
+              Debt: 0,
+              ModifiedBy: null,
+              Uuid: null,
+              LocationId: null,
+              LocationName: "",
+              WardName: "",
+              isActive: true,
+              isDeleted: false,
+              SearchNumber: "",
+              IsOmniChannel: null,
+              AdministrativeAreaId: null,
+              PartnerDeliveryGroupDetails: [],
+              ImageForMobile: "",
+            },
         ServiceCodeText: null,
         ServiceCode: "0",
         ServiceAdd: null,
@@ -861,6 +1129,7 @@ export default function TaoDonHang() {
   const [accessPrivateToken, setAccessPrivateToken] = useState("");
   const [kiotUsers, setKiotUsers] = useState([]);
   const [matchedKiotUser, setMatchedKiotUser] = useState(null);
+  const [partnerDeliveries, setPartnerDeliveries] = useState([]);
   const [preparedInvoicePayload, setPreparedInvoicePayload] = useState(null);
   const [tokenLoading, setTokenLoading] = useState(false);
   const [tokenError, setTokenError] = useState("");
@@ -994,6 +1263,40 @@ export default function TaoDonHang() {
     };
   }, [selectedRetailerId, normalizedUserFullName]);
 
+  useEffect(() => {
+    let active = true;
+
+    const loadPartnerDeliveries = async () => {
+      if (!accessPrivateToken) {
+        setPartnerDeliveries([]);
+        return;
+      }
+
+      try {
+        const response = await getPartnerDelivery(
+          selectedRetailerId,
+          accessPrivateToken,
+        );
+        if (!active) return;
+
+        const nextPartnerDeliveries = Array.isArray(response)
+          ? response
+          : response?.Data || response?.data || [];
+        setPartnerDeliveries(nextPartnerDeliveries);
+      } catch (error) {
+        if (!active) return;
+        console.error("loadPartnerDeliveries error:", error);
+        setPartnerDeliveries([]);
+      }
+    };
+
+    loadPartnerDeliveries();
+
+    return () => {
+      active = false;
+    };
+  }, [selectedRetailerId, accessPrivateToken]);
+
   const handleReset = () => {
     setSelectedShippingPartner("GHN");
     setCustomerType("dai_ly");
@@ -1080,12 +1383,16 @@ export default function TaoDonHang() {
         return;
       }
 
-      const invoicePayload = buildInvoicePayload({
+      const invoicePayload = await buildInvoicePayload({
         customer: customerRecord,
         parsed,
         retailer: selectedRetailerId,
         matchedKiotUser,
         selectedShippingPartner,
+        partnerDeliveries,
+        accessToken,
+        customerType,
+        accessPrivateToken,
       });
 
       setPreparedInvoicePayload(invoicePayload);

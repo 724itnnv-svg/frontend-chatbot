@@ -1,9 +1,10 @@
 import { api } from "./api";
 import axios from "axios";
-
+// import { useAuth } from "../../context/AuthContext";
+// let { user, token } = useAuth();
 const tokenURL = "/api/cashflow";
 
-const token = localStorage.getItem("token");
+const Localtoken = localStorage.getItem("token");
 
 const RETAILER_CONFIG = {
   kingfarm: {
@@ -36,7 +37,7 @@ export async function getEmployeesByRetailer(
     params: { retailer, accessToken },
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
+      Authorization: `Bearer ${Localtoken}`,
     },
   });
 
@@ -60,7 +61,7 @@ export async function getAccessToken(retailer = "kingfarm") {
       {
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
+          Authorization: `Bearer ${Localtoken}`,
         },
       },
     );
@@ -87,7 +88,7 @@ export async function createCashFlow(
 
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
+        Authorization: `Bearer ${Localtoken}`,
       },
     });
     return response.data;
@@ -117,7 +118,7 @@ export async function getAccessPrivateToken(retailer = "kingfarm") {
       {
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
+          Authorization: `Bearer ${Localtoken}`,
         },
       },
     );
@@ -139,7 +140,7 @@ export async function getPartnerDelivery(
       },
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
+        Authorization: `Bearer ${Localtoken}`,
       },
     });
     return response.data;
@@ -168,7 +169,7 @@ export async function getBankAccount(
 
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
+        Authorization: `Bearer ${Localtoken}`,
       },
     });
     return response.data;
@@ -195,7 +196,7 @@ export async function getOrderDelivery(
 
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
+        Authorization: `Bearer ${Localtoken}`,
       },
     });
     return response.data;
@@ -225,7 +226,7 @@ export async function getListOrder(
 
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
+        Authorization: `Bearer ${Localtoken}`,
       },
     });
     return response.data;
@@ -255,7 +256,7 @@ export async function getLocationSuggest(
 
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
+        Authorization: `Bearer ${Localtoken}`,
       },
     });
     return response.data;
@@ -561,7 +562,7 @@ export async function publishEInvoice(
 
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
+          Authorization: `Bearer ${Localtoken}`,
         },
       },
     );
@@ -584,6 +585,44 @@ export async function getUserInKiot(retailer = "kingfarm", accessPrivateToken) {
     const response = await axios.get(url, {
       headers,
     });
+
+    return response.data;
+  } catch (error) {
+    const message =
+      error.response?.data?.error?.ResponseStatus?.Message ||
+      error.response?.data?.ResponseStatus?.Message ||
+      error.response?.data?.message ||
+      error.message;
+
+    throw new Error(`Failed to call administrative area API: ${message}`);
+  }
+}
+
+export async function getProductByCode(
+  retailer = "kingfarm",
+  accessPrivateToken,
+  accessToken,
+  code,
+) {
+  try {
+    const url = `${tokenURL}/getProductByCode`;
+
+    const headers = {
+      Accept: "application/json, text/plain, */*",
+      Authorization: `Bearer ${Localtoken}`,
+    };
+
+    const response = await axios.get(url, {
+      params: {
+        retailer,
+        accessPrivateToken,
+        accessToken,
+        code,
+      },
+      headers,
+    });
+
+    console.log("getProductByCode response:", response.data);
 
     return response.data;
   } catch (error) {
