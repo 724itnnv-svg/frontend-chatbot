@@ -836,6 +836,7 @@ function PageMessage() {
     if (!token) return undefined;
 
     const socket = io(SOCKET_URL, {
+      withCredentials: true,
       auth: { token },
       transports: ["polling", "websocket"],
       reconnection: true,

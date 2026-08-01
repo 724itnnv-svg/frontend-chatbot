@@ -5,7 +5,7 @@ import { useAuth } from "../../context/AuthContext";
 
 const REMEMBER_KEY = "rememberLogin";
 
-// encode/decode đơn giản (base64) – obfuscation, không phải bảo mật tuyệt đối
+// Chỉ ghi nhớ email; tuyệt đối không lưu mật khẩu ở phía trình duyệt.
 function encodeData(obj) {
   try {
     const json = JSON.stringify(obj);
@@ -133,10 +133,12 @@ export default function Login() {
 
     const decoded = decodeData(encoded);
     if (!decoded) return { email: "", password: "" };
+    const rememberedEmail = decoded.email || "";
+    localStorage.setItem(REMEMBER_KEY, encodeData({ email: rememberedEmail }));
 
     return {
-      email: decoded.email || "",
-      password: decoded.password || "",
+      email: rememberedEmail,
+      password: "",
     };
   });
 
@@ -168,6 +170,7 @@ export default function Login() {
 
       const res = await fetch("/api/auth/login", {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ...form,
@@ -186,13 +189,12 @@ export default function Login() {
       }
 
       // dùng context
-      login(data.user, data.token);
+      login(data.user);
 
       // ✅ Nhớ đăng nhập – lưu dạng mã hóa
       if (rememberMe) {
         const encoded = encodeData({
           email: form.email.trim(),
-          password: form.password,
         });
         if (encoded) localStorage.setItem(REMEMBER_KEY, encoded);
       } else {

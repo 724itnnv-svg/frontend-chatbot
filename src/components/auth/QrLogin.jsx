@@ -14,31 +14,6 @@ function getSafeRedirect(value) {
   return value;
 }
 
-function decodeJwtPayload(token) {
-  try {
-    const payload = String(token || "").split(".")[1];
-    if (!payload) return null;
-    const base64 = payload.replace(/-/g, "+").replace(/_/g, "/");
-    const json = decodeURIComponent(
-      atob(base64)
-        .split("")
-        .map((char) => `%${char.charCodeAt(0).toString(16).padStart(2, "0")}`)
-        .join("")
-    );
-    return JSON.parse(json);
-  } catch {
-    return null;
-  }
-}
-
-function hasUsableLocalSession() {
-  const storedToken = localStorage.getItem("token");
-  const storedUser = localStorage.getItem("authUser");
-  if (!storedToken || !storedUser) return false;
-  const payload = decodeJwtPayload(storedToken);
-  return Boolean(payload);
-}
-
 function buildDeepLink(token) {
   const path = `/app-login?token=${encodeURIComponent(token)}`;
   const fallback = encodeURIComponent(`${window.location.origin}${path}`);
@@ -74,13 +49,6 @@ export default function QrLogin() {
     let cancelled = false;
 
     const signInByQr = async () => {
-      if (hasUsableLocalSession()) {
-        setStatus("success");
-        setMessage("Phiên đăng nhập còn hiệu lực. Đang chuyển hướng...");
-        setTimeout(() => navigate(redirectTo, { replace: true }), 250);
-        return;
-      }
-
       if (!token) {
         setStatus("error");
         setMessage("Thiếu token đăng nhập trong đường dẫn.");
@@ -93,6 +61,7 @@ export default function QrLogin() {
 
         const res = await fetch(apiUrl("/api/auth/qr-login"), {
           method: "POST",
+          credentials: "include",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ token, ...getDeviceInfo() }),
         });
@@ -101,7 +70,7 @@ export default function QrLogin() {
         if (!res.ok) throw new Error(data?.message || "Không thể đăng nhập bằng link này.");
         if (cancelled) return;
 
-        login(data.user, data.token);
+        login(data.user);
         setStatus("success");
         setMessage("Đăng nhập thành công. Đang chuyển hướng...");
         setTimeout(() => navigate(redirectTo, { replace: true }), 450);

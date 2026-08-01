@@ -352,8 +352,9 @@ function getSafeRedirect(search) {
 }
 
 function RequireAuth({ children }) {
-  const { isLoggedIn } = useAuth();
+  const { isLoggedIn, isAuthReady } = useAuth();
   const location = useLocation();
+  if (!isAuthReady) return <AppLoader />;
   if (!isLoggedIn) {
     const currentPath = `${location.pathname}${location.search || ""}${location.hash || ""}`;
     return (
@@ -367,10 +368,11 @@ function RequireAuth({ children }) {
 }
 
 function LoginRoute() {
-  const { isLoggedIn } = useAuth();
+  const { isLoggedIn, isAuthReady } = useAuth();
   const location = useLocation();
   const redirectTo = getSafeRedirect(location.search);
 
+  if (!isAuthReady) return <AppLoader />;
   if (isLoggedIn) {
     return <Navigate to={redirectTo || "/admin"} replace />;
   }
@@ -422,7 +424,7 @@ function HomeRoute() {
 }
 
 export default function App() {
-  const { isLoggedIn } = useAuth();
+  const { isLoggedIn, isAuthReady } = useAuth();
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -449,6 +451,8 @@ export default function App() {
       listenerHandle?.remove();
     };
   }, [navigate]);
+
+  if (!isAuthReady) return <AppLoader />;
 
   return (
     <ErrorBoundary>
