@@ -39,10 +39,12 @@ const NotFoundPage = lazy(() => import("./components/NotFoundPage"));
 const PageManager = lazy(() => import("./components/PageManager"));
 const MetaPageConnect = lazy(() => import("./components/MetaPageConnect"));
 const PageMessage = lazy(() => import("./components/PageMessage"));
+const WebMessage = lazy(() => import("./components/WebMessage"));
 const CustomerCareManager = lazy(
   () => import("./components/CustomerCareManager"),
 );
 const DonHang = lazy(() => import("./components/DonHang"));
+const WebOrder = lazy(() => import("./components/WebOrder"));
 const TaoDonHang = lazy(() => import("./components/TaoDonHang"));
 const BusinessStats = lazy(() => import("./components/BusinessStats"));
 const UsersPage = lazy(() => import("./components/UserManager"));
@@ -191,8 +193,10 @@ const ADMIN_ROUTE_BY_SCREEN = {
   pages: "/admin/pages",
   meta_pages: "/admin/meta-pages",
   pagesmessage: "/admin/page-messages",
+  webmessage: "/admin/web-messages",
   customer_care: "/admin/customer-care",
   donhang: "/admin/orders",
+  weborder: "/admin/web-orders",
   tao_don_hang: "/admin/tao-don-hang",
   business_stats: "/admin/business-stats",
   employee_profiles: "/admin/employee-profiles",
@@ -228,12 +232,14 @@ const adminRoutes = [
   { path: "pages", screenId: "pages", element: <PageManager /> },
   { path: "meta-pages", screenId: "meta_pages", element: <MetaPageConnect /> },
   { path: "page-messages", screenId: "pagesmessage", element: <PageMessage /> },
+  { path: "web-messages", screenId: "pagesmessage", element: <WebMessage /> },
   {
     path: "customer-care",
     screenId: "customer_care",
     element: <CustomerCareManager />,
   },
   { path: "orders", screenId: "donhang", element: <DonHang /> },
+  { path: "web-orders", screenId: "donhang", element: <WebOrder /> },
   {
     path: "tao-don-hang",
     screenId: "tao_don_hang",

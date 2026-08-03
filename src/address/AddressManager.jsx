@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import {
   AlertCircle,
-  ArrowLeftRight,
   Building2,
   Check,
   CheckCircle2,
@@ -109,7 +108,6 @@ function ResultDetails({ conversion, onCopy, copied }) {
 }
 
 export default function AddressManager() {
-  const [direction, setDirection] = useState("old-new");
   const [query, setQuery] = useState("");
   const [mappingCount, setMappingCount] = useState(0);
   const [ready, setReady] = useState(false);
@@ -156,11 +154,18 @@ export default function AddressManager() {
     setConversion(null);
     setCopied(false);
     try {
-      const data = await convertAddress(address, direction);
+      const data = await convertAddress(address);
       if (!data?.result) {
         setNotice({
-          type: "error",
-          text: data?.meta?.ambiguous
+          type:
+            data?.meta?.rejectionCode === "MAPPED_ADDRESS_VERIFICATION_FAILED"
+              ? "warning"
+              : "error",
+          text: data?.meta?.rejected
+            ? data.meta?.resultValidation?.reason ||
+              data.meta?.inputValidation?.reason ||
+              "Địa chỉ không tồn tại hoặc không hợp lệ."
+            : data?.meta?.ambiguous
             ? "Chưa tìm được một ánh xạ xã/phường duy nhất. Vui lòng bổ sung huyện hoặc tỉnh."
             : "Chưa tìm thấy địa chỉ phù hợp trong dữ liệu ánh xạ.",
         });
@@ -168,7 +173,13 @@ export default function AddressManager() {
       }
 
       setConversion(data);
-      setNotice({
+      const conversionWarning = data.meta?.warnings?.[0]?.message;
+      if (conversionWarning) {
+        setNotice({
+          type: "warning",
+          text: conversionWarning,
+        });
+      } else setNotice({
         type: "success",
         text: data.meta?.alreadyStandardized
           ? "Địa chỉ đã đúng theo cấu trúc đích, không cần chuyển đổi."
@@ -273,29 +284,7 @@ export default function AddressManager() {
             </div>
           </div>
 
-          <div className="grid gap-4 lg:grid-cols-[250px_minmax(0,1fr)_auto] lg:items-end">
-            <label className="block">
-              <span className="mb-2 block text-sm font-bold text-slate-700">
-                Chiều chuyển đổi
-              </span>
-              <div className="relative">
-                <ArrowLeftRight className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-blue-500" />
-                <select
-                  value={direction}
-                  onChange={(event) => {
-                    setDirection(event.target.value);
-                    setConversion(null);
-                    setNotice(null);
-                  }}
-                  className="h-13 w-full appearance-none rounded-2xl border border-slate-200 bg-slate-50 py-3.5 pl-11 pr-10 font-semibold text-slate-800 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
-                >
-                  <option value="old-new">Địa chỉ cũ → mới</option>
-                  <option value="new-old">Địa chỉ mới → cũ</option>
-                </select>
-                <ChevronDown className="pointer-events-none absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-              </div>
-            </label>
-
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
             <label className="block">
               <span className="mb-2 block text-sm font-bold text-slate-700">
                 Địa chỉ cần chuẩn hóa
@@ -316,11 +305,7 @@ export default function AddressManager() {
                       handleConvert();
                     }
                   }}
-                  placeholder={
-                    direction === "old-new"
-                      ? "Ví dụ: Khóm 7 Phường 5 Trà Vinh"
-                      : "Ví dụ: Khóm 7 Phường Hòa Thuận Vĩnh Long"
-                  }
+                  placeholder="Ví dụ: Khóm 7 Phường 5 Trà Vinh"
                   autoComplete="off"
                   className="h-13 w-full rounded-2xl border border-slate-200 bg-slate-50 py-3.5 pl-11 pr-4 text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
                 />
