@@ -33,6 +33,16 @@ const STORAGE_COLUMN_ORDER = "payroll_column_order_v1";
 const STORAGE_PAYROLL_FORMULAS = "payroll_formula_settings_v1";
 const STORAGE_PAYROLL_PERIOD = "payroll_manager_period_v1";
 const STATUS_OPTIONS = ["DRAFT", "APPROVED", "PAID"];
+const ATTENDANCE_SYNC_COLUMNS = [
+  { key: "ngayCong", label: "Ngày công" },
+  { key: "tongGioLam", label: "Tổng giờ làm" },
+  { key: "tongGioDiMuon", label: "Tổng giờ đi muộn" },
+  { key: "tongGioLamThem", label: "Tổng giờ làm thêm" },
+  { key: "tangCaThuong", label: "Tăng ca thường" },
+  { key: "tangCaChuNhat", label: "Tăng ca Chủ nhật" },
+  { key: "tangCaLeTet", label: "Tăng ca lễ/tết" },
+  { key: "comTangCa", label: "Cơm tăng ca" },
+];
 const COMPUTED_PAYROLL_KEYS = new Set([
   "dataTinhLuong.mucDongBHXH",
   "dataTinhLuong.luongDangApDung",
@@ -102,7 +112,9 @@ const PAYROLL_COLUMNS = [
   { key: "thuNhapTheoNgayCong.hoaHong", label: "Hoa hồng", width: 140, type: "number" },
   { key: "thuNhapTheoNgayCong.congKhac", label: "Cộng khác", width: 130, type: "number" },
   { key: "thuNhapTheoNgayCong.tongThuNhap", label: "Tổng thu nhập", width: 160, type: "number" },
+  { key: "khauTru.apDungBHXH", label: "Trừ BHXH", width: 120, type: "boolean" },
   { key: "khauTru.bhxh", label: "BHXH", width: 120, type: "number" },
+  { key: "khauTru.apDungCongDoan", label: "Trừ công đoàn", width: 145, type: "boolean" },
   { key: "khauTru.congDoan", label: "Công đoàn", width: 130, type: "number" },
   { key: "khauTru.giamLuong", label: "Giam lương", width: 140, type: "number" },
   { key: "khauTru.giamLuongKhongTru", label: "Giam lương (chưa trừ)", width: 180, type: "number" },
@@ -180,6 +192,10 @@ const OLD_KPI_BONUS_EXPRESSION =
   "iff(thuNhapTheoNgayCong.diemKPI > 0, iff(thuNhapTheoNgayCong.diemKPI <= 100, dataTinhLuong.luongCoBan * settings.tyLeKPINhoHonBang100, dataTinhLuong.luongCoBan * settings.tyLeKPILonHon100), thuNhapTheoNgayCong.thuongKPI)";
 const KPI_BONUS_EXPRESSION =
   "iff(thuNhapTheoNgayCong.diemKPI > 0, iff(thuNhapTheoNgayCong.diemKPI <= 100, dataTinhLuong.luongCoBan * settings.tyLeKPINhoHonBang100, dataTinhLuong.luongCoBan * settings.tyLeKPILonHon100), 0)";
+const OLD_BHXH_EXPRESSION = "dataTinhLuong.mucDongBHXH * settings.tyLeBHXH";
+const BHXH_EXPRESSION = "iff(khauTru.apDungBHXH, dataTinhLuong.mucDongBHXH * settings.tyLeBHXH, 0)";
+const OLD_UNION_EXPRESSION = "iff(eqText(congTyDongBHXH, \"NNV\"), dataTinhLuong.luongCoBan * settings.tyLeCongDoanNNV, 0)";
+const UNION_EXPRESSION = "iff(khauTru.apDungCongDoan, iff(eqText(congTyDongBHXH, \"NNV\"), dataTinhLuong.luongCoBan * settings.tyLeCongDoanNNV, 0), 0)";
 
 const DEFAULT_PAYROLL_FORMULA_SETTINGS = {
   settings: {
@@ -292,14 +308,14 @@ const DEFAULT_PAYROLL_FORMULA_SETTINGS = {
     {
       target: "khauTru.bhxh",
       enabled: true,
-      expression: "dataTinhLuong.mucDongBHXH * settings.tyLeBHXH",
-      note: "Khau tru BHXH",
+      expression: BHXH_EXPRESSION,
+      note: "Chi khau tru khi bat ap dung BHXH",
     },
     {
       target: "khauTru.congDoan",
       enabled: true,
-      expression: "iff(eqText(congTyDongBHXH, \"NNV\"), dataTinhLuong.luongCoBan * settings.tyLeCongDoanNNV, 0)",
-      note: "Logic cu: chi NNV tinh cong doan",
+      expression: UNION_EXPRESSION,
+      note: "Chi khau tru khi bat ap dung cong doan",
     },
     {
       target: "khauTru.tongKhauTru",
@@ -409,7 +425,11 @@ function mergeFormulaSettings(value) {
         formula.target === "thuNhapTheoNgayCong.thuongKPI" &&
           savedFormula.expression === OLD_KPI_BONUS_EXPRESSION
           ? { ...savedFormula, expression: KPI_BONUS_EXPRESSION }
-          : savedFormula;
+          : formula.target === "khauTru.bhxh" && savedFormula.expression === OLD_BHXH_EXPRESSION
+            ? { ...savedFormula, expression: BHXH_EXPRESSION }
+            : formula.target === "khauTru.congDoan" && savedFormula.expression === OLD_UNION_EXPRESSION
+              ? { ...savedFormula, expression: UNION_EXPRESSION }
+              : savedFormula;
       return {
         ...formula,
         ...migratedFormula,
@@ -492,11 +512,15 @@ function applyPayrollFormulas(row, formulaSettings = DEFAULT_PAYROLL_FORMULA_SET
   const target = row;
   const settings = formulaSettings.settings || {};
   const errors = [];
+  if (target.khauTru?.apDungBHXH === false) target.khauTru.bhxh = 0;
+  if (target.khauTru?.apDungCongDoan === false) target.khauTru.congDoan = 0;
 
   (formulaSettings.formulas || []).forEach((formula) => {
     if (!formula.enabled || !formula.target) return;
     try {
-      const value = evaluatePayrollFormula(formula.expression, target, settings);
+      let value = evaluatePayrollFormula(formula.expression, target, settings);
+      if (formula.target === "khauTru.bhxh" && target.khauTru?.apDungBHXH === false) value = 0;
+      if (formula.target === "khauTru.congDoan" && target.khauTru?.apDungCongDoan === false) value = 0;
       setDeep(target, formula.target, roundPayrollNumber(value));
     } catch (error) {
       errors.push(`${formula.target}: ${error.message}`);
@@ -626,6 +650,8 @@ function normalizePayrollRow(row = {}, fallbackPeriod = "", formulaSettings = DE
   normalized.thuNhapTheoNgayCong.thuongKPI ??= row.bonus ?? 0;
   normalized.khauTru.giamLuong ??= row.deductions ?? 0;
   normalized.khauTru.tamUng ??= row.advance ?? 0;
+  normalized.khauTru.apDungBHXH = normalized.khauTru.apDungBHXH !== false;
+  normalized.khauTru.apDungCongDoan = normalized.khauTru.apDungCongDoan !== false;
   return applyPayrollFormulas(syncLuongDangApDung(normalized), formulaSettings);
 }
 
@@ -634,7 +660,11 @@ function buildPayload(row, formulaSettings = DEFAULT_PAYROLL_FORMULA_SETTINGS) {
   const source = applyPayrollFormulas(syncLuongDangApDung(structuredClone(row)), formulaSettings);
   PAYROLL_COLUMNS.forEach((column) => {
     const rawValue = getDeep(source, column.key);
-    const value = column.type === "number" ? roundPayrollNumber(rawValue) : String(rawValue ?? "").trim();
+    const value = column.type === "number"
+      ? roundPayrollNumber(rawValue)
+      : column.type === "boolean"
+        ? rawValue !== false
+        : String(rawValue ?? "").trim();
     setDeep(payload, column.key, value);
   });
   return payload;
@@ -663,7 +693,17 @@ function normalizeExcelRow(raw, fallbackPeriod, formulaSettings = DEFAULT_PAYROL
   PAYROLL_COLUMNS.forEach((column) => {
     const rawValue = readCell(raw, [column.key]);
     if (rawValue === "" || rawValue == null) return;
-    setDeep(row, column.key, column.type === "number" ? toNumber(rawValue) : String(rawValue).trim());
+    setDeep(
+      row,
+      column.key,
+      column.type === "number"
+        ? toNumber(rawValue)
+        : column.type === "boolean"
+          ? ![false, 0, "0", "false", "không", "khong", "tắt", "tat"].includes(
+            typeof rawValue === "string" ? rawValue.trim().toLowerCase() : rawValue
+          )
+          : String(rawValue).trim()
+    );
   });
 
   return normalizePayrollRow(row, fallbackPeriod, formulaSettings);
@@ -693,6 +733,8 @@ function downloadPayrollTemplate() {
     "dataTinhLuong.mucDongBHXH": 10000000,
     "dataTinhLuong.luongCoBan": 10000000,
     "dataTinhLuong.luongDangApDung": 10000000,
+    "khauTru.apDungBHXH": true,
+    "khauTru.apDungCongDoan": true,
     "thuNhapTheoNgayCong.tongGioLam": 208,
     "thuNhapTheoNgayCong.tongGioDiMuon": 0,
     "thuNhapTheoNgayCong.tongGioLamThem": 0,
@@ -721,7 +763,11 @@ function downloadPayrollInputTemplate(rows = [], fallbackPeriod = "") {
         item[column.key] = value || "DRAFT";
         return;
       }
-      item[column.key] = column.type === "number" ? roundPayrollNumber(value) : value ?? "";
+      item[column.key] = column.type === "number"
+        ? roundPayrollNumber(value)
+        : column.type === "boolean"
+          ? value !== false
+          : value ?? "";
     });
     return item;
   });
@@ -1215,6 +1261,9 @@ export default function PayrollManager() {
   const [attendanceSyncLoading, setAttendanceSyncLoading] = useState(false);
   const [attendanceSyncApplying, setAttendanceSyncApplying] = useState(false);
   const [attendanceSyncResult, setAttendanceSyncResult] = useState(null);
+  const [selectedAttendanceSyncFields, setSelectedAttendanceSyncFields] = useState(
+    () => new Set(ATTENDANCE_SYNC_COLUMNS.map((column) => column.key))
+  );
   const [hiddenColumns, setHiddenColumns] = useState(() => {
     try {
       return new Set(JSON.parse(localStorage.getItem(STORAGE_HIDDEN_COLUMNS) || "[]"));
@@ -1226,7 +1275,17 @@ export default function PayrollManager() {
   const [columnOrder, setColumnOrder] = useState(() => {
     try {
       const saved = JSON.parse(localStorage.getItem(STORAGE_COLUMN_ORDER) || "null");
-      if (Array.isArray(saved) && saved.length) return saved;
+      if (Array.isArray(saved) && saved.length) {
+        const validKeys = new Set(PAYROLL_COLUMNS.map((column) => column.key));
+        const next = saved.filter((key) => validKeys.has(key));
+        PAYROLL_COLUMNS.forEach((column, index) => {
+          if (next.includes(column.key)) return;
+          const previousKey = PAYROLL_COLUMNS.slice(0, index).reverse().find((item) => next.includes(item.key))?.key;
+          const insertAt = previousKey ? next.indexOf(previousKey) + 1 : 0;
+          next.splice(insertAt, 0, column.key);
+        });
+        return next;
+      }
     } catch { }
     return PAYROLL_COLUMNS.map((c) => c.key);
   });
@@ -1853,6 +1912,7 @@ export default function PayrollManager() {
         body: JSON.stringify({
           period,
           hoursPerDay: toNumber(attendanceHoursPerDay || 8),
+          selectedFields: Array.from(selectedAttendanceSyncFields),
           mode: "preview",
         }),
       });
@@ -1871,7 +1931,7 @@ export default function PayrollManager() {
   };
 
   const applyAttendanceSync = async () => {
-    if (!canEdit || !validAttendanceSyncRows.length) return;
+    if (!canEdit || !validAttendanceSyncRows.length || !selectedAttendanceSyncFields.size) return;
     setAttendanceSyncApplying(true);
     try {
       const res = await fetch("/api/payroll/sync-attendance", {
@@ -1880,6 +1940,7 @@ export default function PayrollManager() {
         body: JSON.stringify({
           period,
           hoursPerDay: toNumber(attendanceHoursPerDay || 8),
+          selectedFields: Array.from(selectedAttendanceSyncFields),
           mode: "apply",
           logContext: { source: "attendance-manager", previewMatched: validAttendanceSyncRows.length },
         }),
@@ -1898,6 +1959,15 @@ export default function PayrollManager() {
     } finally {
       setAttendanceSyncApplying(false);
     }
+  };
+
+  const toggleAttendanceSyncField = (field) => {
+    setSelectedAttendanceSyncFields((current) => {
+      const next = new Set(current);
+      if (next.has(field)) next.delete(field);
+      else next.add(field);
+      return next;
+    });
   };
 
   const toggleRowSelection = (rowId) => {
@@ -1933,9 +2003,11 @@ export default function PayrollManager() {
     const targetIds = new Set(bulkTargetRows.map((row) => row.__clientId));
     const nextValue = bulkColumn.type === "number"
       ? parsePayrollNumberInput(bulkValue)
-      : bulkColumn.type === "status"
-        ? bulkValue || "DRAFT"
-        : bulkValue;
+      : bulkColumn.type === "boolean"
+        ? bulkValue !== "false"
+        : bulkColumn.type === "status"
+          ? bulkValue || "DRAFT"
+          : bulkValue;
 
     setRows((current) =>
       current.map((row) => {
@@ -2483,6 +2555,15 @@ export default function PayrollManager() {
                     <option key={item} value={item}>{item}</option>
                   ))}
                 </select>
+              ) : bulkColumn?.type === "boolean" ? (
+                <select
+                  value={bulkValue === "false" ? "false" : "true"}
+                  onChange={(event) => setBulkValue(event.target.value)}
+                  className="mt-1 w-full rounded-xl border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-sky-100"
+                >
+                  <option value="true">Bật khấu trừ</option>
+                  <option value="false">Tắt khấu trừ</option>
+                </select>
               ) : (
                 <input
                   type={bulkColumn?.type === "month" ? "month" : "text"}
@@ -2523,14 +2604,18 @@ export default function PayrollManager() {
                         <td className="px-3 py-2">
                           {bulkColumn?.type === "number"
                             ? formatPayrollNumber(getDeep(row, bulkColumn.key))
-                            : String(getDeep(row, bulkColumn.key) ?? "")}
+                            : bulkColumn?.type === "boolean"
+                              ? getDeep(row, bulkColumn.key) === false ? "Tắt" : "Bật"
+                              : String(getDeep(row, bulkColumn.key) ?? "")}
                         </td>
                         <td className="px-3 py-2 font-semibold">
                           {bulkColumn?.type === "number"
                             ? formatPayrollNumber(parsePayrollNumberInput(bulkValue))
-                            : bulkColumn?.type === "status"
-                              ? bulkValue || "DRAFT"
-                              : bulkValue}
+                            : bulkColumn?.type === "boolean"
+                              ? bulkValue === "false" ? "Tắt" : "Bật"
+                              : bulkColumn?.type === "status"
+                                ? bulkValue || "DRAFT"
+                                : bulkValue}
                         </td>
                       </tr>
                     ))}
@@ -2545,7 +2630,7 @@ export default function PayrollManager() {
               Dong
             </button>
             <button
-              disabled={!bulkTargetRows.length || (bulkColumn?.type !== "status" && bulkValue === "")}
+              disabled={!bulkTargetRows.length || (!["status", "boolean"].includes(bulkColumn?.type) && bulkValue === "")}
               onClick={applyBulkEdit}
               className="inline-flex items-center gap-2 rounded-xl bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700 disabled:opacity-50"
             >
@@ -2668,6 +2753,43 @@ export default function PayrollManager() {
             </div>
           </div>
 
+          <div className="rounded-xl border p-3">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <div className="text-sm font-semibold text-slate-800">Chọn cột cần cập nhật vào database</div>
+                <div className="text-xs text-slate-500">Cột không chọn sẽ giữ nguyên giá trị hiện có trong bảng lương.</div>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSelectedAttendanceSyncFields(new Set(ATTENDANCE_SYNC_COLUMNS.map((column) => column.key)))}
+                  className="rounded-lg border px-3 py-1.5 text-xs font-semibold hover:bg-slate-50"
+                >
+                  Chọn tất cả
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedAttendanceSyncFields(new Set())}
+                  className="rounded-lg border px-3 py-1.5 text-xs font-semibold hover:bg-slate-50"
+                >
+                  Bỏ chọn
+                </button>
+              </div>
+            </div>
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+              {ATTENDANCE_SYNC_COLUMNS.map((column) => (
+                <label key={column.key} className="flex items-center gap-2 rounded-lg border px-3 py-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={selectedAttendanceSyncFields.has(column.key)}
+                    onChange={() => toggleAttendanceSyncField(column.key)}
+                  />
+                  <span>{column.label}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="text-sm text-slate-600">
               {attendanceSyncResult ? (
@@ -2745,9 +2867,9 @@ export default function PayrollManager() {
 
           <div className="flex justify-end gap-2">
             <button onClick={() => setShowAttendanceSync(false)} className="rounded-xl border bg-white px-4 py-2 text-sm font-semibold hover:bg-slate-50">Đóng</button>
-            <button disabled={!validAttendanceSyncRows.length || attendanceSyncApplying} onClick={applyAttendanceSync} className="inline-flex items-center gap-2 rounded-xl bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700 disabled:opacity-50">
+            <button disabled={!validAttendanceSyncRows.length || !selectedAttendanceSyncFields.size || attendanceSyncApplying} onClick={applyAttendanceSync} className="inline-flex items-center gap-2 rounded-xl bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700 disabled:opacity-50">
               {attendanceSyncApplying ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-              Cập nhật payroll ({validAttendanceSyncRows.length})
+              Cập nhật {selectedAttendanceSyncFields.size} cột ({validAttendanceSyncRows.length} NV)
             </button>
           </div>
         </div>
@@ -2896,6 +3018,22 @@ function CellInput({ column, value, readOnly, onChange }) {
       setDraftValue(value === "" || value == null ? "" : String(value));
     }
   }, [column.type, isEditing, value]);
+
+  if (column.type === "boolean") {
+    const enabled = value !== false;
+    return (
+      <label className={`flex h-9 items-center justify-center gap-2 px-2 text-xs font-semibold ${readOnly ? "cursor-not-allowed text-slate-400" : "cursor-pointer"}`}>
+        <input
+          type="checkbox"
+          disabled={readOnly}
+          checked={enabled}
+          onChange={(event) => onChange(event.target.checked)}
+          className="h-4 w-4 accent-sky-600"
+        />
+        <span className={enabled ? "text-emerald-700" : "text-slate-500"}>{enabled ? "Bật" : "Tắt"}</span>
+      </label>
+    );
+  }
 
   if (column.type === "status") {
     return (
