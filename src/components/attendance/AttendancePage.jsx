@@ -2,26 +2,37 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Capacitor } from "@capacitor/core";
 import { Geolocation } from "@capacitor/geolocation";
 import { useSearchParams } from "react-router-dom";
+import { io } from "socket.io-client";
 import {
   AlertCircle,
+  Bell,
   CalendarDays,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
   Clock,
   Download,
+  FileText,
+  HandCoins,
+  ImagePlus,
   Loader2,
   LogIn,
   LogOut,
   Navigation,
   RefreshCcw,
   ReceiptText,
+  Send,
+  Trash2,
+  Upload,
   Wallet,
   XCircle,
+  Zap,
 } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import { AndroidLocationSettings } from "../../utils/androidLocationSettings";
 import { canAccessScreen, hasFullAccess } from "../../utils/screenAccess";
+import { apiUrl, getApiOrigin } from "../../api/baseUrl";
+import { getDefaultPayrollViewPeriod } from "../../utils/payrollPeriod";
 
 const TONE = {
   emerald: "border-emerald-200 bg-emerald-50 text-emerald-700",
@@ -33,13 +44,29 @@ const TONE = {
 };
 
 const HIST_LIMIT = 100;
+const isViteDevServer = typeof window !== "undefined" && window.location.port === "5173";
+const ATTENDANCE_SOCKET_URL = import.meta.env.VITE_SOCKET_URL ||
+  (isViteDevServer ? "http://localhost:5000" : getApiOrigin() || undefined);
 const ADMIN_CONFIRM_FAILURE_LIMIT = 1;
 const ATTENDANCE_TABS = [
   { id: "attendance", label: "Chấm công", Icon: Clock },
   { id: "history", label: "Lịch sử chấm công", Icon: CalendarDays },
+  { id: "leave", label: "Xin nghỉ phép", Icon: FileText },
+  { id: "advance", label: "Ứng lương", Icon: HandCoins },
   { id: "payroll", label: "Lương của tôi", Icon: Wallet },
 ];
 const DEFAULT_ATTENDANCE_TAB = "attendance";
+const USER_NOTIFICATION_TYPES = [
+  "leave-request-approved",
+  "leave-request-rejected",
+  "leave-request-cancelled",
+  "leave-cancellation-rejected",
+  "salary-advance-approved",
+  "salary-advance-rejected",
+  "salary-advance-paid",
+  "salary-advance-cancelled",
+  "salary-advance-cancellation-rejected",
+];
 
 const SHIFT_WINDOWS = {
   MORNING_START: 7 * 60,
@@ -49,6 +76,45 @@ const EMPTY_SHIFTS = [];
 const GPS_OPTIONS = { enableHighAccuracy: true, timeout: 10000 };
 const SHOW_ATTENDANCE_TASKBAR_RUNNER_DEFAULT = false;
 const RUNNER_GIF_SRC = "/attendance-runner.gif";
+const LEAVE_TYPE_LABELS = {
+  regular: "Nghỉ phép thường",
+  emergency: "Off đột xuất",
+  annual: "Phép năm",
+};
+const LEAVE_SESSION_LABELS = {
+  full_day: "Cả ngày",
+  morning: "Buổi sáng",
+  afternoon: "Buổi chiều",
+};
+
+function createLeaveForm() {
+  const today = dateKey(new Date());
+  return { leaveType: "regular", startDate: today, endDate: today, startTime: "07:30", endTime: "17:00", session: "full_day", reason: "", evidence: null };
+}
+
+function createAdvanceForm() {
+  const today = dateKey(new Date());
+  return { requestedAmount: "", requestedPayDate: today, payrollPeriod: monthPeriod(), paymentMethod: "bank_transfer", reason: "" };
+}
+
+function advanceStatusMeta(status) {
+  if (status === "approved") return { text: "Đã duyệt, chờ chi", tone: "sky" };
+  if (status === "rejected") return { text: "Đã từ chối", tone: "rose" };
+  if (status === "paid") return { text: "Đã chi tiền", tone: "emerald" };
+  if (status === "deducted") return { text: "Đã trừ vào lương", tone: "emerald" };
+  if (status === "cancel_pending") return { text: "Chờ duyệt hủy", tone: "amber" };
+  if (status === "cancelled") return { text: "Đã hủy", tone: "slate" };
+  return { text: "Chờ quản trị duyệt", tone: "violet" };
+}
+
+function leaveStatusMeta(status, needsEvidence) {
+  if (status === "approved") return { text: "Đã duyệt", tone: "emerald" };
+  if (status === "rejected") return { text: "Đã từ chối", tone: "rose" };
+  if (status === "cancel_pending") return { text: "Chờ duyệt hủy", tone: "amber" };
+  if (status === "cancelled") return { text: "Đã hủy", tone: "slate" };
+  if (needsEvidence) return { text: "Chờ bổ sung minh chứng", tone: "amber" };
+  return { text: "Chờ quản trị duyệt", tone: "violet" };
+}
 
 const dayWorkIncomeKeys = [
   "thuNhapTheoNgayCong.luongTheoNgayCong",
@@ -147,6 +213,18 @@ function monthDateKeys(period) {
   return Array.from({ length: lastDay }, (_, index) => dateKey(new Date(year, month - 1, index + 1)));
 }
 
+function countedLeaveDateKeys(startDate, endDate) {
+  if (!startDate || !endDate || endDate < startDate) return [];
+  const dates = [];
+  const cursor = new Date(`${startDate}T00:00:00Z`);
+  const last = new Date(`${endDate}T00:00:00Z`);
+  while (cursor <= last) {
+    if (cursor.getUTCDay() !== 0) dates.push(cursor.toISOString().slice(0, 10));
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  return dates;
+}
+
 function monthCalendarCells(period) {
   const { year, month, lastDay } = periodBounds(period);
   const firstWeekday = new Date(year, month - 1, 1).getDay();
@@ -167,7 +245,16 @@ function shiftHasInvalidPunch(shift) {
   return shift?.checkIn?.isValid === false || shift?.checkOut?.isValid === false || shift?.status === "invalid";
 }
 
-function attendanceDayMeta(record, date, today = todayKey()) {
+function attendanceDayMeta(record, date, today = todayKey(), approvedLeave = null) {
+  if (approvedLeave && (!record || record.status === "incomplete" || !hasAttendancePunch(record))) {
+    return {
+      label: approvedLeave.leaveType === "annual" ? "Phép năm đã duyệt" : approvedLeave.leaveType === "emergency" ? "Off đột xuất đã duyệt" : "Nghỉ phép đã duyệt",
+      dot: "bg-violet-500",
+      border: "border-violet-300",
+      bg: "bg-violet-50",
+      text: "text-violet-700",
+    };
+  }
   if (!record) {
     if (date > today) {
       return {
@@ -929,7 +1016,8 @@ function printPayrolls(payrolls) {
 }
 
 export default function AttendancePage() {
-  const { api, user } = useAuth();
+  const { api, user, token } = useAuth();
+  const currentUserId = user?._id || user?.id || "";
   const [searchParams, setSearchParams] = useSearchParams();
 
   const [gps, setGps] = useState(null);
@@ -963,10 +1051,31 @@ export default function AttendancePage() {
   const [attendanceDate, setAttendanceDate] = useState(() => getActiveAttendanceWindow().date);
   const [activeShiftNo, setActiveShiftNo] = useState(() => getActiveAttendanceWindow().shiftNo);
   const [activeShiftName, setActiveShiftName] = useState(() => getActiveAttendanceWindow().name);
-  const [payrollPeriod, setPayrollPeriod] = useState("");
+  const [payrollPeriod, setPayrollPeriod] = useState(() => getDefaultPayrollViewPeriod());
   const [payroll, setPayroll] = useState(null);
   const [payrollLoading, setPayrollLoading] = useState(false);
   const [payrollMessage, setPayrollMessage] = useState("");
+  const [leaveForm, setLeaveForm] = useState(createLeaveForm);
+  const [leaveRequests, setLeaveRequests] = useState([]);
+  const [leaveLoading, setLeaveLoading] = useState(false);
+  const [leaveSaving, setLeaveSaving] = useState(false);
+  const [advanceForm, setAdvanceForm] = useState(createAdvanceForm);
+  const [advanceRequests, setAdvanceRequests] = useState([]);
+  const [advanceLoading, setAdvanceLoading] = useState(false);
+  const [advanceSaving, setAdvanceSaving] = useState(false);
+  const [deletingAdvanceId, setDeletingAdvanceId] = useState("");
+  const [advanceLimit, setAdvanceLimit] = useState({ minAmount: 100000, baseSalary: 0, sourcePeriod: "" });
+  const [advanceLimitLoading, setAdvanceLimitLoading] = useState(false);
+  const [approvalNotifications, setApprovalNotifications] = useState([]);
+  const [notificationHistory, setNotificationHistory] = useState([]);
+  const [showNotificationCenter, setShowNotificationCenter] = useState(false);
+  const [notificationHistoryLoading, setNotificationHistoryLoading] = useState(false);
+  const [uploadingLeaveId, setUploadingLeaveId] = useState("");
+  const [deletingLeaveId, setDeletingLeaveId] = useState("");
+  const [evidencePreview, setEvidencePreview] = useState(null);
+  const [evidencePreviewLoading, setEvidencePreviewLoading] = useState(false);
+  const [evidencePreviewError, setEvidencePreviewError] = useState("");
+  const [myAutoAttendance, setMyAutoAttendance] = useState(null);
   const [showTaskbarRunner, setShowTaskbarRunner] = useState(() => {
     try { return localStorage.getItem("attendance_show_taskbar_runner") === "true"; } catch { return SHOW_ATTENDANCE_TASKBAR_RUNNER_DEFAULT; }
   });
@@ -976,6 +1085,7 @@ export default function AttendancePage() {
   );
   const msgTimer = useRef(null);
   const gpsRequestRef = useRef(null);
+  const leaveRealtimeRefreshRef = useRef(null);
   const payrollPeriodRef = useRef(payrollPeriod);
   useEffect(() => { payrollPeriodRef.current = payrollPeriod; }, [payrollPeriod]);
   const lookupCodeRef = useRef(lookupCode);
@@ -1023,9 +1133,16 @@ export default function AttendancePage() {
     hasFullAccess(user) || (canAccessScreen(user, "payroll") && user?.action?.payroll?.view === true);
 
   useEffect(() => {
-    if (!canLookupOtherPayroll && payrollEmployeeCode) setLookupCode(payrollEmployeeCode);
+    if (payrollEmployeeCode && (!canLookupOtherPayroll || !lookupCodeRef.current)) {
+      setLookupCode(payrollEmployeeCode);
+    }
   }, [canLookupOtherPayroll, payrollEmployeeCode]);
-  const payrollMeta = useMemo(() => statusMeta(payroll?.status), [payroll?.status]);
+  const payrollMeta = useMemo(
+    () => payroll?.isLiveEstimate
+      ? { label: "Tạm tính", className: "border-amber-200 bg-amber-50 text-amber-700" }
+      : statusMeta(payroll?.status),
+    [payroll?.isLiveEstimate, payroll?.status]
+  );
 
   const requestNativeGpsPermission = useCallback(async () => {
     if (!Capacitor.isNativePlatform()) return true;
@@ -1230,31 +1347,207 @@ export default function AttendancePage() {
     setPayrollLoading(true);
     setPayrollMessage("");
     try {
-      const params = new URLSearchParams({ employeeCode: code });
-      const period = payrollPeriodRef.current;
-      if (period) params.set("period", period);
-      const res = await api.get(`/public/payroll/lookup?${params.toString()}`);
+      const period = payrollPeriodRef.current || getDefaultPayrollViewPeriod();
+      const isOwnPayroll = Boolean(payrollEmployeeCode) && code === payrollEmployeeCode;
+      const params = new URLSearchParams({ period });
+      let res;
+      if (isOwnPayroll) {
+        res = await api.get(`/payroll/my-live?${params.toString()}`);
+      } else {
+        params.set("employeeCode", code);
+        res = await api.get(`/public/payroll/lookup?${params.toString()}`);
+      }
       const data = res.data?.data || null;
       setPayroll(data);
       if (data?.period) setPayrollPeriod(data.period);
     } catch (err) {
       setPayroll(null);
       setPayrollMessage(err.response?.data?.message || err.message || "Không tìm thấy bảng lương đã duyệt.");
-      if (!payrollPeriodRef.current) setPayrollPeriod(prevMonthPeriod());
     } finally {
       setPayrollLoading(false);
     }
   }, [api, canLookupOtherPayroll, payrollEmployeeCode]);
+
+  const loadLeaveRequests = useCallback(async () => {
+    setLeaveLoading(true);
+    try {
+      const res = await api.get("/attendance-leave-requests/my");
+      setLeaveRequests(res.data?.data || []);
+    } catch (err) {
+      showMsg(false, err.response?.data?.message || "Không tải được danh sách đơn nghỉ phép.");
+    } finally {
+      setLeaveLoading(false);
+    }
+  }, [api]);
+
+  const loadMyAutoAttendance = useCallback(async () => {
+    try {
+      const res = await api.get("/auto-attendance/my");
+      setMyAutoAttendance(res.data?.data || { isEnabled: false });
+    } catch {
+      setMyAutoAttendance({ isEnabled: false });
+    }
+  }, [api]);
+
+  const loadAdvanceRequests = useCallback(async () => {
+    setAdvanceLoading(true);
+    try {
+      const res = await api.get("/salary-advance-requests/my");
+      setAdvanceRequests(res.data?.data || []);
+    } catch (err) {
+      showMsg(false, err.response?.data?.message || "Không tải được danh sách phiếu ứng lương.");
+    } finally {
+      setAdvanceLoading(false);
+    }
+  }, [api]);
+
+  const loadAdvanceLimit = useCallback(async (period) => {
+    if (!period) return;
+    setAdvanceLimitLoading(true);
+    try {
+      const res = await api.get(`/salary-advance-requests/my-limit?period=${encodeURIComponent(period)}`);
+      setAdvanceLimit(res.data?.data || { minAmount: 100000, baseSalary: 0, sourcePeriod: "" });
+    } catch {
+      setAdvanceLimit({ minAmount: 100000, baseSalary: 0, sourcePeriod: "" });
+    } finally {
+      setAdvanceLimitLoading(false);
+    }
+  }, [api]);
+
+  const loadApprovalNotifications = useCallback(async () => {
+    try {
+      const res = await api.get(`/notifications/my?unreadOnly=true&types=${encodeURIComponent(USER_NOTIFICATION_TYPES.join(","))}`);
+      setApprovalNotifications(res.data?.data || []);
+    } catch {
+      setApprovalNotifications([]);
+    }
+  }, [api]);
+
+  const openNotificationCenter = async () => {
+    setShowNotificationCenter(true);
+    setNotificationHistoryLoading(true);
+    try {
+      const res = await api.get(`/notifications/my?unreadOnly=false&types=${encodeURIComponent(USER_NOTIFICATION_TYPES.join(","))}`);
+      setNotificationHistory(res.data?.data || []);
+    } catch (err) {
+      showMsg(false, err.response?.data?.message || "Không tải được thông báo.");
+    } finally {
+      setNotificationHistoryLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadAdvanceLimit(advanceForm.payrollPeriod);
+  }, [advanceForm.payrollPeriod, loadAdvanceLimit]);
+
+  useEffect(() => {
+    if (!evidencePreview) return undefined;
+    const closeOnEscape = (event) => {
+      if (event.key === "Escape") setEvidencePreview(null);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [evidencePreview]);
 
   useEffect(() => {
     loadLocations();
     loadShiftSetup();
     loadToday();
     loadHistory(historyPeriod);
-  }, [historyPeriod, loadLocations, loadShiftSetup, loadToday, loadHistory]);
+    loadLeaveRequests();
+    loadAdvanceRequests();
+    loadApprovalNotifications();
+    loadMyAutoAttendance();
+  }, [historyPeriod, loadAdvanceRequests, loadApprovalNotifications, loadLeaveRequests, loadLocations, loadMyAutoAttendance, loadShiftSetup, loadToday, loadHistory]);
 
   useEffect(() => {
     if (activeTab === "payroll") loadPayroll();
+    if (activeTab === "leave") loadLeaveRequests();
+    if (activeTab === "advance") loadAdvanceRequests();
+  }, [activeTab, loadAdvanceRequests, loadLeaveRequests, loadPayroll]);
+
+  leaveRealtimeRefreshRef.current = {
+    activeTab,
+    historyPeriod,
+    loadHistory,
+    loadLeaveRequests,
+    loadAdvanceRequests,
+    loadApprovalNotifications,
+    loadMyAutoAttendance,
+    loadToday,
+    loadPayroll,
+  };
+
+  useEffect(() => {
+    if (!token || !currentUserId) return undefined;
+    const socket = io(ATTENDANCE_SOCKET_URL, {
+      autoConnect: false,
+      withCredentials: true,
+      auth: { token },
+      transports: ["websocket", "polling"],
+      tryAllTransports: true,
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 800,
+      reconnectionDelayMax: 5000,
+      timeout: 20000,
+    });
+    let refreshTimer = null;
+    const connectTimer = window.setTimeout(() => socket.connect(), 0);
+
+    const refreshLeaveState = (payload = {}) => {
+      if (payload.userId && String(payload.userId) !== String(currentUserId)) return;
+      const refresh = leaveRealtimeRefreshRef.current;
+      const refreshPayroll = () => {
+        if (refresh?.activeTab === "payroll") refresh.loadPayroll();
+      };
+      if (payload.entity === "auto-attendance") {
+        refresh?.loadMyAutoAttendance();
+        refreshPayroll();
+        return;
+      }
+      if (payload.entity === "salary-advance") {
+        refresh?.loadAdvanceRequests();
+        refresh?.loadApprovalNotifications();
+        refreshPayroll();
+        return;
+      }
+      window.clearTimeout(refreshTimer);
+      refreshTimer = window.setTimeout(() => {
+        if (payload.entity === "leave-request") {
+          refresh?.loadLeaveRequests();
+          refresh?.loadApprovalNotifications();
+        }
+        refresh?.loadToday();
+        refresh?.loadHistory(refresh.historyPeriod);
+        refreshPayroll();
+      }, 150);
+    };
+
+    const refreshOnConnect = () => {
+      leaveRealtimeRefreshRef.current?.loadLeaveRequests();
+      leaveRealtimeRefreshRef.current?.loadAdvanceRequests();
+      leaveRealtimeRefreshRef.current?.loadApprovalNotifications();
+      leaveRealtimeRefreshRef.current?.loadMyAutoAttendance();
+      if (leaveRealtimeRefreshRef.current?.activeTab === "payroll") {
+        leaveRealtimeRefreshRef.current.loadPayroll();
+      }
+    };
+    socket.on("connect", refreshOnConnect);
+    socket.on("attendance:changed", refreshLeaveState);
+    return () => {
+      window.clearTimeout(connectTimer);
+      window.clearTimeout(refreshTimer);
+      socket.off("connect", refreshOnConnect);
+      socket.off("attendance:changed", refreshLeaveState);
+      socket.disconnect();
+    };
+  }, [currentUserId, token]);
+
+  useEffect(() => {
+    if (activeTab !== "payroll") return undefined;
+    const timer = window.setInterval(loadPayroll, 60000);
+    return () => window.clearInterval(timer);
   }, [activeTab, loadPayroll]);
 
   // Làm mới GPS mỗi 60 giây để phát hiện khi user di chuyển sang vị trí mới
@@ -1383,11 +1676,21 @@ export default function AttendancePage() {
   }, [history]);
   const historyCalendarCells = useMemo(() => monthCalendarCells(historyPeriod), [historyPeriod]);
   const historyMonthDates = useMemo(() => monthDateKeys(historyPeriod), [historyPeriod]);
+  const approvedLeavesByDate = useMemo(() => {
+    const map = new Map();
+    leaveRequests.filter((request) => request.status === "approved" || request.status === "cancel_pending").forEach((request) => {
+      const dates = request.approvedDates?.length ? request.approvedDates : countedLeaveDateKeys(request.startDate, request.endDate);
+      dates.forEach((date) => map.set(date, request));
+    });
+    return map;
+  }, [leaveRequests]);
   const historySummary = useMemo(() => {
     const today = todayKey();
     return historyMonthDates.reduce((summary, date) => {
       const record = historyRecordsByDate.get(date);
-      if (record && hasAttendancePunch(record) && record.status !== "incomplete" && record.status !== "invalid") {
+      if (approvedLeavesByDate.has(date) && (!record || record.status === "incomplete" || !hasAttendancePunch(record))) {
+        summary.leave += 1;
+      } else if (record && hasAttendancePunch(record) && record.status !== "incomplete" && record.status !== "invalid") {
         summary.present += 1;
       } else if (record || date === today) {
         summary.partial += 1;
@@ -1395,8 +1698,8 @@ export default function AttendancePage() {
         summary.absent += 1;
       }
       return summary;
-    }, { present: 0, partial: 0, absent: 0 });
-  }, [historyMonthDates, historyRecordsByDate]);
+    }, { present: 0, partial: 0, absent: 0, leave: 0 });
+  }, [approvedLeavesByDate, historyMonthDates, historyRecordsByDate]);
 
   useEffect(() => {
     if ((!retryInvalidShift || !canEditRetryLocation) && isFixingInvalidLocation) {
@@ -1439,10 +1742,165 @@ export default function AttendancePage() {
       await loadPayroll();
       return;
     }
+    if (activeTab === "leave") {
+      await loadLeaveRequests();
+      return;
+    }
+    if (activeTab === "advance") {
+      await loadAdvanceRequests();
+      return;
+    }
     if (!gps) {
       await getGPS();
     }
     await refreshAttendance();
+  }
+
+  async function submitLeaveRequest(event) {
+    event.preventDefault();
+    if (!leaveForm.startDate || !leaveForm.endDate) return showMsg(false, "Vui lòng chọn thời gian nghỉ.");
+    if (leaveForm.endDate < leaveForm.startDate) return showMsg(false, "Ngày kết thúc phải từ ngày bắt đầu trở đi.");
+    if (leaveForm.leaveType === "emergency" && (!leaveForm.startTime || !leaveForm.endTime || leaveForm.endTime <= leaveForm.startTime)) {
+      return showMsg(false, "Giờ bắt đầu và kết thúc off đột xuất không hợp lệ.");
+    }
+    if (leaveForm.leaveType === "emergency" && (leaveForm.startTime < "07:30" || leaveForm.endTime > "17:00")) {
+      return showMsg(false, "Off đột xuất phải nằm trong giờ làm việc 07:30-17:00.");
+    }
+    if (leaveForm.leaveType === "emergency" && leaveForm.startTime >= "11:30" && leaveForm.endTime <= "13:00") {
+      return showMsg(false, "Khoảng off không được chỉ nằm trong giờ nghỉ trưa 11:30-13:00.");
+    }
+    if (!leaveForm.reason.trim()) return showMsg(false, "Vui lòng nhập lý do xin nghỉ.");
+
+    setLeaveSaving(true);
+    try {
+      const body = new FormData();
+      body.append("leaveType", leaveForm.leaveType);
+      body.append("startDate", leaveForm.startDate);
+      body.append("endDate", leaveForm.endDate);
+      body.append("startTime", leaveForm.startTime);
+      body.append("endTime", leaveForm.endTime);
+      body.append("session", leaveForm.session);
+      body.append("reason", leaveForm.reason.trim());
+      if (leaveForm.evidence) body.append("evidence", leaveForm.evidence);
+      const res = await api.post("/attendance-leave-requests", body);
+      showMsg(true, res.data?.message || "Đã gửi đơn xin nghỉ phép.");
+      setLeaveForm(createLeaveForm());
+      await loadLeaveRequests();
+    } catch (err) {
+      showMsg(false, err.response?.data?.message || "Không thể gửi đơn xin nghỉ phép.");
+    } finally {
+      setLeaveSaving(false);
+    }
+  }
+
+  async function submitAdvanceRequest(event) {
+    event.preventDefault();
+    const requestedAmount = Number(advanceForm.requestedAmount);
+    if (!Number.isFinite(requestedAmount) || requestedAmount < 100000) return showMsg(false, "Số tiền muốn ứng tối thiểu là 100.000 đ.");
+    if (!(Number(advanceLimit.baseSalary) > 0)) return showMsg(false, "Chưa có dữ liệu lương căn bản để tạo phiếu ứng.");
+    if (requestedAmount > Number(advanceLimit.baseSalary)) return showMsg(false, `Số tiền muốn ứng không được vượt quá lương căn bản ${money(advanceLimit.baseSalary)}.`);
+    if (!advanceForm.requestedPayDate || !advanceForm.payrollPeriod) return showMsg(false, "Vui lòng chọn ngày nhận và kỳ khấu trừ.");
+    if (!advanceForm.reason.trim()) return showMsg(false, "Vui lòng nhập lý do ứng lương.");
+    setAdvanceSaving(true);
+    try {
+      const res = await api.post("/salary-advance-requests", {
+        ...advanceForm,
+        requestedAmount,
+        reason: advanceForm.reason.trim(),
+      });
+      showMsg(true, res.data?.message || "Đã gửi phiếu ứng lương.");
+      setAdvanceForm(createAdvanceForm());
+      await loadAdvanceRequests();
+    } catch (err) {
+      showMsg(false, err.response?.data?.message || "Không thể gửi phiếu ứng lương.");
+    } finally {
+      setAdvanceSaving(false);
+    }
+  }
+
+  async function deleteAdvanceRequest(request) {
+    let cancellationReason = "";
+    if (request.status === "approved") {
+      cancellationReason = window.prompt("Nhập lý do yêu cầu hủy phiếu đã duyệt:", "")?.trim();
+      if (!cancellationReason) return;
+    } else if (!window.confirm("Bạn có chắc muốn xóa phiếu ứng lương này?")) return;
+    setDeletingAdvanceId(request._id);
+    try {
+      const res = await api.delete(`/salary-advance-requests/${request._id}`, { data: cancellationReason ? { cancellationReason } : undefined });
+      showMsg(true, res.data?.message || "Đã cập nhật phiếu ứng lương.");
+      await loadAdvanceRequests();
+    } catch (err) {
+      showMsg(false, err.response?.data?.message || "Không thể hủy phiếu ứng lương.");
+    } finally {
+      setDeletingAdvanceId("");
+    }
+  }
+
+  async function openApprovalNotification(notification) {
+    setApprovalNotifications((current) => current.filter((item) => item._id !== notification._id));
+    setNotificationHistory((current) => current.map((item) => item._id === notification._id ? { ...item, isRead: true, readAt: new Date().toISOString() } : item));
+    api.patch(`/notifications/${notification._id}/read`).catch(() => { });
+    setShowNotificationCenter(false);
+    changeTab(notification.type.startsWith("salary-advance-") ? "advance" : "leave");
+  }
+
+  async function markAllUserNotificationsRead() {
+    try {
+      await api.patch("/notifications/my/read-all", { types: USER_NOTIFICATION_TYPES });
+      setApprovalNotifications([]);
+      setNotificationHistory((current) => current.map((item) => ({ ...item, isRead: true, readAt: item.readAt || new Date().toISOString() })));
+    } catch (err) {
+      showMsg(false, err.response?.data?.message || "Không thể đánh dấu thông báo đã đọc.");
+    }
+  }
+
+  async function uploadLeaveEvidence(requestId, file) {
+    if (!file) return;
+    setUploadingLeaveId(requestId);
+    try {
+      const body = new FormData();
+      body.append("evidence", file);
+      const res = await api.post(`/attendance-leave-requests/${requestId}/evidence`, body);
+      showMsg(true, res.data?.message || "Đã bổ sung ảnh minh chứng.");
+      await loadLeaveRequests();
+    } catch (err) {
+      showMsg(false, err.response?.data?.message || "Không thể bổ sung ảnh minh chứng.");
+    } finally {
+      setUploadingLeaveId("");
+    }
+  }
+
+  function openLeaveEvidence(request) {
+    if (!request?.evidence?.url) return;
+    setEvidencePreview({
+      url: apiUrl(request.evidence.url),
+      title: `Ảnh minh chứng · ${LEAVE_TYPE_LABELS[request.leaveType] || "Nghỉ phép"}`,
+      date: `${fmtShortDate(request.startDate)}${request.endDate !== request.startDate ? ` – ${fmtShortDate(request.endDate)}` : ""}`,
+    });
+    setEvidencePreviewLoading(true);
+    setEvidencePreviewError("");
+  }
+
+  async function deleteLeaveRequest(request) {
+    let cancellationReason = "";
+    if (request.status === "approved") {
+      cancellationReason = window.prompt("Nhập lý do yêu cầu hủy đơn đã duyệt:", "")?.trim();
+      if (!cancellationReason) return;
+      if (!window.confirm("Gửi yêu cầu hủy đơn này đến quản trị? Đơn vẫn có hiệu lực cho đến khi được duyệt hủy.")) return;
+    } else if (!window.confirm("Bạn có chắc muốn xoá đơn nghỉ phép này?")) return;
+
+    setDeletingLeaveId(request._id);
+    try {
+      const res = await api.delete(`/attendance-leave-requests/${request._id}`, {
+        data: cancellationReason ? { cancellationReason } : undefined,
+      });
+      showMsg(true, res.data?.message || (request.status === "approved" ? "Đã gửi yêu cầu hủy đơn." : "Đã xoá đơn nghỉ phép."));
+      await Promise.all([loadLeaveRequests(), loadToday(), loadHistory(historyPeriod)]);
+    } catch (err) {
+      showMsg(false, err.response?.data?.message || "Không thể xoá đơn nghỉ phép.");
+    } finally {
+      setDeletingLeaveId("");
+    }
   }
 
   async function handleCheckIn(options = {}) {
@@ -1664,6 +2122,20 @@ export default function AttendancePage() {
                 </button>
               </div> */}
               <button
+                type="button"
+                onClick={openNotificationCenter}
+                className="relative flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 shadow-sm hover:bg-slate-50"
+                title="Xem thông báo"
+              >
+                <Bell size={15} />
+                <span className="hidden sm:inline">Thông báo</span>
+                {approvalNotifications.length > 0 && (
+                  <span className="absolute -right-1.5 -top-1.5 inline-flex min-h-5 min-w-5 items-center justify-center rounded-full bg-rose-600 px-1 text-[10px] font-black text-white ring-2 ring-white">
+                    {approvalNotifications.length > 99 ? "99+" : approvalNotifications.length}
+                  </span>
+                )}
+              </button>
+              <button
                 onClick={refreshCurrentTab}
                 className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 shadow-sm hover:bg-slate-50"
               >
@@ -1673,6 +2145,58 @@ export default function AttendancePage() {
             </div>
           </div>
 
+          {showNotificationCenter && (
+            <div className="fixed inset-0 z-[90] flex items-start justify-center bg-slate-900/35 px-3 py-8 backdrop-blur-sm sm:items-center">
+              <button type="button" aria-label="Đóng thông báo" className="absolute inset-0" onClick={() => setShowNotificationCenter(false)} />
+              <div className="relative flex max-h-[85dvh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
+                <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-4 py-3.5 sm:px-5">
+                  <div className="flex items-center gap-3">
+                    <span className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-sky-50 text-sky-600"><Bell size={20} /></span>
+                    <div><h2 className="font-bold text-slate-900">Thông báo của bạn</h2><p className="text-xs text-slate-500">Lịch sử duyệt nghỉ phép và ứng lương</p></div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {approvalNotifications.length > 0 && <button type="button" onClick={markAllUserNotificationsRead} className="rounded-lg px-2.5 py-1.5 text-xs font-semibold text-sky-700 hover:bg-sky-50">Đọc tất cả</button>}
+                    <button type="button" onClick={() => setShowNotificationCenter(false)} className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100"><XCircle size={20} /></button>
+                  </div>
+                </div>
+                <div className="min-h-40 flex-1 overflow-y-auto">
+                  {notificationHistoryLoading ? (
+                    <div className="flex justify-center py-14"><Loader2 size={24} className="animate-spin text-slate-400" /></div>
+                  ) : notificationHistory.length === 0 ? (
+                    <div className="px-5 py-14 text-center text-sm text-slate-400">Bạn chưa có thông báo nào.</div>
+                  ) : (
+                    <div className="divide-y divide-slate-100">{notificationHistory.map((notification) => (
+                      <button key={notification._id} type="button" onClick={() => openApprovalNotification(notification)} className={`flex w-full items-start gap-3 px-4 py-3.5 text-left transition hover:bg-slate-50 sm:px-5 ${notification.isRead ? "bg-white" : "bg-sky-50/60"}`}>
+                        <span className={`mt-1 h-2.5 w-2.5 shrink-0 rounded-full ${notification.isRead ? "bg-slate-200" : "bg-sky-500"}`} />
+                        <span className="min-w-0 flex-1"><span className={`block text-sm ${notification.isRead ? "font-semibold text-slate-700" : "font-bold text-slate-900"}`}>{notification.title}</span><span className="mt-1 block text-xs leading-5 text-slate-600">{notification.body}</span><span className="mt-1 block text-[11px] text-slate-400">{new Date(notification.createdAt).toLocaleString("vi-VN")} · Bấm để xem chi tiết</span></span>
+                      </button>
+                    ))}</div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {evidencePreview && (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/70 p-3 backdrop-blur-sm sm:p-6">
+              <button type="button" aria-label="Đóng ảnh minh chứng" className="absolute inset-0" onClick={() => setEvidencePreview(null)} />
+              <div className="relative flex max-h-[92dvh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-white/20 bg-white shadow-2xl">
+                <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-4 py-3 sm:px-5">
+                  <div className="min-w-0"><h2 className="truncate text-sm font-bold text-slate-900 sm:text-base">{evidencePreview.title}</h2><p className="text-xs text-slate-500">{evidencePreview.date}</p></div>
+                  <button type="button" onClick={() => setEvidencePreview(null)} className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-slate-500 hover:bg-slate-100" title="Đóng"><XCircle size={22} /></button>
+                </div>
+                <div className="relative flex min-h-[280px] flex-1 items-center justify-center overflow-auto bg-slate-100 p-2 sm:min-h-[480px] sm:p-4">
+                  {evidencePreviewLoading && <div className="absolute inset-0 z-10 flex items-center justify-center bg-slate-100"><Loader2 size={28} className="animate-spin text-sky-600" /></div>}
+                  {evidencePreviewError ? (
+                    <div className="flex max-w-md flex-col items-center gap-2 px-5 py-12 text-center text-sm text-rose-600"><AlertCircle size={28} /><span>{evidencePreviewError}</span></div>
+                  ) : (
+                    <img src={evidencePreview.url} alt={evidencePreview.title} className="max-h-[calc(92dvh-90px)] max-w-full rounded-lg object-contain shadow-sm" onLoad={() => setEvidencePreviewLoading(false)} onError={() => { setEvidencePreviewLoading(false); setEvidencePreviewError("Không thể tải ảnh minh chứng. Vui lòng đóng popup và thử lại."); }} />
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
           {actionMsg && (
             <div className={`flex items-start gap-2 rounded-2xl border p-3 text-sm font-medium ${actionMsg.ok ? TONE.emerald : TONE.rose}`}>
               {actionMsg.ok ? <CheckCircle2 size={16} className="mt-0.5 flex-shrink-0" /> : <XCircle size={16} className="mt-0.5 flex-shrink-0" />}
@@ -1681,7 +2205,7 @@ export default function AttendancePage() {
           )}
 
           <div className="rounded-2xl border border-slate-200 bg-white p-1 shadow-sm">
-            <div className="grid grid-cols-3 gap-1">
+            <div className="grid grid-cols-2 gap-1 sm:grid-cols-5">
               {ATTENDANCE_TABS.map((tab) => {
                 const Icon = tab.Icon;
                 const active = activeTab === tab.id;
@@ -1704,6 +2228,19 @@ export default function AttendancePage() {
 
           {activeTab === "attendance" && (
             <div className="grid gap-5 lg:grid-cols-[minmax(320px,0.9fr)_minmax(0,1.35fr)] lg:items-start">
+              {myAutoAttendance?.isEnabled && (
+                <div className="flex items-start gap-3 rounded-2xl border border-violet-200 bg-violet-50 px-4 py-3 text-violet-800 shadow-sm lg:col-span-2">
+                  <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-violet-600 text-white">
+                    <Zap size={18} />
+                  </span>
+                  <div>
+                    <p className="text-sm font-bold">Bạn đang được tự động chấm công</p>
+                    <p className="mt-0.5 text-xs text-violet-600">
+                      Hệ thống dự kiến tự động chấm vào lúc {myAutoAttendance.checkInTime || "07:30"} và chấm ra lúc {myAutoAttendance.checkOutTime || "17:00"} theo cấu hình của quản trị.
+                    </p>
+                  </div>
+                </div>
+              )}
               <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
                 <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-1">
                   <div className="min-w-0">
@@ -1888,6 +2425,9 @@ export default function AttendancePage() {
                 {todayRecord?.workHours != null && (
                   <div className="mb-3 rounded-xl border border-emerald-100 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700">
                     Tổng công hôm nay: {todayRecord.workHours}h
+                    {Number(todayRecord.remoteWorkHours || 0) > 0 && (
+                      <span className="ml-2 text-sky-700">Tại công ty: {todayRecord.onsiteWorkHours}h · WFH: {todayRecord.remoteWorkHours}h</span>
+                    )}
                     {Number(todayRecord.overtimeMinutes || 0) > 0 && <span className="ml-2 text-violet-700">Tăng ca: {todayRecord.overtimeMinutes} phút</span>}
                   </div>
                 )}
@@ -1989,7 +2529,7 @@ export default function AttendancePage() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-3 divide-x divide-slate-100 border-b border-slate-100 bg-slate-50/80">
+                <div className="grid grid-cols-4 divide-x divide-slate-100 border-b border-slate-100 bg-slate-50/80">
                   <div className="px-3 py-3 text-center">
                     <div className="text-lg font-black tabular-nums text-emerald-700">{historySummary.present}</div>
                     <div className="text-[11px] font-medium text-slate-400">Có làm</div>
@@ -2002,6 +2542,10 @@ export default function AttendancePage() {
                     <div className="text-lg font-black tabular-nums text-rose-700">{historySummary.absent}</div>
                     <div className="text-[11px] font-medium text-slate-400">Không làm</div>
                   </div>
+                  <div className="px-3 py-3 text-center">
+                    <div className="text-lg font-black tabular-nums text-violet-700">{historySummary.leave}</div>
+                    <div className="text-[11px] font-medium text-slate-400">Nghỉ đã duyệt</div>
+                  </div>
                 </div>
 
                 <div className="px-4 py-4 sm:px-5">
@@ -2009,6 +2553,7 @@ export default function AttendancePage() {
                     <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-emerald-500" /> Có làm</span>
                     <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-amber-500" /> Thiếu ca / hôm nay</span>
                     <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-rose-500" /> Không làm</span>
+                    <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-violet-500" /> Nghỉ đã duyệt</span>
                   </div>
 
                   <div className="grid grid-cols-7 gap-1.5 text-center text-[11px] font-bold uppercase text-slate-400 sm:gap-2">
@@ -2021,7 +2566,7 @@ export default function AttendancePage() {
                     {historyCalendarCells.map((cell) => {
                       if (cell.blank) return <div key={cell.key} className="aspect-square" />;
                       const record = historyRecordsByDate.get(cell.date);
-                      const meta = attendanceDayMeta(record, cell.date);
+                      const meta = attendanceDayMeta(record, cell.date, todayKey(), approvedLeavesByDate.get(cell.date));
                       const shifts = record ? getRecordShifts(record) : [];
                       const firstShift = shifts[0];
                       return (
@@ -2100,6 +2645,9 @@ export default function AttendancePage() {
                             {record.workHours != null && (
                               <div className="mt-2 flex items-center gap-2">
                                 <span className="text-xs font-semibold text-emerald-700">Tổng: {record.workHours}h</span>
+                                {Number(record.remoteWorkHours || 0) > 0 && (
+                                  <span className="text-xs font-semibold text-sky-700">Tại công ty {record.onsiteWorkHours}h + WFH {record.remoteWorkHours}h</span>
+                                )}
                                 {Number(record.overtimeMinutes || 0) > 0 && (
                                   <span className="text-xs font-semibold text-violet-700">Tăng ca: {record.overtimeMinutes}p</span>
                                 )}
@@ -2114,6 +2662,249 @@ export default function AttendancePage() {
               </div>
             </div>
           )}
+
+          {approvalNotifications.length > 0 && (
+            <div className="space-y-2">
+              {approvalNotifications.map((notification) => (
+                <button
+                  key={notification._id}
+                  type="button"
+                  onClick={() => openApprovalNotification(notification)}
+                  className="flex w-full items-start gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-3 text-left text-emerald-800 shadow-sm transition hover:bg-emerald-100"
+                >
+                  <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-600 text-white"><Bell size={17} /></span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm font-bold">{notification.title}</span>
+                    <span className="mt-0.5 block text-xs text-emerald-700">{notification.body}</span>
+                    <span className="mt-1 block text-[11px] text-emerald-600">Bấm để xem chi tiết · {new Date(notification.createdAt).toLocaleString("vi-VN")}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+          {activeTab === "leave" && (
+            <div className="grid gap-5 lg:grid-cols-[minmax(320px,0.85fr)_minmax(0,1.15fr)] lg:items-start">
+              <form onSubmit={submitLeaveRequest} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+                <div className="mb-4 flex items-start gap-3">
+                  <span className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-violet-50 text-violet-600">
+                    <FileText size={22} />
+                  </span>
+                  <div>
+                    <h2 className="font-bold text-slate-900">Tạo đơn xin nghỉ phép</h2>
+                    <p className="text-xs text-slate-500">Có thể đăng ký trước cho ngày nghỉ trong tương lai.</p>
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <label className="block text-xs font-semibold text-slate-600">
+                    LOẠI NGHỈ
+                    <select
+                      value={leaveForm.leaveType}
+                      onChange={(event) => setLeaveForm((current) => {
+                        const leaveType = event.target.value;
+                        return {
+                          ...current,
+                          leaveType,
+                          endDate: leaveType === "emergency" ? current.startDate : current.endDate,
+                          session: leaveType === "annual" || leaveType === "emergency" ? "full_day" : current.session,
+                        };
+                      })}
+                      className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
+                    >
+                      <option value="regular">Nghỉ phép thường</option>
+                      <option value="emergency">Off đột xuất</option>
+                      <option value="annual">Phép năm</option>
+                    </select>
+                  </label>
+
+                  <div className={`grid gap-3 ${leaveForm.leaveType === "emergency" ? "grid-cols-1" : "grid-cols-2"}`}>
+                    <label className="block text-xs font-semibold text-slate-600">
+                      TỪ NGÀY
+                      <input type="date" required value={leaveForm.startDate} onChange={(event) => setLeaveForm((current) => ({ ...current, startDate: event.target.value, endDate: current.leaveType === "emergency" || current.endDate < event.target.value ? event.target.value : current.endDate }))} className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-violet-400" />
+                    </label>
+                    {leaveForm.leaveType !== "emergency" && (
+                      <label className="block text-xs font-semibold text-slate-600">
+                        ĐẾN NGÀY
+                        <input type="date" required min={leaveForm.startDate} value={leaveForm.endDate} onChange={(event) => setLeaveForm((current) => ({ ...current, endDate: event.target.value }))} className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-violet-400" />
+                      </label>
+                    )}
+                  </div>
+
+                  {leaveForm.leaveType === "emergency" ? (
+                    <div className="grid grid-cols-2 gap-3">
+                      <label className="block text-xs font-semibold text-slate-600">TỪ GIỜ<input type="time" min="07:30" max="17:00" required value={leaveForm.startTime} onChange={(event) => setLeaveForm((current) => ({ ...current, startTime: event.target.value }))} className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-violet-400" /></label>
+                      <label className="block text-xs font-semibold text-slate-600">ĐẾN GIỜ<input type="time" min="07:30" max="17:00" required value={leaveForm.endTime} onChange={(event) => setLeaveForm((current) => ({ ...current, endTime: event.target.value }))} className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-violet-400" /></label>
+                      <p className="col-span-2 text-xs text-slate-400">Chỉ tính thời gian trong giờ làm việc; tự động loại giờ nghỉ trưa 11:30–13:00.</p>
+                    </div>
+                  ) : leaveForm.leaveType === "annual" ? (
+                    <div className={`rounded-xl border p-3 text-xs ${TONE.emerald}`}>Phép năm tính theo ngày nguyên. Chủ nhật không tính; thứ Bảy và ngày lễ vẫn tính bình thường.</div>
+                  ) : (
+                    <label className="block text-xs font-semibold text-slate-600">
+                      THỜI GIAN
+                      <select value={leaveForm.session} onChange={(event) => setLeaveForm((current) => ({ ...current, session: event.target.value }))} className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-violet-400">
+                        <option value="full_day">Cả ngày</option>
+                        <option value="morning">Buổi sáng</option>
+                        <option value="afternoon">Buổi chiều</option>
+                      </select>
+                    </label>
+                  )}
+
+                  <label className="block text-xs font-semibold text-slate-600">
+                    LÝ DO
+                    <textarea required maxLength={1000} rows={4} value={leaveForm.reason} onChange={(event) => setLeaveForm((current) => ({ ...current, reason: event.target.value }))} placeholder="Nêu lý do và thông tin cần thiết..." className="mt-1.5 w-full resize-none rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100" />
+                  </label>
+
+                  <label className="block cursor-pointer rounded-xl border border-dashed border-slate-300 bg-slate-50 p-3 transition hover:border-violet-300 hover:bg-violet-50/40">
+                    <input type="file" accept="image/jpeg,image/png,image/webp,image/gif" className="hidden" onChange={(event) => setLeaveForm((current) => ({ ...current, evidence: event.target.files?.[0] || null }))} />
+                    <span className="flex items-center gap-2 text-sm font-semibold text-slate-600"><ImagePlus size={17} className="text-violet-500" /> {leaveForm.evidence ? leaveForm.evidence.name : "Chọn ảnh minh chứng"}</span>
+                    <span className="mt-1 block text-xs text-slate-400">Tối đa 8 MB. Bắt buộc với off đột xuất; có thể bổ sung sau khi gửi đơn.</span>
+                  </label>
+
+                  {leaveForm.leaveType === "emergency" && !leaveForm.evidence && (
+                    <div className={`flex gap-2 rounded-xl border p-3 text-xs ${TONE.amber}`}>
+                      <AlertCircle size={15} className="mt-0.5 shrink-0" />
+                      Bạn vẫn có thể gửi đơn trước, nhưng quản trị chỉ duyệt sau khi đã có ảnh minh chứng.
+                    </div>
+                  )}
+
+                  <button type="submit" disabled={leaveSaving} className="flex w-full items-center justify-center gap-2 rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-violet-700 disabled:opacity-60">
+                    {leaveSaving ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
+                    Gửi đơn chờ duyệt
+                  </button>
+                </div>
+              </form>
+
+              <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+                <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3.5 sm:px-5">
+                  <div>
+                    <h2 className="text-sm font-bold text-slate-800">Đơn đã gửi</h2>
+                    <p className="text-xs text-slate-400">Theo dõi kết quả và bổ sung minh chứng khi cần</p>
+                  </div>
+                  <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-500">{leaveRequests.length} đơn</span>
+                </div>
+
+                {leaveLoading ? (
+                  <div className="flex justify-center py-12"><Loader2 size={22} className="animate-spin text-slate-400" /></div>
+                ) : leaveRequests.length === 0 ? (
+                  <div className="px-5 py-12 text-center text-sm text-slate-400">Bạn chưa gửi đơn xin nghỉ phép nào.</div>
+                ) : (
+                  <div className="divide-y divide-slate-100">
+                    {leaveRequests.map((request) => {
+                      const status = leaveStatusMeta(request.status, request.needsEvidence);
+                      return (
+                        <div key={request._id} className="p-4 sm:px-5">
+                          <div className="flex flex-wrap items-start justify-between gap-2">
+                            <div>
+                              <p className="text-sm font-bold text-slate-800">{LEAVE_TYPE_LABELS[request.leaveType] || request.leaveType}</p>
+                              <p className="mt-0.5 text-xs text-slate-500">{fmtShortDate(request.startDate)}{request.endDate !== request.startDate ? ` – ${fmtShortDate(request.endDate)}` : ""} · {request.leaveType === "emergency" ? `${request.startTime || "-"}–${request.endTime || "-"}` : LEAVE_SESSION_LABELS[request.session]}</p>
+                            </div>
+                            <Badge tone={status.tone}>{status.text}</Badge>
+                          </div>
+                          <p className="mt-2 whitespace-pre-wrap text-sm text-slate-600">{request.reason}</p>
+                          {(request.status === "approved" || request.status === "cancel_pending") && <p className="mt-1 text-xs font-semibold text-emerald-700">Đã duyệt: {request.leaveType === "emergency" ? `${Number(request.approvedMinutes || 0)} phút nghỉ` : `${Number(request.approvedDays || 0)} ngày nghỉ`}</p>}
+                          {request.cancellationReason && <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700"><strong>Lý do yêu cầu hủy:</strong> {request.cancellationReason}</p>}
+                          {request.cancellationReviewNote && <p className="mt-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600"><strong>Phản hồi hủy đơn:</strong> {request.cancellationReviewNote}</p>}
+                          {request.reviewNote && <p className={`mt-2 rounded-lg border px-3 py-2 text-xs ${request.status === "rejected" ? TONE.rose : TONE.slate}`}><strong>Phản hồi quản trị:</strong> {request.reviewNote}</p>}
+                          <div className="mt-3 flex flex-wrap items-center gap-2">
+                            {request.evidence?.url ? (
+                              <button type="button" onClick={() => openLeaveEvidence(request)} className="inline-flex items-center gap-1.5 rounded-lg border border-sky-200 bg-sky-50 px-2.5 py-1.5 text-xs font-semibold text-sky-700 hover:bg-sky-100"><ImagePlus size={13} /> Xem minh chứng</button>
+                            ) : request.status === "pending" ? (
+                              <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs font-semibold text-amber-700 hover:bg-amber-100">
+                                <input type="file" accept="image/jpeg,image/png,image/webp,image/gif" className="hidden" disabled={uploadingLeaveId === request._id} onChange={(event) => { uploadLeaveEvidence(request._id, event.target.files?.[0]); event.target.value = ""; }} />
+                                {uploadingLeaveId === request._id ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />} Bổ sung ảnh
+                              </label>
+                            ) : null}
+                            {(request.status === "pending" || request.status === "rejected" || (request.status === "approved" && request.startDate > dateKey(new Date()))) && (
+                              <button
+                                type="button"
+                                disabled={deletingLeaveId === request._id}
+                                onClick={() => deleteLeaveRequest(request)}
+                                className="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                {deletingLeaveId === request._id ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
+                                {request.status === "approved" ? "Yêu cầu hủy" : "Xoá đơn"}
+                              </button>
+                            )}
+                            {request.status === "approved" && request.startDate <= dateKey(new Date()) && <span className="text-[11px] font-semibold text-amber-600">Liên hệ quản trị nếu ngày nghỉ đã bắt đầu hoặc đã qua</span>}
+                            <span className="text-[11px] text-slate-400">Gửi lúc {new Date(request.createdAt).toLocaleString("vi-VN")}</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+          {activeTab === "advance" && (
+            <div className="grid gap-5 lg:grid-cols-[minmax(320px,0.85fr)_minmax(0,1.15fr)] lg:items-start">
+              <form onSubmit={submitAdvanceRequest} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+                <div className="mb-4 flex items-start gap-3">
+                  <span className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600"><HandCoins size={22} /></span>
+                  <div>
+                    <h2 className="font-bold text-slate-900">Tạo phiếu ứng lương</h2>
+                    <p className="text-xs text-slate-500">Phiếu chỉ được khấu trừ vào lương sau khi quản trị xác nhận đã chi tiền.</p>
+                  </div>
+                </div>
+                <div className="space-y-3">
+                  <label className="block text-xs font-semibold text-slate-600">SỐ TIỀN MUỐN ỨNG
+                    <input type="number" required min="100000" max={advanceLimit.baseSalary || undefined} step="1000" value={advanceForm.requestedAmount} onChange={(event) => setAdvanceForm((current) => ({ ...current, requestedAmount: event.target.value }))} placeholder="Từ 100.000 đ" className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-emerald-400" />
+                  </label>
+                  {Number(advanceForm.requestedAmount) > 0 && <p className="-mt-1 text-sm font-bold text-emerald-700">{money(advanceForm.requestedAmount)}</p>}
+                  <div className={`rounded-xl border px-3 py-2 text-xs ${advanceLimit.baseSalary > 0 ? TONE.emerald : TONE.amber}`}>
+                    {advanceLimitLoading ? "Đang tải hạn mức ứng lương..." : advanceLimit.baseSalary > 0
+                      ? <>Được ứng từ <strong>{money(advanceLimit.minAmount || 100000)}</strong> đến tối đa <strong>{money(advanceLimit.baseSalary)}</strong> theo lương căn bản{advanceLimit.sourcePeriod ? ` kỳ ${advanceLimit.sourcePeriod}` : ""}.</>
+                      : "Chưa có dữ liệu lương căn bản. Vui lòng liên hệ quản trị."}
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <label className="block text-xs font-semibold text-slate-600">NGÀY MUỐN NHẬN
+                      <input type="date" required value={advanceForm.requestedPayDate} onChange={(event) => setAdvanceForm((current) => ({ ...current, requestedPayDate: event.target.value }))} className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-emerald-400" />
+                    </label>
+                    <label className="block text-xs font-semibold text-slate-600">KỲ KHẤU TRỪ
+                      <input type="month" required value={advanceForm.payrollPeriod} onChange={(event) => setAdvanceForm((current) => ({ ...current, payrollPeriod: event.target.value }))} className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-emerald-400" />
+                    </label>
+                  </div>
+                  <label className="block text-xs font-semibold text-slate-600">HÌNH THỨC NHẬN
+                    <select value={advanceForm.paymentMethod} onChange={(event) => setAdvanceForm((current) => ({ ...current, paymentMethod: event.target.value }))} className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-emerald-400">
+                      <option value="bank_transfer">Chuyển khoản</option><option value="cash">Tiền mặt</option>
+                    </select>
+                  </label>
+                  <label className="block text-xs font-semibold text-slate-600">LÝ DO
+                    <textarea required maxLength={1000} rows={4} value={advanceForm.reason} onChange={(event) => setAdvanceForm((current) => ({ ...current, reason: event.target.value }))} placeholder="Nêu lý do và thông tin cần thiết..." className="mt-1.5 w-full resize-none rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100" />
+                  </label>
+                  <button type="submit" disabled={advanceSaving || advanceLimitLoading || !(advanceLimit.baseSalary > 0)} className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-emerald-700 disabled:opacity-60">
+                    {advanceSaving ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />} Gửi phiếu chờ duyệt
+                  </button>
+                </div>
+              </form>
+              <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+                <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3.5 sm:px-5">
+                  <div><h2 className="text-sm font-bold text-slate-800">Phiếu đã gửi</h2><p className="text-xs text-slate-400">Theo dõi duyệt, chi tiền và khấu trừ</p></div>
+                  <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-500">{advanceRequests.length} phiếu</span>
+                </div>
+                {advanceLoading ? <div className="flex justify-center py-12"><Loader2 size={22} className="animate-spin text-slate-400" /></div> : advanceRequests.length === 0 ? (
+                  <div className="px-5 py-12 text-center text-sm text-slate-400">Bạn chưa gửi phiếu ứng lương nào.</div>
+                ) : <div className="divide-y divide-slate-100">{advanceRequests.map((request) => {
+                  const status = advanceStatusMeta(request.status);
+                  return <div key={request._id} className="p-4 sm:px-5">
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div><p className="text-lg font-black text-slate-800">{money(request.requestedAmount)}</p><p className="text-xs text-slate-500">Nhận ngày {fmtShortDate(request.requestedPayDate)} · Trừ kỳ {request.payrollPeriod}</p></div>
+                      <Badge tone={status.tone}>{status.text}</Badge>
+                    </div>
+                    {Number(request.approvedAmount) > 0 && <p className="mt-2 text-xs font-semibold text-emerald-700">Số tiền được duyệt: {money(request.approvedAmount)}</p>}
+                    <p className="mt-2 whitespace-pre-wrap text-sm text-slate-600">{request.reason}</p>
+                    {request.reviewNote && <p className="mt-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600"><strong>Phản hồi quản trị:</strong> {request.reviewNote}</p>}
+                    {request.paymentNote && <p className="mt-2 text-xs text-slate-500"><strong>Ghi chú chi:</strong> {request.paymentNote}</p>}
+                    {request.cancellationReason && <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700"><strong>Lý do hủy:</strong> {request.cancellationReason}</p>}
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      {["pending", "rejected", "approved"].includes(request.status) && <button type="button" disabled={deletingAdvanceId === request._id} onClick={() => deleteAdvanceRequest(request)} className="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-100 disabled:opacity-60">{deletingAdvanceId === request._id ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}{request.status === "approved" ? "Yêu cầu hủy" : "Xóa phiếu"}</button>}
+                      <span className="text-[11px] text-slate-400">Gửi lúc {new Date(request.createdAt).toLocaleString("vi-VN")}</span>
+                    </div>
+                  </div>;
+                })}</div>}
+              </div>
+            </div>
+          )}
           {activeTab === "payroll" && (
             <div className="space-y-4">
               <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -2123,7 +2914,7 @@ export default function AttendancePage() {
                   </span>
                   <div>
                     <h2 className="text-base font-bold text-slate-900">Phiếu lương cá nhân</h2>
-                    <p className="text-sm text-slate-500">Chỉ hiển thị bảng lương đã duyệt hoặc đã chi trả.</p>
+                    <p className="text-sm text-slate-500">Tháng đang chấm công hiển thị lương tạm tính; bảng đã duyệt hoặc đã chi trả là số chính thức.</p>
                   </div>
                 </div>
 
@@ -2146,7 +2937,12 @@ export default function AttendancePage() {
                     <input
                       type="month"
                       value={payrollPeriod}
-                      onChange={(e) => setPayrollPeriod(e.target.value)}
+                      onChange={(e) => {
+                        const nextPeriod = e.target.value;
+                        setPayrollPeriod(nextPeriod);
+                        payrollPeriodRef.current = nextPeriod;
+                        if (nextPeriod) loadPayroll();
+                      }}
                       className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
                     />
                   </label>
@@ -2161,8 +2957,8 @@ export default function AttendancePage() {
                     </button>
                     <button
                       onClick={() => payroll && printPayrolls([payroll])}
-                      disabled={!payroll}
-                      title="Xuất phiếu lương PDF"
+                      disabled={!payroll || payroll.isLiveEstimate}
+                      title={payroll?.isLiveEstimate ? "Chỉ xuất PDF khi bảng lương đã được duyệt" : "Xuất phiếu lương PDF"}
                       className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-600 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
                     >
                       <Download size={16} />
@@ -2175,6 +2971,16 @@ export default function AttendancePage() {
                   <div className="mt-4 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-700">
                     <AlertCircle size={16} className="mt-0.5 shrink-0" />
                     {payrollMessage}
+                  </div>
+                )}
+
+                {payroll?.isLiveEstimate && (
+                  <div className="mt-4 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-800">
+                    <p className="font-bold">Lương tạm tính đến {payroll.throughDate ? fmtShortDate(payroll.throughDate) : "đầu kỳ"}</p>
+                    <p className="mt-0.5 text-xs text-sky-700">
+                      Chỉ tính các ca đã chấm ra hoàn tất. Dữ liệu tự cập nhật khi chấm công thay đổi và làm mới mỗi 60 giây.
+                      {payroll.hasOpenShift ? " Ca đang làm chưa được cộng vào tổng giờ." : ""}
+                    </p>
                   </div>
                 )}
 
