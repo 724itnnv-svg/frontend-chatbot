@@ -13,6 +13,8 @@ const RETAILER_CONFIG = {
     BranchTakingAddressId: null,
     BranchTakingAddressStr:
       "Ấp Công Thiện Hùng, Xã Long Đức, Thành phố Trà Vinh, Trà Vinh - 0915283068",
+    Token_GHN: "b124eb06-2a43-11f1-b85d-fab563a1e61d",
+    ShopId_GHN: 6510616,
   },
   vietnhattv: {
     branchId: 1000016463,
@@ -20,6 +22,8 @@ const RETAILER_CONFIG = {
     BranchTakingAddressId: null,
     BranchTakingAddressStr:
       "Ấp Công Thiện Hùng, Xã Long Đức,  Thành phố Trà Vinh, Trà Vinh  - +84 915 283 053",
+    Token_GHN: "e7d0b63f-66e1-11f0-ba41-0aaf661d8b6b",
+    ShopId_GHN: 5854630,
   },
   abctv: {
     branchId: 1000016450,
@@ -27,6 +31,8 @@ const RETAILER_CONFIG = {
     BranchTakingAddressId: null,
     BranchTakingAddressStr:
       "Ấp Đa Cần, Phường Hòa Thuận, Tỉnh Vĩnh Long - +84 915 283 017",
+    Token_GHN: "b5beb0fd-2c1a-11f1-a3eb-52dcb54263af",
+    ShopId_GHN: 5788767,
   },
   nnvtv: {
     branchId: 1000016413,
@@ -34,6 +40,8 @@ const RETAILER_CONFIG = {
     BranchTakingAddressId: null,
     BranchTakingAddressStr:
       "Ấp Công Thiện Hùng, Xã Long Đức, Thành phố Trà Vinh, Trà Vinh - 0915283068",
+    Token_GHN: "77b2aa78-2a43-11f1-bf7c-9a8540816395",
+    ShopId_GHN: 5854657,
   },
 };
 
@@ -848,6 +856,39 @@ export async function createInvoicesDelivery(
       Accept: "application/json, text/plain, */*",
       Retailer: retailer,
       Authorization: `Bearer ${accessPrivateToken}`,
+    };
+
+    const response = await axios.post(url, payload, {
+      headers,
+    });
+
+    console.log("createInvoices response:", response.data);
+
+    return response.data;
+  } catch (error) {
+    const message =
+      error.response?.data?.error?.ResponseStatus?.Message ||
+      error.response?.data?.ResponseStatus?.Message ||
+      error.response?.data?.message ||
+      error.message;
+
+    throw new Error(`Failed to call administrative area API: ${message}`);
+  }
+}
+
+export async function getFullIdProvinceDistrictWard(
+  retailer = "kingfarm",
+  accessPrivateToken,
+  accessToken,
+  payload,
+) {
+  try {
+    const config = getRetailerConfig(retailer);
+    const url = `https://online-gateway.ghn.vn/shiip/public-api/master-data/`;
+
+    const headers = {
+      Accept: "application/json, text/plain, */*",
+      Token: `Bearer ${accessPrivateToken}`,
     };
 
     const response = await axios.post(url, payload, {
