@@ -26,6 +26,7 @@ import {
   MessageSquareText,
   HelpCircle,
   Search,
+  ShoppingCart,
   ShieldCheck,
   Settings2,
   TrendingUp,
@@ -41,6 +42,7 @@ import {
   PackageSearch,
   UserRound,
   FlaskConical,
+  Globe2,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { canAccessScreen, hasFullAccess } from "../utils/screenAccess";
@@ -67,6 +69,13 @@ const MENU_CONFIG = [
     icon: MessageCircle,
   },
   {
+    id: "webmessage",
+    accessId: "pagesmessage",
+    path: "/admin/web-messages",
+    label: "Tin nhắn Web",
+    icon: Globe2,
+  },
+  {
     id: "customer_care",
     path: "/admin/customer-care",
     label: "Chăm sóc khách hàng",
@@ -77,6 +86,13 @@ const MENU_CONFIG = [
     path: "/admin/orders",
     label: "Đơn hàng",
     icon: ClipboardList,
+  },
+  {
+    id: "weborder",
+    accessId: "donhang",
+    path: "/admin/web-orders",
+    label: "Đơn hàng Web",
+    icon: ShoppingCart,
   },
   {
     id: "tao_don_hang",
@@ -254,8 +270,9 @@ const MENU_GROUPS = [
       "business_stats",
       "pages",
       "pagesmessage",
-      "customer_care",
+      "webmessage",
       "donhang",
+      "weborder",
       "tao_don_hang",
       "so_quy",
       "dia_chi",
@@ -291,6 +308,7 @@ const MENU_GROUPS = [
     label: "Hệ thống & AI",
     icon: ShieldCheck,
     items: [
+      "customer_care",
       "admin_dashboard",
       "meta_pages",
       "admin_products_tool",

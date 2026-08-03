@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { EyeIcon, EyeCloseIcon } from "../../icons.jsx";
 import { useAuth } from "../../context/AuthContext";
+import { getDeviceInfo } from "../../utils/deviceIdentity";
 
 const REMEMBER_KEY = "rememberLogin";
 
@@ -22,26 +23,6 @@ function decodeData(str) {
   } catch {
     return null;
   }
-}
-
-function getDeviceInfo() {
-  let deviceId = localStorage.getItem("_did");
-  if (!deviceId) {
-    deviceId = crypto.randomUUID();
-    localStorage.setItem("_did", deviceId);
-  }
-  const ua = navigator.userAgent || "";
-  let platform = "web";
-  if (/android/i.test(ua)) platform = "android";
-  else if (/iphone|ipad|ipod/i.test(ua)) platform = "ios";
-  else if (/windows/i.test(ua)) platform = "windows";
-  else if (/macintosh|mac os/i.test(ua)) platform = "mac";
-  else if (/linux/i.test(ua)) platform = "linux";
-  return {
-    deviceId,
-    deviceName: ua.slice(0, 200),
-    platform,
-  };
 }
 
 function looksLikePhone(value) {
