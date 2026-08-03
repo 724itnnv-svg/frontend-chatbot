@@ -10,18 +10,30 @@ const RETAILER_CONFIG = {
   kingfarm: {
     branchId: 1000016475,
     retailerId: 500846218,
+    BranchTakingAddressId: null,
+    BranchTakingAddressStr:
+      "Ấp Công Thiện Hùng, Xã Long Đức, Thành phố Trà Vinh, Trà Vinh - 0915283068",
   },
   vietnhattv: {
     branchId: 1000016463,
     retailerId: 500846204,
+    BranchTakingAddressId: null,
+    BranchTakingAddressStr:
+      "Ấp Công Thiện Hùng, Xã Long Đức,  Thành phố Trà Vinh, Trà Vinh  - +84 915 283 053",
   },
   abctv: {
     branchId: 1000016450,
     retailerId: 500846190,
+    BranchTakingAddressId: null,
+    BranchTakingAddressStr:
+      "Ấp Đa Cần, Phường Hòa Thuận, Tỉnh Vĩnh Long - +84 915 283 017",
   },
   nnvtv: {
     branchId: 1000016413,
     retailerId: 500846150,
+    BranchTakingAddressId: null,
+    BranchTakingAddressStr:
+      "Ấp Công Thiện Hùng, Xã Long Đức, Thành phố Trà Vinh, Trà Vinh - 0915283068",
   },
 };
 
@@ -318,7 +330,9 @@ export async function updateCustomerAddress(
             TaxCode: responseGetCustomer.data.Data[0].TaxCode,
           }
         : {}),
-      NameEInvoice: responseGetCustomer.data.Data[0].NameEInvoice,
+      NameEInvoice:
+        responseGetCustomer.data.Data[0].NameEInvoice ||
+        responseGetCustomer.data.Data[0].Name,
     };
 
     const response = await axios.post(
@@ -623,6 +637,224 @@ export async function getProductByCode(
     });
 
     console.log("getProductByCode response:", response.data);
+
+    return response.data;
+  } catch (error) {
+    const message =
+      error.response?.data?.error?.ResponseStatus?.Message ||
+      error.response?.data?.ResponseStatus?.Message ||
+      error.response?.data?.message ||
+      error.message;
+
+    throw new Error(`Failed to call administrative area API: ${message}`);
+  }
+}
+
+export async function createInvoices(
+  retailer = "kingfarm",
+  accessPrivateToken,
+  accessToken,
+  payload,
+) {
+  try {
+    const url = `https://api-sale1.kiotviet.vn/api/invoices`;
+    const requestBody = payload?.Invoice ?? payload;
+
+    const headers = {
+      Accept: "application/json, text/plain, */*",
+      Retailer: retailer,
+      Authorization: `Bearer ${accessPrivateToken}`,
+    };
+
+    const response = await axios.post(
+      url,
+      { Invoice: requestBody },
+      {
+        headers,
+      },
+    );
+
+    console.log("createInvoices response:", response.data);
+
+    return response.data;
+  } catch (error) {
+    const message =
+      error.response?.data?.error?.ResponseStatus?.Message ||
+      error.response?.data?.ResponseStatus?.Message ||
+      error.response?.data?.message ||
+      error.message;
+
+    throw new Error(`Failed to call administrative area API: ${message}`);
+  }
+}
+
+export async function checkPriceVTP(
+  retailer = "kingfarm",
+  accessPrivateToken,
+  accessToken,
+  payload,
+) {
+  try {
+    const url = `https://shipping.kiotapi.com/api/v3/check-price/VTPFW`;
+    console.log("ádhadadad", payload);
+    const headers = {
+      Accept: "application/json, text/plain, */*",
+
+      Retailer: retailer,
+      Authorization: `Bearer ${accessPrivateToken}`,
+      Token: `${accessPrivateToken}`,
+    };
+
+    const response = await axios.post(url, payload, {
+      headers,
+    });
+
+    console.log("createInvoices response:", response.data);
+
+    return response.data;
+  } catch (error) {
+    const message =
+      error.response?.data?.error?.ResponseStatus?.Message ||
+      error.response?.data?.ResponseStatus?.Message ||
+      error.response?.data?.message ||
+      error.message;
+
+    throw new Error(`Failed to call administrative area API: ${message}`);
+  }
+}
+
+export async function getIdLocations(
+  retailer = "kingfarm",
+  accessPrivateToken,
+  data,
+  level,
+  provinceName = "",
+) {
+  try {
+    const tokenToUse = accessPrivateToken;
+
+    if (!tokenToUse) {
+      throw new Error("Thiếu access token");
+    }
+
+    if (!data) {
+      throw new Error("Thiếu dữ liệu tìm kiếm");
+    }
+
+    if (![1, 2].includes(Number(level))) {
+      throw new Error("Level chỉ nhận giá trị 1 hoặc 2");
+    }
+
+    if (Number(level) === 2 && !provinceName) {
+      throw new Error("Level 2 bắt buộc phải có provinceName");
+    }
+
+    const url = "https://api-man1.kiotviet.vn/api/locations/autocomplete";
+
+    const headers = {
+      Accept: "application/json, text/plain, */*",
+      Retailer: retailer,
+      Authorization: `Bearer ${tokenToUse}`,
+    };
+
+    const response = await axios.get(url, {
+      params: {
+        tearm: data,
+        lname: Number(level) === 2 ? provinceName : "",
+        level: Number(level),
+      },
+      headers,
+    });
+
+    return response.data;
+  } catch (error) {
+    const message =
+      error.response?.data?.error?.ResponseStatus?.Message ||
+      error.response?.data?.ResponseStatus?.Message ||
+      error.response?.data?.message ||
+      error.message;
+
+    throw new Error(`Failed to call administrative area API: ${message}`);
+  }
+}
+
+export async function getIdWards(
+  retailer = "kingfarm",
+  accessPrivateToken,
+  data,
+  level,
+  provinceName = "",
+  lid = null,
+) {
+  try {
+    const tokenToUse = accessPrivateToken;
+
+    if (!tokenToUse) {
+      throw new Error("Thiếu access token");
+    }
+
+    if (!data) {
+      throw new Error("Thiếu dữ liệu tìm kiếm");
+    }
+
+    if (![1, 2].includes(Number(level))) {
+      throw new Error("Level chỉ nhận giá trị 1 hoặc 2");
+    }
+
+    if (Number(level) === 2 && !provinceName) {
+      throw new Error("Level 2 bắt buộc phải có provinceName");
+    }
+
+    const url = "https://api-man1.kiotviet.vn/api/wards/autocomplete";
+
+    const headers = {
+      Accept: "application/json, text/plain, */*",
+      Retailer: retailer,
+      Authorization: `Bearer ${tokenToUse}`,
+    };
+
+    const response = await axios.get(url, {
+      params: {
+        tearm: data,
+        lid,
+        lname: Number(level) === 2 ? provinceName : "",
+        version_location: 0,
+      },
+      headers,
+    });
+
+    return response.data;
+  } catch (error) {
+    const message =
+      error.response?.data?.error?.ResponseStatus?.Message ||
+      error.response?.data?.ResponseStatus?.Message ||
+      error.response?.data?.message ||
+      error.message;
+
+    throw new Error(`Failed to call administrative area API: ${message}`);
+  }
+}
+
+export async function createInvoicesDelivery(
+  retailer = "kingfarm",
+  accessPrivateToken,
+  accessToken,
+  payload,
+) {
+  try {
+    const url = `https://api-sale1.kiotviet.vn/api/clientDelivery/createorder`;
+
+    const headers = {
+      Accept: "application/json, text/plain, */*",
+      Retailer: retailer,
+      Authorization: `Bearer ${accessPrivateToken}`,
+    };
+
+    const response = await axios.post(url, payload, {
+      headers,
+    });
+
+    console.log("createInvoices response:", response.data);
 
     return response.data;
   } catch (error) {
