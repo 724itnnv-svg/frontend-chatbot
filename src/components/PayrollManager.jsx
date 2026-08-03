@@ -634,6 +634,7 @@ function readCell(row, keys) {
 }
 
 function normalizePayrollRow(row = {}, fallbackPeriod = "", formulaSettings = DEFAULT_PAYROLL_FORMULA_SETTINGS) {
+  const payrollBankAccount = { ...(row.payrollBankAccount || {}) };
   const normalized = {
     ...row,
     period: row.period || fallbackPeriod || new Date().toISOString().slice(0, 7),
@@ -642,7 +643,10 @@ function normalizePayrollRow(row = {}, fallbackPeriod = "", formulaSettings = DE
     tenNhanVien: row.tenNhanVien || row.employeeName || "",
     khoiPhongBan: row.khoiPhongBan || row.department || "",
     chucVu: row.chucVu || row.position || "",
-    payrollBankAccount: { ...(row.payrollBankAccount || {}) },
+    payrollBankAccount,
+    __originalPayrollBankAccount: row.__originalPayrollBankAccount
+      ? { ...row.__originalPayrollBankAccount }
+      : { ...payrollBankAccount },
     congTyDongBHXH: row.congTyDongBHXH || row.dataTinhLuong?.congTyDongBHXH || "",
     dataTinhLuong: { ...(row.dataTinhLuong || {}) },
     thuNhapTheoNgayCong: { ...(row.thuNhapTheoNgayCong || {}) },
@@ -672,7 +676,12 @@ function normalizePayrollRow(row = {}, fallbackPeriod = "", formulaSettings = DE
 function buildPayload(row, formulaSettings = DEFAULT_PAYROLL_FORMULA_SETTINGS) {
   const payload = {};
   const source = applyPayrollFormulas(syncLuongDangApDung(structuredClone(row)), formulaSettings);
+  const bankAccountChanged = ["bankName", "accountHolder", "accountNumber"].some(
+    (field) => String(source.payrollBankAccount?.[field] || "").trim()
+      !== String(source.__originalPayrollBankAccount?.[field] || "").trim()
+  );
   PAYROLL_COLUMNS.forEach((column) => {
+    if (column.profileField && !bankAccountChanged) return;
     const rawValue = getDeep(source, column.key);
     const value = column.type === "number"
       ? roundPayrollNumber(rawValue)
@@ -2023,10 +2032,15 @@ export default function PayrollManager() {
     const body = { action };
     if (action === "approve") {
       const amount = window.prompt("Số tiền duyệt:", String(request.requestedAmount || ""));
-      if (amount == null || !(toNumber(amount) > 0)) return;
+      if (amount == null) return;
+      const approvedAmount = toNumber(amount);
+      if (approvedAmount < 100000 || approvedAmount > 3000000) {
+        window.alert("Số tiền duyệt phải từ 100.000 đ đến 3.000.000 đ.");
+        return;
+      }
       const nextPeriod = window.prompt("Kỳ lương khấu trừ (YYYY-MM):", request.payrollPeriod || period);
       if (!nextPeriod) return;
-      body.approvedAmount = toNumber(amount);
+      body.approvedAmount = approvedAmount;
       body.payrollPeriod = nextPeriod.trim();
       body.reviewNote = window.prompt("Ghi chú duyệt (không bắt buộc):", "") || "";
     } else if (action === "reject" || action === "cancel") {
