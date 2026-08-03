@@ -10,10 +10,10 @@ function config(extra = {}) {
   };
 }
 
-export async function convertAddress(address, direction) {
+export async function convertAddress(address) {
   const response = await axiosClient.post(
     "/address-convert/convert",
-    { address, direction, useOpenAI: true },
+    { address, direction: "old-new", useOpenAI: true },
     config(),
   );
   return response.data?.data;
