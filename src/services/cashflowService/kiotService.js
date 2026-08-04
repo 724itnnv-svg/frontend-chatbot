@@ -893,8 +893,10 @@ export async function getFullIdProvinceDistrictWard(
   accessToken,
   payload,
 ) {
+  void retailer;
+  void accessToken;
+
   try {
-    const config = getRetailerConfig(retailer);
     const url = `https://online-gateway.ghn.vn/shiip/public-api/master-data/`;
 
     const headers = {
@@ -921,17 +923,13 @@ export async function getFullIdProvinceDistrictWard(
 }
 
 //lấy khuyến mãi
-export async function getCampaign(
-  retailer = "kingfarm",
-  accessPrivateToken,
-  accessToken,
-) {
+export async function getCampaign(retailer = "kingfarm", accessPrivateToken) {
   try {
-    const config = getRetailerConfig(retailer);
     const url = `https://api-promotion1.kiotviet.vn/api/campaigns?Includes=SalePromotions&%24inlinecount=allpages&Effect=1&%24top=150&%24filter=IsActive+eq+1`;
 
     const headers = {
       Accept: "application/json, text/plain, */*",
+      Retailer: retailer,
       Authorization: `Bearer ${accessPrivateToken}`,
     };
 
@@ -942,6 +940,44 @@ export async function getCampaign(
     console.log("createInvoices response:", response.data);
 
     return response.data.Data;
+  } catch (error) {
+    const message =
+      error.response?.data?.error?.ResponseStatus?.Message ||
+      error.response?.data?.ResponseStatus?.Message ||
+      error.response?.data?.message ||
+      error.message;
+
+    throw new Error(`Failed to call administrative area API: ${message}`);
+  }
+}
+
+export async function getProductById(
+  retailer = "kingfarm",
+  accessPrivateToken,
+  accessToken,
+  id,
+) {
+  try {
+    const url = `${tokenURL}/getProductById`;
+
+    const headers = {
+      Accept: "application/json, text/plain, */*",
+      Authorization: `Bearer ${Localtoken}`,
+    };
+
+    const response = await axios.get(url, {
+      params: {
+        retailer,
+        accessPrivateToken,
+        accessToken,
+        id,
+      },
+      headers,
+    });
+
+    console.log("getProductById response:", response.data);
+
+    return response.data;
   } catch (error) {
     const message =
       error.response?.data?.error?.ResponseStatus?.Message ||
