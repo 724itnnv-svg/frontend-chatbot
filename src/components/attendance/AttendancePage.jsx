@@ -1064,7 +1064,7 @@ export default function AttendancePage() {
   const [advanceLoading, setAdvanceLoading] = useState(false);
   const [advanceSaving, setAdvanceSaving] = useState(false);
   const [deletingAdvanceId, setDeletingAdvanceId] = useState("");
-  const [advanceLimit, setAdvanceLimit] = useState({ minAmount: 100000, maxAmount: 3000000 });
+  const [advanceLimit, setAdvanceLimit] = useState({ minAmount: 100000, maxAmount: 2500000 });
   const [advanceLimitLoading, setAdvanceLimitLoading] = useState(false);
   const [approvalNotifications, setApprovalNotifications] = useState([]);
   const [notificationHistory, setNotificationHistory] = useState([]);
@@ -1406,9 +1406,9 @@ export default function AttendancePage() {
     setAdvanceLimitLoading(true);
     try {
       const res = await api.get(`/salary-advance-requests/my-limit?period=${encodeURIComponent(period)}`);
-      setAdvanceLimit(res.data?.data || { minAmount: 100000, maxAmount: 3000000 });
+      setAdvanceLimit(res.data?.data || { minAmount: 100000, maxAmount: 2500000 });
     } catch {
-      setAdvanceLimit({ minAmount: 100000, maxAmount: 3000000 });
+      setAdvanceLimit({ minAmount: 100000, maxAmount: 2500000 });
     } finally {
       setAdvanceLimitLoading(false);
     }
@@ -1797,7 +1797,7 @@ export default function AttendancePage() {
     event.preventDefault();
     const requestedAmount = Number(advanceForm.requestedAmount);
     if (!Number.isFinite(requestedAmount) || requestedAmount < 100000) return showMsg(false, "Số tiền muốn ứng tối thiểu là 100.000 đ.");
-    if (requestedAmount > Number(advanceLimit.maxAmount || 3000000)) return showMsg(false, "Số tiền muốn ứng tối đa là 3.000.000 đ.");
+    if (requestedAmount > Number(advanceLimit.maxAmount || 2500000)) return showMsg(false, "Số tiền muốn ứng tối đa là 2.500.000 đ.");
     if (!advanceForm.requestedPayDate || !advanceForm.payrollPeriod) return showMsg(false, "Vui lòng chọn ngày nhận và kỳ khấu trừ.");
     if (!advanceForm.reason.trim()) return showMsg(false, "Vui lòng nhập lý do ứng lương.");
     setAdvanceSaving(true);
@@ -2847,11 +2847,11 @@ export default function AttendancePage() {
                 </div>
                 <div className="space-y-3">
                   <label className="block text-xs font-semibold text-slate-600">SỐ TIỀN MUỐN ỨNG
-                    <input type="number" required min="100000" max="3000000" step="1000" value={advanceForm.requestedAmount} onChange={(event) => setAdvanceForm((current) => ({ ...current, requestedAmount: event.target.value }))} placeholder="Từ 100.000 đ đến 3.000.000 đ" className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-emerald-400" />
+                    <input type="number" required min="100000" max="2500000" step="1000" value={advanceForm.requestedAmount} onChange={(event) => setAdvanceForm((current) => ({ ...current, requestedAmount: event.target.value }))} placeholder="Từ 100.000 đ đến 2.500.000 đ" className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-emerald-400" />
                   </label>
                   {Number(advanceForm.requestedAmount) > 0 && <p className="-mt-1 text-sm font-bold text-emerald-700">{money(advanceForm.requestedAmount)}</p>}
                   <div className={`rounded-xl border px-3 py-2 text-xs ${TONE.emerald}`}>
-                    {advanceLimitLoading ? "Đang tải hạn mức ứng lương..." : <>Được ứng từ <strong>{money(advanceLimit.minAmount || 100000)}</strong> đến tối đa <strong>{money(advanceLimit.maxAmount || 3000000)}</strong>.</>}
+                    {advanceLimitLoading ? "Đang tải hạn mức ứng lương..." : <>Được ứng từ <strong>{money(advanceLimit.minAmount || 100000)}</strong> đến tối đa <strong>{money(advanceLimit.maxAmount || 2500000)}</strong>.</>}
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <label className="block text-xs font-semibold text-slate-600">NGÀY MUỐN NHẬN
