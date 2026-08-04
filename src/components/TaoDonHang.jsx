@@ -1903,6 +1903,7 @@ async function buildInvoicePayload({
   accessToken,
   customerType,
   accessPrivateToken,
+  description = "",
   productMap = null,
   productCampaignMap = null,
   promotionProductMap = null,
@@ -2028,6 +2029,9 @@ async function buildInvoicePayload({
           : (retailerConfig?.priceBookId ?? 0),
       OrderCode: "",
       Code: `Hóa đơn ${customerName || customerCode || customerId || "1"}`,
+      ...(String(customerType).toLowerCase() === "dai_ly"
+        ? { Description: String(description || "").trim() }
+        : {}),
       DiscountAfterTax: 0,
       DiscountRatioAfterTax: 0,
       DiscountByPromotion: 0,
@@ -2170,6 +2174,7 @@ function FieldCard({ label, value, placeholder = "Chưa có dữ liệu" }) {
 export default function TaoDonHang() {
   const [selectedShippingPartner, setSelectedShippingPartner] = useState("GHN");
   const [customerType, setCustomerType] = useState("khach_le");
+  const [agencyDescription, setAgencyDescription] = useState("");
   const [rawText, setRawText] = useState(SAMPLE_TEXT);
   const [copied, setCopied] = useState(false);
   const [accessToken, setAccessToken] = useState("");
@@ -2641,46 +2646,24 @@ export default function TaoDonHang() {
 
     setPromotionSelections((current) => {
       const next = { ...current };
-      const nextCampaignSelections = { ...(current[productCode] || {}) };
-
-      if (!checked) {
-        delete nextCampaignSelections[campaignId];
-      } else {
-        if (details.promotionType === 8) {
-          Object.entries(nextCampaignSelections).forEach(
-            ([selectedCampaignId]) => {
-              const selectedCampaign = campaigns.find(
-                (candidate) =>
-                  String(candidate?.Id) === String(selectedCampaignId),
-              );
-              const selectedPromotion = getCampaignPromotionForProduct(
-                selectedCampaign,
-                product,
-              );
-              if (
-                Number(
-                  selectedPromotion?.PromotionType ??
-                    selectedCampaign?.PromotionType ??
-                    0,
-                ) === 8
-              ) {
-                delete nextCampaignSelections[selectedCampaignId];
-              }
-            },
-          );
-        }
-
-        nextCampaignSelections[campaignId] = {
-          campaignId,
-          giftQuantities,
+      if (checked) {
+        next[productCode] = {
+          [campaignId]: {
+            campaignId,
+            giftQuantities,
+          },
         };
-      }
-
-      if (Object.keys(nextCampaignSelections).length > 0) {
-        next[productCode] = nextCampaignSelections;
       } else {
         delete next[productCode];
       }
+      return next;
+    });
+  };
+
+  const handlePromotionClear = (productCode) => {
+    setPromotionSelections((current) => {
+      const next = { ...current };
+      delete next[productCode];
       return next;
     });
   };
@@ -2710,6 +2693,7 @@ export default function TaoDonHang() {
   const handleReset = () => {
     setSelectedShippingPartner("GHN");
     setCustomerType("dai_ly");
+    setAgencyDescription("");
     setRawText(SAMPLE_TEXT);
     setCopied(false);
     setPromotionSelections({});
@@ -2828,6 +2812,7 @@ export default function TaoDonHang() {
         accessToken,
         customerType,
         accessPrivateToken,
+        description: agencyDescription,
         productMap: orderPreparation.productMap,
         productCampaignMap: orderPreparation.productCampaignMap,
         promotionProductMap: orderPreparation.promotionProductMap,
@@ -2840,12 +2825,12 @@ export default function TaoDonHang() {
       setPreparedInvoicePayload(invoicePayload);
       console.log("preparedInvoicePayload", invoicePayload);
 
-      const createInvoiceResponse = await createInvoices(
-        selectedRetailerId,
-        accessPrivateToken,
-        accessToken,
-        invoicePayload,
-      );
+      // const createInvoiceResponse = await createInvoices(
+      //   selectedRetailerId,
+      //   accessPrivateToken,
+      //   accessToken,
+      //   invoicePayload,
+      // );
       console.log("createInvoices response", createInvoiceResponse);
 
       if (isViettelPostShippingPartner(selectedShippingPartner)) {
@@ -2994,6 +2979,23 @@ export default function TaoDonHang() {
                   </select>
                 </label>
               </div>
+
+              {String(customerType).toLowerCase() === "dai_ly" ? (
+                <label className="block space-y-2">
+                  <span className="text-xs font-semibold text-slate-600">
+                    Ghi chú đại lý
+                  </span>
+                  <textarea
+                    value={agencyDescription}
+                    onChange={(event) =>
+                      setAgencyDescription(event.target.value)
+                    }
+                    rows={3}
+                    className="w-full resize-y rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
+                    placeholder="Nhập ghi chú cho hóa đơn đại lý..."
+                  />
+                </label>
+              ) : null}
 
               <textarea
                 value={rawText}
@@ -3204,9 +3206,24 @@ export default function TaoDonHang() {
                             productCampaigns.length > 0 ? (
                               <div className="mt-3 space-y-2 rounded-xl border border-emerald-200 bg-emerald-50/80 px-3 py-2.5">
                                 <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-emerald-700">
-                                  Có {productCampaigns.length} chương trình
-                                  khuyến mãi
+                                  Chọn 1 trong {productCampaigns.length} chương
+                                  trình khuyến mãi
                                 </div>
+                                <label className="flex cursor-pointer items-center gap-2.5 rounded-xl border border-emerald-100 bg-white px-3 py-2 text-sm font-medium text-slate-600">
+                                  <input
+                                    type="radio"
+                                    name={`promotion-${productCode}-${index}`}
+                                    checked={
+                                      Object.keys(campaignSelections).length ===
+                                      0
+                                    }
+                                    onChange={() =>
+                                      handlePromotionClear(productCode)
+                                    }
+                                    className="h-4 w-4 accent-emerald-600"
+                                  />
+                                  Không áp dụng khuyến mãi
+                                </label>
                                 {productCampaigns.map((campaign) => {
                                   const campaignId = String(campaign.Id);
                                   const selection =
@@ -3234,7 +3251,8 @@ export default function TaoDonHang() {
                                     >
                                       <label className="flex cursor-pointer items-start gap-2.5">
                                         <input
-                                          type="checkbox"
+                                          type="radio"
+                                          name={`promotion-${productCode}-${index}`}
                                           checked={isSelected}
                                           disabled={
                                             details.applicationCount < 1
@@ -3346,9 +3364,8 @@ export default function TaoDonHang() {
                                       ) : isSelected &&
                                         details.promotionType === 8 ? (
                                         <div className="mt-3 rounded-xl border border-emerald-100 bg-white px-3 py-2 text-xs font-medium text-emerald-800">
-                                          Giá khuyến mãi sẽ được áp cùng các
-                                          chương trình quà đã chọn. Mỗi sản phẩm
-                                          chỉ dùng một chương trình giá.
+                                          Giá khuyến mãi sẽ được áp vào dòng sản
+                                          phẩm khi tạo đơn.
                                         </div>
                                       ) : isSelected ? (
                                         <div className="mt-3 text-xs text-amber-700">

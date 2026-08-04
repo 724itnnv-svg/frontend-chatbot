@@ -885,8 +885,9 @@ export async function createInvoicesDelivery(
     throw new Error(`Failed to call administrative area API: ${message}`);
   }
 }
+import axios from "axios";
 
-// lấy full thông tin của tỉnh, huyện, xã bên GHN
+// Lấy full thông tin tỉnh -> huyện -> xã bên GHN
 export async function getFullIdProvinceDistrictWard(
   retailer = "kingfarm",
   accessPrivateToken,
@@ -895,22 +896,141 @@ export async function getFullIdProvinceDistrictWard(
 ) {
   void retailer;
   void accessToken;
-
+  const config = getRetailerConfig(retailer);
   try {
-    const url = `https://online-gateway.ghn.vn/shiip/public-api/master-data/`;
+    const urlProvince =
+      "https://online-gateway.ghn.vn/shiip/public-api/master-data/province";
+
+    const urlDistrict =
+      "https://online-gateway.ghn.vn/shiip/public-api/master-data/district";
+
+    const urlWard =
+      "https://online-gateway.ghn.vn/shiip/public-api/master-data/ward";
 
     const headers = {
       Accept: "application/json, text/plain, */*",
-      Token: `Bearer ${accessPrivateToken}`,
+      "Content-Type": "application/json",
+      Token: config,
     };
 
-    const response = await axios.post(url, payload, {
-      headers,
-    });
+    // ==========================================
+    // Dữ liệu đầu vào
+    // ==========================================
+    const provinceName = payload?.province?.trim();
+    const districtName = payload?.district?.trim();
+    const wardName = payload?.ward?.trim();
 
-    console.log("createInvoices response:", response.data);
+    if (!provinceName || !districtName || !wardName) {
+      throw new Error("Payload phải có đầy đủ province, district và ward");
+    }
 
-    return response.data;
+    // ==========================================
+    // 1. Lấy danh sách TỈNH
+    // ==========================================
+    const provinceResponse = await axios.post(urlProvince, {}, { headers });
+
+    const provinces = provinceResponse.data?.data || [];
+
+    // Map tỉnh theo tên
+    const province = provinces.find(
+      (item) =>
+        item.ProvinceName?.trim().toLowerCase() === provinceName.toLowerCase(),
+    );
+
+    if (!province) {
+      throw new Error(`Không tìm thấy tỉnh "${provinceName}" trên GHN`);
+    }
+
+    const provinceId = province.ProvinceID;
+
+    // ==========================================
+    // 2. Lấy danh sách HUYỆN
+    //    truyền province_id
+    // ==========================================
+    const districtResponse = await axios.post(
+      urlDistrict,
+      {
+        province_id: provinceId,
+      },
+      { headers },
+    );
+
+    const districts = districtResponse.data?.data || [];
+
+    const district = districts.find(
+      (item) =>
+        item.DistrictName?.trim().toLowerCase() === districtName.toLowerCase(),
+    );
+
+    if (!district) {
+      throw new Error(
+        `Không tìm thấy huyện "${districtName}" thuộc tỉnh "${provinceName}" trên GHN`,
+      );
+    }
+
+    const districtId = district.DistrictID;
+
+    // ==========================================
+    // 3. Lấy danh sách XÃ
+    //    truyền district_id
+    // ==========================================
+    const wardResponse = await axios.post(
+      urlWard,
+      {
+        district_id: districtId,
+      },
+      { headers },
+    );
+
+    const wards = wardResponse.data?.data || [];
+
+    const ward = wards.find(
+      (item) => item.WardName?.trim().toLowerCase() === wardName.toLowerCase(),
+    );
+
+    if (!ward) {
+      throw new Error(
+        `Không tìm thấy xã/phường "${wardName}" thuộc huyện "${districtName}" trên GHN`,
+      );
+    }
+
+    const wardCode = ward.WardCode;
+
+    // ==========================================
+    // 4. Return kết quả
+    // ==========================================
+    return {
+      input: {
+        province: provinceName,
+        district: districtName,
+        ward: wardName,
+      },
+
+      province: {
+        id: provinceId,
+        name: province.ProvinceName,
+        data: province,
+      },
+
+      district: {
+        id: districtId,
+        name: district.DistrictName,
+        data: district,
+      },
+
+      ward: {
+        code: wardCode,
+        name: ward.WardName,
+        data: ward,
+      },
+
+      // Nếu cần dùng list đầy đủ thì có luôn
+      lists: {
+        provinces,
+        districts,
+        wards,
+      },
+    };
   } catch (error) {
     const message =
       error.response?.data?.error?.ResponseStatus?.Message ||
@@ -918,7 +1038,7 @@ export async function getFullIdProvinceDistrictWard(
       error.response?.data?.message ||
       error.message;
 
-    throw new Error(`Failed to call administrative area API: ${message}`);
+    throw new Error(`Failed to call GHN administrative area API: ${message}`);
   }
 }
 
