@@ -649,22 +649,28 @@ async function buildNewCustomerPayloadV2({
 }
 
 function extractCustomerRecord(response, fallback = null) {
-  const candidate =
-    response?.Data?.[0] ||
-    response?.data?.Data?.[0] ||
-    response?.data?.data?.[0] ||
-    response?.Customer ||
-    response?.customer ||
-    response?.Data ||
-    response?.data?.Data ||
-    response?.data?.customer ||
-    response;
+  const candidates = [
+    response?.Data?.[0],
+    response?.data?.Data?.[0],
+    response?.data?.data?.[0],
+    response?.Customer,
+    response?.customer,
+    response?.data?.Customer,
+    response?.data?.customer,
+    Array.isArray(response?.Data) ? null : response?.Data,
+    Array.isArray(response?.data?.Data) ? null : response?.data?.Data,
+    response?.data,
+    response,
+  ];
+  const candidate = candidates.find(
+    (item) =>
+      item &&
+      typeof item === "object" &&
+      !Array.isArray(item) &&
+      (item?.Id != null || item?.id != null || item?.CustomerId != null),
+  );
 
-  if (candidate && Object.keys(candidate || {}).length > 0) {
-    return candidate;
-  }
-
-  return fallback;
+  return candidate || fallback;
 }
 
 const roundMoney = (value) => Math.round(Number(value || 0) * 100) / 100;
@@ -2781,7 +2787,21 @@ export default function TaoDonHang() {
         );
 
         console.log("addNewCustomer response:", createResponse);
-        customerRecord = extractCustomerRecord(createResponse, null);
+        const createdCustomer = extractCustomerRecord(createResponse, null);
+        try {
+          const createdCustomerResponse = await getCustomerByPhoneNumber(
+            selectedRetailerId,
+            accessPrivateToken,
+            phoneNumber,
+          );
+          customerRecord = extractCustomerRecord(
+            createdCustomerResponse,
+            createdCustomer,
+          );
+        } catch (error) {
+          console.error("reload created customer error:", error);
+          customerRecord = createdCustomer;
+        }
         if (customerRecord) {
           setOrderPreparation((current) =>
             current.key === orderPreparationKey
