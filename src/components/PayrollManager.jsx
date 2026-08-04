@@ -7,6 +7,7 @@ import {
   ArrowUp,
   ArrowUpDown,
   BadgeCheck,
+  CalendarDays,
   Calculator,
   Columns3,
   Copy,
@@ -14,12 +15,14 @@ import {
   Eye,
   EyeOff,
   FileSpreadsheet,
+  HandCoins,
   ListChecks,
   Loader2,
   Plus,
   RefreshCw,
   Save,
   Search,
+  ShieldAlert,
   Settings2,
   Trash2,
   UploadCloud,
@@ -27,6 +30,7 @@ import {
   X,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
+import { getDefaultPayrollViewPeriod } from "../utils/payrollPeriod";
 
 const STORAGE_HIDDEN_COLUMNS = "payroll_hidden_columns_v1";
 const STORAGE_COLUMN_ORDER = "payroll_column_order_v1";
@@ -42,6 +46,7 @@ const ATTENDANCE_SYNC_COLUMNS = [
   { key: "tangCaChuNhat", label: "Tăng ca Chủ nhật" },
   { key: "tangCaLeTet", label: "Tăng ca lễ/tết" },
   { key: "comTangCa", label: "Cơm tăng ca" },
+  { key: "phepNam", label: "Phép năm" },
 ];
 const COMPUTED_PAYROLL_KEYS = new Set([
   "dataTinhLuong.mucDongBHXH",
@@ -61,6 +66,7 @@ const COMPUTED_PAYROLL_KEYS = new Set([
   "thuNhapTheoNgayCong.tongThuNhap",
   "khauTru.bhxh",
   "khauTru.congDoan",
+  "khauTru.tamUng",
   "khauTru.tongKhauTru",
   "tinhThueTNCN.tongThuNhapChiuThue",
   "tinhThueTNCN.thuNhapTinhThue",
@@ -69,7 +75,7 @@ const COMPUTED_PAYROLL_KEYS = new Set([
 ]);
 
 const PAYROLL_COLUMNS = [
-  { key: "period", label: "Kỳ lương", width: 120, type: "month", required: true, frozen: true },
+  { key: "period", label: "Kỳ lương", width: 120, type: "month", required: true, frozen: true, readOnly: true },
   { key: "status", label: "Trạng thái", width: 130, type: "status" },
   { key: "maNhanVien", label: "Mã NV", width: 120, required: true, frozen: true },
   { key: "tenNhanVien", label: "Tên nhân viên", width: 190, required: true, frozen: true },
@@ -118,7 +124,9 @@ const PAYROLL_COLUMNS = [
   { key: "khauTru.congDoan", label: "Công đoàn", width: 130, type: "number" },
   { key: "khauTru.giamLuong", label: "Giam lương", width: 140, type: "number" },
   { key: "khauTru.giamLuongKhongTru", label: "Giam lương (chưa trừ)", width: 180, type: "number" },
-  { key: "khauTru.tamUng", label: "Tạm ứng", width: 130, type: "number" },
+  { key: "khauTru.tamUngTuPhieu", label: "Ứng từ phiếu", width: 145, type: "number", readOnly: true },
+  { key: "khauTru.tamUngDieuChinh", label: "Ứng điều chỉnh", width: 150, type: "number" },
+  { key: "khauTru.tamUng", label: "Tổng tạm ứng", width: 140, type: "number", readOnly: true },
   { key: "khauTru.phiDienThoai", label: "Phí điện thoại", width: 150, type: "number" },
   { key: "khauTru.truKhac", label: "Trừ khác", width: 130, type: "number" },
   { key: "khauTru.tongKhauTru", label: "Tổng khấu trừ", width: 160, type: "number" },
@@ -455,6 +463,11 @@ function syncLuongDangApDung(row) {
   return row;
 }
 
+function syncSalaryAdvanceTotal(row) {
+  setDeep(row, "khauTru.tamUng", toNumber(getDeep(row, "khauTru.tamUngTuPhieu")) + toNumber(getDeep(row, "khauTru.tamUngDieuChinh")));
+  return row;
+}
+
 function calculatePersonalIncomeTax(taxableIncome) {
   const amount = toNumber(taxableIncome);
   if (amount <= 0) return 0;
@@ -592,13 +605,12 @@ function getPayrollLookupUrl(row) {
 }
 
 function getDefaultPayrollPeriod() {
-  try {
-    const saved = localStorage.getItem(STORAGE_PAYROLL_PERIOD);
-    if (/^\d{4}-\d{2}$/.test(saved || "")) return saved;
-  } catch {
-    // Ignore storage errors and fall back to the current month.
-  }
-  return new Date().toISOString().slice(0, 7);
+  return getDefaultPayrollViewPeriod();
+}
+
+function formatPayrollPeriod(period) {
+  const match = String(period || "").match(/^(\d{4})-(\d{2})$/);
+  return match ? `tháng ${match[2]}/${match[1]}` : period || "chưa chọn";
 }
 
 function comparePayrollValues(left, right, column) {
@@ -622,6 +634,7 @@ function readCell(row, keys) {
 }
 
 function normalizePayrollRow(row = {}, fallbackPeriod = "", formulaSettings = DEFAULT_PAYROLL_FORMULA_SETTINGS) {
+  const payrollBankAccount = { ...(row.payrollBankAccount || {}) };
   const normalized = {
     ...row,
     period: row.period || fallbackPeriod || new Date().toISOString().slice(0, 7),
@@ -630,7 +643,10 @@ function normalizePayrollRow(row = {}, fallbackPeriod = "", formulaSettings = DE
     tenNhanVien: row.tenNhanVien || row.employeeName || "",
     khoiPhongBan: row.khoiPhongBan || row.department || "",
     chucVu: row.chucVu || row.position || "",
-    payrollBankAccount: { ...(row.payrollBankAccount || {}) },
+    payrollBankAccount,
+    __originalPayrollBankAccount: row.__originalPayrollBankAccount
+      ? { ...row.__originalPayrollBankAccount }
+      : { ...payrollBankAccount },
     congTyDongBHXH: row.congTyDongBHXH || row.dataTinhLuong?.congTyDongBHXH || "",
     dataTinhLuong: { ...(row.dataTinhLuong || {}) },
     thuNhapTheoNgayCong: { ...(row.thuNhapTheoNgayCong || {}) },
@@ -649,7 +665,9 @@ function normalizePayrollRow(row = {}, fallbackPeriod = "", formulaSettings = DE
   normalized.thuNhapTheoNgayCong.tangCaThuong ??= row.overtimeHours ?? 0;
   normalized.thuNhapTheoNgayCong.thuongKPI ??= row.bonus ?? 0;
   normalized.khauTru.giamLuong ??= row.deductions ?? 0;
-  normalized.khauTru.tamUng ??= row.advance ?? 0;
+  normalized.khauTru.tamUngTuPhieu ??= 0;
+  normalized.khauTru.tamUngDieuChinh ??= Math.max(0, toNumber(normalized.khauTru.tamUng ?? row.advance ?? 0) - toNumber(normalized.khauTru.tamUngTuPhieu));
+  normalized.khauTru.tamUng = toNumber(normalized.khauTru.tamUngTuPhieu) + toNumber(normalized.khauTru.tamUngDieuChinh);
   normalized.khauTru.apDungBHXH = normalized.khauTru.apDungBHXH !== false;
   normalized.khauTru.apDungCongDoan = normalized.khauTru.apDungCongDoan !== false;
   return applyPayrollFormulas(syncLuongDangApDung(normalized), formulaSettings);
@@ -658,7 +676,12 @@ function normalizePayrollRow(row = {}, fallbackPeriod = "", formulaSettings = DE
 function buildPayload(row, formulaSettings = DEFAULT_PAYROLL_FORMULA_SETTINGS) {
   const payload = {};
   const source = applyPayrollFormulas(syncLuongDangApDung(structuredClone(row)), formulaSettings);
+  const bankAccountChanged = ["bankName", "accountHolder", "accountNumber"].some(
+    (field) => String(source.payrollBankAccount?.[field] || "").trim()
+      !== String(source.__originalPayrollBankAccount?.[field] || "").trim()
+  );
   PAYROLL_COLUMNS.forEach((column) => {
+    if (column.profileField && !bankAccountChanged) return;
     const rawValue = getDeep(source, column.key);
     const value = column.type === "number"
       ? roundPayrollNumber(rawValue)
@@ -1261,6 +1284,14 @@ export default function PayrollManager() {
   const [attendanceSyncLoading, setAttendanceSyncLoading] = useState(false);
   const [attendanceSyncApplying, setAttendanceSyncApplying] = useState(false);
   const [attendanceSyncResult, setAttendanceSyncResult] = useState(null);
+  const [showSalaryAdvances, setShowSalaryAdvances] = useState(false);
+  const [salaryAdvanceStatus, setSalaryAdvanceStatus] = useState("pending");
+  const [salaryAdvanceRows, setSalaryAdvanceRows] = useState([]);
+  const [salaryAdvanceLoading, setSalaryAdvanceLoading] = useState(false);
+  const [salaryAdvanceActionId, setSalaryAdvanceActionId] = useState("");
+  const [salaryAdvanceSyncResult, setSalaryAdvanceSyncResult] = useState(null);
+  const [salaryAdvanceSyncApplying, setSalaryAdvanceSyncApplying] = useState(false);
+  const [salaryAdvancePendingTotal, setSalaryAdvancePendingTotal] = useState(0);
   const [selectedAttendanceSyncFields, setSelectedAttendanceSyncFields] = useState(
     () => new Set(ATTENDANCE_SYNC_COLUMNS.map((column) => column.key))
   );
@@ -1419,6 +1450,10 @@ export default function PayrollManager() {
     () => (attendanceSyncResult?.rows || []).filter((row) => row.statusText === "Khớp"),
     [attendanceSyncResult]
   );
+  const validSalaryAdvanceSyncRows = useMemo(
+    () => (salaryAdvanceSyncResult?.rows || []).filter((row) => row.statusText === "Khớp"),
+    [salaryAdvanceSyncResult]
+  );
 
   const fetchFormulaSettings = async () => {
     try {
@@ -1505,23 +1540,7 @@ export default function PayrollManager() {
   }, [period, canViewPayroll]);
 
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      let latestPeriod = "";
-      try {
-        const res = await fetch("/api/payroll/latest-period", { headers: authHeader });
-        const data = await res.json();
-        if (res.ok && data?.success && /^\d{4}-\d{2}$/.test(data.period || "")) {
-          latestPeriod = data.period;
-        }
-      } catch {
-        // Ignore errors and fall back to the saved/current period.
-      }
-      if (!cancelled) setPeriod(latestPeriod || getDefaultPayrollPeriod());
-    })();
-    return () => {
-      cancelled = true;
-    };
+    setPeriod(getDefaultPayrollPeriod());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -1556,6 +1575,7 @@ export default function PayrollManager() {
         const next = structuredClone(row);
         setDeep(next, key, value);
         if (LUONG_DANG_AP_DUNG_KEY_SET.has(key)) syncLuongDangApDung(next);
+        if (key === "khauTru.tamUngDieuChinh") syncSalaryAdvanceTotal(next);
         return applyPayrollFormulas(next, formulaSettings);
       })
     );
@@ -1961,6 +1981,136 @@ export default function PayrollManager() {
     }
   };
 
+  const loadSalaryAdvances = async (nextStatus = salaryAdvanceStatus) => {
+    setSalaryAdvanceLoading(true);
+    try {
+      const params = new URLSearchParams({ limit: "200" });
+      if (nextStatus !== "ALL") params.set("status", nextStatus);
+      if (period) params.set("period", period);
+      const res = await fetch(`/api/salary-advance-requests?${params}`, { headers: authHeader });
+      const data = await res.json();
+      if (!res.ok || data?.ok === false) throw new Error(data?.message || "Không tải được phiếu ứng lương");
+      setSalaryAdvanceRows(data.data || []);
+    } catch (error) {
+      setMessage(error.message || "Không tải được phiếu ứng lương");
+    } finally {
+      setSalaryAdvanceLoading(false);
+    }
+  };
+
+  const loadSalaryAdvancePendingTotal = async () => {
+    if (!canEdit || !period) {
+      setSalaryAdvancePendingTotal(0);
+      return;
+    }
+    try {
+      const res = await fetch(`/api/salary-advance-requests/pending-count?period=${encodeURIComponent(period)}`, { headers: authHeader });
+      const data = await res.json();
+      if (!res.ok || data?.ok === false) throw new Error(data?.message || "Không đếm được phiếu ứng lương");
+      setSalaryAdvancePendingTotal(Number(data.total) || 0);
+    } catch {
+      setSalaryAdvancePendingTotal(0);
+    }
+  };
+
+  useEffect(() => {
+    loadSalaryAdvancePendingTotal();
+    if (!canEdit || !period) return undefined;
+    const timer = window.setInterval(loadSalaryAdvancePendingTotal, 30000);
+    return () => window.clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [period, canEdit, authHeader]);
+
+  const openSalaryAdvances = () => {
+    setShowSalaryAdvances(true);
+    setSalaryAdvanceSyncResult(null);
+    loadSalaryAdvances();
+    loadSalaryAdvancePendingTotal();
+  };
+
+  const reviewSalaryAdvance = async (request, action) => {
+    const body = { action };
+    if (action === "approve") {
+      const amount = window.prompt("Số tiền duyệt:", String(request.requestedAmount || ""));
+      if (amount == null) return;
+      const approvedAmount = toNumber(amount);
+      if (approvedAmount < 100000 || approvedAmount > 2500000) {
+        window.alert("Số tiền duyệt phải từ 100.000 đ đến 2.500.000 đ.");
+        return;
+      }
+      const nextPeriod = window.prompt("Kỳ lương khấu trừ (YYYY-MM):", request.payrollPeriod || period);
+      if (!nextPeriod) return;
+      body.approvedAmount = approvedAmount;
+      body.payrollPeriod = nextPeriod.trim();
+      body.reviewNote = window.prompt("Ghi chú duyệt (không bắt buộc):", "") || "";
+    } else if (action === "reject" || action === "cancel") {
+      const note = window.prompt(action === "reject" ? "Lý do từ chối:" : "Lý do quản trị hủy phiếu:", "")?.trim();
+      if (!note) return;
+      body.reviewNote = note;
+    } else if (action === "mark_paid") {
+      if (!window.confirm(`Xác nhận đã chi ${formatPayrollNumber(request.approvedAmount)} đ cho ${request.userName}?`)) return;
+      const nextPeriod = window.prompt("Kỳ lương khấu trừ (YYYY-MM):", request.payrollPeriod || period);
+      if (!nextPeriod) return;
+      body.paymentMethod = request.paymentMethod || "bank_transfer";
+      body.paymentNote = window.prompt("Ghi chú chi tiền (không bắt buộc):", "") || "";
+      body.payrollPeriod = nextPeriod.trim();
+    } else if (!window.confirm(action === "approve_cancel" ? "Duyệt yêu cầu hủy phiếu này?" : "Từ chối yêu cầu hủy và giữ nguyên phiếu?")) return;
+
+    setSalaryAdvanceActionId(request._id);
+    try {
+      const res = await fetch(`/api/salary-advance-requests/${request._id}/review`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", ...authHeader },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok || data?.ok === false) throw new Error(data?.message || "Không thể xử lý phiếu ứng lương");
+      setMessage(data.message || "Đã cập nhật phiếu ứng lương");
+      await Promise.all([loadSalaryAdvances(), loadSalaryAdvancePendingTotal()]);
+    } catch (error) {
+      setMessage(error.message || "Không thể xử lý phiếu ứng lương");
+    } finally {
+      setSalaryAdvanceActionId("");
+    }
+  };
+
+  const previewSalaryAdvanceSync = async () => {
+    if (!period) return setMessage("Vui lòng chọn kỳ lương trước khi đồng bộ phiếu ứng.");
+    setSalaryAdvanceLoading(true);
+    setSalaryAdvanceSyncResult(null);
+    try {
+      const res = await fetch("/api/payroll/sync-salary-advances", {
+        method: "POST", headers: { "Content-Type": "application/json", ...authHeader }, body: JSON.stringify({ period, mode: "preview" }),
+      });
+      const data = await res.json();
+      if (!res.ok || data?.success === false) throw new Error(data?.message || "Không lấy được phiếu ứng đã chi");
+      setSalaryAdvanceSyncResult(data);
+    } catch (error) {
+      setMessage(error.message || "Không lấy được phiếu ứng đã chi");
+    } finally {
+      setSalaryAdvanceLoading(false);
+    }
+  };
+
+  const applySalaryAdvanceSync = async () => {
+    if (!validSalaryAdvanceSyncRows.length || !window.confirm(`Cập nhật tạm ứng cho ${validSalaryAdvanceSyncRows.length} nhân viên vào kỳ ${period}?`)) return;
+    setSalaryAdvanceSyncApplying(true);
+    try {
+      const res = await fetch("/api/payroll/sync-salary-advances", {
+        method: "POST", headers: { "Content-Type": "application/json", ...authHeader }, body: JSON.stringify({ period, mode: "apply" }),
+      });
+      const data = await res.json();
+      if (!res.ok || data?.success === false) throw new Error(data?.message || "Đồng bộ phiếu ứng thất bại");
+      setSalaryAdvanceSyncResult(data);
+      setMessage(`Đã cập nhật tạm ứng cho ${data.updated || 0} nhân viên.`);
+      await Promise.all([fetchPayroll(), loadSalaryAdvances(), loadSalaryAdvancePendingTotal()]);
+    } catch (error) {
+      setMessage(error.message || "Đồng bộ phiếu ứng thất bại");
+    } finally {
+      setSalaryAdvanceSyncApplying(false);
+    }
+  };
+
   const toggleAttendanceSyncField = (field) => {
     setSelectedAttendanceSyncFields((current) => {
       const next = new Set(current);
@@ -2015,6 +2165,7 @@ export default function PayrollManager() {
         const next = structuredClone(row);
         setDeep(next, bulkColumn.key, nextValue);
         if (LUONG_DANG_AP_DUNG_KEY_SET.has(bulkColumn.key)) syncLuongDangApDung(next);
+        if (bulkColumn.key === "khauTru.tamUngDieuChinh") syncSalaryAdvanceTotal(next);
         return applyPayrollFormulas(next, formulaSettings);
       })
     );
@@ -2123,10 +2274,25 @@ export default function PayrollManager() {
   }
 
   const dirtyRows = rows.filter((row) => dirtyIds.has(row.__clientId));
+  const changePayrollPeriod = (nextPeriod) => {
+    if (!nextPeriod || nextPeriod === period) return;
+    if (
+      dirtyRows.length > 0 &&
+      !window.confirm(
+        `Bạn đang có ${dirtyRows.length} dòng chưa lưu ở ${formatPayrollPeriod(period)}. Chuyển sang ${formatPayrollPeriod(nextPeriod)} sẽ bỏ các chỉnh sửa chưa lưu. Bạn vẫn muốn chuyển kỳ?`
+      )
+    ) {
+      return;
+    }
+    setPeriod(nextPeriod);
+  };
   const commissionImportPanel = (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
-        <input type="month" value={period} onChange={(event) => setPeriod(event.target.value)} className="rounded-xl border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-sky-100" />
+        <label className="rounded-xl border-2 border-amber-300 bg-amber-50 px-3 py-2 shadow-sm">
+          <span className="block text-[10px] font-black uppercase tracking-widest text-amber-700">Kỳ đang import</span>
+          <input type="month" value={period} onChange={(event) => changePayrollPeriod(event.target.value)} className="mt-0.5 bg-transparent text-base font-black text-amber-950 outline-none" />
+        </label>
         <button disabled={commissionTemplateLoading} onClick={downloadCommissionTemplateFromPayroll} className="inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-50 disabled:opacity-50">
           {commissionTemplateLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
           Tải mẫu tháng này
@@ -2314,6 +2480,16 @@ export default function PayrollManager() {
                 Lấy chấm công
               </button>
             )}
+            {canEdit && (
+              <button onClick={openSalaryAdvances} className="inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700 hover:bg-emerald-100">
+                <HandCoins className="h-4 w-4" /> Phiếu ứng lương
+                {salaryAdvancePendingTotal > 0 && (
+                  <span className="inline-flex min-w-5 items-center justify-center rounded-full bg-rose-600 px-1.5 py-0.5 text-[11px] font-bold leading-none text-white shadow-sm">
+                    {salaryAdvancePendingTotal > 99 ? "99+" : salaryAdvancePendingTotal}
+                  </span>
+                )}
+              </button>
+            )}
             {canCreate && (
               <button
                 onClick={clonePayroll}
@@ -2348,14 +2524,39 @@ export default function PayrollManager() {
                 className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
               >
                 <Save className="h-4 w-4" />
-                Lưu tất cả ({dirtyRows.length})
+                Lưu {formatPayrollPeriod(period)} ({dirtyRows.length})
               </button>
             )}
           </div>
         </div>
 
-        <div className="grid gap-2 lg:grid-cols-[180px_180px_180px_180px_1fr]">
-          <input type="month" value={period} onChange={(event) => setPeriod(event.target.value)} className="rounded-xl border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-sky-100" />
+        <div className="flex flex-col gap-3 rounded-2xl border-2 border-amber-300 bg-gradient-to-r from-amber-50 via-orange-50 to-white p-3 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex min-w-0 items-center gap-3">
+            <span className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-amber-500 text-white shadow-sm">
+              <CalendarDays className="h-6 w-6" />
+            </span>
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-[11px] font-black uppercase tracking-[0.18em] text-amber-700">Kỳ lương đang thao tác</span>
+                {dirtyRows.length > 0 && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-rose-100 px-2 py-0.5 text-[11px] font-bold text-rose-700">
+                    <ShieldAlert className="h-3.5 w-3.5" /> {dirtyRows.length} dòng chưa lưu
+                  </span>
+                )}
+              </div>
+              <p className="mt-0.5 text-sm font-semibold text-slate-600">Mọi thao tác sửa, lấy chấm công, import và lưu bên dưới đều áp dụng cho {formatPayrollPeriod(period)}.</p>
+            </div>
+          </div>
+          <input
+            type="month"
+            value={period}
+            onChange={(event) => changePayrollPeriod(event.target.value)}
+            aria-label="Kỳ lương đang thao tác"
+            className="min-w-[190px] rounded-xl border-2 border-amber-400 bg-white px-4 py-2.5 text-lg font-black text-amber-950 shadow-sm outline-none transition focus:border-orange-500 focus:ring-4 focus:ring-amber-200/70"
+          />
+        </div>
+
+        <div className="grid gap-2 lg:grid-cols-[180px_180px_180px_1fr]">
           <select value={dept} onChange={(event) => setDept(event.target.value)} className="rounded-xl border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-sky-100">
             {deptOptions.map((item) => (
               <option key={item} value={item}>{item === "ALL" ? "Tất cả phòng ban" : item}</option>
@@ -2488,13 +2689,13 @@ export default function PayrollManager() {
                                 disabled={!isDirty || isSaving}
                                 onClick={() => saveRows([row])}
                                 className="rounded-lg p-2 text-emerald-700 hover:bg-emerald-50 disabled:text-slate-300"
-                                title="Lưu dòng"
+                                title={`Lưu dòng vào ${formatPayrollPeriod(period)}`}
                               >
                                 {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
                               </button>
                             )}
                             {canDelete && (
-                              <button onClick={() => deleteRow(row)} disabled={isSaving} className="rounded-lg p-2 text-rose-700 hover:bg-rose-50 disabled:text-slate-300" title="Xóa dòng">
+                              <button onClick={() => deleteRow(row)} disabled={isSaving} className="rounded-lg p-2 text-rose-700 hover:bg-rose-50 disabled:text-slate-300" title={`Xóa dòng khỏi ${formatPayrollPeriod(period)}`}>
                                 <Trash2 className="h-4 w-4" />
                               </button>
                             )}
@@ -2735,6 +2936,55 @@ export default function PayrollManager() {
         {commissionImportPanel}
       </Modal>
 
+      <Modal open={showSalaryAdvances} onClose={() => setShowSalaryAdvances(false)} title={`Phiếu ứng lương · kỳ ${period || "chưa chọn"}`}>
+        <div className="space-y-4">
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <label className="text-sm font-semibold text-slate-700">Trạng thái
+              <select value={salaryAdvanceStatus} onChange={(event) => { setSalaryAdvanceStatus(event.target.value); loadSalaryAdvances(event.target.value); }} className="ml-2 rounded-xl border bg-white px-3 py-2 text-sm">
+                <option value="pending">Chờ xử lý</option><option value="approved">Đã duyệt</option><option value="paid">Đã chi</option><option value="deducted">Đã trừ lương</option><option value="rejected">Từ chối</option><option value="cancelled">Đã hủy</option><option value="ALL">Tất cả</option>
+              </select>
+            </label>
+            <div className="flex gap-2">
+              <button onClick={() => Promise.all([loadSalaryAdvances(), loadSalaryAdvancePendingTotal()])} disabled={salaryAdvanceLoading} className="inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-sm font-semibold hover:bg-slate-50 disabled:opacity-50"><RefreshCw className={`h-4 w-4 ${salaryAdvanceLoading ? "animate-spin" : ""}`} /> Tải lại</button>
+              <button onClick={previewSalaryAdvanceSync} disabled={salaryAdvanceLoading || !rows.length} className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"><HandCoins className="h-4 w-4" /> Lấy phiếu đã chi</button>
+            </div>
+          </div>
+
+          <div className="overflow-hidden rounded-xl border">
+            <div className="max-h-80 overflow-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="sticky top-0 bg-slate-100"><tr><th className="px-3 py-2">Nhân viên</th><th className="px-3 py-2 text-right">Yêu cầu</th><th className="px-3 py-2 text-right">Duyệt</th><th className="px-3 py-2">Nhận / kỳ trừ</th><th className="px-3 py-2">Lý do</th><th className="px-3 py-2">Trạng thái</th><th className="px-3 py-2">Thao tác</th></tr></thead>
+                <tbody>{salaryAdvanceRows.map((request) => {
+                  const label = { pending: "Chờ duyệt", approved: "Chờ chi", rejected: "Từ chối", paid: "Đã chi", deducted: "Đã trừ lương", cancel_pending: "Chờ hủy", cancelled: "Đã hủy" }[request.status] || request.status;
+                  const busy = salaryAdvanceActionId === request._id;
+                  return <tr key={request._id} className="border-t align-top">
+                    <td className="px-3 py-2"><div className="font-semibold text-slate-800">{request.userName || "-"}</div><div className="font-mono text-slate-500">{request.employeeCode}</div></td>
+                    <td className="px-3 py-2 text-right font-semibold">{formatPayrollNumber(request.requestedAmount)} đ</td>
+                    <td className="px-3 py-2 text-right text-emerald-700">{request.approvedAmount ? `${formatPayrollNumber(request.approvedAmount)} đ` : "-"}</td>
+                    <td className="px-3 py-2">{request.requestedPayDate}<br /><strong>{request.payrollPeriod}</strong></td>
+                    <td className="max-w-64 px-3 py-2"><div className="whitespace-pre-wrap">{request.reason}</div>{request.reviewNote && <div className="mt-1 text-slate-500">Phản hồi: {request.reviewNote}</div>}</td>
+                    <td className="px-3 py-2"><span className="rounded-full bg-slate-100 px-2 py-1 font-semibold">{label}</span></td>
+                    <td className="px-3 py-2"><div className="flex min-w-40 flex-wrap gap-1">
+                      {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <>
+                        {request.status === "pending" && <><button onClick={() => reviewSalaryAdvance(request, "approve")} className="rounded-lg bg-emerald-600 px-2 py-1 font-semibold text-white">Duyệt</button><button onClick={() => reviewSalaryAdvance(request, "reject")} className="rounded-lg bg-rose-50 px-2 py-1 font-semibold text-rose-700">Từ chối</button></>}
+                        {request.status === "approved" && <><button onClick={() => reviewSalaryAdvance(request, "mark_paid")} className="rounded-lg bg-sky-600 px-2 py-1 font-semibold text-white">Đã chi</button><button onClick={() => reviewSalaryAdvance(request, "cancel")} className="rounded-lg bg-rose-50 px-2 py-1 font-semibold text-rose-700">Hủy</button></>}
+                        {request.status === "cancel_pending" && <><button onClick={() => reviewSalaryAdvance(request, "approve_cancel")} className="rounded-lg bg-rose-600 px-2 py-1 font-semibold text-white">Duyệt hủy</button><button onClick={() => reviewSalaryAdvance(request, "reject_cancel")} className="rounded-lg bg-slate-100 px-2 py-1 font-semibold">Giữ phiếu</button></>}
+                      </>}
+                    </div></td>
+                  </tr>;
+                })}</tbody>
+              </table>
+            </div>
+            {!salaryAdvanceLoading && !salaryAdvanceRows.length && <div className="py-10 text-center text-sm text-slate-500">Không có phiếu theo bộ lọc.</div>}
+          </div>
+
+          {salaryAdvanceSyncResult && <div className="space-y-3 rounded-xl border border-emerald-200 bg-emerald-50/40 p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2"><div className="text-sm text-slate-700">Preview: {salaryAdvanceSyncResult.totalRequests || 0} phiếu đã chi, khớp {salaryAdvanceSyncResult.matched || 0} nhân viên.</div><button onClick={applySalaryAdvanceSync} disabled={!validSalaryAdvanceSyncRows.length || salaryAdvanceSyncApplying} className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">{salaryAdvanceSyncApplying ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Cập nhật vào lương</button></div>
+            <div className="max-h-64 overflow-auto rounded-lg border bg-white"><table className="w-full text-left text-xs"><thead className="sticky top-0 bg-slate-100"><tr><th className="px-3 py-2">Mã NV</th><th className="px-3 py-2">Nhân viên</th><th className="px-3 py-2 text-right">Điều chỉnh tay</th><th className="px-3 py-2 text-right">Từ phiếu</th><th className="px-3 py-2 text-right">Tổng tạm ứng</th><th className="px-3 py-2">Kết quả</th></tr></thead><tbody>{salaryAdvanceSyncResult.rows?.map((row, index) => <tr key={`${row._id || row.maNhanVien}-${index}`} className="border-t"><td className="px-3 py-2 font-mono">{row.maNhanVien}</td><td className="px-3 py-2">{row.tenNhanVien}</td><td className="px-3 py-2 text-right">{formatPayrollNumber(row.manualAmount)}</td><td className="px-3 py-2 text-right font-semibold text-emerald-700">{formatPayrollNumber(row.requestAmount)}</td><td className="px-3 py-2 text-right font-semibold">{formatPayrollNumber(row.totalAdvance)}</td><td className="px-3 py-2">{row.statusText}</td></tr>)}</tbody></table></div>
+          </div>}
+        </div>
+      </Modal>
+
       <Modal open={showAttendanceSync} onClose={() => setShowAttendanceSync(false)} title="Lấy dữ liệu chấm công">
         <div className="space-y-4">
           <div className="grid gap-3 lg:grid-cols-[180px_1fr]">
@@ -2829,6 +3079,8 @@ export default function PayrollManager() {
                       <th className="px-3 py-2 text-right">TC CN</th>
                       <th className="px-3 py-2 text-right">TC lễ</th>
                       <th className="px-3 py-2 text-right">Cơm TC</th>
+                      <th className="px-3 py-2 text-right">Phép năm cũ</th>
+                      <th className="px-3 py-2 text-right">Phép năm mới</th>
                       <th className="px-3 py-2 text-right">Ngày công cũ</th>
                       <th className="px-3 py-2 text-right">Ngày công mới</th>
                       <th className="px-3 py-2">Trạng thái</th>
@@ -2846,6 +3098,8 @@ export default function PayrollManager() {
                         <td className="px-3 py-2 text-right">{formatPayrollNumber(row.tangCaChuNhat)}</td>
                         <td className="px-3 py-2 text-right">{formatPayrollNumber(row.tangCaLeTet)}</td>
                         <td className="px-3 py-2 text-right">{formatPayrollNumber(row.comTangCa)}</td>
+                        <td className="px-3 py-2 text-right">{formatPayrollNumber(row.oldPhepNam)}</td>
+                        <td className="px-3 py-2 text-right font-semibold text-emerald-700">{formatPayrollNumber(row.phepNam)}</td>
                         <td className="px-3 py-2 text-right">{formatPayrollNumber(row.oldNgayCong)}</td>
                         <td className="px-3 py-2 text-right font-semibold">{formatPayrollNumber(row.ngayCong)}</td>
                         <td className="px-3 py-2">

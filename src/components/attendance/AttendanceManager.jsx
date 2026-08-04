@@ -11,6 +11,8 @@ import {
   ChevronRight,
   Clock,
   Download,
+  FileText,
+  ImagePlus,
   LayoutGrid,
   Pencil,
   Loader2,
@@ -26,7 +28,7 @@ import {
   Zap,
 } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
-import { getApiOrigin } from "../../api/baseUrl";
+import { apiUrl, getApiOrigin } from "../../api/baseUrl";
 
 const PAGE_LIMIT = 20;
 const isViteDevServer = typeof window !== "undefined" && window.location.port === "5173";
@@ -53,8 +55,25 @@ const TABS = [
   { id: "list", label: "Danh sách", icon: CalendarDays },
   { id: "auto", label: "Tự động", icon: Zap },
   { id: "pending", label: "Cần duyệt", icon: AlertCircle },
+  { id: "leave", label: "Đơn nghỉ phép", icon: FileText },
   { id: "report", label: "Báo cáo", icon: BarChart3 },
 ];
+
+const LEAVE_TYPE_LABELS = {
+  regular: "Nghỉ phép thường",
+  emergency: "Off đột xuất",
+  annual: "Phép năm",
+};
+const LEAVE_SESSION_LABELS = { full_day: "Cả ngày", morning: "Buổi sáng", afternoon: "Buổi chiều" };
+
+function leaveStatusMeta(status, needsEvidence) {
+  if (status === "approved") return { label: "Đã duyệt", tone: "emerald" };
+  if (status === "rejected") return { label: "Đã từ chối", tone: "rose" };
+  if (status === "cancel_pending") return { label: "Chờ duyệt hủy", tone: "amber" };
+  if (status === "cancelled") return { label: "Đã hủy", tone: "slate" };
+  if (needsEvidence) return { label: "Thiếu minh chứng", tone: "amber" };
+  return { label: "Chờ duyệt", tone: "violet" };
+}
 
 const DEFAULT_SHIFT_FORM = [
   { shiftNo: 1, name: "Ca ngày", scheduledStart: "07:30", scheduledEnd: "17:00" },
@@ -200,7 +219,7 @@ function isSundayDate(dateStr) {
   return date ? date.getDay() === 0 : false;
 }
 
-function getAttendanceDayStyle(record, date, today) {
+function getAttendanceDayStyle(record, date, today, approvedLeave = null) {
   const isMissingAttendance = !record || !hasAttendancePunch(record);
 
   if (isMissingAttendance && isSundayDate(date)) {
@@ -210,6 +229,20 @@ function getAttendanceDayStyle(record, date, today) {
       text: "text-slate-400",
       label: "Nghỉ CN",
       dot: "bg-slate-300",
+    };
+  }
+
+  if (approvedLeave) {
+    const typeLabel = LEAVE_TYPE_LABELS[approvedLeave.leaveType] || "Nghỉ phép";
+    const timeLabel = approvedLeave.leaveType === "emergency" && approvedLeave.startTime && approvedLeave.endTime
+      ? ` ${approvedLeave.startTime}-${approvedLeave.endTime}`
+      : "";
+    return {
+      border: "border-violet-300 ring-2 ring-violet-100 hover:border-violet-400",
+      bg: "bg-violet-50/90",
+      text: "text-violet-700",
+      label: `${typeLabel}${timeLabel}`,
+      dot: "bg-violet-500",
     };
   }
 
@@ -303,6 +336,8 @@ function buildExportRows(records) {
       "Ca ngày giờ ra": fmtTime(dayShift.checkOut?.time),
       "Ca ngày vị trí ra": punchLocationName(dayShift.checkOut, record.locationName),
       "Ca ngày công": dayShift.workHours ?? "",
+      "Giờ tại công ty": record.onsiteWorkHours ?? "",
+      "Giờ WFH": record.remoteWorkHours ?? "",
       "Ca ngày tăng ca phút": dayShift.overtimeMinutes ?? "",
       "Ca ngày trạng thái": shiftStatusLabel(dayShift),
       "Ca ngày ghi chú": summarizeShift(dayShift),
@@ -360,6 +395,8 @@ function buildExportRows(records) {
         "Ra lý do duyệt": shift.checkOut?.reviewReason || "",
         "Ghi chú ra": shift.checkOut?.note || "",
         "Công chuẩn": shift.regularHours ?? "",
+        "Giờ tại công ty": shift.onsiteWorkHours ?? "",
+        "Giờ WFH": shift.remoteWorkHours ?? "",
         "Công ca": shift.workHours ?? "",
         "Tính tăng ca": yesNo(shift.isOvertimeApproved),
         "Cơm tăng ca": yesNo(isOvertimeMealApproved),
@@ -627,6 +664,7 @@ function Badge({ tone = "slate", children, icon: Icon }) {
 export default function AttendanceManager() {
   const { api, token } = useAuth();
   const formRef = useRef(null);
+  const realtimeRefreshRef = useRef(null);
   const [tab, setTab] = useState("overview");
   const [from, setFrom] = useState(firstDayOfMonth());
   const [to, setTo] = useState(todayVN());
@@ -636,6 +674,7 @@ export default function AttendanceManager() {
   const [overviewAutoFilter, setOverviewAutoFilter] = useState("all");
   const [records, setRecords] = useState([]);
   const [overviewRecords, setOverviewRecords] = useState([]);
+  const [overviewLeaveRequests, setOverviewLeaveRequests] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [listLoading, setListLoading] = useState(false);
@@ -656,6 +695,18 @@ export default function AttendanceManager() {
   const [pendingPage, setPendingPage] = useState(1);
   const [selectedPendingIds, setSelectedPendingIds] = useState(new Set());
   const [bulkApproving, setBulkApproving] = useState(false);
+  const [leaveRequests, setLeaveRequests] = useState([]);
+  const [leaveLoading, setLeaveLoading] = useState(false);
+  const [leaveTotal, setLeaveTotal] = useState(0);
+  const [leavePendingTotal, setLeavePendingTotal] = useState(0);
+  const [leavePage, setLeavePage] = useState(1);
+  const [leaveStatusFilter, setLeaveStatusFilter] = useState("pending");
+  const [leaveFrom, setLeaveFrom] = useState("");
+  const [leaveTo, setLeaveTo] = useState("");
+  const [reviewingLeaveId, setReviewingLeaveId] = useState("");
+  const [evidencePreview, setEvidencePreview] = useState(null);
+  const [evidencePreviewLoading, setEvidencePreviewLoading] = useState(false);
+  const [evidencePreviewError, setEvidencePreviewError] = useState("");
   const [weekMode, setWeekMode] = useState(true);
   const [weekStart, setWeekStart] = useState(() => getWeekStart(todayVN()));
   const [bulkStampOpen, setBulkStampOpen] = useState(false);
@@ -679,6 +730,26 @@ export default function AttendanceManager() {
   const [autoUserIds, setAutoUserIds] = useState(new Set());
   const [autoUserSearch, setAutoUserSearch] = useState("");
   const [autoForm, setAutoForm] = useState(createAutoAttendanceForm);
+
+  useEffect(() => {
+    if (!evidencePreview) return undefined;
+    const closeOnEscape = (event) => {
+      if (event.key === "Escape") setEvidencePreview(null);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [evidencePreview]);
+
+  function openLeaveEvidence(request) {
+    if (!request?.evidence?.url) return;
+    setEvidencePreview({
+      url: apiUrl(request.evidence.url),
+      title: `Ảnh minh chứng · ${request.userName || "Nhân viên"}`,
+      subtitle: `${LEAVE_TYPE_LABELS[request.leaveType] || "Nghỉ phép"} · ${fmtShortDate(request.startDate)}${request.endDate !== request.startDate ? ` – ${fmtShortDate(request.endDate)}` : ""}`,
+    });
+    setEvidencePreviewLoading(true);
+    setEvidencePreviewError("");
+  }
 
   function showFlash(ok, text) {
     setFlash({ ok, text });
@@ -735,7 +806,27 @@ export default function AttendanceManager() {
         currentPage += 1;
       } while (allRecords.length < totalItems);
 
+      const allLeaves = [];
+      let leavePage = 1;
+      let leaveTotal = null;
+      do {
+        const leaveParams = new URLSearchParams({
+          effective: "true",
+          from: effectiveFrom,
+          to: effectiveTo,
+          page: String(leavePage),
+          limit: "100",
+        });
+        const leaveRes = await api.get(`/attendance-leave-requests?${leaveParams}`);
+        const leaveRows = leaveRes.data?.data || [];
+        leaveTotal = Number(leaveRes.data?.total || leaveRows.length);
+        allLeaves.push(...leaveRows);
+        if (leaveRows.length === 0) break;
+        leavePage += 1;
+      } while (allLeaves.length < leaveTotal);
+
       setOverviewRecords(allRecords);
+      setOverviewLeaveRequests(allLeaves);
     } catch {
       showFlash(false, "Không thể tải tổng quan chấm công.");
     } finally {
@@ -786,6 +877,34 @@ export default function AttendanceManager() {
       // Polling/realtime failures stay silent; opening the tab still shows the normal load error.
     }
   }, [api, from, to, teamFilter]);
+
+  const loadLeaveRequests = useCallback(async (p = 1) => {
+    setLeaveLoading(true);
+    try {
+      const params = new URLSearchParams({ page: String(p), limit: String(PAGE_LIMIT) });
+      if (leaveFrom) params.set("from", leaveFrom);
+      if (leaveTo) params.set("to", leaveTo);
+      if (teamFilter) params.set("teamId", normalizeTeam(teamFilter));
+      if (leaveStatusFilter) params.set("status", leaveStatusFilter);
+      if (searchUser.trim()) params.set("search", searchUser.trim());
+      const res = await api.get(`/attendance-leave-requests?${params}`);
+      setLeaveRequests(res.data?.data || []);
+      setLeaveTotal(Number(res.data?.total || 0));
+    } catch (err) {
+      showFlash(false, err.response?.data?.message || "Không thể tải danh sách đơn nghỉ phép.");
+    } finally {
+      setLeaveLoading(false);
+    }
+  }, [api, leaveFrom, leaveStatusFilter, leaveTo, searchUser, teamFilter]);
+
+  const loadLeavePendingCount = useCallback(async () => {
+    try {
+      const res = await api.get("/attendance-leave-requests/pending-count");
+      setLeavePendingTotal(Number(res.data?.total || 0));
+    } catch {
+      // Giữ im lặng khi bộ đếm nền lỗi; tab vẫn hiển thị lỗi tải thông thường.
+    }
+  }, [api]);
 
   const loadAutoSettings = useCallback(async () => {
     setAutoLoading(true);
@@ -942,28 +1061,49 @@ export default function AttendanceManager() {
 
   useEffect(() => {
     loadPendingCount();
+    loadLeavePendingCount();
 
     const refreshWhenVisible = () => {
-      if (document.visibilityState === "visible") loadPendingCount();
+      if (document.visibilityState === "visible") {
+        loadPendingCount();
+        loadLeavePendingCount();
+      }
     };
-    const intervalId = window.setInterval(loadPendingCount, 30000);
-    window.addEventListener("focus", loadPendingCount);
+    const refreshCounts = () => {
+      loadPendingCount();
+      loadLeavePendingCount();
+    };
+    const intervalId = window.setInterval(refreshCounts, 30000);
+    window.addEventListener("focus", refreshCounts);
     document.addEventListener("visibilitychange", refreshWhenVisible);
 
     return () => {
       window.clearInterval(intervalId);
-      window.removeEventListener("focus", loadPendingCount);
+      window.removeEventListener("focus", refreshCounts);
       document.removeEventListener("visibilitychange", refreshWhenVisible);
     };
-  }, [loadPendingCount]);
+  }, [loadLeavePendingCount, loadPendingCount]);
+
+  realtimeRefreshRef.current = {
+    leavePage,
+    loadLeavePendingCount,
+    loadLeaveRequests,
+    loadOverview,
+    loadPending,
+    loadPendingCount,
+    pendingPage,
+    tab,
+  };
 
   useEffect(() => {
     if (!token) return undefined;
 
     const socket = io(ATTENDANCE_SOCKET_URL, {
+      autoConnect: false,
       withCredentials: true,
       auth: { token },
-      transports: ["polling", "websocket"],
+      transports: ["websocket", "polling"],
+      tryAllTransports: true,
       reconnection: true,
       reconnectionAttempts: Infinity,
       reconnectionDelay: 800,
@@ -971,25 +1111,36 @@ export default function AttendanceManager() {
       timeout: 20000,
     });
     let refreshTimer = null;
+    const connectTimer = window.setTimeout(() => socket.connect(), 0);
 
     const refreshAttendance = () => {
       window.clearTimeout(refreshTimer);
       refreshTimer = window.setTimeout(() => {
-        loadPendingCount();
-        if (tab === "pending") loadPending(pendingPage);
+        const refresh = realtimeRefreshRef.current;
+        refresh?.loadPendingCount();
+        refresh?.loadLeavePendingCount();
+        if (refresh?.tab === "overview") refresh.loadOverview();
+        if (refresh?.tab === "pending") refresh.loadPending(refresh.pendingPage);
+        if (refresh?.tab === "leave") refresh.loadLeaveRequests(refresh.leavePage);
       }, 200);
     };
 
-    socket.on("connect", loadPendingCount);
+    const loadRealtimeCounts = () => {
+      const refresh = realtimeRefreshRef.current;
+      refresh?.loadPendingCount();
+      refresh?.loadLeavePendingCount();
+    };
+    socket.on("connect", loadRealtimeCounts);
     socket.on("attendance:changed", refreshAttendance);
 
     return () => {
+      window.clearTimeout(connectTimer);
       window.clearTimeout(refreshTimer);
-      socket.off("connect", loadPendingCount);
+      socket.off("connect", loadRealtimeCounts);
       socket.off("attendance:changed", refreshAttendance);
       socket.disconnect();
     };
-  }, [loadPending, loadPendingCount, pendingPage, tab, token]);
+  }, [token]);
 
   useEffect(() => {
     if (tab === "overview") {
@@ -1004,10 +1155,13 @@ export default function AttendanceManager() {
       loadPending(1);
     } else if (tab === "auto") {
       loadAutoSettings();
+    } else if (tab === "leave") {
+      setLeavePage(1);
+      loadLeaveRequests(1);
     } else {
       loadReport();
     }
-  }, [tab, from, to, statusFilter, teamFilter, loadList, loadOverview, loadReport, loadPending, loadAutoSettings]);
+  }, [tab, from, to, statusFilter, teamFilter, leaveStatusFilter, loadList, loadOverview, loadReport, loadPending, loadLeaveRequests, loadAutoSettings]);
 
   async function refreshCurrentTab({ listPage = page, pendingListPage = pendingPage } = {}) {
     if (tab === "overview") {
@@ -1017,7 +1171,46 @@ export default function AttendanceManager() {
     if (tab === "list") await loadList(listPage);
     if (tab === "pending") await loadPending(pendingListPage);
     if (tab === "auto") await loadAutoSettings();
+    if (tab === "leave") await Promise.all([loadLeaveRequests(leavePage), loadLeavePendingCount()]);
     if (tab === "report") await loadReport();
+  }
+
+  async function reviewLeaveRequest(request, action) {
+    if (action === "approve" && request.needsEvidence) {
+      return showFlash(false, "Đơn off đột xuất chưa có ảnh minh chứng nên chưa thể duyệt.");
+    }
+    const actionMeta = {
+      approve: { verb: "duyệt", prompt: "Ghi chú duyệt (không bắt buộc):" },
+      reject: { verb: "từ chối", prompt: "Lý do từ chối (không bắt buộc):" },
+      approve_cancel: { verb: "duyệt hủy", prompt: "Ghi chú duyệt hủy (không bắt buộc):" },
+      reject_cancel: { verb: "từ chối hủy", prompt: "Lý do từ chối yêu cầu hủy (không bắt buộc):" },
+      cancel: { verb: "hủy", prompt: "Lý do quản trị hủy đơn (bắt buộc):" },
+    }[action];
+    if (!actionMeta) return;
+    const verb = actionMeta.verb;
+    if (!window.confirm(`Xác nhận ${verb} đơn nghỉ của ${request.userName || "nhân viên này"}?`)) return;
+    const reviewNote = window.prompt(actionMeta.prompt, "");
+    if (reviewNote === null) return;
+    if (action === "cancel" && !reviewNote.trim()) return showFlash(false, "Vui lòng nhập lý do hủy đơn.");
+    setReviewingLeaveId(request._id);
+    try {
+      const res = await api.patch(`/attendance-leave-requests/${request._id}/review`, { action, reviewNote });
+      showFlash(true, res.data?.message || `Đã ${verb} đơn nghỉ phép.`);
+      await Promise.all([loadLeaveRequests(leavePage), loadLeavePendingCount()]);
+    } catch (err) {
+      showFlash(false, err.response?.data?.message || "Không thể xử lý đơn nghỉ phép.");
+    } finally {
+      setReviewingLeaveId("");
+    }
+  }
+
+  function clearLeaveFilters() {
+    setSearchUser("");
+    setTeamFilter("");
+    setLeaveFrom("");
+    setLeaveTo("");
+    setLeaveStatusFilter("pending");
+    setLeavePage(1);
   }
 
   function goPage(p) {
@@ -1527,6 +1720,30 @@ export default function AttendanceManager() {
     return map;
   }, [overviewRecords]);
 
+  const overviewLeaveByUserDate = useMemo(() => {
+    const map = new Map();
+    overviewLeaveRequests.forEach((request) => {
+      const dates = Array.isArray(request.approvedDates) && request.approvedDates.length
+        ? request.approvedDates
+        : (() => {
+          const result = [];
+          if (!request.startDate || !request.endDate) return result;
+          for (let date = request.startDate; date <= request.endDate;) {
+            if (!isSundayDate(date)) result.push(date);
+            const parsed = parseDateOnly(date);
+            parsed.setDate(parsed.getDate() + 1);
+            date = formatDateOnly(parsed);
+          }
+          return result;
+        })();
+      dates.forEach((date) => {
+        if (request.userId) map.set(`${request.userId}-${date}`, request);
+        if (request.userName) map.set(`${request.userName}-${date}`, request);
+      });
+    });
+    return map;
+  }, [overviewLeaveRequests]);
+
   const autoSettingsByUser = useMemo(() => {
     const map = new Map();
     autoSettings.forEach((setting) => {
@@ -1599,11 +1816,12 @@ export default function AttendanceManager() {
       overviewDates.forEach((date) => {
         if (isSundayDate(date)) return;
         const record = overviewByUserDate.get(`${employee.id}-${date}`) || overviewByUserDate.get(`${employee.name}-${date}`);
-        if (!hasAttendancePunch(record) && isPastAttendanceDate(date, today)) missingPast += 1;
+        const approvedLeave = overviewLeaveByUserDate.get(`${employee.id}-${date}`) || overviewLeaveByUserDate.get(`${employee.name}-${date}`);
+        if (!approvedLeave && !hasAttendancePunch(record) && isPastAttendanceDate(date, today)) missingPast += 1;
       });
     });
     return { present, incomplete, invalid, missingPast, autoEnabled };
-  }, [autoSettingsByUser, overviewByUserDate, overviewDates, overviewEmployees, overviewRecords]);
+  }, [autoSettingsByUser, overviewByUserDate, overviewDates, overviewEmployees, overviewLeaveByUserDate, overviewRecords]);
 
   const teamOptions = useMemo(() => {
     const teams = new Set();
@@ -1623,6 +1841,25 @@ export default function AttendanceManager() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-violet-50/20 p-3 sm:p-4 md:p-6">
+      {evidencePreview && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/70 p-3 backdrop-blur-sm sm:p-6">
+          <button type="button" aria-label="Đóng ảnh minh chứng" className="absolute inset-0" onClick={() => setEvidencePreview(null)} />
+          <div className="relative flex max-h-[92dvh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-white/20 bg-white shadow-2xl">
+            <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-4 py-3 sm:px-5">
+              <div className="min-w-0"><h2 className="truncate text-sm font-bold text-slate-900 sm:text-base">{evidencePreview.title}</h2><p className="truncate text-xs text-slate-500">{evidencePreview.subtitle}</p></div>
+              <button type="button" onClick={() => setEvidencePreview(null)} className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-slate-500 hover:bg-slate-100" title="Đóng"><XCircle size={22} /></button>
+            </div>
+            <div className="relative flex min-h-[280px] flex-1 items-center justify-center overflow-auto bg-slate-100 p-2 sm:min-h-[480px] sm:p-4">
+              {evidencePreviewLoading && <div className="absolute inset-0 z-10 flex items-center justify-center bg-slate-100"><Loader2 size={28} className="animate-spin text-sky-600" /></div>}
+              {evidencePreviewError ? (
+                <div className="flex max-w-md flex-col items-center gap-2 px-5 py-12 text-center text-sm text-rose-600"><AlertCircle size={28} /><span>{evidencePreviewError}</span></div>
+              ) : (
+                <img src={evidencePreview.url} alt={evidencePreview.title} className="max-h-[calc(92dvh-90px)] max-w-full rounded-lg object-contain shadow-sm" onLoad={() => setEvidencePreviewLoading(false)} onError={() => { setEvidencePreviewLoading(false); setEvidencePreviewError("Không thể tải ảnh minh chứng. Vui lòng đóng popup và thử lại."); }} />
+              )}
+            </div>
+          </div>
+        </div>
+      )}
       <div className="mx-auto max-w-[1600px] space-y-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -2398,12 +2635,12 @@ export default function AttendanceManager() {
             </div>
           </div>
           <div className="flex flex-col gap-1">
-            <label className="text-xs font-semibold text-slate-500">TỪ NGÀY</label>
-            <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100" />
+            <label className="text-xs font-semibold text-slate-500">{tab === "leave" ? "TỪ NGÀY NGHỈ" : "TỪ NGÀY"}</label>
+            <input type="date" value={tab === "leave" ? leaveFrom : from} onChange={(e) => tab === "leave" ? setLeaveFrom(e.target.value) : setFrom(e.target.value)} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100" />
           </div>
           <div className="flex flex-col gap-1">
-            <label className="text-xs font-semibold text-slate-500">ĐẾN NGÀY</label>
-            <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100" />
+            <label className="text-xs font-semibold text-slate-500">{tab === "leave" ? "ĐẾN NGÀY NGHỈ" : "ĐẾN NGÀY"}</label>
+            <input type="date" value={tab === "leave" ? leaveTo : to} onChange={(e) => tab === "leave" ? setLeaveTo(e.target.value) : setTo(e.target.value)} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100" />
           </div>
           <div className="flex flex-col gap-1">
             <label className="text-xs font-semibold text-slate-500">TEAM</label>
@@ -2443,12 +2680,27 @@ export default function AttendanceManager() {
               </select>
             </div>
           )}
+          {tab === "leave" && (
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-semibold text-slate-500">TRẠNG THÁI ĐƠN</label>
+              <select value={leaveStatusFilter} onChange={(event) => setLeaveStatusFilter(event.target.value)} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100">
+                <option value="pending">Chờ xử lý</option>
+                <option value="cancel_pending">Chờ duyệt hủy</option>
+                <option value="approved">Đã duyệt</option>
+                <option value="rejected">Đã từ chối</option>
+                <option value="cancelled">Đã hủy</option>
+                <option value="">Tất cả</option>
+              </select>
+            </div>
+          )}
         </div>
 
         <div className="flex gap-1 overflow-x-auto rounded-2xl border border-slate-200 bg-white p-1 shadow-sm">
           {TABS.map((item) => {
             const Icon = item.icon;
             const isPending = item.id === "pending";
+            const isLeave = item.id === "leave";
+            const badgeTotal = isPending ? pendingTotal : (isLeave ? leavePendingTotal : 0);
             return (
               <button
                 key={item.id}
@@ -2456,9 +2708,9 @@ export default function AttendanceManager() {
                 className={`relative flex min-w-max flex-none items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold transition sm:flex-1 sm:gap-2 sm:text-sm ${tab === item.id ? "bg-violet-600 text-white shadow" : "text-slate-600 hover:bg-slate-50"}`}
               >
                 <Icon size={15} /> {item.label}
-                {isPending && pendingTotal > 0 && (
+                {(isPending || isLeave) && badgeTotal > 0 && (
                   <span className={`absolute right-2 top-1.5 flex h-4 min-w-[16px] items-center justify-center rounded-full px-1 text-[10px] font-bold ${tab === item.id ? "bg-white text-violet-700" : "bg-rose-500 text-white"}`}>
-                    {pendingTotal > 99 ? "99+" : pendingTotal}
+                    {badgeTotal > 99 ? "99+" : badgeTotal}
                   </span>
                 )}
               </button>
@@ -2560,9 +2812,10 @@ export default function AttendanceManager() {
                           <div className="grid grid-cols-2 gap-2 p-2">
                             {overviewDates.map((date) => {
                               const record = overviewByUserDate.get(`${employee.id}-${date}`) || overviewByUserDate.get(`${employee.name}-${date}`);
+                              const approvedLeave = overviewLeaveByUserDate.get(`${employee.id}-${date}`) || overviewLeaveByUserDate.get(`${employee.name}-${date}`);
                               const shifts = getRecordShifts(record);
                               const isToday = date === today;
-                              const dayStyle = getAttendanceDayStyle(record, date, today);
+                              const dayStyle = getAttendanceDayStyle(record, date, today, approvedLeave);
 
                               return (
                                 <button
@@ -2570,7 +2823,7 @@ export default function AttendanceManager() {
                                   type="button"
                                   onClick={() => record && openEditForm(record)}
                                   onDoubleClick={(event) => {
-                                    if (record || isSundayDate(date)) return;
+                                    if (record || approvedLeave || isSundayDate(date)) return;
                                     event.preventDefault();
                                     openCreateFormFromOverviewCell(employee, date);
                                   }}
@@ -2595,7 +2848,7 @@ export default function AttendanceManager() {
                                           <p className="text-xs font-semibold text-slate-800">{fmtTime(shift.checkIn?.time)} - {fmtTime(shift.checkOut?.time)}</p>
                                         </div>
                                       ))}
-                                      {dayStyle.label && record.status !== "present" && (
+                                      {dayStyle.label && (approvedLeave || record.status !== "present") && (
                                         <p className={`text-[11px] font-bold ${dayStyle.text}`}>{dayStyle.label}</p>
                                       )}
                                       {record.workHours != null && <p className="text-[11px] font-bold text-emerald-700">Tổng {record.workHours}h</p>}
@@ -2663,9 +2916,10 @@ export default function AttendanceManager() {
 
                           {overviewDates.map((date) => {
                             const record = overviewByUserDate.get(`${employee.id}-${date}`) || overviewByUserDate.get(`${employee.name}-${date}`);
+                            const approvedLeave = overviewLeaveByUserDate.get(`${employee.id}-${date}`) || overviewLeaveByUserDate.get(`${employee.name}-${date}`);
                             const shifts = getRecordShifts(record);
                             const isToday = date === today;
-                            const dayStyle = getAttendanceDayStyle(record, date, today);
+                            const dayStyle = getAttendanceDayStyle(record, date, today, approvedLeave);
 
                             return (
                               <div key={`${employee.id}-${date}`} className={`border-r border-slate-100 p-2 last:border-r-0 ${isToday && !record ? "bg-violet-50/30" : ""}`}>
@@ -2673,7 +2927,7 @@ export default function AttendanceManager() {
                                   type="button"
                                   onClick={() => record && openEditForm(record)}
                                   onDoubleClick={(event) => {
-                                    if (record || isSundayDate(date)) return;
+                                    if (record || approvedLeave || isSundayDate(date)) return;
                                     event.preventDefault();
                                     openCreateFormFromOverviewCell(employee, date);
                                   }}
@@ -2695,7 +2949,7 @@ export default function AttendanceManager() {
 
                                         </div>
                                       ))}
-                                      {dayStyle.label && record.status !== "present" && (
+                                      {dayStyle.label && (approvedLeave || record.status !== "present") && (
                                         <p className={`text-[11px] font-bold ${dayStyle.text}`}>{dayStyle.label}</p>
                                       )}
                                       {record.workHours != null && <p className="text-[11px] font-bold text-emerald-700">Tổng {record.workHours}h</p>}
@@ -2776,6 +3030,7 @@ export default function AttendanceManager() {
                             );
                           })}
                           {record.workHours != null && <p className="text-xs font-semibold text-emerald-700">Tổng công: {record.workHours}h</p>}
+                          {Number(record.remoteWorkHours || 0) > 0 && <p className="text-xs font-semibold text-sky-700">Tại công ty {record.onsiteWorkHours}h + WFH {record.remoteWorkHours}h</p>}
                           {Number(record.overtimeMinutes || 0) > 0 && <p className="text-xs font-semibold text-violet-700">Tăng ca: {record.overtimeMinutes} phút ({Number(record.overtimeHours || 0).toFixed(2)}h)</p>}
                         </div>
                         <Badge tone={sc.tone} icon={sc.Icon}>{sc.label}</Badge>
@@ -3126,6 +3381,106 @@ export default function AttendanceManager() {
                     <button disabled={pendingPage <= 1} onClick={() => goPendingPage(pendingPage - 1)} className="flex items-center gap-1 rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40"><ChevronLeft size={13} /> Trước</button>
                     <span className="text-xs text-slate-500">Trang {pendingPage}/{Math.ceil(pendingTotal / PAGE_LIMIT)}</span>
                     <button disabled={pendingPage >= Math.ceil(pendingTotal / PAGE_LIMIT)} onClick={() => goPendingPage(pendingPage + 1)} className="flex items-center gap-1 rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40">Sau <ChevronRight size={13} /></button>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
+
+        {tab === "leave" && (
+          <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-4 py-3 sm:px-5">
+              <div>
+                <p className="text-sm font-semibold text-slate-800">Đơn xin nghỉ phép</p>
+                <p className="text-xs text-slate-400">{leaveTotal} đơn theo bộ lọc · {leavePendingTotal} đơn đang chờ xử lý</p>
+              </div>
+              <div className="flex flex-wrap gap-2 text-[11px] font-semibold">
+                <span className="rounded-full border border-violet-200 bg-violet-50 px-2 py-1 text-violet-700">Phép thường</span>
+                <span className="rounded-full border border-rose-200 bg-rose-50 px-2 py-1 text-rose-700">Off đột xuất cần ảnh</span>
+                <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 text-emerald-700">Phép năm</span>
+              </div>
+            </div>
+
+            {leaveLoading ? (
+              <div className="flex justify-center py-12"><Loader2 size={22} className="animate-spin text-slate-400" /></div>
+            ) : leaveRequests.length === 0 ? (
+              <div className="flex flex-col items-center gap-2 py-14 text-center text-sm text-slate-400">
+                <FileText size={32} className="text-violet-300" />
+                <span>Không có đơn nghỉ phép theo bộ lọc.</span>
+                {leavePendingTotal > 0 && (
+                  <button type="button" onClick={clearLeaveFilters} className="mt-1 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-xs font-bold text-violet-700 hover:bg-violet-100">
+                    Hiện tất cả {leavePendingTotal} đơn chờ duyệt
+                  </button>
+                )}
+              </div>
+            ) : (
+              <>
+                <div className="divide-y divide-slate-100">
+                  {leaveRequests.map((request) => {
+                    const status = leaveStatusMeta(request.status, request.needsEvidence);
+                    const isReviewing = reviewingLeaveId === request._id;
+                    return (
+                      <div key={request._id} className="p-4 sm:px-5">
+                        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="text-sm font-bold text-slate-800">{request.userName || "-"}</span>
+                              {request.employeeCode && <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-semibold text-slate-500">{request.employeeCode}</span>}
+                              {request.teamId && <span className="text-xs text-slate-400">{request.teamId}</span>}
+                              <Badge tone={status.tone}>{status.label}</Badge>
+                            </div>
+                            <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
+                              <span className="font-semibold text-violet-700">{LEAVE_TYPE_LABELS[request.leaveType] || request.leaveType}</span>
+                              <span>{fmtShortDate(request.startDate)}{request.endDate !== request.startDate ? ` – ${fmtShortDate(request.endDate)}` : ""}</span>
+                              <span>{request.leaveType === "emergency" ? `${request.startTime || "-"}–${request.endTime || "-"}` : (LEAVE_SESSION_LABELS[request.session] || request.session)}</span>
+                              <span>Gửi {new Date(request.createdAt).toLocaleString("vi-VN")}</span>
+                            </div>
+                            <p className="mt-2 whitespace-pre-wrap text-sm text-slate-600">{request.reason}</p>
+                            {(request.status === "approved" || request.status === "cancel_pending") && <p className="mt-1 text-xs font-semibold text-emerald-700">Đã duyệt: {request.leaveType === "emergency" ? `${Number(request.approvedMinutes || 0)} phút nghỉ` : `${Number(request.approvedDays || 0)} ngày nghỉ`}</p>}
+                            {request.reviewNote && <p className="mt-2 text-xs text-slate-500"><strong>Ghi chú xử lý:</strong> {request.reviewNote}</p>}
+                            {request.cancellationReason && <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700"><strong>Lý do yêu cầu hủy:</strong> {request.cancellationReason}</p>}
+                            {request.cancellationReviewNote && <p className="mt-2 text-xs text-slate-500"><strong>Ghi chú xử lý hủy:</strong> {request.cancellationReviewNote}</p>}
+                          </div>
+
+                          <div className="flex shrink-0 flex-wrap items-center gap-2 lg:justify-end">
+                            {request.evidence?.url ? (
+                              <button type="button" onClick={() => openLeaveEvidence(request)} className="inline-flex items-center gap-1.5 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs font-semibold text-sky-700 hover:bg-sky-100"><ImagePlus size={14} /> Xem minh chứng</button>
+                            ) : (
+                              <span className={`inline-flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-semibold ${request.leaveType === "emergency" ? TONE.amber : TONE.slate}`}><ImagePlus size={14} /> Chưa có ảnh</span>
+                            )}
+                            {request.status === "pending" && (
+                              <>
+                                <button type="button" disabled={isReviewing || request.needsEvidence} onClick={() => reviewLeaveRequest(request, "approve")} title={request.needsEvidence ? "Cần ảnh minh chứng trước khi duyệt" : "Duyệt đơn"} className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3 py-2 text-xs font-bold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-45">
+                                  {isReviewing ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />} Duyệt
+                                </button>
+                                <button type="button" disabled={isReviewing} onClick={() => reviewLeaveRequest(request, "reject")} className="inline-flex items-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700 hover:bg-rose-100 disabled:opacity-45"><XCircle size={14} /> Từ chối</button>
+                              </>
+                            )}
+                            {request.status === "cancel_pending" && (
+                              <>
+                                <button type="button" disabled={isReviewing} onClick={() => reviewLeaveRequest(request, "approve_cancel")} className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3 py-2 text-xs font-bold text-white hover:bg-emerald-700 disabled:opacity-45">
+                                  {isReviewing ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />} Duyệt hủy
+                                </button>
+                                <button type="button" disabled={isReviewing} onClick={() => reviewLeaveRequest(request, "reject_cancel")} className="inline-flex items-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700 hover:bg-rose-100 disabled:opacity-45"><XCircle size={14} /> Từ chối hủy</button>
+                              </>
+                            )}
+                            {request.status === "approved" && (
+                              <button type="button" disabled={isReviewing} onClick={() => reviewLeaveRequest(request, "cancel")} className="inline-flex items-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700 hover:bg-rose-100 disabled:opacity-45">
+                                {isReviewing ? <Loader2 size={14} className="animate-spin" /> : <XCircle size={14} />} Hủy đơn
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                {Math.ceil(leaveTotal / PAGE_LIMIT) > 1 && (
+                  <div className="flex items-center justify-between border-t border-slate-100 px-4 py-3">
+                    <button disabled={leavePage <= 1} onClick={() => { const next = leavePage - 1; setLeavePage(next); loadLeaveRequests(next); }} className="flex items-center gap-1 rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40"><ChevronLeft size={13} /> Trước</button>
+                    <span className="text-xs text-slate-500">Trang {leavePage}/{Math.ceil(leaveTotal / PAGE_LIMIT)}</span>
+                    <button disabled={leavePage >= Math.ceil(leaveTotal / PAGE_LIMIT)} onClick={() => { const next = leavePage + 1; setLeavePage(next); loadLeaveRequests(next); }} className="flex items-center gap-1 rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40">Sau <ChevronRight size={13} /></button>
                   </div>
                 )}
               </>
