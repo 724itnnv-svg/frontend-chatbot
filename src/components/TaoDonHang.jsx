@@ -36,6 +36,8 @@ const SHIPPING_PARTNERS = [
   { id: "VTPFW", label: "Viettel Post FW (VTPFW)" },
 ];
 
+const ORDER_PREPARATION_DELAY_MS = 10000;
+
 const VTP_PRICE_CHECK_DEFAULT = {
   ACTIVE_KSHIP: true,
   SENDER_LOCATION_ID: 686,
@@ -453,6 +455,7 @@ async function buildNewCustomerPayloadV2({
   retailer,
   accessPrivateToken,
   matchedKiotUser,
+  invoiceAddressDetails: prefetchedInvoiceAddressDetails = null,
 }) {
   void parseAddressParts;
   void buildLocationNameFromParts;
@@ -470,11 +473,13 @@ async function buildNewCustomerPayloadV2({
   const customerAddress = oldAddress || newAddress;
   const invoiceAddress = newAddress || oldAddress;
   const customerAddressParts = parseVietnamAddressParts(customerAddress);
-  const invoiceAddressDetails = await resolveAdministrativeAreaDetails({
-    retailer,
-    accessPrivateToken,
-    address: invoiceAddress,
-  });
+  const invoiceAddressDetails =
+    prefetchedInvoiceAddressDetails ??
+    (await resolveAdministrativeAreaDetails({
+      retailer,
+      accessPrivateToken,
+      address: invoiceAddress,
+    }));
   const retailerId = retailerConfig?.retailerId ?? null;
 
   return {
@@ -868,7 +873,13 @@ function buildInvoiceDetailLine({ item, product, customerType }) {
 
 async function buildInvoiceDetailLines(
   items = [],
-  { retailer, accessPrivateToken, accessToken, customerType },
+  {
+    retailer,
+    accessPrivateToken,
+    accessToken,
+    customerType,
+    productMap: prefetchedProductMap = null,
+  },
 ) {
   const uniqueCodes = [
     ...new Set(
@@ -876,24 +887,26 @@ async function buildInvoiceDetailLines(
     ),
   ];
 
-  const productEntries = await Promise.all(
-    uniqueCodes.map(async (code) => {
-      try {
-        const product = await getProductByCode(
-          retailer,
-          accessPrivateToken,
-          accessToken,
-          code,
-        );
-        return [code, product];
-      } catch (error) {
-        console.error("getProductByCode error:", code, error);
-        return [code, null];
-      }
-    }),
-  );
-
-  const productMap = new Map(productEntries);
+  let productMap = prefetchedProductMap;
+  if (!(productMap instanceof Map)) {
+    const productEntries = await Promise.all(
+      uniqueCodes.map(async (code) => {
+        try {
+          const product = await getProductByCode(
+            retailer,
+            accessPrivateToken,
+            accessToken,
+            code,
+          );
+          return [code, product];
+        } catch (error) {
+          console.error("getProductByCode error:", code, error);
+          return [code, null];
+        }
+      }),
+    );
+    productMap = new Map(productEntries);
+  }
 
   const lines = items
     .map((item) =>
@@ -1225,21 +1238,25 @@ async function buildDeliveryDetailPayload({
   accessPrivateToken,
   retailer,
   invoiceUuid,
+  resolvedAddressDetails = null,
 }) {
   const isViettelPost = isViettelPostShippingPartner(selectedShippingPartner);
   const retailerConfig = getRetailerConfig(retailer);
   const branchTakingAddressId = retailerConfig?.BranchTakingAddressId ?? null;
   const branchTakingAddressStr = retailerConfig?.BranchTakingAddressStr ?? "";
-  const resolvedAddress = await resolveAdministrativeAreaDetails({
-    retailer,
-    accessPrivateToken,
-    address: invoiceAddress,
-  });
+  const resolvedAddress =
+    resolvedAddressDetails ??
+    (await resolveAdministrativeAreaDetails({
+      retailer,
+      accessPrivateToken,
+      address: invoiceAddress,
+    }));
   const locationId = resolvedAddress?.locationId ?? null;
   const wardId = resolvedAddress?.wardId ?? null;
   const provinceName = resolvedAddress?.provinceName || "";
   const districtName = resolvedAddress?.districtName || "";
   const wardName = resolvedAddress?.wardName || "";
+  const receiverWardId = wardId ?? VTP_PRICE_CHECK_DEFAULT.RECEIVER_WARD_ID;
   const locationName = buildLocationNameFromParts({
     province: provinceName,
     district: districtName,
@@ -1261,7 +1278,8 @@ async function buildDeliveryDetailPayload({
       Address: deliveryParts.street || invoiceAddress,
       ContactNumber: parsed?.phoneNumber || "",
       Receiver: parsed?.customerName || "",
-      DeliveryBy: 0,
+      DeliveryBy:
+        selectedPartnerDelivery?.Id ?? selectedPartnerDelivery?.id ?? 0,
       LocationId: locationId,
       LocationName: locationName,
       WardName: wardName || deliveryParts.ward || "",
@@ -1270,7 +1288,7 @@ async function buildDeliveryDetailPayload({
       BranchTakingAddressId: branchTakingAddressId,
       BranchTakingAddressStr: branchTakingAddressStr,
       AdministrativeAreaId: null,
-      WardId: wardId,
+      WardId: receiverWardId || VTP_PRICE_CHECK_DEFAULT.RECEIVER_WARD_ID,
       Weight: 0,
       Height: 0,
       Width: 0,
@@ -1351,7 +1369,6 @@ async function buildDeliveryDetailPayload({
   const selectedVtpServiceAdd = JSON.stringify(VTP_DEFAULT_SERVICE_EXTRA);
   const receiverLocationId =
     locationId ?? VTP_PRICE_CHECK_DEFAULT.RECEIVER_LOCATION_ID;
-  const receiverWardId = wardId ?? VTP_PRICE_CHECK_DEFAULT.RECEIVER_WARD_ID;
   const receiverAddress = VTP_PRICE_CHECK_DEFAULT.RECEIVER_ADDRESS;
   const receiverStreet = String(
     deliveryParts.street || receiverAddress || "",
@@ -1466,6 +1483,8 @@ async function buildInvoicePayload({
   accessToken,
   customerType,
   accessPrivateToken,
+  productMap = null,
+  deliveryAddressDetails = null,
 }) {
   const retailerConfig = getRetailerConfig(retailer);
   const branchId = retailerConfig?.branchId ?? null;
@@ -1500,6 +1519,7 @@ async function buildInvoicePayload({
       accessPrivateToken,
       accessToken,
       customerType,
+      productMap,
     },
   );
   const invoiceDetails = invoiceDetailsResult.lines || [];
@@ -1551,6 +1571,7 @@ async function buildInvoicePayload({
     accessPrivateToken,
     retailer,
     invoiceUuid,
+    resolvedAddressDetails: deliveryAddressDetails,
   });
 
   return {
@@ -1723,6 +1744,16 @@ export default function TaoDonHang() {
   const [matchedKiotUser, setMatchedKiotUser] = useState(null);
   const [partnerDeliveries, setPartnerDeliveries] = useState([]);
   const [preparedInvoicePayload, setPreparedInvoicePayload] = useState(null);
+  const [isCreatingOrder, setIsCreatingOrder] = useState(false);
+  const [orderPreparation, setOrderPreparation] = useState({
+    status: "idle",
+    key: "",
+    customerRecord: null,
+    groups: [],
+    productMap: new Map(),
+    addressDetails: new Map(),
+    error: "",
+  });
   const [tokenLoading, setTokenLoading] = useState(false);
   const [tokenError, setTokenError] = useState("");
   const { user } = useAuth() || {};
@@ -1788,6 +1819,10 @@ export default function TaoDonHang() {
       ?.label || selectedShippingPartner;
 
   const parsed = useMemo(() => parseRawOrder(rawText), [rawText]);
+  const orderPreparationKey = useMemo(
+    () => JSON.stringify([selectedRetailerId, customerType, rawText]),
+    [selectedRetailerId, customerType, rawText],
+  );
 
   useEffect(() => {
     let active = true;
@@ -1889,6 +1924,174 @@ export default function TaoDonHang() {
     };
   }, [selectedRetailerId, accessPrivateToken]);
 
+  useEffect(() => {
+    let active = true;
+    let timerId = null;
+
+    setPreparedInvoicePayload(null);
+
+    if (!String(rawText || "").trim()) {
+      setOrderPreparation({
+        status: "idle",
+        key: orderPreparationKey,
+        customerRecord: null,
+        groups: [],
+        productMap: new Map(),
+        addressDetails: new Map(),
+        error: "",
+      });
+      return () => {
+        active = false;
+      };
+    }
+
+    setOrderPreparation({
+      status: "waiting",
+      key: orderPreparationKey,
+      customerRecord: null,
+      groups: [],
+      productMap: new Map(),
+      addressDetails: new Map(),
+      error: "",
+    });
+
+    if (!accessPrivateToken || !accessToken) {
+      return () => {
+        active = false;
+      };
+    }
+
+    timerId = window.setTimeout(async () => {
+      if (!active) return;
+
+      setOrderPreparation((current) => ({
+        ...current,
+        status: "loading",
+        error: "",
+      }));
+
+      try {
+        const phoneNumber = String(parsed.phoneNumber || "").trim();
+        const productCodes = [
+          ...new Set(
+            (parsed.items || [])
+              .map((item) => String(item?.sku || "").trim())
+              .filter(Boolean),
+          ),
+        ];
+        const invoiceAddress = String(
+          parsed.newAddress || parsed.oldAddress || "",
+        ).trim();
+        const deliveryAddress = String(
+          parsed.oldAddress || parsed.newAddress || "",
+        ).trim();
+        const addresses = [
+          ...new Set([invoiceAddress, deliveryAddress].filter(Boolean)),
+        ];
+
+        const [
+          customerResponse,
+          groupsResponse,
+          productEntries,
+          addressEntries,
+        ] = await Promise.all([
+          phoneNumber
+            ? getCustomerByPhoneNumber(
+                selectedRetailerId,
+                accessPrivateToken,
+                phoneNumber,
+              )
+            : Promise.resolve(null),
+          getCustomerGroup(selectedRetailerId, accessPrivateToken),
+          Promise.all(
+            productCodes.map(async (code) => {
+              try {
+                const product = await getProductByCode(
+                  selectedRetailerId,
+                  accessPrivateToken,
+                  accessToken,
+                  code,
+                );
+                return [code, product];
+              } catch (error) {
+                console.error("getProductByCode error:", code, error);
+                return [code, null];
+              }
+            }),
+          ),
+          Promise.all(
+            addresses.map(async (address) => [
+              address,
+              await resolveAdministrativeAreaDetails({
+                retailer: selectedRetailerId,
+                accessPrivateToken,
+                address,
+              }),
+            ]),
+          ),
+        ]);
+
+        if (!active) return;
+
+        const groups = Array.isArray(groupsResponse)
+          ? groupsResponse
+          : groupsResponse?.Data || groupsResponse?.data || [];
+
+        setOrderPreparation({
+          status: "ready",
+          key: orderPreparationKey,
+          customerRecord: extractCustomerRecord(customerResponse, null),
+          groups,
+          productMap: new Map(productEntries),
+          addressDetails: new Map(addressEntries),
+          error: "",
+        });
+      } catch (error) {
+        if (!active) return;
+        console.error("prepare order data error:", error);
+        setOrderPreparation({
+          status: "error",
+          key: orderPreparationKey,
+          customerRecord: null,
+          groups: [],
+          productMap: new Map(),
+          addressDetails: new Map(),
+          error: error?.message || "Không chuẩn bị được dữ liệu đơn hàng",
+        });
+      }
+    }, ORDER_PREPARATION_DELAY_MS);
+
+    return () => {
+      active = false;
+      if (timerId !== null) {
+        window.clearTimeout(timerId);
+      }
+    };
+  }, [
+    accessPrivateToken,
+    accessToken,
+    orderPreparationKey,
+    parsed,
+    rawText,
+    selectedRetailerId,
+  ]);
+
+  const isOrderPreparationReady =
+    orderPreparation.status === "ready" &&
+    orderPreparation.key === orderPreparationKey &&
+    Boolean(String(parsed.phoneNumber || "").trim());
+  const orderPreparationMessage = tokenLoading
+    ? "Đang lấy token để chuẩn bị dữ liệu..."
+    : orderPreparation.status === "waiting"
+      ? "Đang chờ bạn ngưng nhập 10 giây..."
+      : orderPreparation.status === "loading"
+        ? "Đang tải khách hàng, sản phẩm, nhóm khách và địa chỉ..."
+        : orderPreparation.status === "ready"
+          ? "Dữ liệu đã sẵn sàng để tạo đơn."
+          : orderPreparation.status === "error"
+            ? orderPreparation.error
+            : "Nhập nội dung đơn hàng để bắt đầu chuẩn bị dữ liệu.";
+
   const handleReset = () => {
     setSelectedShippingPartner("GHN");
     setCustomerType("dai_ly");
@@ -1918,22 +2121,17 @@ export default function TaoDonHang() {
       return;
     }
 
+    if (!isOrderPreparationReady) {
+      console.warn("Order data is not prepared yet.");
+      return;
+    }
+
+    if (isCreatingOrder) return;
+
+    setIsCreatingOrder(true);
     try {
-      const response = await getCustomerByPhoneNumber(
-        selectedRetailerId,
-        accessPrivateToken,
-        phoneNumber,
-      );
-
-      const foundCustomer = extractCustomerRecord(response, null);
-
-      const groupsResponse = await getCustomerGroup(
-        selectedRetailerId,
-        accessPrivateToken,
-      );
-      const groups = Array.isArray(groupsResponse)
-        ? groupsResponse
-        : groupsResponse?.Data || groupsResponse?.data || [];
+      const foundCustomer = orderPreparation.customerRecord;
+      const groups = orderPreparation.groups;
 
       const targetGroupName = pickCustomerGroupName(customerType);
       const targetGroup = groups.find(
@@ -1953,6 +2151,9 @@ export default function TaoDonHang() {
           retailer: selectedRetailerId,
           accessPrivateToken,
           matchedKiotUser,
+          invoiceAddressDetails: orderPreparation.addressDetails.get(
+            String(parsed.newAddress || parsed.oldAddress || "").trim(),
+          ),
         });
 
         const createResponse = await addNewCustomer(
@@ -1966,6 +2167,13 @@ export default function TaoDonHang() {
 
         console.log("addNewCustomer response:", createResponse);
         customerRecord = extractCustomerRecord(createResponse, null);
+        if (customerRecord) {
+          setOrderPreparation((current) =>
+            current.key === orderPreparationKey
+              ? { ...current, customerRecord }
+              : current,
+          );
+        }
       }
 
       if (!customerRecord) {
@@ -1985,6 +2193,10 @@ export default function TaoDonHang() {
         accessToken,
         customerType,
         accessPrivateToken,
+        productMap: orderPreparation.productMap,
+        deliveryAddressDetails: orderPreparation.addressDetails.get(
+          String(parsed.oldAddress || parsed.newAddress || "").trim(),
+        ),
       });
 
       setPreparedInvoicePayload(invoicePayload);
@@ -2038,6 +2250,8 @@ export default function TaoDonHang() {
       }
     } catch (error) {
       console.error("create customer flow error:", error);
+    } finally {
+      setIsCreatingOrder(false);
     }
   };
 
@@ -2151,6 +2365,18 @@ export default function TaoDonHang() {
                 spellCheck={false}
               />
 
+              <div
+                className={`text-xs font-medium ${
+                  orderPreparation.status === "error"
+                    ? "text-rose-600"
+                    : isOrderPreparationReady
+                      ? "text-emerald-700"
+                      : "text-slate-500"
+                }`}
+              >
+                {orderPreparationMessage}
+              </div>
+
               <div className="flex flex-wrap gap-2">
                 <button
                   type="button"
@@ -2173,9 +2399,10 @@ export default function TaoDonHang() {
                 <button
                   type="button"
                   onClick={handleCreateOrder}
-                  className="inline-flex items-center gap-2 rounded-xl bg-cyan-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-cyan-700"
+                  disabled={!isOrderPreparationReady || isCreatingOrder}
+                  className="inline-flex items-center gap-2 rounded-xl bg-cyan-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-cyan-700 disabled:cursor-not-allowed disabled:bg-slate-300"
                 >
-                  Tạo đơn hàng
+                  {isCreatingOrder ? "Đang tạo đơn..." : "Tạo đơn hàng"}
                 </button>
               </div>
             </div>

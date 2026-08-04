@@ -413,6 +413,7 @@ export async function getCustomerGroup(
   }
 }
 
+//lấy khách hàng theo số điện thoại
 export async function getCustomerByPhoneNumber(
   retailer = "kingfarm",
   accessPrivateToken,
@@ -509,6 +510,7 @@ export async function getCustomerByPhoneNumber(
   }
 }
 
+//lấy id tỉnh, huyện, xã
 export async function getIdAdministrativearea(
   retailer = "kingfarm",
   accessPrivateToken,
@@ -565,6 +567,7 @@ export async function getIdAdministrativearea(
   }
 }
 
+// xuất hóa đơn điện tử
 export async function publishEInvoice(
   retailer = "kingfarm",
   accessPrivateToken,
@@ -594,6 +597,7 @@ export async function publishEInvoice(
   }
 }
 
+//lấy thông tin user trong kiotviet
 export async function getUserInKiot(retailer = "kingfarm", accessPrivateToken) {
   try {
     const url = "https://api-man1.kiotviet.vn/api/users";
@@ -620,6 +624,7 @@ export async function getUserInKiot(retailer = "kingfarm", accessPrivateToken) {
   }
 }
 
+//lấy sản phẩm theo code
 export async function getProductByCode(
   retailer = "kingfarm",
   accessPrivateToken,
@@ -658,6 +663,7 @@ export async function getProductByCode(
   }
 }
 
+//tạo hóa đơn
 export async function createInvoices(
   retailer = "kingfarm",
   accessPrivateToken,
@@ -696,6 +702,7 @@ export async function createInvoices(
   }
 }
 
+//kiểm tra giá vận chuyển viettel post
 export async function checkPriceVTP(
   retailer = "kingfarm",
   accessPrivateToken,
@@ -731,6 +738,7 @@ export async function checkPriceVTP(
   }
 }
 
+//lấy id tỉnh, huyện
 export async function getIdLocations(
   retailer = "kingfarm",
   accessPrivateToken,
@@ -786,6 +794,7 @@ export async function getIdLocations(
   }
 }
 
+//lấy id xã
 export async function getIdWards(
   retailer = "kingfarm",
   accessPrivateToken,
@@ -843,6 +852,7 @@ export async function getIdWards(
   }
 }
 
+//tạo vận đơn cho viettel post
 export async function createInvoicesDelivery(
   retailer = "kingfarm",
   accessPrivateToken,
@@ -876,6 +886,7 @@ export async function createInvoicesDelivery(
   }
 }
 
+// lấy full thông tin của tỉnh, huyện, xã bên GHN
 export async function getFullIdProvinceDistrictWard(
   retailer = "kingfarm",
   accessPrivateToken,
@@ -898,6 +909,39 @@ export async function getFullIdProvinceDistrictWard(
     console.log("createInvoices response:", response.data);
 
     return response.data;
+  } catch (error) {
+    const message =
+      error.response?.data?.error?.ResponseStatus?.Message ||
+      error.response?.data?.ResponseStatus?.Message ||
+      error.response?.data?.message ||
+      error.message;
+
+    throw new Error(`Failed to call administrative area API: ${message}`);
+  }
+}
+
+//lấy khuyến mãi
+export async function getCampaign(
+  retailer = "kingfarm",
+  accessPrivateToken,
+  accessToken,
+) {
+  try {
+    const config = getRetailerConfig(retailer);
+    const url = `https://api-promotion1.kiotviet.vn/api/campaigns?Includes=SalePromotions&%24inlinecount=allpages&Effect=1&%24top=150&%24filter=IsActive+eq+1`;
+
+    const headers = {
+      Accept: "application/json, text/plain, */*",
+      Authorization: `Bearer ${accessPrivateToken}`,
+    };
+
+    const response = await axios.get(url, {
+      headers,
+    });
+
+    console.log("createInvoices response:", response.data);
+
+    return response.data.Data;
   } catch (error) {
     const message =
       error.response?.data?.error?.ResponseStatus?.Message ||
