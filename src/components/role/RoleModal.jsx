@@ -54,6 +54,9 @@ export default function RoleModal({ isOpen, onClose, onSave, initialData }) {
     });
   }
   const allActionIds = APP_PERMISSIONS.actions.map(a => a.id);
+  const tableActions = APP_PERMISSIONS.actions.filter(
+    (action) => !Array.isArray(action.screenIds),
+  );
   const allScreenIds = APP_PERMISSIONS.screens.map(s => s.id);
   const actionAppliesToScreen = (action, screenId) =>
     !Array.isArray(action?.screenIds) || action.screenIds.includes(screenId);
@@ -349,7 +352,7 @@ export default function RoleModal({ isOpen, onClose, onSave, initialData }) {
                         })()}
                       </div>
                     </th>
-                    {APP_PERMISSIONS.actions.map(action => {
+                    {tableActions.map(action => {
                       const applicableScreens = APP_PERMISSIONS.screens.filter((screen) => actionAppliesToScreen(action, screen.id));
                       const total = applicableScreens.length;
                       const count = applicableScreens.filter(s => permissions[s.id]?.[action.id] === true).length;
@@ -389,7 +392,7 @@ export default function RoleModal({ isOpen, onClose, onSave, initialData }) {
                     return (
                       <React.Fragment key={group.id}>
                         <tr className="bg-slate-100/70">
-                          <td colSpan={APP_PERMISSIONS.actions.length + 3} className="px-10 py-3 border-y border-slate-200">
+                          <td colSpan={tableActions.length + 3} className="px-10 py-3 border-y border-slate-200">
                             <div className="flex items-center justify-between gap-4">
                               <div className="min-w-0">
                                 <div className="flex items-center gap-2">
@@ -425,6 +428,32 @@ export default function RoleModal({ isOpen, onClose, onSave, initialData }) {
                                 <div className="flex items-center gap-3">
                                   <span className={`text-sm font-bold ${isVisible ? 'text-slate-900' : 'text-slate-300'}`}>{screen.name}</span>
                                   {screenDefault === screen.id && <span className="bg-indigo-600 text-white text-[8px] px-1.5 py-0.5 font-black uppercase">Home</span>}
+                                  {(APP_PERMISSIONS.actions || [])
+                                    .filter((action) => Array.isArray(action.screenIds) && action.screenIds.includes(screen.id))
+                                    .map((action) => {
+                                      const enabled = permissions[screen.id]?.[action.id] === true;
+                                      return (
+                                        <button
+                                          key={action.id}
+                                          type="button"
+                                          disabled={!isVisible}
+                                          onClick={() => toggleAction(screen.id, action.id)}
+                                          className={`ml-2 inline-flex items-center gap-2 rounded-lg border px-2.5 py-1 text-[10px] font-black uppercase transition ${
+                                            isVisible && enabled
+                                              ? "border-cyan-500 bg-cyan-500 text-white"
+                                              : isVisible
+                                                ? "border-slate-200 bg-white text-slate-500 hover:border-cyan-400"
+                                                : "cursor-not-allowed border-slate-100 bg-slate-50 text-slate-300"
+                                          }`}
+                                          title={`Bật/tắt quyền ${action.name}`}
+                                        >
+                                          <span className={`grid h-3.5 w-3.5 place-items-center rounded-sm border ${enabled ? "border-white bg-white/20" : "border-slate-300"}`}>
+                                            {enabled ? <Check size={10} className="stroke-[3]" /> : null}
+                                          </span>
+                                          {action.name}
+                                        </button>
+                                      );
+                                    })}
                                 </div>
                               </td>
                               <td className="px-4 py-4 text-center">
@@ -435,7 +464,7 @@ export default function RoleModal({ isOpen, onClose, onSave, initialData }) {
                                   <div className={`absolute top-0 w-4 h-full transition-all ${isVisible ? 'left-5 bg-white' : 'left-0 bg-slate-300'}`} />
                                 </button>
                               </td>
-                              {APP_PERMISSIONS.actions.map(action => {
+                              {tableActions.map(action => {
                                 const isApplicable = actionAppliesToScreen(action, screen.id);
                                 const isChecked = permissions[screen.id]?.[action.id];
                                 return (
