@@ -241,6 +241,12 @@ const MENU_CONFIG = [
     label: "Địa chỉ",
     icon: BookOpen,
   },
+  {
+    id: "dia_chi_2",
+    path: "/admin/dia-chi-2",
+    label: "Công cụ chuyển địa chỉ",
+    icon: MapPin,
+  },
 ];
 
 MENU_CONFIG.push({
@@ -275,7 +281,6 @@ const MENU_GROUPS = [
       "weborder",
       "tao_don_hang",
       "so_quy",
-      "dia_chi",
     ],
   },
   {
@@ -332,6 +337,12 @@ const MENU_GROUPS = [
     label: "Nông nghiệp",
     icon: TreePine,
     items: ["dua_sap"],
+  },
+  {
+    id: "tools",
+    label: "Công cụ",
+    icon: LayoutDashboard,
+    items: ["dia_chi", "dia_chi_2"],
   },
 ];
 
@@ -405,7 +416,7 @@ const Sidebar = memo(() => {
     if (otherMenus.length > 0) {
       groups.push({
         id: "other",
-        label: "Khác",
+        label: "Công cụ",
         icon: LayoutDashboard,
         menus: otherMenus,
       });
