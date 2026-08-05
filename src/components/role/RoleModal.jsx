@@ -55,6 +55,12 @@ export default function RoleModal({ isOpen, onClose, onSave, initialData }) {
   }
   const allActionIds = APP_PERMISSIONS.actions.map(a => a.id);
   const allScreenIds = APP_PERMISSIONS.screens.map(s => s.id);
+  const actionAppliesToScreen = (action, screenId) =>
+    !Array.isArray(action?.screenIds) || action.screenIds.includes(screenId);
+  const actionIdsForScreen = (screenId) =>
+    APP_PERMISSIONS.actions
+      .filter((action) => actionAppliesToScreen(action, screenId))
+      .map((action) => action.id);
 
   // 1. Bật/Tắt quyền truy cập màn hình (Menu)
   const toggleScreen = (screenId) => {
@@ -72,6 +78,8 @@ export default function RoleModal({ isOpen, onClose, onSave, initialData }) {
 
   // 2. Bật/Tắt từng hành động cụ thể (Read, Create, Edit, Export...)
   const toggleAction = (screenId, actionId) => {
+    const action = APP_PERMISSIONS.actions.find((item) => item.id === actionId);
+    if (!actionAppliesToScreen(action, screenId)) return;
     if (!selectedScreens.includes(screenId)) {
       setSelectedScreens(prev => [...prev, screenId]);
     }
@@ -92,10 +100,11 @@ export default function RoleModal({ isOpen, onClose, onSave, initialData }) {
     const current = permissions[screenId] || {};
 
     // Kiểm tra xem hàng này đã được tích hết tất cả các cột chưa
-    const isFullRow = allActionIds.every(id => current[id] === true);
+    const rowActionIds = actionIdsForScreen(screenId);
+    const isFullRow = rowActionIds.every(id => current[id] === true);
 
     const updatedRow = {};
-    allActionIds.forEach(id => {
+    rowActionIds.forEach(id => {
       // Nếu đã full thì tắt hết, nếu chưa full thì bật hết
       updatedRow[id] = !isFullRow;
     });
@@ -116,9 +125,11 @@ export default function RoleModal({ isOpen, onClose, onSave, initialData }) {
 
   // 5. Toggle toàn bộ 1 cột action (xem/thêm/sửa/...)
   const handleSelectAllColumn = (actionId) => {
-    const allChecked = allScreenIds.every(id => permissions[id]?.[actionId] === true);
+    const action = APP_PERMISSIONS.actions.find((item) => item.id === actionId);
+    const applicableScreenIds = allScreenIds.filter((id) => actionAppliesToScreen(action, id));
+    const allChecked = applicableScreenIds.every(id => permissions[id]?.[actionId] === true);
     const newPermissions = { ...permissions };
-    allScreenIds.forEach(id => {
+    applicableScreenIds.forEach(id => {
       newPermissions[id] = { ...(newPermissions[id] || {}), [actionId]: !allChecked };
     });
     if (!allChecked) setSelectedScreens(allScreenIds);
@@ -128,7 +139,7 @@ export default function RoleModal({ isOpen, onClose, onSave, initialData }) {
   const handleSelectAllGroup = (group) => {
     const groupScreenIds = group.screens.map((screen) => screen.id);
     const groupIsFull = groupScreenIds.every((id) =>
-      selectedScreens.includes(id) && allActionIds.every((actionId) => permissions[id]?.[actionId] === true)
+      selectedScreens.includes(id) && actionIdsForScreen(id).every((actionId) => permissions[id]?.[actionId] === true)
     );
 
     if (groupIsFull) {
@@ -147,7 +158,7 @@ export default function RoleModal({ isOpen, onClose, onSave, initialData }) {
       const next = { ...prev };
       groupScreenIds.forEach((id) => {
         const row = { ...(next[id] || {}) };
-        allActionIds.forEach((actionId) => {
+        actionIdsForScreen(id).forEach((actionId) => {
           row[actionId] = true;
         });
         next[id] = row;
@@ -162,7 +173,7 @@ export default function RoleModal({ isOpen, onClose, onSave, initialData }) {
 
     APP_PERMISSIONS.screens.forEach(screen => {
       const rowActions = {};
-      allActionIds.forEach(actionId => {
+      actionIdsForScreen(screen.id).forEach(actionId => {
         rowActions[actionId] = true;
       });
       fullPermissions[screen.id] = rowActions;
@@ -339,8 +350,9 @@ export default function RoleModal({ isOpen, onClose, onSave, initialData }) {
                       </div>
                     </th>
                     {APP_PERMISSIONS.actions.map(action => {
-                      const total = APP_PERMISSIONS.screens.length;
-                      const count = APP_PERMISSIONS.screens.filter(s => permissions[s.id]?.[action.id] === true).length;
+                      const applicableScreens = APP_PERMISSIONS.screens.filter((screen) => actionAppliesToScreen(action, screen.id));
+                      const total = applicableScreens.length;
+                      const count = applicableScreens.filter(s => permissions[s.id]?.[action.id] === true).length;
                       const allOn = count === total;
                       return (
                         <th key={action.id} className="px-4 py-4 text-center border-b border-slate-100">
@@ -369,9 +381,9 @@ export default function RoleModal({ isOpen, onClose, onSave, initialData }) {
                     const groupScreenIds = group.screens.map((screen) => screen.id);
                     const visibleCount = groupScreenIds.filter((id) => selectedScreens.includes(id)).length;
                     const actionCount = groupScreenIds.reduce((total, id) => {
-                      return total + allActionIds.filter((actionId) => permissions[id]?.[actionId] === true).length;
+                      return total + actionIdsForScreen(id).filter((actionId) => permissions[id]?.[actionId] === true).length;
                     }, 0);
-                    const maxActionCount = groupScreenIds.length * allActionIds.length;
+                    const maxActionCount = groupScreenIds.reduce((total, id) => total + actionIdsForScreen(id).length, 0);
                     const groupIsFull = visibleCount === groupScreenIds.length && actionCount === maxActionCount;
 
                     return (
@@ -424,20 +436,21 @@ export default function RoleModal({ isOpen, onClose, onSave, initialData }) {
                                 </button>
                               </td>
                               {APP_PERMISSIONS.actions.map(action => {
+                                const isApplicable = actionAppliesToScreen(action, screen.id);
                                 const isChecked = permissions[screen.id]?.[action.id];
                                 return (
                                   <td key={action.id} className="px-4 py-4 text-center">
                                     <button
-                                      disabled={!isVisible}
+                                      disabled={!isVisible || !isApplicable}
                                       onClick={() => toggleAction(screen.id, action.id)}
-                                      className={`w-6 h-6 rounded border-2 mx-auto transition-all flex items-center justify-center ${isVisible && isChecked
+                                      className={`w-6 h-6 rounded border-2 mx-auto transition-all flex items-center justify-center ${isVisible && isApplicable && isChecked
                                         ? 'bg-emerald-500 border-emerald-600 shadow-sm shadow-emerald-200'
-                                        : isVisible
+                                        : isVisible && isApplicable
                                           ? 'bg-white border-slate-300 hover:border-emerald-400'
                                           : 'bg-slate-50 border-slate-200 cursor-not-allowed'
                                         }`}
                                     >
-                                      {isVisible && isChecked && <Check size={13} className="text-white stroke-[3]" />}
+                                      {isVisible && isApplicable && isChecked && <Check size={13} className="text-white stroke-[3]" />}
                                     </button>
                                   </td>
                                 );

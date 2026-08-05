@@ -131,6 +131,7 @@ const APP_PERMISSIONS = {
     { id: "edit", name: "Chỉnh sửa", color: "amber" },
     { id: "delete", name: "Xóa", color: "red" },
     { id: "export", name: "Xuất file", color: "slate" },
+    { id: "new_to_old", name: "Mới → Cũ", color: "cyan", screenIds: ["dia_chi_2"] },
   ],
 };
 

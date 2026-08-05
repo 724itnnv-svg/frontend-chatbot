@@ -20,6 +20,8 @@ import {
   getAddress2Status,
   reverseConvertAddress2,
 } from "./address2Api";
+import { useAuth } from "../context/AuthContext";
+import { hasFullAccess } from "../utils/screenAccess";
 
 function displayName(value) {
   return value?.name_with_type || value?.name || "-";
@@ -180,6 +182,9 @@ function ResultDetails({ result, direction, onCopy, copied }) {
 }
 
 export default function Address2Manager() {
+  const { user } = useAuth();
+  const canConvertNewToOld =
+    hasFullAccess(user) || user?.action?.dia_chi_2?.new_to_old === true;
   const [query, setQuery] = useState("");
   const [direction, setDirection] = useState("old-new");
   const [mappingCount, setMappingCount] = useState(0);
@@ -310,7 +315,7 @@ export default function Address2Manager() {
             {[
               { id: "old-new", label: "Cũ → Mới" },
               { id: "new-old", label: "Mới → Cũ" },
-            ].map((item) => (
+            ].filter((item) => item.id !== "new-old" || canConvertNewToOld).map((item) => (
               <button
                 key={item.id}
                 type="button"
