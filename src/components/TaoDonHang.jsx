@@ -1,11 +1,15 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import {
+  CheckCircle2,
+  Circle,
   ClipboardList,
   Copy,
+  LoaderCircle,
   ShoppingCart,
   Sparkles,
   Trash2,
+  XCircle,
 } from "lucide-react";
 import {
   getAccessPrivateToken,
@@ -43,6 +47,15 @@ const SHIPPING_PARTNERS = [
 
 const ORDER_PREPARATION_DELAY_MS = 10000;
 
+const CREATE_ORDER_STEP_DEFINITIONS = {
+  customer: "Khách hàng",
+  products: "Sản phẩm và khuyến mãi",
+  address: "Địa chỉ giao hàng",
+  price: "Phí vận chuyển",
+  shipping: "Vận đơn",
+  invoice: "Hóa đơn",
+};
+
 const GHN_PACKAGE_DEFAULT = {
   length: 50,
   width: 30,
@@ -79,7 +92,7 @@ const SAMPLE_TEXT = `Khách hàng: Thành
 SĐT: 0964294979
 Địa chỉ cũ: 27/19 Ấp Tân Hưng, Xã Tân Hạnh, Huyện Long Hồ, Tỉnh Vĩnh Long
 Địa chỉ mới: Ấp Tân hưng, Phường Tân Hạnh, Vĩnh Long
-1 Xô Siêu Phục Hồi 30-10-10+TE 22kg  - ONNV110 (giá 859.000₫/xô)
+1 Xô Siêu Phục Hồi 30-10-10+TE 22kg  - KFB1 (giá 859.000₫/xô)
 NVC: Viettel`;
 
 function getCustomerTypeOptions(retailerId) {
@@ -284,15 +297,47 @@ function normalizeNameForCompare(value = "") {
     .trim();
 }
 
-function getKiotUserDisplayName(user = {}) {
+function getKiotUserDisplayName(kiotUser = {}) {
   return (
-    user?.CompareGivenName ||
-    user?.GivenName ||
-    user?.FullName ||
-    user?.fullName ||
-    user?.Name ||
-    user?.name ||
+    kiotUser?.CompareGivenName ||
+    kiotUser?.GivenName ||
+    kiotUser?.FullName ||
+    kiotUser?.Name ||
     ""
+  );
+}
+
+function findMatchingKiotUser(kiotUsers = [], userName = "") {
+  const normalizedUserName = normalizeNameForCompare(userName);
+  if (!normalizedUserName) return null;
+
+  return (
+    kiotUsers.find((kiotUser) => {
+      const kiotName = normalizeNameForCompare(
+        getKiotUserDisplayName(kiotUser),
+      );
+      return kiotName && kiotName === normalizedUserName;
+    }) ||
+    kiotUsers.find((kiotUser) => {
+      const kiotName = normalizeNameForCompare(
+        getKiotUserDisplayName(kiotUser),
+      );
+      return (
+        kiotName &&
+        (kiotName.includes(normalizedUserName) ||
+          normalizedUserName.includes(kiotName))
+      );
+    }) ||
+    null
+  );
+}
+
+function getKiotUserOptionKey(kiotUser = {}, index = 0) {
+  return String(
+    kiotUser?.Id ||
+      kiotUser?.UserId ||
+      kiotUser?.UserName ||
+      `kiot-user-${index}`,
   );
 }
 
@@ -505,6 +550,7 @@ function buildNewCustomerPayload({
   parsed,
   selectedGroupId,
   customerType,
+  taxCode = "",
   matchedKiotUser = null,
 }) {
   const customerName = String(parsed.customerName || "").trim();
@@ -558,7 +604,8 @@ function buildNewCustomerPayload({
       CustomerGroupDetails: selectedGroupId
         ? [{ GroupId: selectedGroupId }]
         : [],
-      Organization: "",
+      TaxCode: isAgency ? String(taxCode || "").trim() : "",
+      Organization: isAgency ? customerName : "",
       Uuid:
         globalThis?.crypto?.randomUUID?.() ||
         `tmp-${Date.now()}-${Math.random().toString(16).slice(2)}`,
@@ -575,6 +622,7 @@ async function buildNewCustomerPayloadV2({
   retailer,
   accessPrivateToken,
   matchedKiotUser,
+  taxCode = "",
   invoiceAddressDetails: prefetchedInvoiceAddressDetails = null,
 }) {
   void parseAddressParts;
@@ -648,7 +696,8 @@ async function buildNewCustomerPayloadV2({
       CustomerGroupDetails: selectedGroupId
         ? [{ GroupId: selectedGroupId }]
         : [],
-      Organization: "",
+      TaxCode: isAgency ? String(taxCode || "").trim() : "",
+      Organization: isAgency ? customerName : "",
       Uuid:
         globalThis?.crypto?.randomUUID?.() ||
         `tmp-${Date.now()}-${Math.random().toString(16).slice(2)}`,
@@ -1105,6 +1154,7 @@ async function getGhnShippingQuote({
   branchTakingAddressStr,
   deliveryParts,
   invoiceDetails,
+  onProgress,
 }) {
   const pricingPackages = buildGhnPricingPackages(invoiceDetails);
   if (pricingPackages.length === 0) {
@@ -1135,6 +1185,7 @@ async function getGhnShippingQuote({
     ward: deliveryParts.ward,
   };
 
+  onProgress?.("address", "loading", "Đang lấy mã địa chỉ GHN...");
   const [fromAddress, toAddress] = await Promise.all([
     getFullIdProvinceDistrictWard(
       retailer,
@@ -1164,6 +1215,7 @@ async function getGhnShippingQuote({
   ) {
     throw new Error("Không map đủ địa chỉ gửi/nhận sang mã khu vực GHN.");
   }
+  onProgress?.("address", "success", "Lấy địa chỉ GHN thành công.");
 
   const payloads = pricingPackages.map((item) => ({
     service_type_id: item.serviceTypeId,
@@ -1187,6 +1239,7 @@ async function getGhnShippingQuote({
   }));
   console.log("TaoDonHang GHN check price payloads", payloads);
 
+  onProgress?.("price", "loading", "Đang tính phí vận chuyển GHN...");
   const responses = await Promise.all(
     payloads.map((payload) =>
       checkPriceGHN(retailer, accessPrivateToken, accessToken, payload),
@@ -1198,8 +1251,14 @@ async function getGhnShippingQuote({
   }
 
   console.log("TaoDonHang GHN check price responses", responses);
+  const totalFee = fees.reduce((sum, fee) => sum + fee, 0);
+  onProgress?.(
+    "price",
+    "success",
+    `Tính phí GHN thành công: ${totalFee.toLocaleString("vi-VN")}đ.`,
+  );
   return {
-    totalFee: fees.reduce((sum, fee) => sum + fee, 0),
+    totalFee,
     totalActualWeight: pricingPackages.reduce(
       (sum, item) => sum + item.actualWeight,
       0,
@@ -2154,11 +2213,13 @@ async function buildDeliveryDetailPayload({
   retailer,
   invoiceUuid,
   resolvedAddressDetails = null,
+  onProgress,
 }) {
   const isViettelPost = isViettelPostShippingPartner(selectedShippingPartner);
   const retailerConfig = getRetailerConfig(retailer);
   const branchTakingAddressId = retailerConfig?.BranchTakingAddressId ?? null;
   const branchTakingAddressStr = retailerConfig?.BranchTakingAddressStr ?? "";
+  onProgress?.("address", "loading", "Đang đối chiếu địa chỉ giao hàng...");
   const resolvedAddress =
     resolvedAddressDetails ??
     (await resolveAdministrativeAreaDetails({
@@ -2193,6 +2254,7 @@ async function buildDeliveryDetailPayload({
       branchTakingAddressStr,
       deliveryParts,
       invoiceDetails,
+      onProgress,
     });
     const ghnServiceText = ghnQuote.serviceTypeIds
       .map((serviceTypeId) => (serviceTypeId === 5 ? "Hàng nặng" : "Hàng nhẹ"))
@@ -2266,6 +2328,8 @@ async function buildDeliveryDetailPayload({
     return { deliveryDetail, ghnShipping: ghnQuote };
   }
 
+  onProgress?.("address", "success", "Lấy địa chỉ giao hàng thành công.");
+
   const checkPricePayload = buildVtpCheckPricePayload({
     parsed,
     totalBeforeDiscount,
@@ -2274,6 +2338,7 @@ async function buildDeliveryDetailPayload({
     invoiceUuid,
   });
   console.log("TaoDonHang VTP check price payload", checkPricePayload);
+  onProgress?.("price", "loading", "Đang tính phí vận chuyển Viettel Post...");
   const checkPriceResponse = await checkPriceVTP(
     retailer,
     accessPrivateToken,
@@ -2282,6 +2347,11 @@ async function buildDeliveryDetailPayload({
   );
   const selectedVtpService = pickLowestVtpService(checkPriceResponse);
   const selectedVtpFee = getVtpServiceFeeValue(selectedVtpService) ?? 0;
+  onProgress?.(
+    "price",
+    "success",
+    `Tính phí Viettel Post thành công: ${selectedVtpFee.toLocaleString("vi-VN")}đ.`,
+  );
   const selectedVtpServiceCode = selectedVtpService?.code || "VTK";
   const selectedVtpServiceName =
     selectedVtpService?.name || selectedVtpServiceCode;
@@ -2418,6 +2488,7 @@ async function buildInvoicePayload({
   promotionProductMap = null,
   promotionSelections = {},
   deliveryAddressDetails = null,
+  onProgress,
 }) {
   const retailerConfig = getRetailerConfig(retailer);
   const branchId = retailerConfig?.branchId ?? null;
@@ -2445,6 +2516,11 @@ async function buildInvoicePayload({
     .map((value) => normalizeDisplayText(value))
     .filter(Boolean)
     .join(", ");
+  onProgress?.(
+    "products",
+    "loading",
+    "Đang chuẩn bị sản phẩm và khuyến mãi...",
+  );
   const invoiceDetailsResult = await buildInvoiceDetailLines(
     parsed?.items || [],
     {
@@ -2466,6 +2542,11 @@ async function buildInvoicePayload({
     totalTax: invoiceDetailsResult.totalTax || 0,
     totalAfterTax: invoiceDetailsResult.totalAfterTax || 0,
   });
+  onProgress?.(
+    "products",
+    "success",
+    `Chuẩn bị ${promotionResult.invoiceDetails.length} dòng sản phẩm thành công.`,
+  );
   const invoiceDetails = promotionResult.invoiceDetails;
   const totalBeforeDiscount = invoiceDetailsResult.totalBeforeDiscount || 0;
   const totalTax = promotionResult.totalTax;
@@ -2518,6 +2599,7 @@ async function buildInvoicePayload({
     retailer,
     invoiceUuid,
     resolvedAddressDetails: deliveryAddressDetails,
+    onProgress,
   });
   const deliveryDetail =
     deliveryBuildResult?.deliveryDetail || deliveryBuildResult;
@@ -2687,16 +2769,22 @@ function FieldCard({ label, value, placeholder = "Chưa có dữ liệu" }) {
 export default function TaoDonHang() {
   const [selectedShippingPartner, setSelectedShippingPartner] = useState("GHN");
   const [customerType, setCustomerType] = useState("khach_le");
+  const [agencyTaxCode, setAgencyTaxCode] = useState("");
   const [agencyDescription, setAgencyDescription] = useState("");
   const [rawText, setRawText] = useState(SAMPLE_TEXT);
   const [copied, setCopied] = useState(false);
   const [accessToken, setAccessToken] = useState("");
   const [accessPrivateToken, setAccessPrivateToken] = useState("");
-  const [kiotUsers, setKiotUsers] = useState([]);
+  const [kiotUserOptions, setKiotUserOptions] = useState([]);
+  const [selectedKiotUserKey, setSelectedKiotUserKey] = useState("");
+  const [kiotUsersLoading, setKiotUsersLoading] = useState(false);
+  const [kiotUsersError, setKiotUsersError] = useState("");
   const [matchedKiotUser, setMatchedKiotUser] = useState(null);
   const [partnerDeliveries, setPartnerDeliveries] = useState([]);
   const [preparedInvoicePayload, setPreparedInvoicePayload] = useState(null);
   const [isCreatingOrder, setIsCreatingOrder] = useState(false);
+  const [createOrderProgress, setCreateOrderProgress] = useState([]);
+  const [createOrderError, setCreateOrderError] = useState("");
   const [promotionSelections, setPromotionSelections] = useState({});
   const [orderPreparation, setOrderPreparation] = useState({
     status: "idle",
@@ -2710,7 +2798,7 @@ export default function TaoDonHang() {
     error: "",
   });
   const [tokenLoading, setTokenLoading] = useState(false);
-  const [tokenError, setTokenError] = useState("");
+  const [, setTokenError] = useState("");
   const { user } = useAuth() || {};
   const selectedRetailerId = useMemo(
     () => mapTeamIdToRetailerId(user?.teamId),
@@ -2726,39 +2814,19 @@ export default function TaoDonHang() {
     [selectedRetailerId],
   );
   const normalizedUserFullName = normalizeNameForCompare(user?.fullName);
-  const kiotUserInfoList = useMemo(() => {
-    if (!matchedKiotUser) return [];
-
-    return [
-      {
-        label: "CompareGivenName",
-        value: matchedKiotUser?.CompareGivenName || "",
-      },
-      { label: "GivenName", value: matchedKiotUser?.GivenName || "" },
-      {
-        label: "Tên hiển thị",
-        value: getKiotUserDisplayName(matchedKiotUser),
-      },
-      {
-        label: "UserId",
-        value: matchedKiotUser?.Id || matchedKiotUser?.UserId || "",
-      },
-      { label: "Retailer", value: selectedRetailerId },
-    ].filter((item) => String(item.value || "").trim());
-  }, [matchedKiotUser, selectedRetailerId]);
 
   const customerTypeOptions = useMemo(
     () => getCustomerTypeOptions(selectedRetailerId),
     [selectedRetailerId],
   );
 
-  const customerTypeLabel = useMemo(
-    () =>
-      customerTypeOptions.find((item) => item.value === customerType)?.label ||
-      customerTypeOptions[0]?.label ||
-      "",
-    [customerType, customerTypeOptions],
-  );
+  const updateCreateOrderProgress = (id, status, message) => {
+    setCreateOrderProgress((current) =>
+      current.map((step) =>
+        step.id === id ? { ...step, status, message } : step,
+      ),
+    );
+  };
 
   useEffect(() => {
     if (
@@ -2768,10 +2836,6 @@ export default function TaoDonHang() {
       setCustomerType(customerTypeOptions[0]?.value || "");
     }
   }, [customerType, customerTypeOptions]);
-
-  const shippingLabel =
-    SHIPPING_PARTNERS.find((item) => item.id === selectedShippingPartner)
-      ?.label || selectedShippingPartner;
 
   const parsed = useMemo(() => parseRawOrder(rawText), [rawText]);
   const orderPreparationKey = useMemo(
@@ -2788,6 +2852,11 @@ export default function TaoDonHang() {
         setTokenError("");
         setAccessToken("");
         setAccessPrivateToken("");
+        setKiotUserOptions([]);
+        setSelectedKiotUserKey("");
+        setMatchedKiotUser(null);
+        setKiotUsersLoading(true);
+        setKiotUsersError("");
 
         const [nextAccessToken, nextPrivateToken] = await Promise.all([
           getAccessToken(selectedRetailerId),
@@ -2800,40 +2869,50 @@ export default function TaoDonHang() {
         console.log("getUsserr", getUsserr);
         const nextKiotUsers = Array.isArray(getUsserr?.Data)
           ? getUsserr.Data
-          : Array.isArray(getUsserr)
-            ? getUsserr
-            : [];
-        const matchedUser = nextKiotUsers.find((item) => {
-          const compareGivenName = normalizeNameForCompare(
-            item?.CompareGivenName,
-          );
-
-          const givenName = normalizeNameForCompare(item?.GivenName);
-
-          return (
-            (normalizedUserFullName &&
-              compareGivenName === normalizedUserFullName) ||
-            (normalizedUserFullName && givenName === normalizedUserFullName) ||
-            (normalizedUserFullName &&
-              compareGivenName.includes(normalizedUserFullName)) ||
-            (normalizedUserFullName &&
-              givenName.includes(normalizedUserFullName))
-          );
-        });
+          : Array.isArray(getUsserr?.data?.Data)
+            ? getUsserr.data.Data
+            : Array.isArray(getUsserr)
+              ? getUsserr
+              : [];
+        const options = nextKiotUsers
+          .filter((kiotUser) => kiotUser?.IsActive !== false)
+          .map((kiotUser, index) => ({
+            key: getKiotUserOptionKey(kiotUser, index),
+            displayName: getKiotUserDisplayName(kiotUser) || "User Kiot",
+            kiotUser,
+          }));
+        const currentKiotUser = findMatchingKiotUser(
+          nextKiotUsers,
+          normalizedUserFullName,
+        );
+        const currentKiotUserId =
+          currentKiotUser?.Id ?? currentKiotUser?.UserId;
+        const defaultOption = currentKiotUser
+          ? options.find(
+              (option) =>
+                (option.kiotUser?.Id ?? option.kiotUser?.UserId) ===
+                currentKiotUserId,
+            ) || null
+          : null;
 
         if (!active) return;
-        console.log("matchedUser", matchedUser);
+        console.log("selected Kiot user option", defaultOption);
         setAccessToken(nextAccessToken || "");
         setAccessPrivateToken(nextPrivateToken || "");
-        setKiotUsers(nextKiotUsers);
-        setMatchedKiotUser(matchedUser || null);
+        setKiotUserOptions(options);
+        setSelectedKiotUserKey(defaultOption?.key || "");
+        setMatchedKiotUser(defaultOption?.kiotUser || null);
       } catch (error) {
         if (!active) return;
         console.error("loadTokens error:", error);
         setTokenError(error?.message || "Không lấy được token retailer");
+        setKiotUsersError(
+          error?.message || "Không tải được danh sách user Kiot.",
+        );
       } finally {
         if (active) {
           setTokenLoading(false);
+          setKiotUsersLoading(false);
         }
       }
     };
@@ -3206,10 +3285,13 @@ export default function TaoDonHang() {
   const handleReset = () => {
     setSelectedShippingPartner("GHN");
     setCustomerType("dai_ly");
+    setAgencyTaxCode("");
     setAgencyDescription("");
     setRawText(SAMPLE_TEXT);
     setCopied(false);
     setPromotionSelections({});
+    setCreateOrderProgress([]);
+    setCreateOrderError("");
   };
 
   const handleCopy = async () => {
@@ -3220,6 +3302,19 @@ export default function TaoDonHang() {
     } catch {
       setCopied(false);
     }
+  };
+
+  const handleKiotUserChange = (event) => {
+    const nextKiotUserKey = event.target.value;
+    const nextKiotUserOption = kiotUserOptions.find(
+      (option) => option.key === nextKiotUserKey,
+    );
+
+    setSelectedKiotUserKey(nextKiotUserKey);
+    setMatchedKiotUser(nextKiotUserOption?.kiotUser || null);
+    setPreparedInvoicePayload(null);
+    setCreateOrderProgress([]);
+    setCreateOrderError("");
   };
 
   const handleCreateOrder = async () => {
@@ -3244,9 +3339,35 @@ export default function TaoDonHang() {
       return;
     }
 
+    if (!matchedKiotUser) {
+      console.warn("No linked Kiot employee selected.");
+      return;
+    }
+
     if (isCreatingOrder) return;
 
+    const isViettelPost = isViettelPostShippingPartner(selectedShippingPartner);
+    const stepIds = isViettelPost
+      ? ["customer", "products", "address", "price", "invoice", "shipping"]
+      : ["customer", "products", "address", "price", "shipping", "invoice"];
+    setCreateOrderProgress(
+      stepIds.map((id) => ({
+        id,
+        label:
+          id === "shipping"
+            ? `Vận đơn ${isViettelPost ? "Viettel Post" : "GHN"}`
+            : CREATE_ORDER_STEP_DEFINITIONS[id],
+        status: "pending",
+        message: "Đang chờ...",
+      })),
+    );
+    setCreateOrderError("");
     setIsCreatingOrder(true);
+    updateCreateOrderProgress(
+      "customer",
+      "loading",
+      "Đang kiểm tra thông tin khách hàng...",
+    );
     try {
       const foundCustomer = orderPreparation.customerRecord;
       const groups = orderPreparation.groups;
@@ -3261,7 +3382,17 @@ export default function TaoDonHang() {
       let customerRecord = foundCustomer;
       if (customerRecord && Object.keys(customerRecord || {}).length > 0) {
         console.log("Customer already exists:", customerRecord);
+        updateCreateOrderProgress(
+          "customer",
+          "success",
+          "Tìm thấy khách hàng trên KiotViet.",
+        );
       } else {
+        updateCreateOrderProgress(
+          "customer",
+          "loading",
+          "Chưa có khách hàng, đang tạo mới...",
+        );
         const payload = await buildNewCustomerPayloadV2({
           parsed,
           selectedGroupId: targetGroup?.Id || targetGroup?.GroupId || null,
@@ -3269,6 +3400,7 @@ export default function TaoDonHang() {
           retailer: selectedRetailerId,
           accessPrivateToken,
           matchedKiotUser,
+          taxCode: agencyTaxCode,
           invoiceAddressDetails: orderPreparation.addressDetails.get(
             String(parsed.newAddress || parsed.oldAddress || "").trim(),
           ),
@@ -3305,14 +3437,16 @@ export default function TaoDonHang() {
               ? { ...current, customerRecord }
               : current,
           );
+          updateCreateOrderProgress(
+            "customer",
+            "success",
+            "Tạo và lấy lại thông tin khách hàng thành công.",
+          );
         }
       }
 
       if (!customerRecord) {
-        console.warn(
-          "Cannot build invoice payload because customer is missing.",
-        );
-        return;
+        throw new Error("Không lấy được thông tin khách hàng để tạo đơn.");
       }
 
       const builtInvoicePayload = await buildInvoicePayload({
@@ -3333,18 +3467,24 @@ export default function TaoDonHang() {
         deliveryAddressDetails: orderPreparation.addressDetails.get(
           String(parsed.oldAddress || parsed.newAddress || "").trim(),
         ),
+        onProgress: updateCreateOrderProgress,
       });
 
       const { __ghnShipping: ghnShipping, ...invoicePayloadWithoutMetadata } =
         builtInvoicePayload;
       let invoicePayload = invoicePayloadWithoutMetadata;
 
-      if (!isViettelPostShippingPartner(selectedShippingPartner)) {
+      if (!isViettelPost) {
+        updateCreateOrderProgress(
+          "shipping",
+          "loading",
+          "Đang tạo vận đơn GHN...",
+        );
         const ghnOrderPayloads = buildGhnCreateOrderPayloads({
           invoicePayload,
           ghnShipping,
           senderName:
-            matchedKiotUser?.GivenName ||
+            getKiotUserDisplayName(matchedKiotUser) ||
             selectedRetailer?.label ||
             selectedRetailerId,
         });
@@ -3370,6 +3510,12 @@ export default function TaoDonHang() {
           ghnOrderCodes.push(orderCode);
         }
 
+        updateCreateOrderProgress(
+          "shipping",
+          "success",
+          `Tạo vận đơn GHN thành công: ${ghnOrderCodes.join(", ")}.`,
+        );
+
         invoicePayload = {
           ...invoicePayload,
           Invoice: {
@@ -3385,6 +3531,11 @@ export default function TaoDonHang() {
       setPreparedInvoicePayload(invoicePayload);
       console.log("preparedInvoicePayload", invoicePayload);
 
+      updateCreateOrderProgress(
+        "invoice",
+        "loading",
+        "Đang tạo hóa đơn trên KiotViet...",
+      );
       const createInvoiceResponse = await createInvoices(
         selectedRetailerId,
         accessPrivateToken,
@@ -3392,8 +3543,18 @@ export default function TaoDonHang() {
         invoicePayload,
       );
       console.log("createInvoices response", createInvoiceResponse);
+      updateCreateOrderProgress(
+        "invoice",
+        "success",
+        "Tạo hóa đơn KiotViet thành công.",
+      );
 
-      if (isViettelPostShippingPartner(selectedShippingPartner)) {
+      if (isViettelPost) {
+        updateCreateOrderProgress(
+          "shipping",
+          "loading",
+          "Đang tạo vận đơn Viettel Post...",
+        );
         const invoiceDetails = Array.isArray(
           invoicePayload?.Invoice?.InvoiceDetails,
         )
@@ -3430,9 +3591,31 @@ export default function TaoDonHang() {
           deliveryPayload,
         );
         console.log("createInvoicesDelivery response", createDeliveryResponse);
+        updateCreateOrderProgress(
+          "shipping",
+          "success",
+          "Tạo vận đơn Viettel Post thành công.",
+        );
       }
     } catch (error) {
       console.error("create customer flow error:", error);
+      const message = error?.message || "Không thể hoàn tất tạo đơn hàng.";
+      setCreateOrderError(message);
+      setCreateOrderProgress((current) => {
+        const loadingIndex = current.findIndex(
+          (step) => step.status === "loading",
+        );
+        const pendingIndex = current.findIndex(
+          (step) => step.status === "pending",
+        );
+        const failedIndex = loadingIndex >= 0 ? loadingIndex : pendingIndex;
+
+        return current.map((step, index) =>
+          index === failedIndex
+            ? { ...step, status: "error", message: `Thất bại: ${message}` }
+            : step,
+        );
+      });
     } finally {
       setIsCreatingOrder(false);
     }
@@ -3486,7 +3669,7 @@ export default function TaoDonHang() {
             </div>
 
             <div className="space-y-4 px-5 py-5">
-              <div className="grid gap-3 md:grid-cols-3">
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                 <div className="rounded-xl border border-cyan-100 bg-cyan-50/70 px-3 py-2.5 text-sm text-cyan-900 md:col-span-1">
                   <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-cyan-700">
                     Công ty hiện tại
@@ -3534,7 +3717,62 @@ export default function TaoDonHang() {
                     ))}
                   </select>
                 </label>
+
+                <label className="block space-y-2">
+                  <span className="text-xs font-semibold text-slate-600">
+                    Nhân viên tạo đơn
+                  </span>
+                  <select
+                    value={selectedKiotUserKey}
+                    onChange={handleKiotUserChange}
+                    disabled={kiotUsersLoading || kiotUserOptions.length === 0}
+                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
+                  >
+                    <option value="">
+                      {kiotUsersLoading
+                        ? "Đang tải nhân viên..."
+                        : "Chọn nhân viên"}
+                    </option>
+                    {kiotUserOptions.map((option) => (
+                      <option key={option.key} value={option.key}>
+                        {option.displayName}
+                        {option.kiotUser?.Id ? ` (#${option.kiotUser.Id})` : ""}
+                      </option>
+                    ))}
+                  </select>
+                  <span
+                    className={`block text-[11px] ${
+                      kiotUsersError || (!kiotUsersLoading && !matchedKiotUser)
+                        ? "text-rose-600"
+                        : "text-slate-500"
+                    }`}
+                  >
+                    {kiotUsersError ||
+                      (matchedKiotUser
+                        ? `Đang dùng user Kiot: ${getKiotUserDisplayName(matchedKiotUser)} - ${kiotUserOptions.length} nhân viên`
+                        : "Chọn nhân viên từ danh sách user Kiot.")}
+                  </span>
+                </label>
               </div>
+
+              {customerType === "dai_ly" ? (
+                <label className="block space-y-2">
+                  <span className="text-xs font-semibold text-slate-600">
+                    Mã số thuế đại lý
+                  </span>
+                  <input
+                    type="text"
+                    value={agencyTaxCode}
+                    onChange={(event) => setAgencyTaxCode(event.target.value)}
+                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none transition focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100"
+                    placeholder="Nhập TaxCode..."
+                    autoComplete="off"
+                  />
+                  <span className="block text-[11px] text-slate-500">
+                    Mã này sẽ được dùng khi hệ thống cần tạo đại lý mới.
+                  </span>
+                </label>
+              ) : null}
 
               <label className="block space-y-2">
                 <span className="text-xs font-semibold text-slate-600">
@@ -3594,6 +3832,7 @@ export default function TaoDonHang() {
                   disabled={
                     !isOrderPreparationReady ||
                     !promotionSelectionsAreComplete ||
+                    !matchedKiotUser ||
                     isCreatingOrder
                   }
                   className="inline-flex items-center gap-2 rounded-xl bg-cyan-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-cyan-700 disabled:cursor-not-allowed disabled:bg-slate-300"
@@ -3601,6 +3840,114 @@ export default function TaoDonHang() {
                   {isCreatingOrder ? "Đang tạo đơn..." : "Tạo đơn hàng"}
                 </button>
               </div>
+
+              {createOrderProgress.length > 0 ? (
+                <div
+                  aria-live="polite"
+                  className="overflow-hidden rounded-2xl border border-cyan-100 bg-gradient-to-br from-cyan-50 via-white to-sky-50 shadow-sm"
+                >
+                  <div className="flex items-center justify-between gap-3 border-b border-cyan-100 px-4 py-3">
+                    <div>
+                      <div className="text-[11px] font-black uppercase tracking-[0.18em] text-cyan-700">
+                        Tiến trình tạo đơn
+                      </div>
+                      <div className="mt-0.5 text-sm font-semibold text-slate-800">
+                        {createOrderError
+                          ? "Có bước chưa hoàn tất"
+                          : isCreatingOrder
+                            ? "Hệ thống đang xử lý theo thứ tự"
+                            : "Tạo đơn hàng hoàn tất"}
+                      </div>
+                    </div>
+                    <div className="rounded-full border border-cyan-200 bg-white px-3 py-1 text-xs font-bold text-cyan-800">
+                      {
+                        createOrderProgress.filter(
+                          (step) => step.status === "success",
+                        ).length
+                      }
+                      /{createOrderProgress.length}
+                    </div>
+                  </div>
+
+                  <div className="h-1.5 bg-cyan-100/70">
+                    <div
+                      className={`h-full transition-all duration-500 ${
+                        createOrderError ? "bg-rose-500" : "bg-cyan-500"
+                      }`}
+                      style={{
+                        width: `${
+                          (createOrderProgress.filter(
+                            (step) => step.status === "success",
+                          ).length /
+                            createOrderProgress.length) *
+                          100
+                        }%`,
+                      }}
+                    />
+                  </div>
+
+                  <div className="space-y-1.5 p-3">
+                    {createOrderProgress.map((step, index) => {
+                      const isLoading = step.status === "loading";
+                      const isSuccess = step.status === "success";
+                      const isError = step.status === "error";
+
+                      return (
+                        <div
+                          key={step.id}
+                          className={`flex gap-3 rounded-xl border px-3 py-2.5 transition-colors ${
+                            isLoading
+                              ? "border-cyan-200 bg-white shadow-sm"
+                              : isSuccess
+                                ? "border-emerald-100 bg-emerald-50/70"
+                                : isError
+                                  ? "border-rose-200 bg-rose-50"
+                                  : "border-transparent bg-white/45"
+                          }`}
+                        >
+                          <div className="mt-0.5 shrink-0">
+                            {isLoading ? (
+                              <LoaderCircle className="h-5 w-5 animate-spin text-cyan-600" />
+                            ) : isSuccess ? (
+                              <CheckCircle2 className="h-5 w-5 text-emerald-600" />
+                            ) : isError ? (
+                              <XCircle className="h-5 w-5 text-rose-600" />
+                            ) : (
+                              <Circle className="h-5 w-5 text-slate-300" />
+                            )}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div
+                              className={`text-sm font-bold ${
+                                isError
+                                  ? "text-rose-800"
+                                  : isSuccess
+                                    ? "text-emerald-900"
+                                    : "text-slate-800"
+                              }`}
+                            >
+                              {index + 1}. {step.label}
+                            </div>
+                            <div
+                              className={`mt-0.5 text-xs leading-5 ${
+                                isError
+                                  ? "text-rose-700"
+                                  : isSuccess
+                                    ? "text-emerald-700"
+                                    : isLoading
+                                      ? "font-medium text-cyan-700"
+                                      : "text-slate-400"
+                              }`}
+                            >
+                              {step.message}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : null}
             </div>
           </div>
 
