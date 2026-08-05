@@ -8,7 +8,7 @@ import {
 } from "../../../services/cashflowService/kiotService";
 import * as XLSX from "xlsx";
 import { useRef } from "react";
-import { convertAddress } from "../../../address/addressApi";
+import { autoConvertAddress2 } from "../../../address2/address2Api";
 const currency = new Intl.NumberFormat("vi-VN");
 
 const normalizeText = (value) => String(value ?? "").trim();
@@ -238,42 +238,42 @@ const buildAddressConvertQuery = (row) =>
     .join(", ");
 
 const buildFallbackLocationSuggestResult = (conversionResult) => {
-  const boundaries = Array.isArray(conversionResult?.result?.boundaries)
-    ? conversionResult.result.boundaries
-    : [];
-  const provinceBoundary = boundaries.find((item) => Number(item?.type) === 0);
-  const wardBoundary = boundaries.find((item) => Number(item?.type) === 2);
+  const conversionMapping = conversionResult?.conversion?.result || {};
+  const provinceBoundary =
+    conversionResult?.converted_new?.province ||
+    conversionMapping?.new_province ||
+    null;
+  const wardBoundary =
+    conversionResult?.converted_new?.ward ||
+    conversionMapping?.new_ward ||
+    null;
 
   if (!provinceBoundary && !wardBoundary) {
     return null;
   }
 
+  const buildLocationNode = (boundary) => {
+    if (!boundary) return null;
+    const fullName = normalizeText(boundary?.name_with_type || boundary?.name);
+    const name = normalizeText(boundary?.name);
+    const prefix =
+      name && fullName.endsWith(name)
+        ? fullName.slice(0, -name.length).trim()
+        : "";
+
+    return {
+      Id: boundary?.code ?? null,
+      Code: boundary?.code ?? "",
+      Name: fullName,
+      Prefix: prefix,
+      FullName: fullName,
+    };
+  };
+
   return {
-    LocationV2: provinceBoundary
-      ? {
-          Id: provinceBoundary.id ?? null,
-          Name:
-            provinceBoundary.full_name ||
-            provinceBoundary.name ||
-            provinceBoundary.prefix ||
-            "",
-          Prefix: provinceBoundary.prefix || "",
-          FullName: provinceBoundary.full_name || "",
-        }
-      : null,
-    WardV2: wardBoundary
-      ? {
-          Id: wardBoundary.id ?? null,
-          Name:
-            wardBoundary.full_name ||
-            wardBoundary.name ||
-            wardBoundary.prefix ||
-            "",
-          Prefix: wardBoundary.prefix || "",
-          FullName: wardBoundary.full_name || "",
-        }
-      : null,
-    __source: "convertAddress",
+    LocationV2: buildLocationNode(provinceBoundary),
+    WardV2: buildLocationNode(wardBoundary),
+    __source: "autoConvertAddress2",
     __conversion: conversionResult,
   };
 };
@@ -382,14 +382,14 @@ const buildCustomerAddressUpdatePayload = async (
     AddressEInvoiceCombine: [streetAddress, districtName, provinceName]
       .filter(Boolean)
       .join(", "),
-    suggestLocationV2: locationV2 ?? provinceIds?.[0],
-    suggestWardV2: wardV2 ?? wardId?.[0],
+    suggestLocationV2: provinceIds?.[0] ?? locationV2,
+    suggestWardV2: wardId?.[0] ?? wardV2,
     CompareName: row?.CustomerName,
     Code: row?.CustomerCode,
     CompareCode: row?.CustomerCode,
     Name: row?.CustomerName,
-    LocationId: locationV2.Id,
-    WardId: wardV2.Id,
+    LocationId: provinceIds?.[0]?.Id ?? locationV2.Id ?? null,
+    WardId: wardId?.[0]?.Id ?? wardV2.Id ?? null,
     WardName: districtName,
     LocationName: provinceName,
     ContactNumber: row?.CustomerContactNumber,
@@ -931,40 +931,44 @@ export default function EinvoicesTab({
           }
 
           const hasCustomerDistrictName = Boolean(
-            normalizeText(row?.CustomerDistrictName),
+            normalizeText(
+              row?.CustomerDistrictName ?? row?.customerDistrictName,
+            ),
           );
-          const locationSuggestResult = hasCustomerDistrictName
-            ? await getLocationSuggest(
-                retailer,
-                accessPrivateToken,
-                accessToken,
-                row.CustomerLocationName,
-                row.CustomerDistrictName,
-                row.CustomerWardName,
-              )
-            : null;
+          const hasCustomerWardName = Boolean(
+            normalizeText(row?.CustomerWardName ?? row?.customerWardName),
+          );
+          const locationSuggestResult =
+            hasCustomerDistrictName && hasCustomerWardName
+              ? await getLocationSuggest(
+                  retailer,
+                  accessPrivateToken,
+                  accessToken,
+                  row?.CustomerLocationName ?? row?.customerLocationName,
+                  row?.CustomerDistrictName ?? row?.customerDistrictName,
+                  row?.CustomerWardName ?? row?.customerWardName,
+                )
+              : null;
 
           let resolvedLocationSuggestResult = locationSuggestResult;
-          if (
-            hasCustomerDistrictName &&
-            (!locationSuggestResult?.LocationV2 ||
-              !locationSuggestResult?.WardV2)
-          ) {
+          const shouldAutoConvertAddress =
+            !hasCustomerDistrictName ||
+            !hasCustomerWardName ||
+            !locationSuggestResult?.LocationV2 ||
+            !locationSuggestResult?.WardV2;
+          if (shouldAutoConvertAddress) {
             const addressConvertQuery = buildAddressConvertQuery(row);
             if (addressConvertQuery) {
-              const convertedAddress = await convertAddress(
-                addressConvertQuery,
-                "old-new",
-              );
+              const convertedAddress =
+                await autoConvertAddress2(addressConvertQuery);
               resolvedLocationSuggestResult =
                 buildFallbackLocationSuggestResult(convertedAddress);
             }
           }
 
           if (
-            hasCustomerDistrictName &&
-            (!resolvedLocationSuggestResult?.LocationV2 ||
-              !resolvedLocationSuggestResult?.WardV2)
+            !resolvedLocationSuggestResult?.LocationV2 ||
+            !resolvedLocationSuggestResult?.WardV2
           ) {
             failedCount += 1;
             failedRows.push({
