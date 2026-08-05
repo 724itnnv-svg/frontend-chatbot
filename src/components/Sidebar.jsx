@@ -43,6 +43,7 @@ import {
   UserRound,
   FlaskConical,
   Globe2,
+  HandCoins,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { canAccessScreen, hasFullAccess } from "../utils/screenAccess";
@@ -256,6 +257,12 @@ MENU_CONFIG.push({
   icon: Wallet,
 });
 MENU_CONFIG.push({
+  id: "salary_advance_management",
+  path: "/admin/salary-advances",
+  label: "Quản lý phiếu ứng lương",
+  icon: HandCoins,
+});
+MENU_CONFIG.push({
   id: "dua_sap",
   path: "/admin/dua-sap",
   label: "Quản lý Dừa Sáp",
@@ -293,6 +300,7 @@ const MENU_GROUPS = [
       "attendance_shifts",
       "attendance_locations",
       "payroll",
+      "salary_advance_management",
       "notifications",
     ],
   },
