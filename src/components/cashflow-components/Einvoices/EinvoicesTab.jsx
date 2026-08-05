@@ -1170,7 +1170,7 @@ export default function EinvoicesTab({
   }, [visibleRows]);
 
   return (
-    <section className="mx-auto grid max-w-[1600px] grid-cols-1 gap-[18px] xl:grid-cols-[minmax(0,1.25fr)_minmax(360px,0.75fr)]">
+    <section className="mx-auto grid max-w-[1660px] grid-cols-1 gap-[18px] xl:grid-cols-[minmax(0,1.55fr)_minmax(300px,0.45fr)]">
       <div className="rounded-[22px] border border-slate-400/20 bg-white/90 p-[18px] shadow-[0_18px_42px_rgba(15,23,42,0.08)] backdrop-blur-xl sm:rounded-[28px] sm:p-[22px]">
         <div className="mb-5 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
           <div>
@@ -1500,13 +1500,13 @@ export default function EinvoicesTab({
         </div>
       </div>
 
-      <aside className="rounded-[22px] border border-slate-400/20 bg-white/90 p-[18px] shadow-[0_18px_42px_rgba(15,23,42,0.08)] backdrop-blur-xl sm:rounded-[28px] sm:p-[22px] xl:sticky xl:top-[18px]">
+      <aside className="rounded-[20px] border border-slate-400/20 bg-white/90 p-4 shadow-[0_18px_42px_rgba(15,23,42,0.08)] backdrop-blur-xl sm:rounded-[24px] sm:p-5 xl:sticky xl:top-[18px]">
         <div className="mb-4">
-          <h3 className="m-0 text-lg font-black text-slate-900">
+          <h3 className="m-0 text-base font-black text-slate-900">
             Tác vụ nhanh
           </h3>
         </div>
-        <div className="grid gap-3">
+        <div className="grid gap-2.5">
           <button
             type="button"
             onClick={handleExportHDDT}
@@ -1516,7 +1516,7 @@ export default function EinvoicesTab({
                 ? "Không thể xuất HDDT khi đang ở trạng thái Đã phát hành"
                 : "Xuất hóa đơn điện tử"
             }
-            className={`rounded-[18px] border px-4 py-3.5 text-left text-sm font-extrabold transition ${
+            className={`rounded-[14px] border px-3 py-2.5 text-left text-[13px] font-extrabold transition ${
               isPublishedEinvoiceTab
                 ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400"
                 : "border-emerald-300/30 bg-emerald-50 text-emerald-800 hover:bg-emerald-100"
@@ -1527,14 +1527,14 @@ export default function EinvoicesTab({
           <button
             type="button"
             onClick={exportToExcel}
-            className="rounded-[18px] border border-indigo-300/30 bg-indigo-50 px-4 py-3.5 text-left text-sm font-extrabold text-indigo-800 transition hover:bg-indigo-100"
+            className="rounded-[14px] border border-indigo-300/30 bg-indigo-50 px-3 py-2.5 text-left text-[13px] font-extrabold text-indigo-800 transition hover:bg-indigo-100"
           >
             Xuất Excel
           </button>
           <button
             type="button"
             onClick={handleSyncAddress}
-            className="rounded-[18px] border border-sky-300/30 bg-sky-50 px-4 py-3.5 text-left text-sm font-extrabold text-sky-800 transition hover:bg-sky-100"
+            className="rounded-[14px] border border-sky-300/30 bg-sky-50 px-3 py-2.5 text-left text-[13px] font-extrabold text-sky-800 transition hover:bg-sky-100"
           >
             Đồng bộ địa chỉ
           </button>

@@ -281,7 +281,7 @@ const mergeOrderDeliveryIntoRow = (row, orderDelivery) => ({
 });
 
 export default function CashFlowApp() {
-  const { user } = useAuth();
+  const { user, token } = useAuth();
   const [activeTab, setActiveTab] = useState("cashflow");
   const [retailer, setRetailer] = useState(
     () => getRetailerFromTeamId(user?.teamId) || "kingfarm",
@@ -315,6 +315,7 @@ export default function CashFlowApp() {
     total: 0,
     completed: 0,
   });
+  console.log("token", token);
   const [orderDeliveryLoadProgress, setOrderDeliveryLoadProgress] = useState({
     runId: 0,
     active: false,

@@ -11,11 +11,22 @@ import {
   getAccessPrivateToken,
   getAccessToken,
   addNewCustomer,
+  checkPriceGHN,
+  checkPriceVTP,
+  createOrderGHN,
+  createInvoices,
+  createInvoicesDelivery,
+  getCampaign,
   getCustomerGroup,
   getCustomerByPhoneNumber,
-  getIdAdministrativearea,
   getRetailerConfig,
+  getPartnerDelivery,
+  getProductByCode,
+  getProductById,
   getUserInKiot,
+  getIdLocations,
+  getIdWards,
+  getFullIdProvinceDistrictWard,
 } from "../services/cashflowService/kiotService";
 import { useAuth } from "../context/AuthContext";
 const RETAILERS = [
@@ -30,8 +41,42 @@ const SHIPPING_PARTNERS = [
   { id: "VTPFW", label: "Viettel Post FW (VTPFW)" },
 ];
 
-const SAMPLE_TEXT = `Khách hàng: Thanh Bình
-SĐT: 0984384778
+const ORDER_PREPARATION_DELAY_MS = 10000;
+
+const GHN_PACKAGE_DEFAULT = {
+  length: 50,
+  width: 30,
+  height: 30,
+};
+const GHN_LIGHT_MAX_WEIGHT = 20000;
+
+const VTP_PRICE_CHECK_DEFAULT = {
+  ACTIVE_KSHIP: true,
+  SENDER_LOCATION_ID: 686,
+  SENDER_WARD_ID: 10077,
+  SENDER_ADDRESS: "Ấp Công Thiện Hùng",
+  RECEIVER_LOCATION_ID: 686,
+  RECEIVER_WARD_ID: 10076,
+  RECEIVER_ADDRESS: "313",
+};
+
+const VTP_DEFAULT_SERVICE_EXTRA = [
+  {
+    Code: "ShipperNote",
+    Value: "KHONGCHOXEMHANG",
+    ViewType: "DropdownList",
+    Name: "Không cho xem hàng",
+  },
+  {
+    Code: "PaymentBy",
+    Value: "NGUOIGUI",
+    ViewType: "Radio",
+    Name: "Người gửi trả phí",
+  },
+];
+
+const SAMPLE_TEXT = `Khách hàng: Thành
+SĐT: 0964294979
 Địa chỉ cũ: 27/19 Ấp Tân Hưng, Xã Tân Hạnh, Huyện Long Hồ, Tỉnh Vĩnh Long
 Địa chỉ mới: Ấp Tân hưng, Phường Tân Hạnh, Vĩnh Long
 1 Xô Siêu Phục Hồi 30-10-10+TE 22kg  - ONNV110 (giá 859.000₫/xô)
@@ -43,8 +88,8 @@ function getCustomerTypeOptions(retailerId) {
   }
 
   return [
-    { value: "dai_ly", label: "Đại lý" },
     { value: "khach_le", label: "Khách lẻ" },
+    { value: "dai_ly", label: "Đại lý" },
   ];
 }
 
@@ -60,6 +105,114 @@ function normalizeLookupText(value = "") {
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "");
+}
+
+function getPromotionPrerequisiteProductIds(promotion = {}) {
+  const ids = String(promotion?.PrereqProductIds || "")
+    .split(",")
+    .map((value) => Number(value.trim()))
+    .filter(Number.isFinite);
+  const primaryId = Number(promotion?.PrereqProductId);
+
+  if (Number.isFinite(primaryId)) ids.push(primaryId);
+  return new Set(ids);
+}
+
+function getPromotionReceivedProductIds(promotion = {}) {
+  const ids = String(promotion?.ReceivedProductIds || "")
+    .split(",")
+    .map((value) => Number(value.trim()))
+    .filter(Number.isFinite);
+  const primaryId = Number(promotion?.ReceivedProductId);
+
+  if (Number.isFinite(primaryId)) ids.push(primaryId);
+  return [...new Set(ids)];
+}
+
+function getCampaignPromotionForProduct(campaign, product) {
+  const productId = Number(product?.id ?? product?.Id ?? product?.ProductId);
+  if (!Number.isFinite(productId)) return null;
+
+  return (
+    (campaign?.SalePromotions || []).find((promotion) =>
+      getPromotionPrerequisiteProductIds(promotion).has(productId),
+    ) || null
+  );
+}
+
+function extractProductRecord(response, fallbackId = null) {
+  let candidate = response?.Data ?? response?.data ?? response;
+  if (Array.isArray(candidate)) candidate = candidate[0];
+
+  if (!candidate || typeof candidate !== "object") return null;
+  const id =
+    candidate?.id ?? candidate?.Id ?? candidate?.ProductId ?? fallbackId;
+  return {
+    ...candidate,
+    id,
+    code: candidate?.code ?? candidate?.Code ?? candidate?.ProductCode ?? "",
+    fullName:
+      candidate?.fullName ??
+      candidate?.FullName ??
+      candidate?.name ??
+      candidate?.Name ??
+      candidate?.ProductName ??
+      "",
+    name: candidate?.name ?? candidate?.Name ?? candidate?.ProductName ?? "",
+    unit: candidate?.unit ?? candidate?.Unit ?? "",
+    weight: candidate?.weight ?? candidate?.Weight ?? 0,
+    categoryId: candidate?.categoryId ?? candidate?.CategoryId ?? null,
+    price: candidate?.price ?? candidate?.Price ?? candidate?.BasePrice ?? 0,
+  };
+}
+
+function getProductCampaigns(product, campaigns = []) {
+  const productId = Number(product?.id ?? product?.Id ?? product?.ProductId);
+  if (!Number.isFinite(productId)) return [];
+
+  return campaigns.filter((campaign) => {
+    if (campaign?.IsActive === false) return false;
+
+    return (campaign?.SalePromotions || []).some((promotion) =>
+      getPromotionPrerequisiteProductIds(promotion).has(productId),
+    );
+  });
+}
+
+function formatPromotionRule(campaign, product) {
+  const promotion = getCampaignPromotionForProduct(campaign, product);
+  if (!promotion) return "";
+
+  const prerequisiteQuantity = Number(promotion?.PrereqQuantity || 0);
+  const receivedQuantity = Number(promotion?.ReceivedQuantity || 0);
+  const promotionPrice = Number(promotion?.ProductPrice || 0);
+
+  if (promotionPrice > 0) {
+    return `Giá khuyến mãi: ${promotionPrice.toLocaleString("vi-VN")}đ`;
+  }
+  if (prerequisiteQuantity > 0 && receivedQuantity > 0) {
+    return `Điều kiện: mua ${prerequisiteQuantity}, số lượng nhận ${receivedQuantity}`;
+  }
+  if (prerequisiteQuantity > 0) {
+    return `Điều kiện: mua từ ${prerequisiteQuantity}`;
+  }
+  return "";
+}
+
+function getProductDisplayCode(product = {}) {
+  return product?.code || product?.Code || product?.ProductCode || "";
+}
+
+function getProductDisplayName(product = {}) {
+  return (
+    product?.fullName ||
+    product?.FullName ||
+    product?.name ||
+    product?.Name ||
+    product?.ProductName ||
+    getProductDisplayCode(product) ||
+    "Sản phẩm"
+  );
 }
 
 function normalizePlainText(value = "") {
@@ -143,6 +296,19 @@ function getKiotUserDisplayName(user = {}) {
   );
 }
 
+function mapTeamIdToRetailerId(teamId = "") {
+  const normalizedTeamId = String(teamId || "")
+    .trim()
+    .toUpperCase();
+
+  if (normalizedTeamId === "NNV") return "nnvtv";
+  if (normalizedTeamId === "KF") return "kingfarm";
+  if (normalizedTeamId === "ABC") return "abctv";
+  if (normalizedTeamId === "VN") return "vietnhattv";
+
+  return "kingfarm";
+}
+
 function stripProvincePrefixDisplay(value = "") {
   return normalizeDisplayText(value)
     .replace(/^(Tỉnh|Thành phố|TP\.?|Tp\.?)\s+/iu, "")
@@ -192,12 +358,18 @@ async function resolveAdministrativeAreaDetails({
   const parts = parseVietnamAddressParts(address);
   const provinceName = stripProvincePrefix(parts.province || "");
   const districtName = String(parts.district || parts.ward || "").trim();
+  const wardName = String(parts.ward || "").trim();
+  const locationName = buildLocationNameFromParts({
+    province: provinceName,
+    district: districtName,
+  });
 
   let provinceRows = [];
   let districtRows = [];
+  let wardRows = [];
 
   if (provinceName) {
-    const provinceResponse = await getIdAdministrativearea(
+    const provinceResponse = await getIdLocations(
       retailer,
       accessPrivateToken,
       provinceName,
@@ -209,7 +381,7 @@ async function resolveAdministrativeAreaDetails({
   }
 
   if (provinceName && districtName) {
-    const districtResponse = await getIdAdministrativearea(
+    const districtResponse = await getIdLocations(
       retailer,
       accessPrivateToken,
       districtName,
@@ -221,14 +393,31 @@ async function resolveAdministrativeAreaDetails({
       : districtResponse?.Data || districtResponse?.data || [];
   }
 
+  if (wardName) {
+    const wardResponse = await getIdWards(
+      retailer,
+      accessPrivateToken,
+      wardName,
+      2,
+      locationName || `${provinceName} - ${districtName}`,
+      provinceRows[0]?.Id ?? null,
+    );
+    wardRows = Array.isArray(wardResponse)
+      ? wardResponse
+      : wardResponse?.Data || wardResponse?.data || [];
+  }
+
   return {
     parts,
     provinceName,
     districtName,
+    wardName,
     provinceRows,
     districtRows,
-    provinceId: provinceRows[0]?.Id ?? null,
+    wardRows,
+    locationId: provinceRows[0]?.Id ?? null,
     districtId: districtRows[0]?.Id ?? null,
+    wardId: wardRows[0]?.Id ?? null,
   };
 }
 
@@ -312,7 +501,12 @@ function pickCustomerGroupName(customerType) {
   return "Đại lý";
 }
 
-function buildNewCustomerPayload({ parsed, selectedGroupId, customerType }) {
+function buildNewCustomerPayload({
+  parsed,
+  selectedGroupId,
+  customerType,
+  matchedKiotUser = null,
+}) {
   const customerName = String(parsed.customerName || "").trim();
   const phoneNumber = String(parsed.phoneNumber || "").trim();
   const address = String(parsed.newAddress || parsed.oldAddress || "").trim();
@@ -381,6 +575,7 @@ async function buildNewCustomerPayloadV2({
   retailer,
   accessPrivateToken,
   matchedKiotUser,
+  invoiceAddressDetails: prefetchedInvoiceAddressDetails = null,
 }) {
   void parseAddressParts;
   void buildLocationNameFromParts;
@@ -398,11 +593,13 @@ async function buildNewCustomerPayloadV2({
   const customerAddress = oldAddress || newAddress;
   const invoiceAddress = newAddress || oldAddress;
   const customerAddressParts = parseVietnamAddressParts(customerAddress);
-  const invoiceAddressDetails = await resolveAdministrativeAreaDetails({
-    retailer,
-    accessPrivateToken,
-    address: invoiceAddress,
-  });
+  const invoiceAddressDetails =
+    prefetchedInvoiceAddressDetails ??
+    (await resolveAdministrativeAreaDetails({
+      retailer,
+      accessPrivateToken,
+      address: invoiceAddress,
+    }));
   const retailerId = retailerConfig?.retailerId ?? null;
 
   return {
@@ -458,6 +655,1931 @@ async function buildNewCustomerPayloadV2({
     },
     SkipValidateEmail: false,
     UseCustomValidation: true,
+  };
+}
+
+function extractCustomerRecord(response, fallback = null) {
+  const candidates = [
+    response?.Data?.[0],
+    response?.data?.Data?.[0],
+    response?.data?.data?.[0],
+    response?.Customer,
+    response?.customer,
+    response?.data?.Customer,
+    response?.data?.customer,
+    Array.isArray(response?.Data) ? null : response?.Data,
+    Array.isArray(response?.data?.Data) ? null : response?.data?.Data,
+    response?.data,
+    response,
+  ];
+  const candidate = candidates.find(
+    (item) =>
+      item &&
+      typeof item === "object" &&
+      !Array.isArray(item) &&
+      (item?.Id != null || item?.id != null || item?.CustomerId != null),
+  );
+
+  return candidate || fallback;
+}
+
+const roundMoney = (value) => Math.round(Number(value || 0) * 100) / 100;
+
+function normalizeProductTaxRate(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : 0;
+}
+
+function getProductPriceBook(product, customerType) {
+  const priceBooks = Array.isArray(product?.priceBooks)
+    ? product.priceBooks
+    : [];
+  const normalizedCustomerType = String(customerType || "").toLowerCase();
+
+  if (normalizedCustomerType === "khach_le") {
+    const targetName = normalizeDisplayText("Bảng giá Khách lẻ").toLowerCase();
+    const matched = priceBooks.find(
+      (item) =>
+        normalizeDisplayText(item?.priceBookName).toLowerCase() ===
+          targetName && item?.isActive !== false,
+    );
+    if (matched) return matched;
+  }
+
+  return null;
+}
+
+function getProductTaxInfo(product) {
+  const saleTax = product?.saleTax || {};
+  const productTax = Array.isArray(product?.productTaxs)
+    ? product.productTaxs[0] || {}
+    : {};
+  const source = productTax?.id != null ? productTax : saleTax;
+  const taxRate = normalizeProductTaxRate(source?.value ?? source?.rate ?? 0);
+  return {
+    taxId: source?.taxId ?? source?.id ?? null,
+    taxName: source?.name || source?.taxname || "VAT",
+    taxRate,
+  };
+}
+
+function buildInvoiceDetailTaxs({
+  taxId,
+  taxName,
+  taxRate,
+  baseAmount,
+  taxedAmount,
+}) {
+  if (!taxRate) return [];
+
+  const detailTax = roundMoney((baseAmount * taxRate) / 100);
+  return [
+    {
+      TaxId: taxId ?? 0,
+      DetailTax: detailTax,
+      OldDetailTax: detailTax,
+      PriceAfterTax: roundMoney(taxedAmount),
+      ViewDiscountAfterTax: 0,
+      DiscountAfterTax: 0,
+      DiscountRatioAfterTax: 0,
+      DiscountByPromotionAfterTax: 0,
+      AllocationDiscountAfterTax: 0,
+      TaxByUser: {
+        CountryId: 1,
+        Id: taxId ?? 0,
+        Name: taxName,
+        Type: 1,
+        Value: taxRate,
+        OldValue: taxRate,
+        OldName: taxName,
+      },
+    },
+  ];
+}
+
+function getProductWeightFromProduct(product = {}) {
+  const source =
+    product?.data && typeof product.data === "object"
+      ? product.data
+      : product?.Data && typeof product.Data === "object"
+        ? product.Data
+        : product;
+
+  const numeric = Number(
+    source?.weight ??
+      source?.Weight ??
+      source?.weightValue ??
+      source?.WeightValue ??
+      0,
+  );
+
+  return Number.isFinite(numeric) && numeric >= 0 ? numeric : 0;
+}
+
+function normalizeShippingPhone(phone = "") {
+  const digits = String(phone || "").replace(/[^\d]/g, "");
+  if (!digits) return "";
+  if (digits.startsWith("84")) return `+${digits}`;
+  if (digits.startsWith("0")) return `+84${digits.slice(1)}`;
+  return `+84${digits}`;
+}
+
+function extractInvoiceIdFromResponse(response = {}) {
+  return (
+    response?.Id ??
+    response?.id ??
+    response?.Data?.Id ??
+    response?.data?.Id ??
+    response?.Invoice?.Id ??
+    response?.invoice?.Id ??
+    null
+  );
+}
+
+function parseBranchTakingAddress(branchTakingAddressStr = "") {
+  const text = String(branchTakingAddressStr || "").trim();
+  if (!text) {
+    return {
+      senderAddress: "",
+      senderFullAddress: "",
+      senderLocationName: "",
+      senderWardName: "",
+      senderDistrictName: "",
+      senderProvinceName: "",
+      senderMobile: "",
+    };
+  }
+
+  const phoneSeparatorIndex = text.lastIndexOf(" - ");
+  const addressPart =
+    phoneSeparatorIndex >= 0 ? text.slice(0, phoneSeparatorIndex).trim() : text;
+  const phonePart =
+    phoneSeparatorIndex >= 0 ? text.slice(phoneSeparatorIndex + 3).trim() : "";
+
+  const addressParts = addressPart
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  const senderAddress = addressParts[0] || addressPart || "";
+  const senderWardName = addressParts[1] || "";
+  const senderDistrictName = addressParts[2] || "";
+  const senderProvinceName = addressParts[3] || "";
+  const senderLocationName = buildLocationNameFromParts({
+    province: senderProvinceName,
+    district: senderDistrictName,
+  });
+
+  return {
+    senderAddress,
+    senderFullAddress: addressPart,
+    senderLocationName,
+    senderWardName,
+    senderDistrictName,
+    senderProvinceName,
+    senderMobile: normalizeShippingPhone(phonePart),
+  };
+}
+
+function getGhnItemName(invoiceDetail = {}) {
+  return invoiceDetail?.ProductName || invoiceDetail?.ProductCode || "Sản phẩm";
+}
+
+function getGhnItemPrice(invoiceDetail = {}) {
+  if (invoiceDetail?.PromotionParentProductId != null) return 0;
+
+  return Math.max(
+    0,
+    Math.round(
+      Number(
+        invoiceDetail?.PriceByPromotion ??
+          invoiceDetail?.Price ??
+          invoiceDetail?.BasePrice ??
+          0,
+      ),
+    ),
+  );
+}
+
+function createGhnPackageItem(invoiceDetail, quantity, unitWeight) {
+  return {
+    name: getGhnItemName(invoiceDetail),
+    code: String(invoiceDetail?.ProductCode || ""),
+    quantity,
+    price: getGhnItemPrice(invoiceDetail),
+    ...GHN_PACKAGE_DEFAULT,
+    weight: unitWeight,
+    category: {
+      level1: String(invoiceDetail?.Unit || "Sản phẩm"),
+    },
+  };
+}
+
+function appendGhnLightItem(items, invoiceDetail, quantity, unitWeight) {
+  const name = getGhnItemName(invoiceDetail);
+  const code = String(invoiceDetail?.ProductCode || "");
+  const existing = items.find(
+    (item) =>
+      item.name === name && item.code === code && item.weight === unitWeight,
+  );
+
+  if (existing) {
+    existing.quantity += quantity;
+    return;
+  }
+
+  items.push(createGhnPackageItem(invoiceDetail, quantity, unitWeight));
+}
+
+function createGhnPricingPackage({
+  serviceTypeId,
+  items,
+  actualWeight,
+  height,
+}) {
+  const length = GHN_PACKAGE_DEFAULT.length;
+  const width = GHN_PACKAGE_DEFAULT.width;
+  const packageHeight = Math.max(GHN_PACKAGE_DEFAULT.height, Number(height));
+  const volumetricWeight = Math.ceil((length * width * packageHeight) / 5);
+
+  return {
+    serviceTypeId,
+    length,
+    width,
+    height: packageHeight,
+    actualWeight: Math.round(actualWeight),
+    weight: Math.max(Math.round(actualWeight), volumetricWeight),
+    items,
+  };
+}
+
+function mergeGhnLightItemIntoHeavyItem(heavyItem, lightItem) {
+  return {
+    ...heavyItem,
+    name: `${heavyItem.name} + ${lightItem.name}`.slice(0, 255),
+    code: [heavyItem.code, lightItem.code]
+      .filter(Boolean)
+      .join("+")
+      .slice(0, 50),
+    price:
+      Math.max(0, Number(heavyItem.price || 0)) +
+      Math.max(0, Number(lightItem.price || 0)),
+    weight:
+      Math.max(0, Number(heavyItem.weight || 0)) +
+      Math.max(0, Number(lightItem.weight || 0)),
+  };
+}
+
+function buildGhnPricingPackages(invoiceDetails = []) {
+  const normalizedDetails = invoiceDetails
+    .map((invoiceDetail) => ({
+      invoiceDetail,
+      quantity: Math.max(
+        0,
+        Math.ceil(Number(invoiceDetail?.Quantity || 0)),
+      ),
+      unitWeight: Math.max(
+        0,
+        Math.round(Number(invoiceDetail?.Weight || 0)),
+      ),
+    }))
+    .filter((item) => item.quantity > 0);
+  const heavyItems = [];
+
+  for (const item of normalizedDetails) {
+    if (item.unitWeight > GHN_LIGHT_MAX_WEIGHT) {
+      for (let index = 0; index < item.quantity; index += 1) {
+        heavyItems.push(
+          createGhnPackageItem(item.invoiceDetail, 1, item.unitWeight),
+        );
+      }
+    }
+  }
+
+  if (heavyItems.length > 0) {
+    const heavyLoads = heavyItems.map((item) => ({ item, addedCount: 0 }));
+    const lightDetails = normalizedDetails.filter(
+      (item) => item.unitWeight <= GHN_LIGHT_MAX_WEIGHT,
+    );
+
+    for (const lightDetail of lightDetails) {
+      for (let index = 0; index < lightDetail.quantity; index += 1) {
+        const target = heavyLoads.reduce((best, current) => {
+          const bestWeight = Number(best.item.weight || 0);
+          const currentWeight = Number(current.item.weight || 0);
+          if (currentWeight !== bestWeight) {
+            return currentWeight < bestWeight ? current : best;
+          }
+          return current.addedCount < best.addedCount ? current : best;
+        });
+        const lightItem = createGhnPackageItem(
+          lightDetail.invoiceDetail,
+          1,
+          lightDetail.unitWeight,
+        );
+        target.item = mergeGhnLightItemIntoHeavyItem(target.item, lightItem);
+        target.addedCount += 1;
+      }
+    }
+
+    const mergedHeavyItems = heavyLoads.map((item) => item.item);
+    return [
+      createGhnPricingPackage({
+        serviceTypeId: 5,
+        items: mergedHeavyItems,
+        actualWeight: mergedHeavyItems.reduce(
+          (sum, item) => sum + Number(item.weight || 0),
+          0,
+        ),
+        height: GHN_PACKAGE_DEFAULT.height * mergedHeavyItems.length,
+      }),
+    ];
+  }
+
+  const totalLightWeight = normalizedDetails.reduce(
+    (sum, item) => sum + item.unitWeight * item.quantity,
+    0,
+  );
+  if (totalLightWeight > GHN_LIGHT_MAX_WEIGHT) {
+    const lightItemsAsHeavy = normalizedDetails.flatMap((item) =>
+      Array.from({ length: item.quantity }, () =>
+        createGhnPackageItem(item.invoiceDetail, 1, item.unitWeight),
+      ),
+    );
+
+    return [
+      createGhnPricingPackage({
+        serviceTypeId: 5,
+        items: lightItemsAsHeavy,
+        actualWeight: totalLightWeight,
+        height: GHN_PACKAGE_DEFAULT.height * lightItemsAsHeavy.length,
+      }),
+    ];
+  }
+
+  const lightPackages = [];
+  for (const { invoiceDetail, quantity, unitWeight } of normalizedDetails) {
+    let remainingQuantity = quantity;
+    while (remainingQuantity > 0) {
+      let currentPackage = lightPackages[lightPackages.length - 1];
+      if (!currentPackage) {
+        currentPackage = { items: [], actualWeight: 0 };
+        lightPackages.push(currentPackage);
+      }
+
+      if (unitWeight === 0) {
+        appendGhnLightItem(
+          currentPackage.items,
+          invoiceDetail,
+          remainingQuantity,
+          unitWeight,
+        );
+        remainingQuantity = 0;
+        continue;
+      }
+
+      const availableWeight =
+        GHN_LIGHT_MAX_WEIGHT - currentPackage.actualWeight;
+      const quantityThatFits = Math.floor(availableWeight / unitWeight);
+      if (quantityThatFits === 0) {
+        lightPackages.push({ items: [], actualWeight: 0 });
+        continue;
+      }
+
+      const packedQuantity = Math.min(remainingQuantity, quantityThatFits);
+      appendGhnLightItem(
+        currentPackage.items,
+        invoiceDetail,
+        packedQuantity,
+        unitWeight,
+      );
+      currentPackage.actualWeight += unitWeight * packedQuantity;
+      remainingQuantity -= packedQuantity;
+    }
+  }
+
+  return lightPackages
+    .filter((item) => item.items.length > 0)
+    .map((item) =>
+      createGhnPricingPackage({
+        serviceTypeId: 2,
+        items: item.items,
+        actualWeight: item.actualWeight,
+        height: GHN_PACKAGE_DEFAULT.height,
+      }),
+    );
+}
+
+function getGhnShippingFeeValue(response = {}) {
+  const candidates = [
+    response?.data?.total,
+    response?.Data?.Total,
+    response?.total,
+    response?.Total,
+  ];
+
+  for (const candidate of candidates) {
+    const numeric = Number(candidate);
+    if (Number.isFinite(numeric) && numeric >= 0) return numeric;
+  }
+
+  return null;
+}
+
+async function getGhnShippingQuote({
+  retailer,
+  accessPrivateToken,
+  accessToken,
+  branchTakingAddressStr,
+  deliveryParts,
+  invoiceDetails,
+}) {
+  const pricingPackages = buildGhnPricingPackages(invoiceDetails);
+  if (pricingPackages.length === 0) {
+    return {
+      totalFee: 0,
+      totalActualWeight: 0,
+      length: 0,
+      width: 0,
+      height: 0,
+      serviceTypeIds: [],
+      pricingPackages: [],
+      branchAddress: parseBranchTakingAddress(branchTakingAddressStr),
+      fromAddress: null,
+      toAddress: null,
+      route: null,
+    };
+  }
+
+  const branchAddress = parseBranchTakingAddress(branchTakingAddressStr);
+  const fromAddressPayload = {
+    province: branchAddress.senderProvinceName,
+    district: branchAddress.senderDistrictName,
+    ward: branchAddress.senderWardName,
+  };
+  const toAddressPayload = {
+    province: deliveryParts.province,
+    district: deliveryParts.district,
+    ward: deliveryParts.ward,
+  };
+
+  const [fromAddress, toAddress] = await Promise.all([
+    getFullIdProvinceDistrictWard(
+      retailer,
+      accessPrivateToken,
+      accessToken,
+      fromAddressPayload,
+    ),
+    getFullIdProvinceDistrictWard(
+      retailer,
+      accessPrivateToken,
+      accessToken,
+      toAddressPayload,
+    ),
+  ]);
+
+  const route = {
+    from_district_id: Number(fromAddress?.district?.id),
+    from_ward_code: String(fromAddress?.ward?.code || ""),
+    to_district_id: Number(toAddress?.district?.id),
+    to_ward_code: String(toAddress?.ward?.code || ""),
+  };
+  if (
+    !route.from_district_id ||
+    !route.from_ward_code ||
+    !route.to_district_id ||
+    !route.to_ward_code
+  ) {
+    throw new Error("Không map đủ địa chỉ gửi/nhận sang mã khu vực GHN.");
+  }
+
+  const payloads = pricingPackages.map((item) => ({
+    service_type_id: item.serviceTypeId,
+    ...route,
+    length: item.length,
+    width: item.width,
+    height: item.height,
+    weight: item.weight,
+    insurance_value: 0,
+    coupon: null,
+    items: item.items.map(({ name, quantity, length, width, height, weight }) => ({
+      name,
+      quantity,
+      length,
+      width,
+      height,
+      weight,
+    })),
+  }));
+  console.log("TaoDonHang GHN check price payloads", payloads);
+
+  const responses = await Promise.all(
+    payloads.map((payload) =>
+      checkPriceGHN(retailer, accessPrivateToken, accessToken, payload),
+    ),
+  );
+  const fees = responses.map(getGhnShippingFeeValue);
+  if (fees.some((fee) => fee == null)) {
+    throw new Error("GHN không trả về tổng phí vận chuyển hợp lệ.");
+  }
+
+  console.log("TaoDonHang GHN check price responses", responses);
+  return {
+    totalFee: fees.reduce((sum, fee) => sum + fee, 0),
+    totalActualWeight: pricingPackages.reduce(
+      (sum, item) => sum + item.actualWeight,
+      0,
+    ),
+    length: Math.max(...pricingPackages.map((item) => item.length)),
+    width: Math.max(...pricingPackages.map((item) => item.width)),
+    height: pricingPackages.reduce((sum, item) => sum + item.height, 0),
+    serviceTypeIds: [
+      ...new Set(pricingPackages.map((item) => item.serviceTypeId)),
+    ],
+    pricingPackages,
+    branchAddress,
+    fromAddress,
+    toAddress,
+    route,
+  };
+}
+
+function normalizeGhnPhone(phone = "") {
+  const digits = String(phone || "").replace(/\D/g, "");
+  if (digits.startsWith("84")) return `0${digits.slice(2)}`;
+  return digits;
+}
+
+function allocateGhnCodAmounts(totalAmount, packageValues) {
+  const total = Math.max(0, Math.round(Number(totalAmount || 0)));
+  const valueTotal = packageValues.reduce(
+    (sum, value) => sum + Math.max(0, Number(value || 0)),
+    0,
+  );
+  let allocated = 0;
+
+  return packageValues.map((value, index) => {
+    if (index === packageValues.length - 1) return total - allocated;
+
+    const amount =
+      valueTotal > 0
+        ? Math.round((total * Math.max(0, Number(value || 0))) / valueTotal)
+        : Math.floor(total / packageValues.length);
+    allocated += amount;
+    return amount;
+  });
+}
+
+function buildGhnCreateOrderPayloads({
+  invoicePayload,
+  ghnShipping,
+  senderName,
+}) {
+  const invoice = invoicePayload?.Invoice || {};
+  const deliveryDetail = invoice?.DeliveryDetail || {};
+  const pricingPackages = ghnShipping?.pricingPackages || [];
+  const branchAddress = ghnShipping?.branchAddress || {};
+  const fromAddress = ghnShipping?.fromAddress || {};
+  const toAddress = ghnShipping?.toAddress || {};
+  const packageValues = pricingPackages.map((item) =>
+    item.items.reduce(
+      (sum, product) =>
+        sum +
+        Math.max(0, Number(product?.price || 0)) *
+          Math.max(0, Number(product?.quantity || 0)),
+      0,
+    ),
+  );
+  const codAmounts = allocateGhnCodAmounts(invoice?.Total, packageValues);
+  const pickupTime = Math.floor(Date.now() / 1000) + 60 * 60;
+  const fromPhone = normalizeGhnPhone(branchAddress?.senderMobile);
+  const toPhone = normalizeGhnPhone(deliveryDetail?.ContactNumber);
+
+  return pricingPackages.map((item, index) => ({
+    payment_type_id: 2,
+    note: String(invoice?.Description || "").trim(),
+    required_note: "KHONGCHOXEMHANG",
+    return_phone: fromPhone,
+    return_address: branchAddress?.senderFullAddress || "",
+    return_district_id: null,
+    return_ward_code: "",
+    client_order_code: "",
+    from_name: String(senderName || "Cửa hàng").trim(),
+    from_phone: fromPhone,
+    from_address: branchAddress?.senderFullAddress || "",
+    from_ward_name: fromAddress?.ward?.name || "",
+    from_district_name: fromAddress?.district?.name || "",
+    from_province_name: fromAddress?.province?.name || "",
+    to_name: String(deliveryDetail?.Receiver || "").trim(),
+    to_phone: toPhone,
+    to_address:
+      String(deliveryDetail?.AddressInforDelivery || "").trim() ||
+      String(deliveryDetail?.Address || "").trim(),
+    to_ward_name: toAddress?.ward?.name || deliveryDetail?.WardName || "",
+    to_district_name: toAddress?.district?.name || "",
+    to_province_name: toAddress?.province?.name || "",
+    cod_amount: codAmounts[index] || 0,
+    content: item.items
+      .map((product) => product.name)
+      .filter(Boolean)
+      .join(", ")
+      .slice(0, 2000),
+    length: item.length,
+    width: item.width,
+    height: item.height,
+    weight: item.weight,
+    cod_failed_amount: 0,
+    pick_station_id: null,
+    deliver_station_id: null,
+    insurance_value: Math.min(
+      10000000,
+      Math.max(0, Math.round(packageValues[index] || 0)),
+    ),
+    service_type_id: item.serviceTypeId,
+    coupon: null,
+    pickup_time: pickupTime,
+    pick_shift: [2],
+    items: item.items,
+  }));
+}
+
+function extractGhnOrderCode(response = {}) {
+  return String(
+    response?.data?.order_code ||
+      response?.Data?.OrderCode ||
+      response?.order_code ||
+      "",
+  ).trim();
+}
+
+function buildInvoiceDeliveryPayload({
+  invoicePayload,
+  invoiceResponse,
+  deliveryDetail,
+  totalBeforeDiscount,
+  totalProductPrice,
+  totalWeight,
+  branchTakingAddressId,
+  branchTakingAddressStr,
+  selectedVtpServiceCode,
+}) {
+  const invoice = invoicePayload?.Invoice || {};
+  const invoiceId = extractInvoiceIdFromResponse(invoiceResponse);
+  const branchAddress = parseBranchTakingAddress(branchTakingAddressStr);
+  const products = Array.isArray(invoice.InvoiceDetails)
+    ? invoice.InvoiceDetails.map((item) => ({
+        Name: item?.ProductName || "",
+        Quantity: Number(item?.Quantity || 0) || 0,
+      })).filter((item) => item.Name)
+    : [];
+
+  const receiverAddress = String(deliveryDetail?.Address || "").trim();
+  const receiverMobile = String(deliveryDetail?.ContactNumber || "").trim();
+  const receiverFullName = String(deliveryDetail?.Receiver || "").trim();
+  const receiverLocationId = deliveryDetail?.LocationId ?? null;
+  const receiverWardId = deliveryDetail?.WardId ?? null;
+  const receiverWardName = String(deliveryDetail?.WardName || "").trim();
+  const senderLocationId = VTP_PRICE_CHECK_DEFAULT.SENDER_LOCATION_ID;
+  const senderWardId = VTP_PRICE_CHECK_DEFAULT.SENDER_WARD_ID;
+
+  return {
+    OrderRequest: {
+      SenderLocationName:
+        branchAddress.senderLocationName || branchTakingAddressStr || "",
+      ClientCode: "VTPFW",
+      ShopInvoice: invoice?.Code || "",
+      SenderAddress: branchAddress.senderAddress || "",
+      SenderMobile: branchAddress.senderMobile || "",
+      ReceiverAddress: receiverAddress,
+      ReceiverMobile: receiverMobile,
+      ReceiverFullName: receiverFullName,
+      ProductPrice: Math.round(Number(totalBeforeDiscount || 0)),
+      MoneyCollection: Math.round(Number(totalProductPrice || 0)),
+      ProductQuantity: products.reduce(
+        (sum, item) => sum + (Number(item.Quantity || 0) || 0),
+        0,
+      ),
+      MoneyTotal: 0,
+      ProductHeight: 10,
+      ProductWeight: Math.round(Number(totalWeight || 0)),
+      ProductLength: 10,
+      ProductWidth: 10,
+      OrderService: selectedVtpServiceCode || "ECOD",
+      SenderLocationId: senderLocationId,
+      SenderWardId: senderWardId,
+      SenderWardName: branchAddress.senderWardName || "",
+      ReceiverLocationId: receiverLocationId,
+      ReceiverWardId: receiverWardId,
+      ReceiverWardName: receiverWardName,
+      Note: "",
+      OrderServiceAdd: "",
+      ShipperNote: "KHONGCHOXEMHANG",
+      PaymentBy: "NGUOIGUI",
+      Products: products,
+    },
+    InvoiceId: invoiceId,
+    BranchTakingAddressId: branchTakingAddressId ?? null,
+    BranchTakingAddressStr: branchTakingAddressStr || "",
+  };
+}
+
+function buildInvoiceDetailLine({ item, product, customerType }) {
+  const quantity = Number(item?.quantity || 0) || 0;
+  const productId = product?.id ?? item?.productId ?? null;
+  const productCode = product?.code || item?.sku || "";
+  const productName =
+    product?.fullName || product?.name || item?.productName || "";
+  const unit = product?.unit || item?.unit || "";
+  const weight = getProductWeightFromProduct(product);
+  const categoryId = product?.categoryId ?? item?.categoryId ?? null;
+  const masterProductId =
+    product?.id ?? item?.masterProductId ?? item?.productId ?? null;
+  const priceBook = getProductPriceBook(product, customerType);
+  const customerLePriceBook = getProductPriceBook(product, "khach_le");
+  const outsidePrice =
+    Number(product?.price ?? product?.basePrice ?? item?.price ?? 0) || 0;
+  const selectedUnitPrice =
+    String(customerType || "").toLowerCase() === "khach_le"
+      ? Number(
+          priceBook?.price ?? customerLePriceBook?.price ?? outsidePrice,
+        ) || 0
+      : outsidePrice > 0
+        ? outsidePrice
+        : Number(customerLePriceBook?.price ?? 0) || 0;
+  const baseAmount = roundMoney(selectedUnitPrice * quantity);
+  const { taxId, taxName, taxRate } = getProductTaxInfo(product);
+  const lineTax = roundMoney((baseAmount * taxRate) / 100);
+  const priceAfterTax = roundMoney(baseAmount + lineTax);
+  console.log("TaoDonHang product weight debug", {
+    productCode,
+    quantity,
+    rawWeight: product?.weight,
+    normalizedWeight: weight,
+  });
+
+  return {
+    BasePrice: selectedUnitPrice,
+    IsLotSerialControl: Boolean(product?.isLotSerialControl),
+    IsBatchExpireControl: Boolean(product?.isBatchExpireControl),
+    IsRewardPoint: product?.isRewardPoint ?? true,
+    Note: null,
+    Price: selectedUnitPrice,
+    PriceAfterTax: priceAfterTax,
+    ProductId: productId,
+    Quantity: quantity,
+    ProductCode: productCode,
+    Weight: weight,
+    DiscountAfterTax: null,
+    ProductName: productName,
+    SalePromotionId: null,
+    OriginPrice: selectedUnitPrice,
+    PriceByPromotion: null,
+    ProductFormulaHistoryId: null,
+    PromotionParentProductId: null,
+    ProductBatchExpireId: null,
+    CategoryId: categoryId,
+    MasterProductId: masterProductId,
+    Unit: unit,
+    Uuid:
+      globalThis?.crypto?.randomUUID?.() ||
+      `tmp-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    SupplyPromotionTypes: "",
+    Formulas: null,
+    AllocationDiscount: 0,
+    InvoiceDetailTaxs: buildInvoiceDetailTaxs({
+      taxId,
+      taxName,
+      taxRate,
+      baseAmount,
+      taxedAmount: priceAfterTax,
+    }),
+    DetailTaxIds: taxRate
+      ? [
+          {
+            CountryId: 1,
+            Id: taxId ?? 0,
+            Name: taxName,
+            Type: 1,
+            Value: taxRate,
+            OldValue: taxRate,
+            OldName: taxName,
+          },
+        ]
+      : [],
+    IsUndeclaredTax: null,
+    __meta: {
+      priceBookId: priceBook?.priceBookId ?? null,
+      baseAmount,
+      lineTax,
+      priceAfterTax,
+    },
+  };
+}
+
+async function buildInvoiceDetailLines(
+  items = [],
+  {
+    retailer,
+    accessPrivateToken,
+    accessToken,
+    customerType,
+    productMap: prefetchedProductMap = null,
+  },
+) {
+  const uniqueCodes = [
+    ...new Set(
+      items.map((item) => String(item?.sku || "").trim()).filter(Boolean),
+    ),
+  ];
+
+  let productMap = prefetchedProductMap;
+  if (!(productMap instanceof Map)) {
+    const productEntries = await Promise.all(
+      uniqueCodes.map(async (code) => {
+        try {
+          const product = await getProductByCode(
+            retailer,
+            accessPrivateToken,
+            accessToken,
+            code,
+          );
+          return [code, product];
+        } catch (error) {
+          console.error("getProductByCode error:", code, error);
+          return [code, null];
+        }
+      }),
+    );
+    productMap = new Map(productEntries);
+  }
+
+  const lines = items
+    .map((item) =>
+      buildInvoiceDetailLine({
+        item,
+        product: productMap.get(String(item?.sku || "").trim()) || null,
+        customerType,
+      }),
+    )
+    .filter(
+      (item) => item.Quantity > 0 || item.ProductName || item.ProductCode,
+    );
+  console.log("TaoDonHang invoice detail lines debug", {
+    uniqueCodes,
+    lineCount: lines.length,
+    weights: lines.map((item) => ({
+      productCode: item.ProductCode,
+      quantity: item.Quantity,
+      weight: item.Weight,
+      total: Number(item.Weight || 0) * Number(item.Quantity || 0),
+    })),
+  });
+
+  const totalBeforeDiscount = lines.reduce(
+    (sum, item) => sum + Number(item.__meta?.baseAmount || 0),
+    0,
+  );
+  const totalTax = lines.reduce(
+    (sum, item) => sum + Number(item.__meta?.lineTax || 0),
+    0,
+  );
+  const totalAfterTax = lines.reduce(
+    (sum, item) => sum + Number(item.__meta?.priceAfterTax || 0),
+    0,
+  );
+  const priceBookId =
+    lines.find((item) => item.__meta?.priceBookId != null)?.__meta
+      ?.priceBookId ?? null;
+
+  return {
+    lines: lines.map((item) => {
+      const { __meta: meta, ...nextItem } = item;
+      void meta;
+      return nextItem;
+    }),
+    totalBeforeDiscount: roundMoney(totalBeforeDiscount),
+    totalTax: roundMoney(totalTax),
+    totalAfterTax: roundMoney(totalAfterTax),
+    priceBookId,
+  };
+}
+
+function buildPromotionInfo({
+  campaign,
+  promotion,
+  parentProduct,
+  receivedProduct = null,
+  receivedQuantity = 0,
+}) {
+  const parentCode = getProductDisplayCode(parentProduct);
+  const parentName = getProductDisplayName(parentProduct);
+  const prerequisiteQuantity = Number(promotion?.PrereqQuantity || 0);
+  const campaignName = campaign?.Name || campaign?.Code || "Khuyến mãi";
+
+  if (receivedProduct) {
+    const receivedCode = getProductDisplayCode(receivedProduct);
+    const receivedName = getProductDisplayName(receivedProduct);
+    return `${campaignName}: Mua ${prerequisiteQuantity} ${parentCode} - ${parentName}, tặng ${receivedQuantity} ${receivedCode} - ${receivedName}`;
+  }
+
+  const promotionPrice = Number(promotion?.ProductPrice || 0);
+  return `${campaignName}: ${parentCode} - ${parentName} giá ${promotionPrice.toLocaleString("vi-VN")}đ`;
+}
+
+function buildGiftPromotionLine({
+  product,
+  quantity,
+  customerType,
+  salePromotionId,
+  parentProductId,
+}) {
+  const line = buildInvoiceDetailLine({
+    item: {
+      quantity,
+      sku: getProductDisplayCode(product),
+      productName: getProductDisplayName(product),
+    },
+    product,
+    customerType,
+  });
+  const { __meta: meta, ...giftLine } = line;
+  void meta;
+  const unitPrice = Number(giftLine.Price || 0);
+  const taxRate = Number(giftLine.DetailTaxIds?.[0]?.Value || 0);
+  const unitPriceAfterTax = roundMoney(unitPrice * (1 + taxRate / 100));
+
+  return {
+    ...giftLine,
+    BasePrice: 0,
+    PriceAfterTax: unitPriceAfterTax,
+    Discount: unitPrice,
+    DiscountAfterTax: unitPriceAfterTax,
+    SalePromotionId: salePromotionId,
+    PromotionParentProductId: parentProductId,
+    InvoiceDetailTaxs: (giftLine.InvoiceDetailTaxs || []).map((tax) => ({
+      ...tax,
+      DetailTax: 0,
+      OldDetailTax: 0,
+      PriceAfterTax: unitPriceAfterTax,
+      ViewDiscountAfterTax: unitPriceAfterTax,
+      DiscountAfterTax: unitPriceAfterTax,
+      DiscountRatioAfterTax: 100,
+      DiscountByPromotionAfterTax: 0,
+    })),
+  };
+}
+
+function getPromotionSelectionDetails({ item, product, campaign, selection }) {
+  const promotion = getCampaignPromotionForProduct(campaign, product);
+  const prerequisiteQuantity = Number(promotion?.PrereqQuantity || 0);
+  const purchasedQuantity = Number(item?.quantity || 0);
+  const applicationCount =
+    prerequisiteQuantity > 0
+      ? Math.floor(purchasedQuantity / prerequisiteQuantity)
+      : 0;
+  const promotionType = Number(
+    promotion?.PromotionType ?? campaign?.PromotionType ?? 0,
+  );
+  const expectedGiftQuantity =
+    applicationCount * Number(promotion?.ReceivedQuantity || 0);
+  const selectedGiftQuantity = Object.values(
+    selection?.giftQuantities || {},
+  ).reduce((sum, quantity) => sum + Number(quantity || 0), 0);
+  const isComplete =
+    applicationCount > 0 &&
+    (promotionType === 8
+      ? Number(promotion?.ProductPrice || 0) > 0
+      : promotionType === 6 &&
+        expectedGiftQuantity > 0 &&
+        selectedGiftQuantity === expectedGiftQuantity);
+
+  return {
+    promotion,
+    promotionType,
+    applicationCount,
+    expectedGiftQuantity,
+    selectedGiftQuantity,
+    isComplete,
+  };
+}
+
+function applySelectedPromotions({
+  invoiceDetails = [],
+  parsedItems = [],
+  productMap,
+  productCampaignMap,
+  promotionProductMap,
+  promotionSelections = {},
+  customerType,
+  totalTax = 0,
+  totalAfterTax = 0,
+}) {
+  const nextLines = invoiceDetails.map((line) => ({ ...line }));
+  const invoicePromotions = [];
+  let nextTotalTax = Number(totalTax || 0);
+  let nextTotalAfterTax = Number(totalAfterTax || 0);
+  let productDiscount = 0;
+
+  parsedItems.forEach((item) => {
+    const productCode = String(item?.sku || "").trim();
+    const productSelections = Object.values(
+      promotionSelections[productCode] || {},
+    );
+    if (productSelections.length === 0) return;
+    const parentProduct = productMap?.get(productCode);
+    productSelections.forEach((selection) => {
+      const campaign = (productCampaignMap?.get(productCode) || []).find(
+        (candidate) => String(candidate?.Id) === String(selection.campaignId),
+      );
+      const promotion = getCampaignPromotionForProduct(campaign, parentProduct);
+      if (!campaign || !promotion) return;
+
+      const prerequisiteQuantity = Number(promotion?.PrereqQuantity || 0);
+      const purchasedQuantity = Number(item?.quantity || 0);
+      const applicationCount =
+        prerequisiteQuantity > 0
+          ? Math.floor(purchasedQuantity / prerequisiteQuantity)
+          : 0;
+      if (applicationCount < 1) return;
+
+      const parentLineIndex = nextLines.findIndex(
+        (line) => String(line?.ProductCode || "").trim() === productCode,
+      );
+      if (parentLineIndex < 0) return;
+
+      const parentLine = nextLines[parentLineIndex];
+      const parentProductId =
+        parentLine?.ProductId ?? parentProduct?.id ?? parentProduct?.Id;
+      const promotionType = Number(
+        promotion?.PromotionType ?? campaign?.PromotionType ?? 0,
+      );
+
+      if (promotionType === 8 && Number(promotion?.ProductPrice || 0) > 0) {
+        const promotionPrice = Number(promotion.ProductPrice);
+        const originalPrice = Number(parentLine.Price || 0);
+        const quantity = Number(parentLine.Quantity || 0);
+        const taxRate = Number(parentLine.DetailTaxIds?.[0]?.Value || 0);
+        const originalTax = Number(
+          parentLine.InvoiceDetailTaxs?.[0]?.DetailTax || 0,
+        );
+        const promotedBaseAmount = roundMoney(promotionPrice * quantity);
+        const promotedTax = roundMoney((promotedBaseAmount * taxRate) / 100);
+        const promotedAfterTax = roundMoney(promotedBaseAmount + promotedTax);
+        const originalAfterTax = Number(parentLine.PriceAfterTax || 0);
+        const discountBeforeTax = roundMoney(
+          Math.max(0, (originalPrice - promotionPrice) * quantity),
+        );
+        const discountAfterTax = roundMoney(
+          Math.max(0, originalAfterTax - promotedAfterTax),
+        );
+
+        nextLines[parentLineIndex] = {
+          ...parentLine,
+          Price: promotionPrice,
+          PriceAfterTax: promotedAfterTax,
+          SalePromotionId: promotion.Id,
+          OriginPrice: originalPrice,
+          PriceByPromotion: promotionPrice,
+          DiscountByPromotionAfterTax: discountAfterTax,
+          InvoiceDetailTaxs: (parentLine.InvoiceDetailTaxs || []).map(
+            (tax) => ({
+              ...tax,
+              DetailTax: promotedTax,
+              OldDetailTax: originalTax,
+              PriceAfterTax: promotedAfterTax,
+              DiscountByPromotionAfterTax: discountAfterTax,
+            }),
+          ),
+        };
+        nextTotalTax = roundMoney(nextTotalTax - originalTax + promotedTax);
+        nextTotalAfterTax = roundMoney(
+          nextTotalAfterTax - originalAfterTax + promotedAfterTax,
+        );
+        productDiscount = roundMoney(productDiscount + discountBeforeTax);
+        invoicePromotions.push({
+          Type: promotionType,
+          TargetType: promotion.Type ?? 1,
+          SalePromotionId: promotion.Id,
+          PromotionId: campaign.Id,
+          ProductId: parentProductId,
+          RelatedProductId: parentProductId,
+          RelatedProductQty: purchasedQuantity,
+          ProductQty: purchasedQuantity,
+          IsFixedQuantity: campaign.IsFixedQuantity ?? false,
+          LimitPromotionUsage: campaign.LimitPromotionUsage ?? false,
+          LimitPromotionUsageType: campaign.LimitPromotionUsageType ?? 2,
+          PromotionInfo: buildPromotionInfo({
+            campaign,
+            promotion,
+            parentProduct,
+          }),
+          ProductIds: String(parentProductId || ""),
+          RelatedProductIds: String(parentProductId || ""),
+          RelatedCategoryIds: "",
+          BackupSelectedSerials: {},
+        });
+        return;
+      }
+
+      if (promotionType !== 6) return;
+
+      const expectedGiftQuantity =
+        applicationCount * Number(promotion?.ReceivedQuantity || 0);
+      const selectedGiftEntries = Object.entries(selection.giftQuantities || {})
+        .map(([id, quantity]) => [Number(id), Number(quantity || 0)])
+        .filter(([id, quantity]) => Number.isFinite(id) && quantity > 0);
+      const selectedGiftQuantity = selectedGiftEntries.reduce(
+        (sum, [, quantity]) => sum + quantity,
+        0,
+      );
+      const allowedReceivedProductIds = new Set(
+        getPromotionReceivedProductIds(promotion),
+      );
+      const selectedGiftProductsAreValid = selectedGiftEntries.every(
+        ([id]) =>
+          allowedReceivedProductIds.has(id) &&
+          Boolean(promotionProductMap?.get(id)),
+      );
+      if (
+        expectedGiftQuantity <= 0 ||
+        selectedGiftQuantity !== expectedGiftQuantity ||
+        !selectedGiftProductsAreValid
+      ) {
+        return;
+      }
+
+      selectedGiftEntries.forEach(([receivedProductId, quantity]) => {
+        const receivedProduct = promotionProductMap?.get(receivedProductId);
+        if (!receivedProduct) return;
+
+        const giftLine = buildGiftPromotionLine({
+          product: receivedProduct,
+          quantity,
+          customerType,
+          salePromotionId: promotion.Id,
+          parentProductId,
+        });
+        nextLines.push(giftLine);
+        productDiscount = roundMoney(
+          productDiscount +
+            Number(giftLine.Discount || 0) * Number(giftLine.Quantity || 0),
+        );
+        invoicePromotions.push({
+          Type: promotionType,
+          TargetType: promotion.Type ?? 1,
+          SalePromotionId: promotion.Id,
+          PromotionId: campaign.Id,
+          ProductId: receivedProductId,
+          RelatedProductId: parentProductId,
+          RelatedProductQty: prerequisiteQuantity * applicationCount,
+          ProductQty: quantity,
+          IsFixedQuantity: campaign.IsFixedQuantity ?? false,
+          LimitPromotionUsage: campaign.LimitPromotionUsage ?? false,
+          LimitPromotionUsageType: campaign.LimitPromotionUsageType ?? 2,
+          PromotionInfo: buildPromotionInfo({
+            campaign,
+            promotion,
+            parentProduct,
+            receivedProduct,
+            receivedQuantity: quantity,
+          }),
+          PrintPromotionInfo: buildPromotionInfo({
+            campaign,
+            promotion,
+            parentProduct,
+            receivedProduct,
+            receivedQuantity: quantity,
+          }),
+          ProductIds: String(receivedProductId),
+          RelatedProductIds: String(parentProductId || ""),
+          RelatedCategoryIds: "",
+          BackupSelectedSerials: {},
+        });
+      });
+    });
+  });
+
+  return {
+    invoiceDetails: nextLines,
+    invoicePromotions,
+    productDiscount,
+    totalTax: nextTotalTax,
+    totalAfterTax: nextTotalAfterTax,
+  };
+}
+
+function normalizePartnerDeliveryText(value = "") {
+  return normalizeDisplayText(value).toLowerCase();
+}
+
+function getSelectedPartnerDelivery(partnerDeliveries = [], selected = "") {
+  const selectedCode = normalizePartnerDeliveryText(selected);
+  if (!selectedCode) return null;
+
+  return (
+    partnerDeliveries.find((item) => {
+      const itemCode = normalizePartnerDeliveryText(
+        item?.code || item?.Code || item?.CompareCode || "",
+      );
+      const itemName = normalizePartnerDeliveryText(
+        item?.name || item?.Name || item?.CompareName || "",
+      );
+
+      return (
+        itemCode === selectedCode ||
+        itemName === selectedCode ||
+        itemCode.includes(selectedCode) ||
+        itemName.includes(selectedCode)
+      );
+    }) || null
+  );
+}
+
+function isViettelPostShippingPartner(selected = "") {
+  const normalized = normalizePartnerDeliveryText(selected);
+  return (
+    normalized.includes("viettel") ||
+    normalized === "vtp" ||
+    normalized === "vtpfw" ||
+    normalized.includes("vtpfw")
+  );
+}
+
+function getInvoiceTotalWeight(invoiceDetails = []) {
+  return invoiceDetails.reduce((sum, item) => {
+    const weight = Number(item?.Weight ?? item?.weight ?? 0) || 0;
+    const quantity = Number(item?.Quantity || 0) || 0;
+    return sum + weight * quantity;
+  }, 0);
+}
+
+function buildPartnerDeliverySnapshot({
+  selectedPartnerDelivery,
+  partnerCode,
+  partnerName,
+  retailerId,
+  soldById,
+  isViettelPost,
+}) {
+  const base = selectedPartnerDelivery
+    ? {
+        ...selectedPartnerDelivery,
+        IdOld: selectedPartnerDelivery?.IdOld ?? 0,
+        TotalInvoiced: selectedPartnerDelivery?.TotalInvoiced ?? 0,
+        CompareCode: selectedPartnerDelivery?.CompareCode || partnerCode || "",
+        CompareName: selectedPartnerDelivery?.CompareName || partnerName || "",
+        Id: selectedPartnerDelivery?.id ?? selectedPartnerDelivery?.Id ?? 0,
+        RetailerId: selectedPartnerDelivery?.retailerId ?? retailerId,
+        Type: selectedPartnerDelivery?.Type ?? (isViettelPost ? 2 : 0),
+        Code: partnerCode,
+        Name: partnerName,
+        CustomName:
+          selectedPartnerDelivery?.CustomName ||
+          selectedPartnerDelivery?.name ||
+          partnerName,
+        ContactNumber: selectedPartnerDelivery?.ContactNumber || "",
+        Address: selectedPartnerDelivery?.Address || "",
+        Email: selectedPartnerDelivery?.Email || "",
+        Comments: selectedPartnerDelivery?.Comments || "",
+        CreatedDate:
+          selectedPartnerDelivery?.CreatedDate || new Date().toISOString(),
+        CreatedBy: soldById || selectedPartnerDelivery?.CreatedBy || 0,
+        ModifiedDate:
+          selectedPartnerDelivery?.ModifiedDate || new Date().toISOString(),
+        Debt: selectedPartnerDelivery?.Debt ?? 0,
+        ModifiedBy: selectedPartnerDelivery?.ModifiedBy ?? null,
+        Uuid: selectedPartnerDelivery?.Uuid ?? null,
+        LocationId: selectedPartnerDelivery?.LocationId ?? null,
+        LocationName: selectedPartnerDelivery?.LocationName || "",
+        WardName: selectedPartnerDelivery?.WardName || "",
+        isActive: selectedPartnerDelivery?.isActive ?? true,
+        isDeleted: selectedPartnerDelivery?.isDeleted ?? false,
+        SearchNumber: selectedPartnerDelivery?.SearchNumber || "",
+        IsOmniChannel: selectedPartnerDelivery?.IsOmniChannel ?? null,
+        AdministrativeAreaId:
+          selectedPartnerDelivery?.AdministrativeAreaId ?? null,
+        PartnerDeliveryGroupDetails:
+          selectedPartnerDelivery?.PartnerDeliveryGroupDetails || [],
+        ImageForMobile: selectedPartnerDelivery?.ImageForMobile || "",
+        ServiceCodeText: selectedPartnerDelivery?.ServiceCodeText ?? null,
+        ServiceCode: selectedPartnerDelivery?.ServiceCode ?? "0",
+        ServiceAdd: selectedPartnerDelivery?.ServiceAdd ?? null,
+        PartnerDeliveryImage:
+          selectedPartnerDelivery?.PartnerDeliveryImage || "",
+        Description: selectedPartnerDelivery?.Description || "",
+        ServiceAddInfor: selectedPartnerDelivery?.ServiceAddInfor ?? null,
+      }
+    : {
+        IdOld: 0,
+        TotalInvoiced: 0,
+        CompareCode: partnerCode,
+        CompareName: partnerName,
+        Id: 0,
+        RetailerId: retailerId,
+        Type: isViettelPost ? 2 : 0,
+        Code: partnerCode,
+        Name: partnerName,
+        CustomName: partnerName,
+        ContactNumber: "",
+        Address: "",
+        Email: "",
+        Comments: "",
+        CreatedDate: new Date().toISOString(),
+        CreatedBy: soldById || 0,
+        ModifiedDate: new Date().toISOString(),
+        Debt: 0,
+        ModifiedBy: null,
+        Uuid: null,
+        LocationId: null,
+        LocationName: "",
+        WardName: "",
+        isActive: true,
+        isDeleted: false,
+        SearchNumber: "",
+        IsOmniChannel: null,
+        AdministrativeAreaId: null,
+        PartnerDeliveryGroupDetails: [],
+        ImageForMobile: "",
+        ServiceCodeText: null,
+        ServiceCode: "0",
+        ServiceAdd: null,
+        PartnerDeliveryImage: "",
+        Description: "",
+        ServiceAddInfor: null,
+      };
+
+  if (isViettelPost) {
+    return {
+      ...base,
+      Type: base.Type ?? 2,
+    };
+  }
+
+  return base;
+}
+
+function getVtpServiceFeeValue(service = {}) {
+  const candidates = [
+    service?.totalPrice,
+    service?.fee,
+    service?.transferFee,
+    service?.codFee,
+    service?.connFee,
+    service?.codstFee,
+    service?.insuranceFee,
+    service?.otherFee,
+    service?.oldTotalPrice,
+  ];
+
+  for (const candidate of candidates) {
+    const numeric = Number(candidate);
+    if (Number.isFinite(numeric) && numeric >= 0) {
+      return numeric;
+    }
+  }
+
+  return null;
+}
+
+function pickLowestVtpService(responsePayload = {}) {
+  const services = Array.isArray(responsePayload?.data)
+    ? responsePayload.data
+    : Array.isArray(responsePayload?.Data)
+      ? responsePayload.Data
+      : Array.isArray(responsePayload)
+        ? responsePayload
+        : [];
+
+  const candidates = services
+    .map((service) => ({
+      service,
+      fee: getVtpServiceFeeValue(service),
+    }))
+    .filter((item) => item.fee != null);
+
+  if (candidates.length === 0) return null;
+
+  const successful = candidates.filter((item) => item.service?.status === true);
+  const pool = successful.length > 0 ? successful : candidates;
+
+  return (
+    pool.reduce((best, current) => {
+      if (!best) return current;
+      return current.fee < best.fee ? current : best;
+    }, null)?.service || null
+  );
+}
+
+function buildVtpCheckPricePayload({
+  parsed,
+  totalBeforeDiscount,
+  totalProductPrice,
+  totalWeight,
+  invoiceUuid,
+}) {
+  const productQuantity = (parsed?.items || []).reduce(
+    (sum, item) => sum + (Number(item?.quantity || 0) || 0),
+    0,
+  );
+
+  return {
+    ...VTP_PRICE_CHECK_DEFAULT,
+    PRODUCT_WIDTH: 10,
+    PRODUCT_HEIGHT: 10,
+    PRODUCT_LENGTH: 10,
+    PRODUCT_WEIGHT: totalWeight,
+    PRODUCT_QUANTITY: productQuantity || 1,
+    MONEY_COLLECTION: totalProductPrice,
+    PRODUCT_PRICE: totalBeforeDiscount,
+    UUID: invoiceUuid,
+    SERVICES: [
+      { CODE: "VTK" },
+      { CODE: "PHS" },
+      { CODE: "LCOD" },
+      { CODE: "VCBO" },
+      { CODE: "VSL3" },
+      { CODE: "VSL1" },
+      { CODE: "VSL5" },
+      { CODE: "VSL2" },
+      { CODE: "VSL6" },
+      { CODE: "VSL4" },
+      { CODE: "VSL7" },
+      { CODE: "VCK" },
+      { CODE: "ECOD" },
+      { CODE: "SCOD" },
+      { CODE: "QTK" },
+      { CODE: "VMCH" },
+      { CODE: "VMCV" },
+      { CODE: "EDC" },
+      { CODE: "EDS" },
+      { CODE: "VCG" },
+      { CODE: "VSL8" },
+      { CODE: "VNT" },
+      { CODE: "BTK" },
+      { CODE: "VSL9" },
+      { CODE: "VBAY" },
+      { CODE: "V2CK" },
+      { CODE: "V1CK" },
+      { CODE: "STK" },
+      { CODE: "V1NS" },
+      { CODE: "VDL" },
+    ],
+    SERVICE_EXTRA: VTP_DEFAULT_SERVICE_EXTRA,
+  };
+}
+
+async function buildDeliveryDetailPayload({
+  parsed,
+  customerId,
+  customerCode,
+  totalBeforeDiscount,
+  totalProductPrice,
+  totalWeight,
+  invoiceDetails,
+  selectedShippingPartner,
+  selectedPartnerDelivery,
+  partnerCode,
+  partnerName,
+  retailerId,
+  soldById,
+  invoiceAddress,
+  deliveryParts,
+  deliveryAddressText,
+  accessPrivateToken,
+  accessToken,
+  retailer,
+  invoiceUuid,
+  resolvedAddressDetails = null,
+}) {
+  const isViettelPost = isViettelPostShippingPartner(selectedShippingPartner);
+  const retailerConfig = getRetailerConfig(retailer);
+  const branchTakingAddressId = retailerConfig?.BranchTakingAddressId ?? null;
+  const branchTakingAddressStr = retailerConfig?.BranchTakingAddressStr ?? "";
+  const resolvedAddress =
+    resolvedAddressDetails ??
+    (await resolveAdministrativeAreaDetails({
+      retailer,
+      accessPrivateToken,
+      address: invoiceAddress,
+    }));
+  const locationId = resolvedAddress?.locationId ?? null;
+  const wardId = resolvedAddress?.wardId ?? null;
+  const provinceName = resolvedAddress?.provinceName || "";
+  const districtName = resolvedAddress?.districtName || "";
+  const wardName = resolvedAddress?.wardName || "";
+  const receiverWardId = wardId ?? VTP_PRICE_CHECK_DEFAULT.RECEIVER_WARD_ID;
+  const locationName = buildLocationNameFromParts({
+    province: provinceName,
+    district: districtName,
+  });
+  const deliveryPartner = buildPartnerDeliverySnapshot({
+    selectedPartnerDelivery,
+    partnerCode,
+    partnerName,
+    retailerId,
+    soldById,
+    isViettelPost,
+  });
+
+  if (!isViettelPost) {
+    const ghnQuote = await getGhnShippingQuote({
+      retailer,
+      accessPrivateToken,
+      accessToken,
+      branchTakingAddressStr,
+      deliveryParts,
+      invoiceDetails,
+    });
+    const ghnServiceText = ghnQuote.serviceTypeIds
+      .map((serviceTypeId) => (serviceTypeId === 5 ? "Hàng nặng" : "Hàng nhẹ"))
+      .join(" + ");
+
+    const deliveryDetail = {
+      Type: 0,
+      TypeName: "",
+      Status: 1,
+      Address: deliveryParts.street || invoiceAddress,
+      ContactNumber: parsed?.phoneNumber || "",
+      Receiver: parsed?.customerName || "",
+      DeliveryBy:
+        selectedPartnerDelivery?.Id ?? selectedPartnerDelivery?.id ?? 0,
+      LocationId: locationId,
+      LocationName: locationName,
+      WardName: wardName || deliveryParts.ward || "",
+      CustomerId: customerId,
+      CustomerCode: customerCode,
+      BranchTakingAddressId: branchTakingAddressId,
+      BranchTakingAddressStr: branchTakingAddressStr,
+      AdministrativeAreaId: null,
+      WardId: receiverWardId || VTP_PRICE_CHECK_DEFAULT.RECEIVER_WARD_ID,
+      Weight: ghnQuote.totalActualWeight,
+      Height: ghnQuote.height,
+      Width: ghnQuote.width,
+      Length: ghnQuote.length,
+      AddressInforDelivery: deliveryAddressText || invoiceAddress,
+      IsChangeGBH: false,
+      LastLocation: buildLocationNameFromParts({
+        province: deliveryParts.province,
+        district: deliveryParts.district,
+      }),
+      LastWard: wardName || deliveryParts.ward || "",
+      PackageType: 0,
+      Paymenter: 0,
+      TotalProductPrice: totalProductPrice,
+      TotalReceiverPay: totalProductPrice,
+      UseDefaultPartner: false,
+      UsingOfBilling: false,
+      UsingPriceCod: 1,
+      ChangeExpectedDelivery: false,
+      WeightInput: ghnQuote.totalActualWeight,
+      PackageTypeObj: {
+        Value: 0,
+        Name: "gram",
+      },
+      MaterialType: "cm",
+      WidthInput: ghnQuote.width,
+      HeightInput: ghnQuote.height,
+      LengthInput: ghnQuote.length,
+      Price: ghnQuote.totalFee,
+      Comments: null,
+      ExpectedDelivery: null,
+      DeliveryCode: null,
+      PartnerCode: partnerCode,
+      PartnerName: partnerName,
+      PartnerDelivery: deliveryPartner,
+      ServiceCodeText: ghnServiceText || null,
+      ServiceCode: "0",
+      ServiceAdd: null,
+      PartnerDeliveryImage: deliveryPartner?.ImageForMobile || "",
+      Description: ghnServiceText || deliveryPartner?.Description || "",
+      ServiceAddInfor: null,
+      FeeShip: ghnQuote.totalFee,
+      SenderPaymentFee: ghnQuote.totalFee,
+      RecipientPaymentFee: 0,
+      TotalRecipientPayment: totalProductPrice,
+    };
+
+    return { deliveryDetail, ghnShipping: ghnQuote };
+  }
+
+  const checkPricePayload = buildVtpCheckPricePayload({
+    parsed,
+    totalBeforeDiscount,
+    totalProductPrice,
+    totalWeight,
+    invoiceUuid,
+  });
+  console.log("TaoDonHang VTP check price payload", checkPricePayload);
+  const checkPriceResponse = await checkPriceVTP(
+    retailer,
+    accessPrivateToken,
+    null,
+    checkPricePayload,
+  );
+  const selectedVtpService = pickLowestVtpService(checkPriceResponse);
+  const selectedVtpFee = getVtpServiceFeeValue(selectedVtpService) ?? 0;
+  const selectedVtpServiceCode = selectedVtpService?.code || "VTK";
+  const selectedVtpServiceName =
+    selectedVtpService?.name || selectedVtpServiceCode;
+  const selectedVtpServiceImage =
+    selectedVtpService?.imageForMobile ||
+    selectedVtpService?.image ||
+    deliveryPartner?.ImageForMobile ||
+    "";
+  const selectedVtpServiceDescription =
+    selectedVtpService?.description ||
+    selectedVtpService?.msg ||
+    deliveryPartner?.Description ||
+    "";
+  const selectedVtpServiceAdd = JSON.stringify(VTP_DEFAULT_SERVICE_EXTRA);
+  const receiverLocationId =
+    locationId ?? VTP_PRICE_CHECK_DEFAULT.RECEIVER_LOCATION_ID;
+  const receiverAddress = VTP_PRICE_CHECK_DEFAULT.RECEIVER_ADDRESS;
+  const receiverStreet = String(
+    deliveryParts.street || receiverAddress || "",
+  ).trim();
+  const receiverWardName = wardName || String(deliveryParts.ward || "").trim();
+
+  return {
+    Type: 0,
+    TypeName: "",
+    Status: 1,
+    Address: receiverStreet || invoiceAddress,
+    ContactNumber: parsed?.phoneNumber || "",
+    Receiver: parsed?.customerName || "",
+    DeliveryBy: null,
+    LocationId: receiverLocationId,
+    LocationName: locationName,
+    WardName: receiverWardName,
+    CustomerId: customerId,
+    CustomerCode: customerCode,
+    BranchTakingAddressId: branchTakingAddressId,
+    BranchTakingAddressStr: branchTakingAddressStr,
+    AdministrativeAreaId: null,
+    WardId: receiverWardId,
+    Weight: totalWeight,
+    Height: 10,
+    Width: 10,
+    Length: 10,
+    AddressInforDelivery: deliveryAddressText || invoiceAddress,
+    IsChangeGBH: false,
+    LastLocation: locationName,
+    LastWard: receiverWardName,
+    PackageType: 0,
+    Paymenter: 0,
+    TotalProductPrice: totalProductPrice,
+    TotalReceiverPay: totalProductPrice,
+    UseDefaultPartner: true,
+    UsingOfBilling: false,
+    UsingPriceCod: 1,
+    ChangeExpectedDelivery: false,
+    WeightInput: totalWeight,
+    PackageTypeObj: {
+      Value: 0,
+      Name: "gram",
+    },
+    MaterialType: "cm",
+    WidthInput: 10,
+    HeightInput: 10,
+    LengthInput: 10,
+    Price:
+      selectedVtpFee > 0
+        ? selectedVtpFee
+        : totalWeight > 0
+          ? totalWeight
+          : null,
+    Comments: null,
+    ExpectedDelivery: null,
+    DeliveryCode: null,
+    PartnerCode: partnerCode,
+    PartnerName: partnerName,
+    PartnerDelivery: {
+      ...deliveryPartner,
+      DeliveryBy: null,
+      LocationId: receiverLocationId,
+      LocationName: locationName,
+      WardName: receiverWardName,
+      Weight: totalWeight,
+      Height: 10,
+      Width: 10,
+      Length: 10,
+      WeightInput: totalWeight,
+      WidthInput: 10,
+      HeightInput: 10,
+      LengthInput: 10,
+      Price:
+        selectedVtpFee > 0
+          ? selectedVtpFee
+          : totalWeight > 0
+            ? totalWeight
+            : null,
+      UseDefaultPartner: true,
+      UsingPriceCod: 1,
+      TotalProductPrice: totalProductPrice,
+      TotalReceiverPay: totalProductPrice,
+      ServiceCodeText: selectedVtpServiceName,
+      ServiceCode: selectedVtpServiceCode,
+      ServiceAdd: selectedVtpServiceAdd,
+      PartnerDeliveryImage: selectedVtpServiceImage,
+      Description: selectedVtpServiceDescription,
+      ServiceAddInfor: VTP_DEFAULT_SERVICE_EXTRA,
+    },
+    ServiceCodeText: selectedVtpServiceName,
+    ServiceCode: selectedVtpServiceCode,
+    ServiceAdd: selectedVtpServiceAdd,
+    PartnerDeliveryImage: selectedVtpServiceImage,
+    Description: selectedVtpServiceDescription,
+    ServiceAddInfor: VTP_DEFAULT_SERVICE_EXTRA,
+    FeeShip: selectedVtpFee,
+    SenderPaymentFee: selectedVtpFee,
+    RecipientPaymentFee: 0,
+    TotalRecipientPayment: totalProductPrice,
+  };
+}
+
+async function buildInvoicePayload({
+  customer,
+  parsed,
+  retailer,
+  matchedKiotUser,
+  selectedShippingPartner,
+  partnerDeliveries,
+  partnerDeliveryRecord,
+  accessToken,
+  customerType,
+  accessPrivateToken,
+  description = "",
+  productMap = null,
+  productCampaignMap = null,
+  promotionProductMap = null,
+  promotionSelections = {},
+  deliveryAddressDetails = null,
+}) {
+  const retailerConfig = getRetailerConfig(retailer);
+  const branchId = retailerConfig?.branchId ?? null;
+  const retailerId = retailerConfig?.retailerId ?? null;
+  const customerId =
+    customer?.Id ?? customer?.id ?? customer?.CustomerId ?? null;
+  const customerCode =
+    customer?.Code || customer?.CompareCode || customer?.CustomerCode || "";
+  const customerName =
+    customer?.Name ||
+    customer?.CompareName ||
+    customer?.CustomerName ||
+    parsed?.customerName ||
+    "";
+  const invoiceAddress = String(
+    parsed?.oldAddress || parsed?.newAddress || "",
+  ).trim();
+  const deliveryParts = parseVietnamAddressParts(invoiceAddress);
+  const deliveryAddressText = [
+    deliveryParts.street,
+    deliveryParts.ward,
+    deliveryParts.district,
+    deliveryParts.province,
+  ]
+    .map((value) => normalizeDisplayText(value))
+    .filter(Boolean)
+    .join(", ");
+  const invoiceDetailsResult = await buildInvoiceDetailLines(
+    parsed?.items || [],
+    {
+      retailer,
+      accessPrivateToken,
+      accessToken,
+      customerType,
+      productMap,
+    },
+  );
+  const promotionResult = applySelectedPromotions({
+    invoiceDetails: invoiceDetailsResult.lines || [],
+    parsedItems: parsed?.items || [],
+    productMap,
+    productCampaignMap,
+    promotionProductMap,
+    promotionSelections,
+    customerType,
+    totalTax: invoiceDetailsResult.totalTax || 0,
+    totalAfterTax: invoiceDetailsResult.totalAfterTax || 0,
+  });
+  const invoiceDetails = promotionResult.invoiceDetails;
+  const totalBeforeDiscount = invoiceDetailsResult.totalBeforeDiscount || 0;
+  const totalTax = promotionResult.totalTax;
+  const totalProductPrice = promotionResult.totalAfterTax;
+  const totalWeight = getInvoiceTotalWeight(invoiceDetails);
+  const invoiceUuid =
+    globalThis?.crypto?.randomUUID?.() ||
+    `tmp-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const debugUuid =
+    globalThis?.crypto?.randomUUID?.() ||
+    `tmp-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const soldBy = matchedKiotUser ? { ...matchedKiotUser } : null;
+  const soldById = matchedKiotUser?.Id ?? matchedKiotUser?.UserId ?? null;
+  const selectedPartnerDelivery = partnerDeliveryRecord
+    ? partnerDeliveryRecord
+    : getSelectedPartnerDelivery(partnerDeliveries, selectedShippingPartner);
+  const partnerCode =
+    selectedPartnerDelivery?.code ||
+    selectedPartnerDelivery?.Code ||
+    selectedPartnerDelivery?.CompareCode ||
+    String(selectedShippingPartner || "")
+      .trim()
+      .toUpperCase();
+  const partnerName =
+    selectedPartnerDelivery?.name ||
+    selectedPartnerDelivery?.Name ||
+    selectedPartnerDelivery?.CompareName ||
+    selectedPartnerDelivery?.code ||
+    selectedPartnerDelivery?.Code ||
+    selectedShippingPartner;
+  const deliveryBuildResult = await buildDeliveryDetailPayload({
+    parsed,
+    customerId,
+    customerCode,
+    totalBeforeDiscount,
+    totalProductPrice,
+    totalWeight,
+    invoiceDetails,
+    selectedShippingPartner,
+    selectedPartnerDelivery,
+    partnerCode,
+    partnerName,
+    retailerId,
+    soldById,
+    invoiceAddress,
+    deliveryParts,
+    deliveryAddressText,
+    accessPrivateToken,
+    accessToken,
+    retailer,
+    invoiceUuid,
+    resolvedAddressDetails: deliveryAddressDetails,
+  });
+  const deliveryDetail =
+    deliveryBuildResult?.deliveryDetail || deliveryBuildResult;
+  const ghnShipping = deliveryBuildResult?.ghnShipping || null;
+
+  return {
+    ...(ghnShipping ? { __ghnShipping: ghnShipping } : {}),
+    Invoice: {
+      BranchId: branchId,
+      RetailerId: retailerId,
+      UpdateInvoiceId: 0,
+      UpdateReturnId: 0,
+      IsChangeNormalToShippingDelivery: false,
+      CustomerId: customerId,
+      SoldById: soldById,
+      SoldBy: soldBy,
+      Seller: soldBy,
+      SaleChannelId: 0,
+      PriceBookId:
+        customerType === "khach_le"
+          ? (invoiceDetailsResult.priceBookId ??
+            retailerConfig?.priceBookId ??
+            0)
+          : (retailerConfig?.priceBookId ?? 0),
+      OrderCode: "",
+      Code: `Hóa đơn ${customerName || customerCode || customerId || "1"}`,
+      ...(String(customerType).toLowerCase() === "dai_ly"
+        ? { Description: String(description || "").trim() }
+        : {}),
+      DiscountAfterTax: 0,
+      DiscountRatioAfterTax: 0,
+      DiscountByPromotion: 0,
+      DiscountByPromotionAfterTax: 0,
+      DiscountByPromotionValue: 0,
+      DiscountByPromotionRatio: 0,
+      DiscountByCouponAfterTax: 0,
+      InvoiceDetails: invoiceDetails,
+      InvoiceOrderSurcharges: [],
+      InvoicePromotions: promotionResult.invoicePromotions,
+      InvoiceSupplierPromotions: [],
+      UsingCod: 1,
+      Payments: [],
+      Status: 3,
+      Total: totalProductPrice,
+      TotalTax: totalTax,
+      EnableVATToggle: true,
+      IsTaxReductionEnabled: false,
+      IsApplyTaxReduction: false,
+      RoundAmount: null,
+      Surcharge: 0,
+      Type: 1,
+      Uuid: invoiceUuid,
+      addToAccount: "0",
+      addToAccountSurplus: "0",
+      addToAccountAllocation: "0",
+      addToAccountPaymentAllocation: "0",
+      PayingAmount: 0,
+      TotalBeforeDiscount: totalBeforeDiscount,
+      ProductDiscount: promotionResult.productDiscount,
+      DebugUuid: debugUuid,
+      InvoiceWarranties: [],
+      IsUsingProductVAT: true,
+      PricingMode: 0,
+      CreatedBy: soldById,
+      DeliveryDetail: deliveryDetail,
+    },
   };
 }
 
@@ -561,18 +2683,37 @@ function FieldCard({ label, value, placeholder = "Chưa có dữ liệu" }) {
 }
 
 export default function TaoDonHang() {
-  const [selectedRetailerId, setSelectedRetailerId] = useState("kingfarm");
   const [selectedShippingPartner, setSelectedShippingPartner] = useState("GHN");
-  const [customerType, setCustomerType] = useState("dai_ly");
+  const [customerType, setCustomerType] = useState("khach_le");
+  const [agencyDescription, setAgencyDescription] = useState("");
   const [rawText, setRawText] = useState(SAMPLE_TEXT);
   const [copied, setCopied] = useState(false);
   const [accessToken, setAccessToken] = useState("");
   const [accessPrivateToken, setAccessPrivateToken] = useState("");
   const [kiotUsers, setKiotUsers] = useState([]);
   const [matchedKiotUser, setMatchedKiotUser] = useState(null);
+  const [partnerDeliveries, setPartnerDeliveries] = useState([]);
+  const [preparedInvoicePayload, setPreparedInvoicePayload] = useState(null);
+  const [isCreatingOrder, setIsCreatingOrder] = useState(false);
+  const [promotionSelections, setPromotionSelections] = useState({});
+  const [orderPreparation, setOrderPreparation] = useState({
+    status: "idle",
+    key: "",
+    customerRecord: null,
+    groups: [],
+    productMap: new Map(),
+    productCampaignMap: new Map(),
+    promotionProductMap: new Map(),
+    addressDetails: new Map(),
+    error: "",
+  });
   const [tokenLoading, setTokenLoading] = useState(false);
   const [tokenError, setTokenError] = useState("");
   const { user } = useAuth() || {};
+  const selectedRetailerId = useMemo(
+    () => mapTeamIdToRetailerId(user?.teamId),
+    [user?.teamId],
+  );
   const selectedRetailer = useMemo(
     () =>
       RETAILERS.find(
@@ -617,11 +2758,24 @@ export default function TaoDonHang() {
     [customerType, customerTypeOptions],
   );
 
+  useEffect(() => {
+    if (
+      customerTypeOptions.length > 0 &&
+      !customerTypeOptions.some((item) => item.value === customerType)
+    ) {
+      setCustomerType(customerTypeOptions[0]?.value || "");
+    }
+  }, [customerType, customerTypeOptions]);
+
   const shippingLabel =
     SHIPPING_PARTNERS.find((item) => item.id === selectedShippingPartner)
       ?.label || selectedShippingPartner;
 
   const parsed = useMemo(() => parseRawOrder(rawText), [rawText]);
+  const orderPreparationKey = useMemo(
+    () => JSON.stringify([selectedRetailerId, customerType, rawText]),
+    [selectedRetailerId, customerType, rawText],
+  );
 
   useEffect(() => {
     let active = true;
@@ -689,12 +2843,371 @@ export default function TaoDonHang() {
     };
   }, [selectedRetailerId, normalizedUserFullName]);
 
+  useEffect(() => {
+    let active = true;
+
+    const loadPartnerDeliveries = async () => {
+      if (!accessPrivateToken) {
+        setPartnerDeliveries([]);
+        return;
+      }
+
+      try {
+        const response = await getPartnerDelivery(
+          selectedRetailerId,
+          accessPrivateToken,
+        );
+        if (!active) return;
+
+        const nextPartnerDeliveries = Array.isArray(response)
+          ? response
+          : response?.Data || response?.data || [];
+        setPartnerDeliveries(nextPartnerDeliveries);
+      } catch (error) {
+        if (!active) return;
+        console.error("loadPartnerDeliveries error:", error);
+        setPartnerDeliveries([]);
+      }
+    };
+
+    loadPartnerDeliveries();
+
+    return () => {
+      active = false;
+    };
+  }, [selectedRetailerId, accessPrivateToken]);
+
+  useEffect(() => {
+    let active = true;
+    let timerId = null;
+
+    setPreparedInvoicePayload(null);
+    setPromotionSelections({});
+
+    if (!String(rawText || "").trim()) {
+      setOrderPreparation({
+        status: "idle",
+        key: orderPreparationKey,
+        customerRecord: null,
+        groups: [],
+        productMap: new Map(),
+        productCampaignMap: new Map(),
+        promotionProductMap: new Map(),
+        addressDetails: new Map(),
+        error: "",
+      });
+      return () => {
+        active = false;
+      };
+    }
+
+    setOrderPreparation({
+      status: "waiting",
+      key: orderPreparationKey,
+      customerRecord: null,
+      groups: [],
+      productMap: new Map(),
+      productCampaignMap: new Map(),
+      promotionProductMap: new Map(),
+      addressDetails: new Map(),
+      error: "",
+    });
+
+    if (!accessPrivateToken || !accessToken) {
+      return () => {
+        active = false;
+      };
+    }
+
+    timerId = window.setTimeout(async () => {
+      if (!active) return;
+
+      setOrderPreparation((current) => ({
+        ...current,
+        status: "loading",
+        error: "",
+      }));
+
+      try {
+        const phoneNumber = String(parsed.phoneNumber || "").trim();
+        const productCodes = [
+          ...new Set(
+            (parsed.items || [])
+              .map((item) => String(item?.sku || "").trim())
+              .filter(Boolean),
+          ),
+        ];
+        const invoiceAddress = String(
+          parsed.newAddress || parsed.oldAddress || "",
+        ).trim();
+        const deliveryAddress = String(
+          parsed.oldAddress || parsed.newAddress || "",
+        ).trim();
+        const addresses = [
+          ...new Set([invoiceAddress, deliveryAddress].filter(Boolean)),
+        ];
+
+        const [
+          customerResponse,
+          groupsResponse,
+          productEntries,
+          addressEntries,
+          campaignsResponse,
+        ] = await Promise.all([
+          phoneNumber
+            ? getCustomerByPhoneNumber(
+                selectedRetailerId,
+                accessPrivateToken,
+                phoneNumber,
+              )
+            : Promise.resolve(null),
+          getCustomerGroup(selectedRetailerId, accessPrivateToken),
+          Promise.all(
+            productCodes.map(async (code) => {
+              try {
+                const product = await getProductByCode(
+                  selectedRetailerId,
+                  accessPrivateToken,
+                  accessToken,
+                  code,
+                );
+                return [code, product];
+              } catch (error) {
+                console.error("getProductByCode error:", code, error);
+                return [code, null];
+              }
+            }),
+          ),
+          Promise.all(
+            addresses.map(async (address) => [
+              address,
+              await resolveAdministrativeAreaDetails({
+                retailer: selectedRetailerId,
+                accessPrivateToken,
+                address,
+              }),
+            ]),
+          ),
+          getCampaign(selectedRetailerId, accessPrivateToken).catch((error) => {
+            console.error("getCampaign error:", error);
+            return [];
+          }),
+        ]);
+
+        if (!active) return;
+
+        const groups = Array.isArray(groupsResponse)
+          ? groupsResponse
+          : groupsResponse?.Data || groupsResponse?.data || [];
+        const campaigns = Array.isArray(campaignsResponse)
+          ? campaignsResponse
+          : campaignsResponse?.Data || campaignsResponse?.data || [];
+        const productMap = new Map(productEntries);
+        const productCampaignMap = new Map(
+          productEntries.map(([code, product]) => [
+            code,
+            getProductCampaigns(product, campaigns),
+          ]),
+        );
+        const receivedProductIds = [
+          ...new Set(
+            [...productCampaignMap.values()]
+              .flat()
+              .flatMap((campaign) =>
+                (campaign?.SalePromotions || []).flatMap((promotion) =>
+                  getPromotionReceivedProductIds(promotion),
+                ),
+              ),
+          ),
+        ];
+        const promotionProductEntries = await Promise.all(
+          receivedProductIds.map(async (id) => {
+            try {
+              const response = await getProductById(
+                selectedRetailerId,
+                accessPrivateToken,
+                accessToken,
+                id,
+              );
+              return [id, extractProductRecord(response, id)];
+            } catch (error) {
+              console.error("getProductById error:", id, error);
+              return [id, null];
+            }
+          }),
+        );
+
+        if (!active) return;
+
+        setOrderPreparation({
+          status: "ready",
+          key: orderPreparationKey,
+          customerRecord: extractCustomerRecord(customerResponse, null),
+          groups,
+          productMap,
+          productCampaignMap,
+          promotionProductMap: new Map(promotionProductEntries),
+          addressDetails: new Map(addressEntries),
+          error: "",
+        });
+      } catch (error) {
+        if (!active) return;
+        console.error("prepare order data error:", error);
+        setOrderPreparation({
+          status: "error",
+          key: orderPreparationKey,
+          customerRecord: null,
+          groups: [],
+          productMap: new Map(),
+          productCampaignMap: new Map(),
+          promotionProductMap: new Map(),
+          addressDetails: new Map(),
+          error: error?.message || "Không chuẩn bị được dữ liệu đơn hàng",
+        });
+      }
+    }, ORDER_PREPARATION_DELAY_MS);
+
+    return () => {
+      active = false;
+      if (timerId !== null) {
+        window.clearTimeout(timerId);
+      }
+    };
+  }, [
+    accessPrivateToken,
+    accessToken,
+    orderPreparationKey,
+    parsed,
+    rawText,
+    selectedRetailerId,
+  ]);
+
+  const isOrderPreparationReady =
+    orderPreparation.status === "ready" &&
+    orderPreparation.key === orderPreparationKey &&
+    Boolean(String(parsed.phoneNumber || "").trim());
+  const orderPreparationMessage = tokenLoading
+    ? "Đang lấy token để chuẩn bị dữ liệu..."
+    : orderPreparation.status === "waiting"
+      ? "Đang chờ bạn ngưng nhập 10 giây..."
+      : orderPreparation.status === "loading"
+        ? "Đang tải khách hàng, sản phẩm, khuyến mãi, nhóm khách và địa chỉ..."
+        : orderPreparation.status === "ready"
+          ? "Dữ liệu đã sẵn sàng để tạo đơn."
+          : orderPreparation.status === "error"
+            ? orderPreparation.error
+            : "Nhập nội dung đơn hàng để bắt đầu chuẩn bị dữ liệu.";
+  const promotionSelectionsAreComplete = Object.entries(
+    promotionSelections,
+  ).every(([productCode, campaignSelections]) => {
+    const item = parsed.items.find(
+      (candidate) => String(candidate?.sku || "").trim() === productCode,
+    );
+    const product = orderPreparation.productMap.get(productCode);
+    const campaigns =
+      orderPreparation.productCampaignMap.get(productCode) || [];
+
+    return Object.values(campaignSelections).every((selection) => {
+      const campaign = campaigns.find(
+        (candidate) => String(candidate?.Id) === String(selection.campaignId),
+      );
+      const details = getPromotionSelectionDetails({
+        item,
+        product,
+        campaign,
+        selection,
+      });
+      const selectedGiftProductsLoaded = Object.entries(
+        selection.giftQuantities || {},
+      ).every(
+        ([id, quantity]) =>
+          Number(quantity || 0) <= 0 ||
+          Boolean(orderPreparation.promotionProductMap.get(Number(id))),
+      );
+
+      return details.isComplete && selectedGiftProductsLoaded;
+    });
+  });
+
+  const handlePromotionCampaignToggle = (
+    productCode,
+    campaignId,
+    item,
+    checked,
+  ) => {
+    const product = orderPreparation.productMap.get(productCode);
+    const campaigns =
+      orderPreparation.productCampaignMap.get(productCode) || [];
+    const campaign = campaigns.find(
+      (candidate) => String(candidate?.Id) === String(campaignId),
+    );
+    const details = getPromotionSelectionDetails({
+      item,
+      product,
+      campaign,
+      selection: null,
+    });
+    const receivedProductIds = getPromotionReceivedProductIds(
+      details.promotion,
+    );
+    const giftQuantities =
+      details.promotionType === 6 && receivedProductIds.length === 1
+        ? { [receivedProductIds[0]]: details.expectedGiftQuantity }
+        : {};
+
+    setPromotionSelections((current) => {
+      const next = { ...current };
+      if (checked) {
+        next[productCode] = {
+          [campaignId]: {
+            campaignId,
+            giftQuantities,
+          },
+        };
+      } else {
+        delete next[productCode];
+      }
+      return next;
+    });
+  };
+
+  const handlePromotionClear = (productCode) => {
+    setPromotionSelections((current) => {
+      const next = { ...current };
+      delete next[productCode];
+      return next;
+    });
+  };
+
+  const handlePromotionGiftQuantityChange = (
+    productCode,
+    campaignId,
+    productId,
+    quantity,
+  ) => {
+    const nextQuantity = Math.max(0, Math.floor(Number(quantity || 0)));
+    setPromotionSelections((current) => ({
+      ...current,
+      [productCode]: {
+        ...current[productCode],
+        [campaignId]: {
+          ...current[productCode]?.[campaignId],
+          giftQuantities: {
+            ...current[productCode]?.[campaignId]?.giftQuantities,
+            [productId]: nextQuantity,
+          },
+        },
+      },
+    }));
+  };
+
   const handleReset = () => {
-    setSelectedRetailerId("nnvtv");
     setSelectedShippingPartner("GHN");
     setCustomerType("dai_ly");
+    setAgencyDescription("");
     setRawText(SAMPLE_TEXT);
     setCopied(false);
+    setPromotionSelections({});
   };
 
   const handleCopy = async () => {
@@ -710,40 +3223,31 @@ export default function TaoDonHang() {
   const handleCreateOrder = async () => {
     const phoneNumber = String(parsed.phoneNumber || "").trim();
     if (!phoneNumber) {
-      console.warn("Không tìm thấy số điện thoại trong dữ liệu thô.");
+      console.warn("No phone number found in parsed data.");
       return;
     }
 
     if (!accessPrivateToken) {
-      console.warn(
-        "Chưa có accessPrivateToken để gọi getCustomerByPhoneNumber.",
-      );
+      console.warn("Missing accessPrivateToken for customer lookup.");
       return;
     }
 
+    if (!isOrderPreparationReady) {
+      console.warn("Order data is not prepared yet.");
+      return;
+    }
+
+    if (!promotionSelectionsAreComplete) {
+      console.warn("Promotion selection is incomplete.");
+      return;
+    }
+
+    if (isCreatingOrder) return;
+
+    setIsCreatingOrder(true);
     try {
-      const response = await getCustomerByPhoneNumber(
-        selectedRetailerId,
-        accessPrivateToken,
-        phoneNumber,
-      );
-
-      const foundCustomer = Array.isArray(response)
-        ? response
-        : response?.Data?.[0] || response;
-
-      if (foundCustomer && Object.keys(foundCustomer || {}).length > 0) {
-        console.log("Khách hàng đã tồn tại:", foundCustomer);
-        return;
-      }
-
-      const groupsResponse = await getCustomerGroup(
-        selectedRetailerId,
-        accessPrivateToken,
-      );
-      const groups = Array.isArray(groupsResponse)
-        ? groupsResponse
-        : groupsResponse?.Data || groupsResponse?.data || [];
+      const foundCustomer = orderPreparation.customerRecord;
+      const groups = orderPreparation.groups;
 
       const targetGroupName = pickCustomerGroupName(customerType);
       const targetGroup = groups.find(
@@ -752,29 +3256,183 @@ export default function TaoDonHang() {
           normalizeLookupText(targetGroupName),
       );
 
-      console.log("parsed", parsed);
+      let customerRecord = foundCustomer;
+      if (customerRecord && Object.keys(customerRecord || {}).length > 0) {
+        console.log("Customer already exists:", customerRecord);
+      } else {
+        const payload = await buildNewCustomerPayloadV2({
+          parsed,
+          selectedGroupId: targetGroup?.Id || targetGroup?.GroupId || null,
+          customerType,
+          retailer: selectedRetailerId,
+          accessPrivateToken,
+          matchedKiotUser,
+          invoiceAddressDetails: orderPreparation.addressDetails.get(
+            String(parsed.newAddress || parsed.oldAddress || "").trim(),
+          ),
+        });
 
-      const payload = await buildNewCustomerPayloadV2({
+        const createResponse = await addNewCustomer(
+          selectedRetailerId,
+          accessPrivateToken,
+          accessToken,
+          payload,
+          targetGroupName,
+          "",
+        );
+
+        console.log("addNewCustomer response:", createResponse);
+        const createdCustomer = extractCustomerRecord(createResponse, null);
+        try {
+          const createdCustomerResponse = await getCustomerByPhoneNumber(
+            selectedRetailerId,
+            accessPrivateToken,
+            phoneNumber,
+          );
+          customerRecord = extractCustomerRecord(
+            createdCustomerResponse,
+            createdCustomer,
+          );
+        } catch (error) {
+          console.error("reload created customer error:", error);
+          customerRecord = createdCustomer;
+        }
+        if (customerRecord) {
+          setOrderPreparation((current) =>
+            current.key === orderPreparationKey
+              ? { ...current, customerRecord }
+              : current,
+          );
+        }
+      }
+
+      if (!customerRecord) {
+        console.warn(
+          "Cannot build invoice payload because customer is missing.",
+        );
+        return;
+      }
+
+      const builtInvoicePayload = await buildInvoicePayload({
+        customer: customerRecord,
         parsed,
-        selectedGroupId: targetGroup?.Id || targetGroup?.GroupId || null,
-        customerType,
         retailer: selectedRetailerId,
-        accessPrivateToken,
         matchedKiotUser,
+        selectedShippingPartner,
+        partnerDeliveries,
+        accessToken,
+        customerType,
+        accessPrivateToken,
+        description: agencyDescription,
+        productMap: orderPreparation.productMap,
+        productCampaignMap: orderPreparation.productCampaignMap,
+        promotionProductMap: orderPreparation.promotionProductMap,
+        promotionSelections,
+        deliveryAddressDetails: orderPreparation.addressDetails.get(
+          String(parsed.oldAddress || parsed.newAddress || "").trim(),
+        ),
       });
 
-      const createResponse = await addNewCustomer(
+      const { __ghnShipping: ghnShipping, ...invoicePayloadWithoutMetadata } =
+        builtInvoicePayload;
+      let invoicePayload = invoicePayloadWithoutMetadata;
+
+      if (!isViettelPostShippingPartner(selectedShippingPartner)) {
+        const ghnOrderPayloads = buildGhnCreateOrderPayloads({
+          invoicePayload,
+          ghnShipping,
+          senderName:
+            matchedKiotUser?.GivenName ||
+            selectedRetailer?.label ||
+            selectedRetailerId,
+        });
+        if (ghnOrderPayloads.length === 0) {
+          throw new Error("Không có kiện hàng hợp lệ để tạo vận đơn GHN.");
+        }
+
+        const ghnOrderCodes = [];
+        for (const ghnOrderPayload of ghnOrderPayloads) {
+          console.log("createOrderGHN payload", ghnOrderPayload);
+          const ghnOrderResponse = await createOrderGHN(
+            selectedRetailerId,
+            accessPrivateToken,
+            accessToken,
+            ghnOrderPayload,
+          );
+          console.log("createOrderGHN response", ghnOrderResponse);
+
+          const orderCode = extractGhnOrderCode(ghnOrderResponse);
+          if (!orderCode) {
+            throw new Error("GHN không trả về mã vận đơn sau khi tạo đơn.");
+          }
+          ghnOrderCodes.push(orderCode);
+        }
+
+        invoicePayload = {
+          ...invoicePayload,
+          Invoice: {
+            ...invoicePayload.Invoice,
+            DeliveryDetail: {
+              ...invoicePayload.Invoice.DeliveryDetail,
+              DeliveryCode: ghnOrderCodes.join(", "),
+            },
+          },
+        };
+      }
+
+      setPreparedInvoicePayload(invoicePayload);
+      console.log("preparedInvoicePayload", invoicePayload);
+
+      const createInvoiceResponse = await createInvoices(
         selectedRetailerId,
         accessPrivateToken,
         accessToken,
-        payload,
-        targetGroupName,
-        "",
+        invoicePayload,
       );
+      console.log("createInvoices response", createInvoiceResponse);
 
-      console.log("addNewCustomer response:", createResponse);
+      if (isViettelPostShippingPartner(selectedShippingPartner)) {
+        const invoiceDetails = Array.isArray(
+          invoicePayload?.Invoice?.InvoiceDetails,
+        )
+          ? invoicePayload.Invoice.InvoiceDetails
+          : [];
+        const totalWeightForDelivery = invoiceDetails.reduce(
+          (sum, item) =>
+            sum + Number(item?.Weight || 0) * Number(item?.Quantity || 0),
+          0,
+        );
+        const deliveryPayload = buildInvoiceDeliveryPayload({
+          invoicePayload,
+          invoiceResponse: createInvoiceResponse,
+          deliveryDetail: invoicePayload?.Invoice?.DeliveryDetail || {},
+          totalBeforeDiscount:
+            invoicePayload?.Invoice?.TotalBeforeDiscount || 0,
+          totalProductPrice: invoicePayload?.Invoice?.Total || 0,
+          totalWeight: totalWeightForDelivery,
+          branchTakingAddressId:
+            invoicePayload?.Invoice?.DeliveryDetail?.BranchTakingAddressId ??
+            null,
+          branchTakingAddressStr:
+            invoicePayload?.Invoice?.DeliveryDetail?.BranchTakingAddressStr ||
+            "",
+          selectedVtpServiceCode:
+            invoicePayload?.Invoice?.DeliveryDetail?.ServiceCode || "ECOD",
+        });
+
+        console.log("createInvoicesDelivery payload", deliveryPayload);
+        const createDeliveryResponse = await createInvoicesDelivery(
+          selectedRetailerId,
+          accessPrivateToken,
+          accessToken,
+          deliveryPayload,
+        );
+        console.log("createInvoicesDelivery response", createDeliveryResponse);
+      }
     } catch (error) {
       console.error("create customer flow error:", error);
+    } finally {
+      setIsCreatingOrder(false);
     }
   };
 
@@ -792,8 +3450,8 @@ export default function TaoDonHang() {
                   Tạo đơn hàng
                 </h1>
                 <p className="text-xs text-slate-500 md:text-sm">
-                  Tạm thời đã tắt phần gửi order. Chỉ nhập dữ liệu thô vào một ô
-                  duy nhất, đồng thời tách thông tin ra ngay bên cạnh.
+                  Nhập dữ liệu thô, kiểm tra sản phẩm và khuyến mãi, sau đó tạo
+                  hóa đơn trực tiếp trên KiotViet.
                 </p>
               </div>
             </div>
@@ -831,32 +3489,18 @@ export default function TaoDonHang() {
 
             <div className="space-y-4 px-5 py-5">
               <div className="grid gap-3 md:grid-cols-3">
-                <label className="block space-y-2">
-                  <span className="text-xs font-semibold text-slate-600">
-                    Retailer
-                  </span>
-                  <select
-                    value={selectedRetailerId}
-                    onChange={(e) => {
-                      const next = e.target.value;
-                      setSelectedRetailerId(next);
-                      const nextOptions = getCustomerTypeOptions(next);
-                      if (
-                        !nextOptions.some((item) => item.value === customerType)
-                      ) {
-                        setCustomerType(nextOptions[0]?.value || "");
-                      }
-                    }}
-                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100"
-                  >
-                    {RETAILERS.map((item) => (
-                      <option key={item.id} value={item.id}>
-                        {item.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-
+                <div className="rounded-xl border border-cyan-100 bg-cyan-50/70 px-3 py-2.5 text-sm text-cyan-900 md:col-span-1">
+                  <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-cyan-700">
+                    Công ty hiện tại
+                  </div>
+                  <div className="mt-1 font-semibold">
+                    {selectedRetailer.label}
+                  </div>
+                  <div className="text-xs text-cyan-700/80">
+                    Team: {user?.teamId || "Chưa có"} - Retailer:{" "}
+                    {selectedRetailerId}
+                  </div>
+                </div>
                 <label className="block space-y-2">
                   <span className="text-xs font-semibold text-slate-600">
                     Đối tác giao hàng
@@ -894,6 +3538,23 @@ export default function TaoDonHang() {
                 </label>
               </div>
 
+              {String(customerType).toLowerCase() === "dai_ly" ? (
+                <label className="block space-y-2">
+                  <span className="text-xs font-semibold text-slate-600">
+                    Ghi chú đại lý
+                  </span>
+                  <textarea
+                    value={agencyDescription}
+                    onChange={(event) =>
+                      setAgencyDescription(event.target.value)
+                    }
+                    rows={3}
+                    className="w-full resize-y rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
+                    placeholder="Nhập ghi chú cho hóa đơn đại lý..."
+                  />
+                </label>
+              ) : null}
+
               <textarea
                 value={rawText}
                 onChange={(e) => setRawText(e.target.value)}
@@ -901,6 +3562,18 @@ export default function TaoDonHang() {
                 placeholder="Nhập dữ liệu đơn hàng thô..."
                 spellCheck={false}
               />
+
+              <div
+                className={`text-xs font-medium ${
+                  orderPreparation.status === "error"
+                    ? "text-rose-600"
+                    : isOrderPreparationReady
+                      ? "text-emerald-700"
+                      : "text-slate-500"
+                }`}
+              >
+                {orderPreparationMessage}
+              </div>
 
               <div className="flex flex-wrap gap-2">
                 <button
@@ -924,9 +3597,14 @@ export default function TaoDonHang() {
                 <button
                   type="button"
                   onClick={handleCreateOrder}
-                  className="inline-flex items-center gap-2 rounded-xl bg-cyan-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-cyan-700"
+                  disabled={
+                    !isOrderPreparationReady ||
+                    !promotionSelectionsAreComplete ||
+                    isCreatingOrder
+                  }
+                  className="inline-flex items-center gap-2 rounded-xl bg-cyan-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-cyan-700 disabled:cursor-not-allowed disabled:bg-slate-300"
                 >
-                  Tạo đơn hàng
+                  {isCreatingOrder ? "Đang tạo đơn..." : "Tạo đơn hàng"}
                 </button>
               </div>
             </div>
@@ -1026,32 +3704,247 @@ export default function TaoDonHang() {
                 </div>
               </div>
 
+              <div className="mt-4 rounded-2xl border border-amber-100 bg-amber-50/70 px-4 py-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-amber-700">
+                    Payload hóa đơn
+                  </div>
+                  <div className="text-xs text-amber-700/80">
+                    {preparedInvoicePayload ? "Đã chuẩn bị" : "Chưa có"}
+                  </div>
+                </div>
+                {preparedInvoicePayload ? (
+                  <pre className="mt-3 max-h-72 overflow-auto rounded-xl bg-white p-3 text-[11px] leading-5 text-slate-700">
+                    {JSON.stringify(preparedInvoicePayload, null, 2)}
+                  </pre>
+                ) : (
+                  <div className="mt-2 text-sm text-slate-600">
+                    Bấm <b>Tạo đơn hàng</b> để tìm/tạo khách hàng và dựng
+                    payload hóa đơn theo mẫu.
+                  </div>
+                )}
+              </div>
+
               <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-3">
                 <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">
                   Dòng sản phẩm
                 </div>
                 <div className="mt-2 space-y-3">
                   {parsed.items.length > 0 ? (
-                    parsed.items.map((item, index) => (
-                      <div
-                        key={`${item.sku}-${index}`}
-                        className="rounded-2xl border border-white bg-white px-3 py-3 shadow-sm"
-                      >
-                        <div className="text-sm font-semibold text-slate-900">
-                          {item.quantity} x {item.productName}
+                    parsed.items.map((item, index) => {
+                      const productCode = String(item.sku || "").trim();
+                      const product =
+                        orderPreparation.productMap.get(productCode);
+                      const productCampaigns =
+                        orderPreparation.productCampaignMap.get(productCode) ||
+                        [];
+                      const campaignSelections =
+                        promotionSelections[productCode] || {};
+
+                      return (
+                        <div
+                          key={`${item.sku}-${index}`}
+                          className="rounded-2xl border border-white bg-white px-3 py-3 shadow-sm"
+                        >
+                          <div className="text-sm font-semibold text-slate-900">
+                            {item.quantity} x {item.productName}
+                          </div>
+                          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500">
+                            <span>SKU: {item.sku}</span>
+                            <span>Đơn vị: {item.unit}</span>
+                            <span>
+                              Giá:{" "}
+                              {typeof item.price === "number"
+                                ? item.price.toLocaleString("vi-VN")
+                                : "Chưa có"}
+                            </span>
+                          </div>
+
+                          {orderPreparation.status === "ready" ? (
+                            productCampaigns.length > 0 ? (
+                              <div className="mt-3 space-y-2 rounded-xl border border-emerald-200 bg-emerald-50/80 px-3 py-2.5">
+                                <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-emerald-700">
+                                  Chọn 1 trong {productCampaigns.length} chương
+                                  trình khuyến mãi
+                                </div>
+                                <label className="flex cursor-pointer items-center gap-2.5 rounded-xl border border-emerald-100 bg-white px-3 py-2 text-sm font-medium text-slate-600">
+                                  <input
+                                    type="radio"
+                                    name={`promotion-${productCode}-${index}`}
+                                    checked={
+                                      Object.keys(campaignSelections).length ===
+                                      0
+                                    }
+                                    onChange={() =>
+                                      handlePromotionClear(productCode)
+                                    }
+                                    className="h-4 w-4 accent-emerald-600"
+                                  />
+                                  Không áp dụng khuyến mãi
+                                </label>
+                                {productCampaigns.map((campaign) => {
+                                  const campaignId = String(campaign.Id);
+                                  const selection =
+                                    campaignSelections[campaignId];
+                                  const details = getPromotionSelectionDetails({
+                                    item,
+                                    product,
+                                    campaign,
+                                    selection,
+                                  });
+                                  const receivedProductIds =
+                                    getPromotionReceivedProductIds(
+                                      details.promotion,
+                                    );
+                                  const isSelected = Boolean(selection);
+
+                                  return (
+                                    <div
+                                      key={campaign.Id || campaign.Code}
+                                      className={`rounded-xl border px-3 py-2.5 ${
+                                        isSelected
+                                          ? "border-emerald-300 bg-white"
+                                          : "border-emerald-100 bg-emerald-50/40"
+                                      }`}
+                                    >
+                                      <label className="flex cursor-pointer items-start gap-2.5">
+                                        <input
+                                          type="radio"
+                                          name={`promotion-${productCode}-${index}`}
+                                          checked={isSelected}
+                                          disabled={
+                                            details.applicationCount < 1
+                                          }
+                                          onChange={(event) =>
+                                            handlePromotionCampaignToggle(
+                                              productCode,
+                                              campaignId,
+                                              item,
+                                              event.target.checked,
+                                            )
+                                          }
+                                          className="mt-1 h-4 w-4 accent-emerald-600"
+                                        />
+                                        <div className="min-w-0 flex-1">
+                                          <div className="text-sm font-semibold leading-5 text-emerald-950">
+                                            {campaign.Name || campaign.Code}
+                                          </div>
+                                          <div className="mt-1 text-xs text-emerald-800/80">
+                                            {[
+                                              campaign.Code,
+                                              formatPromotionRule(
+                                                campaign,
+                                                product,
+                                              ),
+                                              details.applicationCount < 1
+                                                ? "Chưa đủ số lượng"
+                                                : "",
+                                            ]
+                                              .filter(Boolean)
+                                              .join(" · ")}
+                                          </div>
+                                        </div>
+                                      </label>
+
+                                      {isSelected &&
+                                      details.promotionType === 6 ? (
+                                        <div className="mt-3 space-y-2 border-t border-emerald-100 pt-2">
+                                          <div className="text-xs font-semibold text-emerald-900">
+                                            Chọn sản phẩm tặng: đã chọn{" "}
+                                            {details.selectedGiftQuantity}/
+                                            {details.expectedGiftQuantity}
+                                          </div>
+                                          {receivedProductIds.map(
+                                            (productId) => {
+                                              const receivedProduct =
+                                                orderPreparation.promotionProductMap.get(
+                                                  productId,
+                                                );
+                                              const quantity = Number(
+                                                selection?.giftQuantities?.[
+                                                  productId
+                                                ] || 0,
+                                              );
+
+                                              return (
+                                                <label
+                                                  key={productId}
+                                                  className="flex items-center gap-3 rounded-xl border border-emerald-100 bg-white px-3 py-2"
+                                                >
+                                                  <div className="min-w-0 flex-1">
+                                                    <div className="truncate text-xs font-semibold text-slate-800">
+                                                      {receivedProduct
+                                                        ? getProductDisplayName(
+                                                            receivedProduct,
+                                                          )
+                                                        : `Sản phẩm #${productId}`}
+                                                    </div>
+                                                    <div className="text-[11px] text-slate-500">
+                                                      {receivedProduct
+                                                        ? getProductDisplayCode(
+                                                            receivedProduct,
+                                                          )
+                                                        : "Không tải được thông tin"}
+                                                    </div>
+                                                  </div>
+                                                  <input
+                                                    type="number"
+                                                    min="0"
+                                                    step="1"
+                                                    value={quantity}
+                                                    disabled={!receivedProduct}
+                                                    onChange={(event) =>
+                                                      handlePromotionGiftQuantityChange(
+                                                        productCode,
+                                                        campaignId,
+                                                        productId,
+                                                        event.target.value,
+                                                      )
+                                                    }
+                                                    className="w-20 rounded-lg border border-slate-200 px-2 py-1.5 text-center text-sm outline-none focus:border-emerald-300"
+                                                  />
+                                                </label>
+                                              );
+                                            },
+                                          )}
+                                          <div
+                                            className={`text-xs font-medium ${
+                                              details.isComplete
+                                                ? "text-emerald-700"
+                                                : "text-amber-700"
+                                            }`}
+                                          >
+                                            {details.isComplete
+                                              ? "Đã đủ quà, chương trình sẽ được thêm vào payload."
+                                              : "Phân bổ đủ số lượng quà để áp chương trình."}
+                                          </div>
+                                        </div>
+                                      ) : isSelected &&
+                                        details.promotionType === 8 ? (
+                                        <div className="mt-3 rounded-xl border border-emerald-100 bg-white px-3 py-2 text-xs font-medium text-emerald-800">
+                                          Giá khuyến mãi sẽ được áp vào dòng sản
+                                          phẩm khi tạo đơn.
+                                        </div>
+                                      ) : isSelected ? (
+                                        <div className="mt-3 text-xs text-amber-700">
+                                          Loại khuyến mãi này chưa được hỗ trợ
+                                          tự động.
+                                        </div>
+                                      ) : null}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            ) : (
+                              <div className="mt-3 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2 text-xs text-slate-500">
+                                Sản phẩm không có chương trình khuyến mãi đang
+                                hoạt động.
+                              </div>
+                            )
+                          ) : null}
                         </div>
-                        <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500">
-                          <span>SKU: {item.sku}</span>
-                          <span>Đơn vị: {item.unit}</span>
-                          <span>
-                            Giá:{" "}
-                            {typeof item.price === "number"
-                              ? item.price.toLocaleString("vi-VN")
-                              : "Chưa có"}
-                          </span>
-                        </div>
-                      </div>
-                    ))
+                      );
+                    })
                   ) : (
                     <div className="text-sm text-slate-500">
                       Chưa tách được dòng sản phẩm nào.
