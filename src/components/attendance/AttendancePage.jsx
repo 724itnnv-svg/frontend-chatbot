@@ -1063,6 +1063,7 @@ export default function AttendancePage() {
   const [payrollMessage, setPayrollMessage] = useState("");
   const [leaveForm, setLeaveForm] = useState(createLeaveForm);
   const [leaveRequests, setLeaveRequests] = useState([]);
+  const [annualLeaveBalance, setAnnualLeaveBalance] = useState({ year: new Date().getFullYear(), remainingDays: 0 });
   const [leaveLoading, setLeaveLoading] = useState(false);
   const [leaveSaving, setLeaveSaving] = useState(false);
   const [advanceForm, setAdvanceForm] = useState(createAdvanceForm);
@@ -1377,14 +1378,26 @@ export default function AttendancePage() {
   const loadLeaveRequests = useCallback(async () => {
     setLeaveLoading(true);
     try {
-      const res = await api.get("/attendance-leave-requests/my");
+      const [res, balanceRes] = await Promise.all([
+        api.get("/attendance-leave-requests/my"),
+        api.get("/attendance-leave-requests/annual-balance/my").catch(() => ({ data: { data: null } })),
+      ]);
       setLeaveRequests(res.data?.data || []);
+      if (balanceRes.data?.data) setAnnualLeaveBalance(balanceRes.data.data);
     } catch (err) {
       showMsg(false, err.response?.data?.message || "Không tải được danh sách đơn nghỉ phép.");
     } finally {
       setLeaveLoading(false);
     }
   }, [api]);
+
+  useEffect(() => {
+    if (leaveForm.leaveType !== "annual" || !/^\d{4}-/.test(leaveForm.startDate || "")) return;
+    const year = leaveForm.startDate.slice(0, 4);
+    api.get(`/attendance-leave-requests/annual-balance/my?year=${year}`)
+      .then((res) => setAnnualLeaveBalance(res.data?.data || { year: Number(year), remainingDays: 0 }))
+      .catch(() => setAnnualLeaveBalance({ year: Number(year), remainingDays: 0 }));
+  }, [api, leaveForm.leaveType, leaveForm.startDate]);
 
   const loadMyAutoAttendance = useCallback(async () => {
     try {
@@ -1777,8 +1790,7 @@ export default function AttendancePage() {
     }
     if (!leaveForm.reason.trim()) return showMsg(false, "Vui lòng nhập lý do xin nghỉ.");
 
-    setLeaveSaving(true);
-    try {
+    const sendRequest = async (convertAnnualToRegular = false) => {
       const body = new FormData();
       body.append("leaveType", leaveForm.leaveType);
       body.append("startDate", leaveForm.startDate);
@@ -1787,8 +1799,23 @@ export default function AttendancePage() {
       body.append("endTime", leaveForm.endTime);
       body.append("session", leaveForm.session);
       body.append("reason", leaveForm.reason.trim());
+      if (convertAnnualToRegular) body.append("convertAnnualToRegular", "true");
       if (leaveForm.evidence) body.append("evidence", leaveForm.evidence);
-      const res = await api.post("/attendance-leave-requests", body);
+      return api.post("/attendance-leave-requests", body);
+    };
+
+    setLeaveSaving(true);
+    try {
+      let res;
+      try {
+        res = await sendRequest(false);
+      } catch (err) {
+        const data = err.response?.data;
+        if (data?.code !== "ANNUAL_LEAVE_INSUFFICIENT" || !data?.data?.canConvertToRegular) throw err;
+        const agreed = window.confirm(`${data.message}\n\nBạn có đồng ý chuyển toàn bộ đơn này sang phép thường không lương không?`);
+        if (!agreed) return;
+        res = await sendRequest(true);
+      }
       showMsg(true, res.data?.message || "Đã gửi đơn xin nghỉ phép.");
       setLeaveForm(createLeaveForm());
       await loadLeaveRequests();
@@ -2699,6 +2726,21 @@ export default function AttendancePage() {
                   </div>
                 </div>
 
+                <div className="mb-4 flex items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3.5 py-3" aria-live="polite">
+                  <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white text-emerald-600 shadow-sm">
+                    <CalendarDays size={19} />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-semibold text-emerald-700">Phép năm còn lại</p>
+                    <p className="text-lg font-black tabular-nums text-emerald-800">
+                      {Number(annualLeaveBalance.remainingDays || 0)} ngày
+                    </p>
+                  </div>
+                  <span className="rounded-full border border-emerald-200 bg-white px-2.5 py-1 text-xs font-bold text-emerald-700">
+                    Năm {annualLeaveBalance.year || new Date().getFullYear()}
+                  </span>
+                </div>
+
                 <div className="space-y-3">
                   <label className="block text-xs font-semibold text-slate-600">
                     LOẠI NGHỈ <span className="text-rose-500">*</span>
@@ -2741,7 +2783,7 @@ export default function AttendancePage() {
                       <p className="col-span-2 text-xs text-slate-400">Chỉ tính thời gian trong giờ làm việc; tự động loại giờ nghỉ trưa 11:30–13:00.</p>
                     </div>
                   ) : leaveForm.leaveType === "annual" ? (
-                    <div className={`rounded-xl border p-3 text-xs ${TONE.emerald}`}>Phép năm tính theo ngày nguyên. Chủ nhật không tính; thứ Bảy và ngày lễ vẫn tính bình thường.</div>
+                    <div className={`rounded-xl border p-3 text-xs ${TONE.emerald}`}><b>Điều kiện tự duyệt phép năm</b><span className="mt-1 block">Báo trước: 1 ngày ≥ 3 ngày, 2 ngày ≥ 7 ngày, từ 3 ngày ≥ 15 ngày. Chủ nhật không tính ngày nghỉ.</span></div>
                   ) : (
                     <label className="block text-xs font-semibold text-slate-600">
                       THỜI GIAN <span className="text-rose-500">*</span>
@@ -2805,6 +2847,8 @@ export default function AttendancePage() {
                             <Badge tone={status.tone}>{status.text}</Badge>
                           </div>
                           <p className="mt-2 whitespace-pre-wrap text-sm text-slate-600">{request.reason}</p>
+                          {request.convertedFromAnnual && <p className="mt-1 text-xs font-semibold text-amber-700">Đơn này đã được chuyển sang phép thường không lương do không đủ phép năm.</p>}
+                          {request.autoApproved && <p className="mt-1 text-xs font-semibold text-violet-700">Đã được hệ thống tự động duyệt.</p>}
                           {(request.status === "approved" || request.status === "cancel_pending") && <p className="mt-1 text-xs font-semibold text-emerald-700">Đã duyệt: {request.leaveType === "emergency" ? `${Number(request.approvedMinutes || 0)} phút nghỉ` : `${Number(request.approvedDays || 0)} ngày nghỉ`}</p>}
                           {request.cancellationReason && <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700"><strong>Lý do yêu cầu hủy:</strong> {request.cancellationReason}</p>}
                           {request.cancellationReviewNote && <p className="mt-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600"><strong>Phản hồi hủy đơn:</strong> {request.cancellationReviewNote}</p>}

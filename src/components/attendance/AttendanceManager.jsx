@@ -65,6 +65,15 @@ const LEAVE_TYPE_LABELS = {
   annual: "Phép năm",
 };
 const LEAVE_SESSION_LABELS = { full_day: "Cả ngày", morning: "Buổi sáng", afternoon: "Buổi chiều" };
+const AI_REVIEW_FLAG_LABELS = {
+  unreadable: "Ảnh khó đọc",
+  unrelated: "Ảnh không liên quan",
+  screenshot_or_reproduced: "Ảnh chụp màn hình/chụp lại",
+  suspected_editing: "Nghi ảnh đã chỉnh sửa",
+  sensitive_document: "Có tài liệu nhạy cảm",
+  prompt_injection_text: "Ảnh chứa chỉ dẫn bất thường",
+  date_mismatch: "Ngày trong ảnh không phù hợp",
+};
 
 function leaveStatusMeta(status, needsEvidence) {
   if (status === "approved") return { label: "Đã duyệt", tone: "emerald" };
@@ -1199,6 +1208,20 @@ export default function AttendanceManager() {
       await Promise.all([loadLeaveRequests(leavePage), loadLeavePendingCount()]);
     } catch (err) {
       showFlash(false, err.response?.data?.message || "Không thể xử lý đơn nghỉ phép.");
+    } finally {
+      setReviewingLeaveId("");
+    }
+  }
+
+  async function retryLeaveAiReview(request) {
+    if (!window.confirm(`Phân tích ảnh minh chứng của ${request.userName || "nhân viên này"} bằng AI?`)) return;
+    setReviewingLeaveId(request._id);
+    try {
+      const res = await api.patch(`/attendance-leave-requests/${request._id}/ai-review`);
+      showFlash(res.data?.data?.aiReview?.status === "completed", res.data?.message || "Đã xử lý ảnh minh chứng.");
+      await loadLeaveRequests(leavePage);
+    } catch (err) {
+      showFlash(false, err.response?.data?.message || "Không thể phân tích ảnh minh chứng.");
     } finally {
       setReviewingLeaveId("");
     }
@@ -3436,9 +3459,25 @@ export default function AttendanceManager() {
                               <span>{request.leaveType === "emergency" ? `${request.startTime || "-"}–${request.endTime || "-"}` : (LEAVE_SESSION_LABELS[request.session] || request.session)}</span>
                               <span>Gửi {new Date(request.createdAt).toLocaleString("vi-VN")}</span>
                             </div>
-                            <p className="mt-2 whitespace-pre-wrap text-sm text-slate-600">{request.reason}</p>
-                            {(request.status === "approved" || request.status === "cancel_pending") && <p className="mt-1 text-xs font-semibold text-emerald-700">Đã duyệt: {request.leaveType === "emergency" ? `${Number(request.approvedMinutes || 0)} phút nghỉ` : `${Number(request.approvedDays || 0)} ngày nghỉ`}</p>}
-                            {request.reviewNote && <p className="mt-2 text-xs text-slate-500"><strong>Ghi chú xử lý:</strong> {request.reviewNote}</p>}
+                             <p className="mt-2 whitespace-pre-wrap text-sm text-slate-600">{request.reason}</p>
+                             {request.convertedFromAnnual && <p className="mt-1 text-xs font-semibold text-amber-700">Đã chuyển từ phép năm sang phép thường không lương do không đủ số dư.</p>}
+                             {request.autoApproved && <p className="mt-1 text-xs font-semibold text-violet-700">Hệ thống tự động duyệt · báo trước {Number(request.autoApprovalNoticeDays || 0)}/{Number(request.autoApprovalRequiredDays || 0)} ngày.</p>}
+                             {(request.status === "approved" || request.status === "cancel_pending") && <p className="mt-1 text-xs font-semibold text-emerald-700">Đã duyệt: {request.leaveType === "emergency" ? `${Number(request.approvedMinutes || 0)} phút nghỉ` : `${Number(request.approvedDays || 0)} ngày nghỉ`}</p>}
+                             {request.leaveType === "emergency" && request.evidence?.url && (
+                               <div className={`mt-3 rounded-xl border p-3 text-xs ${request.aiReview?.recommendation === "recommend_approve" ? TONE.emerald : request.aiReview?.status === "failed" ? TONE.rose : TONE.amber}`}>
+                                 <div className="flex flex-wrap items-center gap-2 font-bold">
+                                   <ShieldCheck size={15} />
+                                   {request.aiReview?.status === "processing" ? "AI đang phân tích ảnh" : request.aiReview?.status === "completed" && request.aiReview?.recommendation === "recommend_approve" ? "AI đề xuất có thể duyệt" : request.aiReview?.status === "completed" ? "AI đề xuất quản trị xem xét thủ công" : request.aiReview?.status === "failed" ? "AI chưa thể phân tích ảnh" : "Ảnh chưa được AI phân tích"}
+                                   {request.aiReview?.status === "completed" && <span>· phù hợp {Number(request.aiReview.reasonMatchScore || 0)}%</span>}
+                                 </div>
+                                 {request.aiReview?.imageSummary && <p className="mt-1.5"><strong>Nội dung ảnh:</strong> {request.aiReview.imageSummary}</p>}
+                                 {request.aiReview?.reasonComparison && <p className="mt-1"><strong>So với lý do:</strong> {request.aiReview.reasonComparison}</p>}
+                                 {request.aiReview?.flags?.length > 0 && <p className="mt-1"><strong>Cần lưu ý:</strong> {request.aiReview.flags.map((flag) => AI_REVIEW_FLAG_LABELS[flag] || flag).join(", ")}</p>}
+                                 {request.aiReview?.status === "failed" && <p className="mt-1">Đơn vẫn được giữ để duyệt thủ công.</p>}
+                                 <p className="mt-1.5 font-semibold">AI chỉ đưa ra đề xuất; quản trị là người quyết định cuối cùng.</p>
+                               </div>
+                             )}
+                             {request.reviewNote && <p className="mt-2 text-xs text-slate-500"><strong>Ghi chú xử lý:</strong> {request.reviewNote}</p>}
                             {request.cancellationReason && <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700"><strong>Lý do yêu cầu hủy:</strong> {request.cancellationReason}</p>}
                             {request.cancellationReviewNote && <p className="mt-2 text-xs text-slate-500"><strong>Ghi chú xử lý hủy:</strong> {request.cancellationReviewNote}</p>}
                           </div>
@@ -3448,6 +3487,9 @@ export default function AttendanceManager() {
                               <button type="button" onClick={() => openLeaveEvidence(request)} className="inline-flex items-center gap-1.5 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs font-semibold text-sky-700 hover:bg-sky-100"><ImagePlus size={14} /> Xem minh chứng</button>
                             ) : (
                               <span className={`inline-flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-semibold ${request.leaveType === "emergency" ? TONE.amber : TONE.slate}`}><ImagePlus size={14} /> Chưa có ảnh</span>
+                            )}
+                            {request.leaveType === "emergency" && request.status === "pending" && request.evidence?.url && request.aiReview?.status !== "processing" && request.aiReview?.status !== "completed" && (
+                              <button type="button" disabled={isReviewing} onClick={() => retryLeaveAiReview(request)} className="inline-flex items-center gap-1.5 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-xs font-bold text-violet-700 hover:bg-violet-100 disabled:opacity-45"><ShieldCheck size={14} /> Phân tích AI</button>
                             )}
                             {request.status === "pending" && (
                               <>
