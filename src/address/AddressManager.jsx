@@ -155,6 +155,9 @@ export default function AddressManager() {
     setCopied(false);
     try {
       const data = await convertAddress(address);
+      if (data?.meta?.normalizedInput) {
+        setQuery(data.meta.normalizedInput);
+      }
       if (!data?.result) {
         setNotice({
           type:
