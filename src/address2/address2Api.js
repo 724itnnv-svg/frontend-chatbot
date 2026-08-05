@@ -21,3 +21,12 @@ export async function autoConvertAddress2(text) {
   );
   return response.data?.data;
 }
+
+export async function reverseConvertAddress2(text) {
+  const response = await axiosClient.post(
+    "/address-all/reverse-convert",
+    { text },
+    authConfig(),
+  );
+  return response.data?.data;
+}

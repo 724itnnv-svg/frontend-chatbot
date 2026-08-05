@@ -13,14 +13,60 @@ import {
   RotateCcw,
   Search,
   Sparkles,
+  ArrowLeftRight,
 } from "lucide-react";
-import { autoConvertAddress2, getAddress2Status } from "./address2Api";
+import {
+  autoConvertAddress2,
+  getAddress2Status,
+  reverseConvertAddress2,
+} from "./address2Api";
 
 function displayName(value) {
   return value?.name_with_type || value?.name || "-";
 }
 
-function ResultDetails({ result, onCopy, copied }) {
+function ResultDetails({ result, direction, onCopy, copied }) {
+  if (direction === "new-old") {
+    return (
+      <section className="overflow-hidden rounded-3xl border border-emerald-100 bg-white shadow-[0_16px_50px_-28px_rgba(5,150,105,0.35)]">
+        <div className="relative overflow-hidden bg-gradient-to-br from-emerald-500 via-teal-500 to-cyan-600 px-5 py-6 text-white sm:px-7">
+          <div className="absolute -right-14 -top-14 h-40 w-40 rounded-full bg-white/10" />
+          <div className="relative">
+            <div className="mb-2 flex items-center gap-2 text-xs font-bold uppercase tracking-[0.16em] text-emerald-50">
+              <CheckCircle2 className="h-4 w-4" /> Địa chỉ cũ tương ứng
+            </div>
+            <div className="text-sm text-emerald-50">
+              Tìm thấy {result.old_candidates?.length || 0} địa chỉ trước thay đổi hành chính
+            </div>
+          </div>
+        </div>
+        <div className="grid gap-3 p-5 sm:p-7">
+          {(result.old_candidates || []).map((candidate, index) => (
+            <div key={`${candidate.codes?.ward}-${index}`} className="flex flex-col justify-between gap-4 rounded-2xl border border-slate-200 bg-slate-50/70 p-4 sm:flex-row sm:items-center">
+              <div className="min-w-0">
+                <div className="text-xs font-bold uppercase tracking-wider text-slate-400">Phương án {index + 1}</div>
+                <div className="mt-1 font-bold leading-6 text-slate-800">{candidate.normalized_text}</div>
+                <div className="mt-2 flex flex-wrap gap-2 text-xs text-slate-500">
+                  <span>Tỉnh/TP: {candidate.province}</span><span>•</span>
+                  <span>Quận/Huyện: {candidate.district}</span><span>•</span>
+                  <span>Phường/Xã: {candidate.ward}</span>
+                </div>
+              </div>
+              <button type="button" onClick={() => onCopy(candidate.normalized_text)} className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-700 transition hover:border-cyan-300 hover:text-cyan-700">
+                {copied === candidate.normalized_text ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                {copied === candidate.normalized_text ? "Đã sao chép" : "Sao chép"}
+              </button>
+            </div>
+          ))}
+          <details className="group mt-2 rounded-2xl border border-slate-200 bg-slate-950">
+            <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3.5 text-sm font-semibold text-slate-200"><span className="flex items-center gap-2"><Code2 className="h-4 w-4 text-cyan-400" />Dữ liệu kỹ thuật</span><ChevronDown className="h-4 w-4 transition group-open:rotate-180" /></summary>
+            <pre className="max-h-[420px] overflow-auto border-t border-slate-800 p-4 text-xs leading-6 text-cyan-100">{JSON.stringify(result, null, 2)}</pre>
+          </details>
+        </div>
+      </section>
+    );
+  }
+
   const conversion = result.conversion || {};
   const old = conversion.old || {};
   const converted = result.converted_new || {};
@@ -135,6 +181,7 @@ function ResultDetails({ result, onCopy, copied }) {
 
 export default function Address2Manager() {
   const [query, setQuery] = useState("");
+  const [direction, setDirection] = useState("old-new");
   const [mappingCount, setMappingCount] = useState(0);
   const [ready, setReady] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -170,20 +217,26 @@ export default function Address2Manager() {
     setResult(null);
     setCopied(false);
     try {
-      const data = await autoConvertAddress2(address);
+      const data = direction === "new-old"
+        ? await reverseConvertAddress2(address)
+        : await autoConvertAddress2(address);
       if (!data?.normalized_text) {
         setNotice({
           type: "warning",
-          text: "Chưa tìm được một ánh xạ xã/phường phù hợp. Vui lòng bổ sung huyện hoặc tỉnh.",
+          text: direction === "new-old"
+            ? "Chưa nhận diện được địa chỉ mới hoặc không tìm thấy địa chỉ cũ tương ứng."
+            : "Chưa tìm được một ánh xạ xã/phường phù hợp. Vui lòng bổ sung huyện hoặc tỉnh.",
         });
         return;
       }
       setResult(data);
       setNotice({
         type: "success",
-        text: data.input_type === "new"
-          ? "Địa chỉ đã đúng theo cấu trúc đích, không cần chuyển đổi."
-          : "Đã ánh xạ trực tiếp bằng dữ liệu local, không cần gọi AI.",
+        text: direction === "new-old"
+          ? `Đã tìm thấy ${data.old_candidates?.length || 0} địa chỉ cũ tương ứng.`
+          : data.input_type === "new"
+            ? "Địa chỉ đã đúng theo cấu trúc đích, không cần chuyển đổi."
+            : "Đã ánh xạ trực tiếp bằng dữ liệu local, không cần gọi AI.",
       });
     } catch (error) {
       setNotice({
@@ -205,7 +258,7 @@ export default function Address2Manager() {
   async function copyResult(value) {
     try {
       await navigator.clipboard.writeText(value);
-      setCopied(true);
+      setCopied(value);
       window.setTimeout(() => setCopied(false), 1800);
     } catch {
       setNotice({ type: "error", text: "Không thể sao chép địa chỉ. Vui lòng thử lại." });
@@ -253,6 +306,27 @@ export default function Address2Manager() {
             </div>
           </div>
 
+          <div className="mb-5 inline-flex w-full rounded-2xl bg-slate-100 p-1 sm:w-auto">
+            {[
+              { id: "old-new", label: "Cũ → Mới" },
+              { id: "new-old", label: "Mới → Cũ" },
+            ].map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => {
+                  setDirection(item.id);
+                  setResult(null);
+                  setNotice(null);
+                  setCopied(false);
+                }}
+                className={`inline-flex flex-1 items-center justify-center gap-2 rounded-xl px-5 py-2.5 text-sm font-bold transition sm:flex-none ${direction === item.id ? "bg-white text-blue-700 shadow-sm ring-1 ring-slate-200" : "text-slate-500 hover:text-slate-800"}`}
+              >
+                <ArrowLeftRight className="h-4 w-4" />{item.label}
+              </button>
+            ))}
+          </div>
+
           <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
             <label className="block">
               <span className="mb-2 block text-sm font-bold text-slate-700">Địa chỉ cần chuẩn hóa</span>
@@ -265,7 +339,7 @@ export default function Address2Manager() {
                     if (!event.target.value.trim()) { setResult(null); setNotice(null); }
                   }}
                   onKeyDown={(event) => { if (event.key === "Enter" && ready && !loading) handleConvert(); }}
-                  placeholder="Ví dụ: Đường Trần Não, Phường Thảo Điền, TP Thủ Đức, TP Hồ Chí Minh"
+                  placeholder={direction === "new-old" ? "Ví dụ: Đường Trần Não, Phường An Khánh, TP Hồ Chí Minh" : "Ví dụ: Đường Trần Não, Phường Thảo Điền, TP Thủ Đức, TP Hồ Chí Minh"}
                   autoComplete="off"
                   className="h-13 w-full rounded-2xl border border-slate-200 bg-slate-50 py-3.5 pl-11 pr-4 text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
                 />
@@ -302,7 +376,7 @@ export default function Address2Manager() {
             </div>
           ) : null}
 
-          {result?.normalized_text && !loading ? <ResultDetails result={result} onCopy={copyResult} copied={copied} /> : null}
+          {result?.normalized_text && !loading ? <ResultDetails result={result} direction={direction} onCopy={copyResult} copied={copied} /> : null}
         </div>
 
         <footer className="flex flex-col items-center justify-between gap-2 py-7 text-xs text-slate-400 sm:flex-row">
