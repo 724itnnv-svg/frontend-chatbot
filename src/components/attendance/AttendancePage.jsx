@@ -93,8 +93,14 @@ function createLeaveForm() {
 }
 
 function createAdvanceForm() {
-  const today = dateKey(new Date());
-  return { requestedAmount: "", requestedPayDate: today, payrollPeriod: monthPeriod(), paymentMethod: "bank_transfer", reason: "" };
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Ho_Chi_Minh",
+    year: "numeric",
+    month: "2-digit",
+  }).formatToParts(new Date());
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  const payrollPeriod = `${values.year}-${values.month}`;
+  return { requestedAmount: "", requestedPayDate: `${payrollPeriod}-20`, payrollPeriod, paymentMethod: "bank_transfer", reason: "" };
 }
 
 function advanceStatusMeta(status) {
@@ -1064,7 +1070,7 @@ export default function AttendancePage() {
   const [advanceLoading, setAdvanceLoading] = useState(false);
   const [advanceSaving, setAdvanceSaving] = useState(false);
   const [deletingAdvanceId, setDeletingAdvanceId] = useState("");
-  const [advanceLimit, setAdvanceLimit] = useState({ minAmount: 100000, maxAmount: 2500000 });
+  const [advanceLimit, setAdvanceLimit] = useState({ minAmount: 100000, maxAmount: 2600000 });
   const [advanceLimitLoading, setAdvanceLimitLoading] = useState(false);
   const [approvalNotifications, setApprovalNotifications] = useState([]);
   const [notificationHistory, setNotificationHistory] = useState([]);
@@ -1406,9 +1412,9 @@ export default function AttendancePage() {
     setAdvanceLimitLoading(true);
     try {
       const res = await api.get(`/salary-advance-requests/my-limit?period=${encodeURIComponent(period)}`);
-      setAdvanceLimit(res.data?.data || { minAmount: 100000, maxAmount: 2500000 });
+      setAdvanceLimit(res.data?.data || { minAmount: 100000, maxAmount: 2600000 });
     } catch {
-      setAdvanceLimit({ minAmount: 100000, maxAmount: 2500000 });
+      setAdvanceLimit({ minAmount: 100000, maxAmount: 2600000 });
     } finally {
       setAdvanceLimitLoading(false);
     }
@@ -1797,9 +1803,8 @@ export default function AttendancePage() {
     event.preventDefault();
     const requestedAmount = Number(advanceForm.requestedAmount);
     if (!Number.isFinite(requestedAmount) || requestedAmount < 100000) return showMsg(false, "Số tiền muốn ứng tối thiểu là 100.000 đ.");
-    if (requestedAmount > Number(advanceLimit.maxAmount || 2500000)) return showMsg(false, "Số tiền muốn ứng tối đa là 2.500.000 đ.");
+    if (requestedAmount > Number(advanceLimit.maxAmount || 2600000)) return showMsg(false, "Số tiền muốn ứng tối đa là 2.600.000 đ.");
     if (!advanceForm.requestedPayDate || !advanceForm.payrollPeriod) return showMsg(false, "Vui lòng chọn ngày nhận và kỳ khấu trừ.");
-    if (!advanceForm.reason.trim()) return showMsg(false, "Vui lòng nhập lý do ứng lương.");
     setAdvanceSaving(true);
     try {
       const res = await api.post("/salary-advance-requests", {
@@ -2690,13 +2695,13 @@ export default function AttendancePage() {
                   </span>
                   <div>
                     <h2 className="font-bold text-slate-900">Tạo đơn xin nghỉ phép</h2>
-                    <p className="text-xs text-slate-500">Có thể đăng ký trước cho ngày nghỉ trong tương lai.</p>
+                    <p className="text-xs text-slate-500">Có thể đăng ký trước cho ngày nghỉ trong tương lai. <span className="font-semibold text-rose-500">* Bắt buộc</span></p>
                   </div>
                 </div>
 
                 <div className="space-y-3">
                   <label className="block text-xs font-semibold text-slate-600">
-                    LOẠI NGHỈ
+                    LOẠI NGHỈ <span className="text-rose-500">*</span>
                     <select
                       value={leaveForm.leaveType}
                       onChange={(event) => setLeaveForm((current) => {
@@ -2718,12 +2723,12 @@ export default function AttendancePage() {
 
                   <div className={`grid gap-3 ${leaveForm.leaveType === "emergency" ? "grid-cols-1" : "grid-cols-2"}`}>
                     <label className="block text-xs font-semibold text-slate-600">
-                      TỪ NGÀY
+                      TỪ NGÀY <span className="text-rose-500">*</span>
                       <input type="date" required value={leaveForm.startDate} onChange={(event) => setLeaveForm((current) => ({ ...current, startDate: event.target.value, endDate: current.leaveType === "emergency" || current.endDate < event.target.value ? event.target.value : current.endDate }))} className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-violet-400" />
                     </label>
                     {leaveForm.leaveType !== "emergency" && (
                       <label className="block text-xs font-semibold text-slate-600">
-                        ĐẾN NGÀY
+                        ĐẾN NGÀY <span className="text-rose-500">*</span>
                         <input type="date" required min={leaveForm.startDate} value={leaveForm.endDate} onChange={(event) => setLeaveForm((current) => ({ ...current, endDate: event.target.value }))} className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-violet-400" />
                       </label>
                     )}
@@ -2731,15 +2736,15 @@ export default function AttendancePage() {
 
                   {leaveForm.leaveType === "emergency" ? (
                     <div className="grid grid-cols-2 gap-3">
-                      <label className="block text-xs font-semibold text-slate-600">TỪ GIỜ<input type="time" min="07:30" max="17:00" required value={leaveForm.startTime} onChange={(event) => setLeaveForm((current) => ({ ...current, startTime: event.target.value }))} className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-violet-400" /></label>
-                      <label className="block text-xs font-semibold text-slate-600">ĐẾN GIỜ<input type="time" min="07:30" max="17:00" required value={leaveForm.endTime} onChange={(event) => setLeaveForm((current) => ({ ...current, endTime: event.target.value }))} className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-violet-400" /></label>
+                      <label className="block text-xs font-semibold text-slate-600">TỪ GIỜ <span className="text-rose-500">*</span><input type="time" min="07:30" max="17:00" required value={leaveForm.startTime} onChange={(event) => setLeaveForm((current) => ({ ...current, startTime: event.target.value }))} className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-violet-400" /></label>
+                      <label className="block text-xs font-semibold text-slate-600">ĐẾN GIỜ <span className="text-rose-500">*</span><input type="time" min="07:30" max="17:00" required value={leaveForm.endTime} onChange={(event) => setLeaveForm((current) => ({ ...current, endTime: event.target.value }))} className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-violet-400" /></label>
                       <p className="col-span-2 text-xs text-slate-400">Chỉ tính thời gian trong giờ làm việc; tự động loại giờ nghỉ trưa 11:30–13:00.</p>
                     </div>
                   ) : leaveForm.leaveType === "annual" ? (
                     <div className={`rounded-xl border p-3 text-xs ${TONE.emerald}`}>Phép năm tính theo ngày nguyên. Chủ nhật không tính; thứ Bảy và ngày lễ vẫn tính bình thường.</div>
                   ) : (
                     <label className="block text-xs font-semibold text-slate-600">
-                      THỜI GIAN
+                      THỜI GIAN <span className="text-rose-500">*</span>
                       <select value={leaveForm.session} onChange={(event) => setLeaveForm((current) => ({ ...current, session: event.target.value }))} className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-violet-400">
                         <option value="full_day">Cả ngày</option>
                         <option value="morning">Buổi sáng</option>
@@ -2749,7 +2754,7 @@ export default function AttendancePage() {
                   )}
 
                   <label className="block text-xs font-semibold text-slate-600">
-                    LÝ DO
+                    LÝ DO <span className="text-rose-500">*</span>
                     <textarea required maxLength={1000} rows={4} value={leaveForm.reason} onChange={(event) => setLeaveForm((current) => ({ ...current, reason: event.target.value }))} placeholder="Nêu lý do và thông tin cần thiết..." className="mt-1.5 w-full resize-none rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100" />
                   </label>
 
@@ -2847,27 +2852,27 @@ export default function AttendancePage() {
                 </div>
                 <div className="space-y-3">
                   <label className="block text-xs font-semibold text-slate-600">SỐ TIỀN MUỐN ỨNG
-                    <input type="number" required min="100000" max="2500000" step="1000" value={advanceForm.requestedAmount} onChange={(event) => setAdvanceForm((current) => ({ ...current, requestedAmount: event.target.value }))} placeholder="Từ 100.000 đ đến 2.500.000 đ" className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-emerald-400" />
+                    <input type="number" required min="100000" max="2600000" step="1000" value={advanceForm.requestedAmount} onChange={(event) => setAdvanceForm((current) => ({ ...current, requestedAmount: event.target.value }))} placeholder="Từ 100.000 đ đến 2.600.000 đ" className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-emerald-400" />
                   </label>
                   {Number(advanceForm.requestedAmount) > 0 && <p className="-mt-1 text-sm font-bold text-emerald-700">{money(advanceForm.requestedAmount)}</p>}
                   <div className={`rounded-xl border px-3 py-2 text-xs ${TONE.emerald}`}>
-                    {advanceLimitLoading ? "Đang tải hạn mức ứng lương..." : <>Được ứng từ <strong>{money(advanceLimit.minAmount || 100000)}</strong> đến tối đa <strong>{money(advanceLimit.maxAmount || 2500000)}</strong>.</>}
+                    {advanceLimitLoading ? "Đang tải hạn mức ứng lương..." : <>Được ứng từ <strong>{money(advanceLimit.minAmount || 100000)}</strong> đến tối đa <strong>{money(advanceLimit.maxAmount || 2600000)}</strong>.</>}
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <label className="block text-xs font-semibold text-slate-600">NGÀY MUỐN NHẬN
-                      <input type="date" required value={advanceForm.requestedPayDate} onChange={(event) => setAdvanceForm((current) => ({ ...current, requestedPayDate: event.target.value }))} className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-emerald-400" />
+                      <input type="date" required disabled value={advanceForm.requestedPayDate} className="mt-1.5 w-full cursor-not-allowed rounded-xl border border-slate-200 bg-slate-100 px-3 py-2.5 text-sm text-slate-500" />
                     </label>
                     <label className="block text-xs font-semibold text-slate-600">KỲ KHẤU TRỪ
-                      <input type="month" required value={advanceForm.payrollPeriod} onChange={(event) => setAdvanceForm((current) => ({ ...current, payrollPeriod: event.target.value }))} className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-emerald-400" />
+                      <input type="month" required disabled value={advanceForm.payrollPeriod} className="mt-1.5 w-full cursor-not-allowed rounded-xl border border-slate-200 bg-slate-100 px-3 py-2.5 text-sm text-slate-500" />
                     </label>
                   </div>
                   <label className="block text-xs font-semibold text-slate-600">HÌNH THỨC NHẬN
-                    <select value={advanceForm.paymentMethod} onChange={(event) => setAdvanceForm((current) => ({ ...current, paymentMethod: event.target.value }))} className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-emerald-400">
-                      <option value="bank_transfer">Chuyển khoản</option><option value="cash">Tiền mặt</option>
+                    <select disabled value={advanceForm.paymentMethod} className="mt-1.5 w-full cursor-not-allowed rounded-xl border border-slate-200 bg-slate-100 px-3 py-2.5 text-sm text-slate-500">
+                      <option value="bank_transfer">Chuyển khoản</option>
                     </select>
                   </label>
-                  <label className="block text-xs font-semibold text-slate-600">LÝ DO
-                    <textarea required maxLength={1000} rows={4} value={advanceForm.reason} onChange={(event) => setAdvanceForm((current) => ({ ...current, reason: event.target.value }))} placeholder="Nêu lý do và thông tin cần thiết..." className="mt-1.5 w-full resize-none rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100" />
+                  <label className="block text-xs font-semibold text-slate-600">LÝ DO <span className="font-normal text-slate-400">(KHÔNG BẮT BUỘC)</span>
+                    <textarea maxLength={1000} rows={4} value={advanceForm.reason} onChange={(event) => setAdvanceForm((current) => ({ ...current, reason: event.target.value }))} placeholder="Có thể để trống..." className="mt-1.5 w-full resize-none rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100" />
                   </label>
                   <button type="submit" disabled={advanceSaving || advanceLimitLoading} className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-emerald-700 disabled:opacity-60">
                     {advanceSaving ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />} Gửi phiếu chờ duyệt
