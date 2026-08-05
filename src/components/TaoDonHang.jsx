@@ -32,6 +32,7 @@ import {
   getIdWards,
   getFullIdProvinceDistrictWard,
 } from "../services/cashflowService/kiotService";
+import { convertAddress } from "../address/addressApi";
 import { useAuth } from "../context/AuthContext";
 const RETAILERS = [
   { id: "nnvtv", label: "Công ty Phân Bón Nông Nghiệp Việt" },
@@ -43,6 +44,26 @@ const RETAILERS = [
 const SHIPPING_PARTNERS = [
   { id: "GHN", label: "Giao hàng nhanh (GHN)" },
   { id: "VTPFW", label: "Viettel Post FW (VTPFW)" },
+];
+
+const DEFAULT_GHN_REQUIRED_NOTE = "CHOXEMHANGKHONGTHU";
+
+const GHN_REQUIRED_NOTE_OPTIONS = [
+  {
+    value: "CHOTHUHANG",
+    label: "Cho thử hàng",
+    description: "Người mua có thể yêu cầu xem và dùng thử hàng hóa.",
+  },
+  {
+    value: "CHOXEMHANGKHONGTHU",
+    label: "Cho xem hàng, không thử",
+    description: "Người mua được xem hàng nhưng không được dùng thử hàng.",
+  },
+  {
+    value: "KHONGCHOXEMHANG",
+    label: "Không cho xem hàng",
+    description: "Người mua không được phép xem hàng.",
+  },
 ];
 
 const ORDER_PREPARATION_DELAY_MS = 10000;
@@ -295,6 +316,31 @@ function normalizeNameForCompare(value = "") {
     .replace(/[^a-z0-9\s]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function extractConvertedAddress(payload) {
+  if (!payload) return "";
+  if (typeof payload === "string") return payload.trim();
+  if (Array.isArray(payload)) {
+    for (const item of payload) {
+      const convertedAddress = extractConvertedAddress(item);
+      if (convertedAddress) return convertedAddress;
+    }
+    return "";
+  }
+
+  const convertedAddress = String(
+    payload?.normalized_address ||
+      payload?.normalizedAddress ||
+      payload?.result?.display ||
+      payload?.mapping?.display ||
+      payload?.mapping?.address ||
+      payload?.displayAnalysis?.normalized_address ||
+      "",
+  ).trim();
+
+  if (convertedAddress) return convertedAddress;
+  return payload?.data ? extractConvertedAddress(payload.data) : "";
 }
 
 function getKiotUserDisplayName(kiotUser = {}) {
@@ -1307,6 +1353,7 @@ function buildGhnCreateOrderPayloads({
   invoicePayload,
   ghnShipping,
   senderName,
+  requiredNote = DEFAULT_GHN_REQUIRED_NOTE,
 }) {
   const invoice = invoicePayload?.Invoice || {};
   const deliveryDetail = invoice?.DeliveryDetail || {};
@@ -1327,11 +1374,16 @@ function buildGhnCreateOrderPayloads({
   const pickupTime = Math.floor(Date.now() / 1000) + 60 * 60;
   const fromPhone = normalizeGhnPhone(branchAddress?.senderMobile);
   const toPhone = normalizeGhnPhone(deliveryDetail?.ContactNumber);
+  const resolvedRequiredNote = GHN_REQUIRED_NOTE_OPTIONS.some(
+    (option) => option.value === requiredNote,
+  )
+    ? requiredNote
+    : DEFAULT_GHN_REQUIRED_NOTE;
 
   return pricingPackages.map((item, index) => ({
     payment_type_id: 2,
     note: String(invoice?.Description || "").trim(),
-    required_note: "CHOXEMHANGKHONGTHU",
+    required_note: resolvedRequiredNote,
     return_phone: fromPhone,
     return_address: branchAddress?.senderFullAddress || "",
     return_district_id: null,
@@ -2768,6 +2820,9 @@ function FieldCard({ label, value, placeholder = "Chưa có dữ liệu" }) {
 
 export default function TaoDonHang() {
   const [selectedShippingPartner, setSelectedShippingPartner] = useState("GHN");
+  const [ghnRequiredNote, setGhnRequiredNote] = useState(
+    DEFAULT_GHN_REQUIRED_NOTE,
+  );
   const [customerType, setCustomerType] = useState("khach_le");
   const [agencyTaxCode, setAgencyTaxCode] = useState("");
   const [agencyDescription, setAgencyDescription] = useState("");
@@ -2795,6 +2850,7 @@ export default function TaoDonHang() {
     productCampaignMap: new Map(),
     promotionProductMap: new Map(),
     addressDetails: new Map(),
+    convertedNewAddress: "",
     error: "",
   });
   const [tokenLoading, setTokenLoading] = useState(false);
@@ -2842,6 +2898,16 @@ export default function TaoDonHang() {
     () => JSON.stringify([selectedRetailerId, customerType, rawText]),
     [selectedRetailerId, customerType, rawText],
   );
+  const effectiveParsed = useMemo(() => {
+    const enteredNewAddress = String(parsed.newAddress || "").trim();
+    const convertedNewAddress =
+      orderPreparation.key === orderPreparationKey
+        ? String(orderPreparation.convertedNewAddress || "").trim()
+        : "";
+
+    if (enteredNewAddress || !convertedNewAddress) return parsed;
+    return { ...parsed, newAddress: convertedNewAddress };
+  }, [orderPreparation, orderPreparationKey, parsed]);
 
   useEffect(() => {
     let active = true;
@@ -2975,6 +3041,7 @@ export default function TaoDonHang() {
         productCampaignMap: new Map(),
         promotionProductMap: new Map(),
         addressDetails: new Map(),
+        convertedNewAddress: "",
         error: "",
       });
       return () => {
@@ -2991,6 +3058,7 @@ export default function TaoDonHang() {
       productCampaignMap: new Map(),
       promotionProductMap: new Map(),
       addressDetails: new Map(),
+      convertedNewAddress: "",
       error: "",
     });
 
@@ -3011,6 +3079,23 @@ export default function TaoDonHang() {
 
       try {
         const phoneNumber = String(parsed.phoneNumber || "").trim();
+        const oldAddress = String(parsed.oldAddress || "").trim();
+        const enteredNewAddress = String(parsed.newAddress || "").trim();
+        let convertedNewAddress = "";
+
+        if (!enteredNewAddress && oldAddress) {
+          console.log("Converting missing new address:", oldAddress);
+          const convertedResponse = await convertAddress(oldAddress);
+          convertedNewAddress = extractConvertedAddress(convertedResponse);
+          if (!convertedNewAddress) {
+            throw new Error(
+              "Không lấy được địa chỉ mới từ API chuyển đổi địa chỉ.",
+            );
+          }
+          console.log("Converted new address:", convertedNewAddress);
+        }
+
+        const resolvedNewAddress = enteredNewAddress || convertedNewAddress;
         const productCodes = [
           ...new Set(
             (parsed.items || [])
@@ -3018,12 +3103,8 @@ export default function TaoDonHang() {
               .filter(Boolean),
           ),
         ];
-        const invoiceAddress = String(
-          parsed.newAddress || parsed.oldAddress || "",
-        ).trim();
-        const deliveryAddress = String(
-          parsed.oldAddress || parsed.newAddress || "",
-        ).trim();
+        const invoiceAddress = String(resolvedNewAddress || oldAddress).trim();
+        const deliveryAddress = String(oldAddress || resolvedNewAddress).trim();
         const addresses = [
           ...new Set([invoiceAddress, deliveryAddress].filter(Boolean)),
         ];
@@ -3129,6 +3210,7 @@ export default function TaoDonHang() {
           productCampaignMap,
           promotionProductMap: new Map(promotionProductEntries),
           addressDetails: new Map(addressEntries),
+          convertedNewAddress,
           error: "",
         });
       } catch (error) {
@@ -3143,6 +3225,7 @@ export default function TaoDonHang() {
           productCampaignMap: new Map(),
           promotionProductMap: new Map(),
           addressDetails: new Map(),
+          convertedNewAddress: "",
           error: error?.message || "Không chuẩn bị được dữ liệu đơn hàng",
         });
       }
@@ -3174,7 +3257,9 @@ export default function TaoDonHang() {
       : orderPreparation.status === "loading"
         ? "Đang tải khách hàng, sản phẩm, khuyến mãi, nhóm khách và địa chỉ..."
         : orderPreparation.status === "ready"
-          ? "Dữ liệu đã sẵn sàng để tạo đơn."
+          ? orderPreparation.convertedNewAddress
+            ? `Dữ liệu đã sẵn sàng. Địa chỉ mới: ${orderPreparation.convertedNewAddress}`
+            : "Dữ liệu đã sẵn sàng để tạo đơn."
           : orderPreparation.status === "error"
             ? orderPreparation.error
             : "Nhập nội dung đơn hàng để bắt đầu chuẩn bị dữ liệu.";
@@ -3284,6 +3369,7 @@ export default function TaoDonHang() {
 
   const handleReset = () => {
     setSelectedShippingPartner("GHN");
+    setGhnRequiredNote(DEFAULT_GHN_REQUIRED_NOTE);
     setCustomerType("dai_ly");
     setAgencyTaxCode("");
     setAgencyDescription("");
@@ -3394,7 +3480,7 @@ export default function TaoDonHang() {
           "Chưa có khách hàng, đang tạo mới...",
         );
         const payload = await buildNewCustomerPayloadV2({
-          parsed,
+          parsed: effectiveParsed,
           selectedGroupId: targetGroup?.Id || targetGroup?.GroupId || null,
           customerType,
           retailer: selectedRetailerId,
@@ -3402,7 +3488,9 @@ export default function TaoDonHang() {
           matchedKiotUser,
           taxCode: agencyTaxCode,
           invoiceAddressDetails: orderPreparation.addressDetails.get(
-            String(parsed.newAddress || parsed.oldAddress || "").trim(),
+            String(
+              effectiveParsed.newAddress || effectiveParsed.oldAddress || "",
+            ).trim(),
           ),
         });
 
@@ -3451,7 +3539,7 @@ export default function TaoDonHang() {
 
       const builtInvoicePayload = await buildInvoicePayload({
         customer: customerRecord,
-        parsed,
+        parsed: effectiveParsed,
         retailer: selectedRetailerId,
         matchedKiotUser,
         selectedShippingPartner,
@@ -3465,7 +3553,9 @@ export default function TaoDonHang() {
         promotionProductMap: orderPreparation.promotionProductMap,
         promotionSelections,
         deliveryAddressDetails: orderPreparation.addressDetails.get(
-          String(parsed.oldAddress || parsed.newAddress || "").trim(),
+          String(
+            effectiveParsed.oldAddress || effectiveParsed.newAddress || "",
+          ).trim(),
         ),
         onProgress: updateCreateOrderProgress,
       });
@@ -3483,6 +3573,7 @@ export default function TaoDonHang() {
         const ghnOrderPayloads = buildGhnCreateOrderPayloads({
           invoicePayload,
           ghnShipping,
+          requiredNote: ghnRequiredNote,
           senderName:
             getKiotUserDisplayName(matchedKiotUser) ||
             selectedRetailer?.label ||
@@ -3754,6 +3845,32 @@ export default function TaoDonHang() {
                   </span>
                 </label>
               </div>
+
+              {selectedShippingPartner === "GHN" ? (
+                <label className="block space-y-2">
+                  <span className="text-xs font-semibold text-slate-600">
+                    Ghi chú bắt buộc GHN
+                  </span>
+                  <select
+                    value={ghnRequiredNote}
+                    onChange={(event) => setGhnRequiredNote(event.target.value)}
+                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100"
+                  >
+                    {GHN_REQUIRED_NOTE_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label} ({option.value})
+                      </option>
+                    ))}
+                  </select>
+                  <span className="block text-[11px] text-slate-500">
+                    {
+                      GHN_REQUIRED_NOTE_OPTIONS.find(
+                        (option) => option.value === ghnRequiredNote,
+                      )?.description
+                    }
+                  </span>
+                </label>
+              ) : null}
 
               {customerType === "dai_ly" ? (
                 <label className="block space-y-2">
