@@ -11,7 +11,9 @@ import {
   getAccessPrivateToken,
   getAccessToken,
   addNewCustomer,
+  checkPriceGHN,
   checkPriceVTP,
+  createOrderGHN,
   createInvoices,
   createInvoicesDelivery,
   getCampaign,
@@ -24,6 +26,7 @@ import {
   getUserInKiot,
   getIdLocations,
   getIdWards,
+  getFullIdProvinceDistrictWard,
 } from "../services/cashflowService/kiotService";
 import { useAuth } from "../context/AuthContext";
 const RETAILERS = [
@@ -39,6 +42,13 @@ const SHIPPING_PARTNERS = [
 ];
 
 const ORDER_PREPARATION_DELAY_MS = 10000;
+
+const GHN_PACKAGE_DEFAULT = {
+  length: 50,
+  width: 30,
+  height: 30,
+};
+const GHN_LIGHT_MAX_WEIGHT = 20000;
 
 const VTP_PRICE_CHECK_DEFAULT = {
   ACTIVE_KSHIP: true,
@@ -791,15 +801,20 @@ function parseBranchTakingAddress(branchTakingAddressStr = "") {
   if (!text) {
     return {
       senderAddress: "",
+      senderFullAddress: "",
       senderLocationName: "",
       senderWardName: "",
+      senderDistrictName: "",
+      senderProvinceName: "",
       senderMobile: "",
     };
   }
 
-  const [addressPart = "", phonePart = ""] = text
-    .split(/\s-\s(?=[^-\s]+$)/)
-    .map((part) => part.trim());
+  const phoneSeparatorIndex = text.lastIndexOf(" - ");
+  const addressPart =
+    phoneSeparatorIndex >= 0 ? text.slice(0, phoneSeparatorIndex).trim() : text;
+  const phonePart =
+    phoneSeparatorIndex >= 0 ? text.slice(phoneSeparatorIndex + 3).trim() : "";
 
   const addressParts = addressPart
     .split(",")
@@ -817,10 +832,416 @@ function parseBranchTakingAddress(branchTakingAddressStr = "") {
 
   return {
     senderAddress,
+    senderFullAddress: addressPart,
     senderLocationName,
     senderWardName,
+    senderDistrictName,
+    senderProvinceName,
     senderMobile: normalizeShippingPhone(phonePart),
   };
+}
+
+function getGhnItemName(invoiceDetail = {}) {
+  return invoiceDetail?.ProductName || invoiceDetail?.ProductCode || "Sản phẩm";
+}
+
+function getGhnItemPrice(invoiceDetail = {}) {
+  if (invoiceDetail?.PromotionParentProductId != null) return 0;
+
+  return Math.max(
+    0,
+    Math.round(
+      Number(
+        invoiceDetail?.PriceByPromotion ??
+          invoiceDetail?.Price ??
+          invoiceDetail?.BasePrice ??
+          0,
+      ),
+    ),
+  );
+}
+
+function createGhnPackageItem(invoiceDetail, quantity, unitWeight) {
+  return {
+    name: getGhnItemName(invoiceDetail),
+    code: String(invoiceDetail?.ProductCode || ""),
+    quantity,
+    price: getGhnItemPrice(invoiceDetail),
+    ...GHN_PACKAGE_DEFAULT,
+    weight: unitWeight,
+    category: {
+      level1: String(invoiceDetail?.Unit || "Sản phẩm"),
+    },
+  };
+}
+
+function appendGhnLightItem(items, invoiceDetail, quantity, unitWeight) {
+  const name = getGhnItemName(invoiceDetail);
+  const code = String(invoiceDetail?.ProductCode || "");
+  const existing = items.find(
+    (item) =>
+      item.name === name && item.code === code && item.weight === unitWeight,
+  );
+
+  if (existing) {
+    existing.quantity += quantity;
+    return;
+  }
+
+  items.push(createGhnPackageItem(invoiceDetail, quantity, unitWeight));
+}
+
+function createGhnPricingPackage({
+  serviceTypeId,
+  items,
+  actualWeight,
+  height,
+}) {
+  const length = GHN_PACKAGE_DEFAULT.length;
+  const width = GHN_PACKAGE_DEFAULT.width;
+  const packageHeight = Math.max(GHN_PACKAGE_DEFAULT.height, Number(height));
+  const volumetricWeight = Math.ceil((length * width * packageHeight) / 5);
+
+  return {
+    serviceTypeId,
+    length,
+    width,
+    height: packageHeight,
+    actualWeight: Math.round(actualWeight),
+    weight: Math.max(Math.round(actualWeight), volumetricWeight),
+    items,
+  };
+}
+
+function buildGhnPricingPackages(invoiceDetails = []) {
+  const heavyItems = [];
+  const lightPackages = [];
+
+  for (const invoiceDetail of invoiceDetails) {
+    const quantity = Math.max(
+      0,
+      Math.ceil(Number(invoiceDetail?.Quantity || 0)),
+    );
+    const unitWeight = Math.max(
+      0,
+      Math.round(Number(invoiceDetail?.Weight || 0)),
+    );
+    if (quantity === 0) continue;
+
+    if (unitWeight > GHN_LIGHT_MAX_WEIGHT) {
+      for (let index = 0; index < quantity; index += 1) {
+        heavyItems.push(createGhnPackageItem(invoiceDetail, 1, unitWeight));
+      }
+      continue;
+    }
+
+    let remainingQuantity = quantity;
+    while (remainingQuantity > 0) {
+      let currentPackage = lightPackages[lightPackages.length - 1];
+      if (!currentPackage) {
+        currentPackage = { items: [], actualWeight: 0 };
+        lightPackages.push(currentPackage);
+      }
+
+      if (unitWeight === 0) {
+        appendGhnLightItem(
+          currentPackage.items,
+          invoiceDetail,
+          remainingQuantity,
+          unitWeight,
+        );
+        remainingQuantity = 0;
+        continue;
+      }
+
+      const availableWeight =
+        GHN_LIGHT_MAX_WEIGHT - currentPackage.actualWeight;
+      const quantityThatFits = Math.floor(availableWeight / unitWeight);
+      if (quantityThatFits === 0) {
+        lightPackages.push({ items: [], actualWeight: 0 });
+        continue;
+      }
+
+      const packedQuantity = Math.min(remainingQuantity, quantityThatFits);
+      appendGhnLightItem(
+        currentPackage.items,
+        invoiceDetail,
+        packedQuantity,
+        unitWeight,
+      );
+      currentPackage.actualWeight += unitWeight * packedQuantity;
+      remainingQuantity -= packedQuantity;
+    }
+  }
+
+  const pricingPackages = lightPackages
+    .filter((item) => item.items.length > 0)
+    .map((item) =>
+      createGhnPricingPackage({
+        serviceTypeId: 2,
+        items: item.items,
+        actualWeight: item.actualWeight,
+        height: GHN_PACKAGE_DEFAULT.height,
+      }),
+    );
+
+  if (heavyItems.length > 0) {
+    pricingPackages.push(
+      createGhnPricingPackage({
+        serviceTypeId: 5,
+        items: heavyItems,
+        actualWeight: heavyItems.reduce(
+          (sum, item) => sum + Number(item.weight || 0),
+          0,
+        ),
+        height: GHN_PACKAGE_DEFAULT.height * heavyItems.length,
+      }),
+    );
+  }
+
+  return pricingPackages;
+}
+
+function getGhnShippingFeeValue(response = {}) {
+  const candidates = [
+    response?.data?.total,
+    response?.Data?.Total,
+    response?.total,
+    response?.Total,
+  ];
+
+  for (const candidate of candidates) {
+    const numeric = Number(candidate);
+    if (Number.isFinite(numeric) && numeric >= 0) return numeric;
+  }
+
+  return null;
+}
+
+async function getGhnShippingQuote({
+  retailer,
+  accessPrivateToken,
+  accessToken,
+  branchTakingAddressStr,
+  deliveryParts,
+  invoiceDetails,
+}) {
+  const pricingPackages = buildGhnPricingPackages(invoiceDetails);
+  if (pricingPackages.length === 0) {
+    return {
+      totalFee: 0,
+      totalActualWeight: 0,
+      length: 0,
+      width: 0,
+      height: 0,
+      serviceTypeIds: [],
+      pricingPackages: [],
+      branchAddress: parseBranchTakingAddress(branchTakingAddressStr),
+      fromAddress: null,
+      toAddress: null,
+      route: null,
+    };
+  }
+
+  const branchAddress = parseBranchTakingAddress(branchTakingAddressStr);
+  const fromAddressPayload = {
+    province: branchAddress.senderProvinceName,
+    district: branchAddress.senderDistrictName,
+    ward: branchAddress.senderWardName,
+  };
+  const toAddressPayload = {
+    province: deliveryParts.province,
+    district: deliveryParts.district,
+    ward: deliveryParts.ward,
+  };
+
+  const [fromAddress, toAddress] = await Promise.all([
+    getFullIdProvinceDistrictWard(
+      retailer,
+      accessPrivateToken,
+      accessToken,
+      fromAddressPayload,
+    ),
+    getFullIdProvinceDistrictWard(
+      retailer,
+      accessPrivateToken,
+      accessToken,
+      toAddressPayload,
+    ),
+  ]);
+
+  const route = {
+    from_district_id: Number(fromAddress?.district?.id),
+    from_ward_code: String(fromAddress?.ward?.code || ""),
+    to_district_id: Number(toAddress?.district?.id),
+    to_ward_code: String(toAddress?.ward?.code || ""),
+  };
+  if (
+    !route.from_district_id ||
+    !route.from_ward_code ||
+    !route.to_district_id ||
+    !route.to_ward_code
+  ) {
+    throw new Error("Không map đủ địa chỉ gửi/nhận sang mã khu vực GHN.");
+  }
+
+  const payloads = pricingPackages.map((item) => ({
+    service_type_id: item.serviceTypeId,
+    ...route,
+    length: item.length,
+    width: item.width,
+    height: item.height,
+    weight: item.weight,
+    insurance_value: 0,
+    coupon: null,
+    items: item.items.map(({ name, quantity, length, width, height, weight }) => ({
+      name,
+      quantity,
+      length,
+      width,
+      height,
+      weight,
+    })),
+  }));
+  console.log("TaoDonHang GHN check price payloads", payloads);
+
+  const responses = await Promise.all(
+    payloads.map((payload) =>
+      checkPriceGHN(retailer, accessPrivateToken, accessToken, payload),
+    ),
+  );
+  const fees = responses.map(getGhnShippingFeeValue);
+  if (fees.some((fee) => fee == null)) {
+    throw new Error("GHN không trả về tổng phí vận chuyển hợp lệ.");
+  }
+
+  console.log("TaoDonHang GHN check price responses", responses);
+  return {
+    totalFee: fees.reduce((sum, fee) => sum + fee, 0),
+    totalActualWeight: pricingPackages.reduce(
+      (sum, item) => sum + item.actualWeight,
+      0,
+    ),
+    length: Math.max(...pricingPackages.map((item) => item.length)),
+    width: Math.max(...pricingPackages.map((item) => item.width)),
+    height: pricingPackages.reduce((sum, item) => sum + item.height, 0),
+    serviceTypeIds: [
+      ...new Set(pricingPackages.map((item) => item.serviceTypeId)),
+    ],
+    pricingPackages,
+    branchAddress,
+    fromAddress,
+    toAddress,
+    route,
+  };
+}
+
+function normalizeGhnPhone(phone = "") {
+  const digits = String(phone || "").replace(/\D/g, "");
+  if (digits.startsWith("84")) return `0${digits.slice(2)}`;
+  return digits;
+}
+
+function allocateGhnCodAmounts(totalAmount, packageValues) {
+  const total = Math.max(0, Math.round(Number(totalAmount || 0)));
+  const valueTotal = packageValues.reduce(
+    (sum, value) => sum + Math.max(0, Number(value || 0)),
+    0,
+  );
+  let allocated = 0;
+
+  return packageValues.map((value, index) => {
+    if (index === packageValues.length - 1) return total - allocated;
+
+    const amount =
+      valueTotal > 0
+        ? Math.round((total * Math.max(0, Number(value || 0))) / valueTotal)
+        : Math.floor(total / packageValues.length);
+    allocated += amount;
+    return amount;
+  });
+}
+
+function buildGhnCreateOrderPayloads({
+  invoicePayload,
+  ghnShipping,
+  senderName,
+}) {
+  const invoice = invoicePayload?.Invoice || {};
+  const deliveryDetail = invoice?.DeliveryDetail || {};
+  const pricingPackages = ghnShipping?.pricingPackages || [];
+  const branchAddress = ghnShipping?.branchAddress || {};
+  const fromAddress = ghnShipping?.fromAddress || {};
+  const toAddress = ghnShipping?.toAddress || {};
+  const packageValues = pricingPackages.map((item) =>
+    item.items.reduce(
+      (sum, product) =>
+        sum +
+        Math.max(0, Number(product?.price || 0)) *
+          Math.max(0, Number(product?.quantity || 0)),
+      0,
+    ),
+  );
+  const codAmounts = allocateGhnCodAmounts(invoice?.Total, packageValues);
+  const pickupTime = Math.floor(Date.now() / 1000) + 60 * 60;
+  const fromPhone = normalizeGhnPhone(branchAddress?.senderMobile);
+  const toPhone = normalizeGhnPhone(deliveryDetail?.ContactNumber);
+
+  return pricingPackages.map((item, index) => ({
+    payment_type_id: 2,
+    note: String(invoice?.Description || "").trim(),
+    required_note: "KHONGCHOXEMHANG",
+    return_phone: fromPhone,
+    return_address: branchAddress?.senderFullAddress || "",
+    return_district_id: null,
+    return_ward_code: "",
+    client_order_code: "",
+    from_name: String(senderName || "Cửa hàng").trim(),
+    from_phone: fromPhone,
+    from_address: branchAddress?.senderFullAddress || "",
+    from_ward_name: fromAddress?.ward?.name || "",
+    from_district_name: fromAddress?.district?.name || "",
+    from_province_name: fromAddress?.province?.name || "",
+    to_name: String(deliveryDetail?.Receiver || "").trim(),
+    to_phone: toPhone,
+    to_address:
+      String(deliveryDetail?.AddressInforDelivery || "").trim() ||
+      String(deliveryDetail?.Address || "").trim(),
+    to_ward_name: toAddress?.ward?.name || deliveryDetail?.WardName || "",
+    to_district_name: toAddress?.district?.name || "",
+    to_province_name: toAddress?.province?.name || "",
+    cod_amount: codAmounts[index] || 0,
+    content: item.items
+      .map((product) => product.name)
+      .filter(Boolean)
+      .join(", ")
+      .slice(0, 2000),
+    length: item.length,
+    width: item.width,
+    height: item.height,
+    weight: item.weight,
+    cod_failed_amount: 0,
+    pick_station_id: null,
+    deliver_station_id: null,
+    insurance_value: Math.min(
+      10000000,
+      Math.max(0, Math.round(packageValues[index] || 0)),
+    ),
+    service_type_id: item.serviceTypeId,
+    coupon: null,
+    pickup_time: pickupTime,
+    pick_shift: [2],
+    items: item.items,
+  }));
+}
+
+function extractGhnOrderCode(response = {}) {
+  return String(
+    response?.data?.order_code ||
+      response?.Data?.OrderCode ||
+      response?.order_code ||
+      "",
+  ).trim();
 }
 
 function buildInvoiceDeliveryPayload({
@@ -1646,6 +2067,7 @@ async function buildDeliveryDetailPayload({
   totalBeforeDiscount,
   totalProductPrice,
   totalWeight,
+  invoiceDetails,
   selectedShippingPartner,
   selectedPartnerDelivery,
   partnerCode,
@@ -1656,6 +2078,7 @@ async function buildDeliveryDetailPayload({
   deliveryParts,
   deliveryAddressText,
   accessPrivateToken,
+  accessToken,
   retailer,
   invoiceUuid,
   resolvedAddressDetails = null,
@@ -1691,7 +2114,19 @@ async function buildDeliveryDetailPayload({
   });
 
   if (!isViettelPost) {
-    return {
+    const ghnQuote = await getGhnShippingQuote({
+      retailer,
+      accessPrivateToken,
+      accessToken,
+      branchTakingAddressStr,
+      deliveryParts,
+      invoiceDetails,
+    });
+    const ghnServiceText = ghnQuote.serviceTypeIds
+      .map((serviceTypeId) => (serviceTypeId === 5 ? "Hàng nặng" : "Hàng nhẹ"))
+      .join(" + ");
+
+    const deliveryDetail = {
       Type: 0,
       TypeName: "",
       Status: 1,
@@ -1709,10 +2144,10 @@ async function buildDeliveryDetailPayload({
       BranchTakingAddressStr: branchTakingAddressStr,
       AdministrativeAreaId: null,
       WardId: receiverWardId || VTP_PRICE_CHECK_DEFAULT.RECEIVER_WARD_ID,
-      Weight: 0,
-      Height: 0,
-      Width: 0,
-      Length: 0,
+      Weight: ghnQuote.totalActualWeight,
+      Height: ghnQuote.height,
+      Width: ghnQuote.width,
+      Length: ghnQuote.length,
       AddressInforDelivery: deliveryAddressText || invoiceAddress,
       IsChangeGBH: false,
       LastLocation: buildLocationNameFromParts({
@@ -1728,33 +2163,35 @@ async function buildDeliveryDetailPayload({
       UsingOfBilling: false,
       UsingPriceCod: 1,
       ChangeExpectedDelivery: false,
-      WeightInput: 0,
+      WeightInput: ghnQuote.totalActualWeight,
       PackageTypeObj: {
         Value: 0,
         Name: "gram",
       },
       MaterialType: "cm",
-      WidthInput: 0,
-      HeightInput: 0,
-      LengthInput: 0,
-      Price: null,
+      WidthInput: ghnQuote.width,
+      HeightInput: ghnQuote.height,
+      LengthInput: ghnQuote.length,
+      Price: ghnQuote.totalFee,
       Comments: null,
       ExpectedDelivery: null,
       DeliveryCode: null,
       PartnerCode: partnerCode,
       PartnerName: partnerName,
       PartnerDelivery: deliveryPartner,
-      ServiceCodeText: null,
+      ServiceCodeText: ghnServiceText || null,
       ServiceCode: "0",
       ServiceAdd: null,
-      PartnerDeliveryImage: "",
-      Description: "",
+      PartnerDeliveryImage: deliveryPartner?.ImageForMobile || "",
+      Description: ghnServiceText || deliveryPartner?.Description || "",
       ServiceAddInfor: null,
-      FeeShip: 0,
-      SenderPaymentFee: 0,
+      FeeShip: ghnQuote.totalFee,
+      SenderPaymentFee: ghnQuote.totalFee,
       RecipientPaymentFee: 0,
       TotalRecipientPayment: totalProductPrice,
     };
+
+    return { deliveryDetail, ghnShipping: ghnQuote };
   }
 
   const checkPricePayload = buildVtpCheckPricePayload({
@@ -1987,13 +2424,14 @@ async function buildInvoicePayload({
     selectedPartnerDelivery?.code ||
     selectedPartnerDelivery?.Code ||
     selectedShippingPartner;
-  const deliveryDetail = await buildDeliveryDetailPayload({
+  const deliveryBuildResult = await buildDeliveryDetailPayload({
     parsed,
     customerId,
     customerCode,
     totalBeforeDiscount,
     totalProductPrice,
     totalWeight,
+    invoiceDetails,
     selectedShippingPartner,
     selectedPartnerDelivery,
     partnerCode,
@@ -2004,12 +2442,17 @@ async function buildInvoicePayload({
     deliveryParts,
     deliveryAddressText,
     accessPrivateToken,
+    accessToken,
     retailer,
     invoiceUuid,
     resolvedAddressDetails: deliveryAddressDetails,
   });
+  const deliveryDetail =
+    deliveryBuildResult?.deliveryDetail || deliveryBuildResult;
+  const ghnShipping = deliveryBuildResult?.ghnShipping || null;
 
   return {
+    ...(ghnShipping ? { __ghnShipping: ghnShipping } : {}),
     Invoice: {
       BranchId: branchId,
       RetailerId: retailerId,
@@ -2802,7 +3245,7 @@ export default function TaoDonHang() {
         return;
       }
 
-      const invoicePayload = await buildInvoicePayload({
+      const builtInvoicePayload = await buildInvoicePayload({
         customer: customerRecord,
         parsed,
         retailer: selectedRetailerId,
@@ -2822,15 +3265,62 @@ export default function TaoDonHang() {
         ),
       });
 
+      const { __ghnShipping: ghnShipping, ...invoicePayloadWithoutMetadata } =
+        builtInvoicePayload;
+      let invoicePayload = invoicePayloadWithoutMetadata;
+
+      if (!isViettelPostShippingPartner(selectedShippingPartner)) {
+        const ghnOrderPayloads = buildGhnCreateOrderPayloads({
+          invoicePayload,
+          ghnShipping,
+          senderName:
+            matchedKiotUser?.GivenName ||
+            selectedRetailer?.label ||
+            selectedRetailerId,
+        });
+        if (ghnOrderPayloads.length === 0) {
+          throw new Error("Không có kiện hàng hợp lệ để tạo vận đơn GHN.");
+        }
+
+        const ghnOrderCodes = [];
+        for (const ghnOrderPayload of ghnOrderPayloads) {
+          console.log("createOrderGHN payload", ghnOrderPayload);
+          const ghnOrderResponse = await createOrderGHN(
+            selectedRetailerId,
+            accessPrivateToken,
+            accessToken,
+            ghnOrderPayload,
+          );
+          console.log("createOrderGHN response", ghnOrderResponse);
+
+          const orderCode = extractGhnOrderCode(ghnOrderResponse);
+          if (!orderCode) {
+            throw new Error("GHN không trả về mã vận đơn sau khi tạo đơn.");
+          }
+          ghnOrderCodes.push(orderCode);
+        }
+
+        invoicePayload = {
+          ...invoicePayload,
+          Invoice: {
+            ...invoicePayload.Invoice,
+            DeliveryDetail: {
+              ...invoicePayload.Invoice.DeliveryDetail,
+              DeliveryCode: ghnOrderCodes.join(", "),
+            },
+          },
+        };
+      }
+
       setPreparedInvoicePayload(invoicePayload);
       console.log("preparedInvoicePayload", invoicePayload);
 
-      // const createInvoiceResponse = await createInvoices(
-      //   selectedRetailerId,
-      //   accessPrivateToken,
-      //   accessToken,
-      //   invoicePayload,
-      // );
+      const createInvoiceResponse = await createInvoices(
+        selectedRetailerId,
+        accessPrivateToken,
+        accessToken,
+        invoicePayload,
+      );
       console.log("createInvoices response", createInvoiceResponse);
 
       if (isViettelPostShippingPartner(selectedShippingPartner)) {

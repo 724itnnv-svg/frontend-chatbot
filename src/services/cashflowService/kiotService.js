@@ -13,7 +13,7 @@ const RETAILER_CONFIG = {
     BranchTakingAddressId: null,
     BranchTakingAddressStr:
       "Ấp Công Thiện Hùng, Xã Long Đức, Thành phố Trà Vinh, Trà Vinh - 0915283068",
-    Token_GHN: "b124eb06-2a43-11f1-b85d-fab563a1e61d",
+    Token_GHN: "3045642b-906e-11f1-839d-6a7d77a6dad6",
     ShopId_GHN: 6510616,
   },
   vietnhattv: {
@@ -885,16 +885,38 @@ export async function createInvoicesDelivery(
     throw new Error(`Failed to call administrative area API: ${message}`);
   }
 }
-import axios from "axios";
 
 // Lấy full thông tin tỉnh -> huyện -> xã bên GHN
+function normalizeGhnAdministrativeName(value = "") {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/gi, "d")
+    .toLowerCase()
+    .replace(
+      /^(tinh|thanh pho|tp\.?|quan|huyen|thi xa|phuong|xa|thi tran)\s+/,
+      "",
+    )
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function isGhnAdministrativeNameMatch(item, nameKey, expectedName) {
+  const expected = normalizeGhnAdministrativeName(expectedName);
+  const aliases = [item?.[nameKey], ...(item?.NameExtension || [])];
+
+  return aliases.some(
+    (name) => normalizeGhnAdministrativeName(name) === expected,
+  );
+}
+
 export async function getFullIdProvinceDistrictWard(
   retailer = "kingfarm",
   accessPrivateToken,
   accessToken,
   payload,
 ) {
-  void retailer;
+  void accessPrivateToken;
   void accessToken;
   const config = getRetailerConfig(retailer);
   try {
@@ -910,7 +932,7 @@ export async function getFullIdProvinceDistrictWard(
     const headers = {
       Accept: "application/json, text/plain, */*",
       "Content-Type": "application/json",
-      Token: config,
+      Token: config?.Token_GHN,
     };
 
     // ==========================================
@@ -932,9 +954,8 @@ export async function getFullIdProvinceDistrictWard(
     const provinces = provinceResponse.data?.data || [];
 
     // Map tỉnh theo tên
-    const province = provinces.find(
-      (item) =>
-        item.ProvinceName?.trim().toLowerCase() === provinceName.toLowerCase(),
+    const province = provinces.find((item) =>
+      isGhnAdministrativeNameMatch(item, "ProvinceName", provinceName),
     );
 
     if (!province) {
@@ -957,9 +978,8 @@ export async function getFullIdProvinceDistrictWard(
 
     const districts = districtResponse.data?.data || [];
 
-    const district = districts.find(
-      (item) =>
-        item.DistrictName?.trim().toLowerCase() === districtName.toLowerCase(),
+    const district = districts.find((item) =>
+      isGhnAdministrativeNameMatch(item, "DistrictName", districtName),
     );
 
     if (!district) {
@@ -984,8 +1004,8 @@ export async function getFullIdProvinceDistrictWard(
 
     const wards = wardResponse.data?.data || [];
 
-    const ward = wards.find(
-      (item) => item.WardName?.trim().toLowerCase() === wardName.toLowerCase(),
+    const ward = wards.find((item) =>
+      isGhnAdministrativeNameMatch(item, "WardName", wardName),
     );
 
     if (!ward) {
@@ -1096,6 +1116,72 @@ export async function getProductById(
     });
 
     console.log("getProductById response:", response.data);
+
+    return response.data;
+  } catch (error) {
+    const message =
+      error.response?.data?.error?.ResponseStatus?.Message ||
+      error.response?.data?.ResponseStatus?.Message ||
+      error.response?.data?.message ||
+      error.message;
+
+    throw new Error(`Failed to call administrative area API: ${message}`);
+  }
+}
+
+export async function checkPriceGHN(
+  retailer = "kingfarm",
+  accessPrivateToken,
+  accessToken,
+  payload,
+) {
+  try {
+    const config = getRetailerConfig(retailer);
+
+    const url = `https://online-gateway.ghn.vn/shiip/public-api/v2/shipping-order/fee`;
+
+    const headers = {
+      Accept: "application/json, text/plain, */*",
+      Token: config.Token_GHN,
+      ShopId: config.ShopId_GHN,
+    };
+
+    const response = await axios.post(url, payload, {
+      headers,
+    });
+
+    return response.data;
+  } catch (error) {
+    const message =
+      error.response?.data?.error?.ResponseStatus?.Message ||
+      error.response?.data?.ResponseStatus?.Message ||
+      error.response?.data?.message ||
+      error.message;
+
+    throw new Error(`Failed to call administrative area API: ${message}`);
+  }
+}
+
+export async function createOrderGHN(
+  retailer = "kingfarm",
+  accessPrivateToken,
+  accessToken,
+  payload,
+) {
+  try {
+    const config = getRetailerConfig(retailer);
+
+    const url = `https://online-gateway.ghn.vn/shiip/public-api/v2/shipping-order/create`;
+
+    const headers = {
+      Accept: "application/json, text/plain, */*",
+      Token: config.Token_GHN,
+      ShopId: config.ShopId_GHN,
+    };
+
+    const response = await axios.post(url, payload, {
+      headers,
+    });
 
     return response.data;
   } catch (error) {
