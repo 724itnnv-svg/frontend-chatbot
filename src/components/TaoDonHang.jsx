@@ -913,28 +913,112 @@ function createGhnPricingPackage({
   };
 }
 
+function mergeGhnLightItemIntoHeavyItem(heavyItem, lightItem) {
+  return {
+    ...heavyItem,
+    name: `${heavyItem.name} + ${lightItem.name}`.slice(0, 255),
+    code: [heavyItem.code, lightItem.code]
+      .filter(Boolean)
+      .join("+")
+      .slice(0, 50),
+    price:
+      Math.max(0, Number(heavyItem.price || 0)) +
+      Math.max(0, Number(lightItem.price || 0)),
+    weight:
+      Math.max(0, Number(heavyItem.weight || 0)) +
+      Math.max(0, Number(lightItem.weight || 0)),
+  };
+}
+
 function buildGhnPricingPackages(invoiceDetails = []) {
+  const normalizedDetails = invoiceDetails
+    .map((invoiceDetail) => ({
+      invoiceDetail,
+      quantity: Math.max(
+        0,
+        Math.ceil(Number(invoiceDetail?.Quantity || 0)),
+      ),
+      unitWeight: Math.max(
+        0,
+        Math.round(Number(invoiceDetail?.Weight || 0)),
+      ),
+    }))
+    .filter((item) => item.quantity > 0);
   const heavyItems = [];
-  const lightPackages = [];
 
-  for (const invoiceDetail of invoiceDetails) {
-    const quantity = Math.max(
-      0,
-      Math.ceil(Number(invoiceDetail?.Quantity || 0)),
-    );
-    const unitWeight = Math.max(
-      0,
-      Math.round(Number(invoiceDetail?.Weight || 0)),
-    );
-    if (quantity === 0) continue;
-
-    if (unitWeight > GHN_LIGHT_MAX_WEIGHT) {
-      for (let index = 0; index < quantity; index += 1) {
-        heavyItems.push(createGhnPackageItem(invoiceDetail, 1, unitWeight));
+  for (const item of normalizedDetails) {
+    if (item.unitWeight > GHN_LIGHT_MAX_WEIGHT) {
+      for (let index = 0; index < item.quantity; index += 1) {
+        heavyItems.push(
+          createGhnPackageItem(item.invoiceDetail, 1, item.unitWeight),
+        );
       }
-      continue;
+    }
+  }
+
+  if (heavyItems.length > 0) {
+    const heavyLoads = heavyItems.map((item) => ({ item, addedCount: 0 }));
+    const lightDetails = normalizedDetails.filter(
+      (item) => item.unitWeight <= GHN_LIGHT_MAX_WEIGHT,
+    );
+
+    for (const lightDetail of lightDetails) {
+      for (let index = 0; index < lightDetail.quantity; index += 1) {
+        const target = heavyLoads.reduce((best, current) => {
+          const bestWeight = Number(best.item.weight || 0);
+          const currentWeight = Number(current.item.weight || 0);
+          if (currentWeight !== bestWeight) {
+            return currentWeight < bestWeight ? current : best;
+          }
+          return current.addedCount < best.addedCount ? current : best;
+        });
+        const lightItem = createGhnPackageItem(
+          lightDetail.invoiceDetail,
+          1,
+          lightDetail.unitWeight,
+        );
+        target.item = mergeGhnLightItemIntoHeavyItem(target.item, lightItem);
+        target.addedCount += 1;
+      }
     }
 
+    const mergedHeavyItems = heavyLoads.map((item) => item.item);
+    return [
+      createGhnPricingPackage({
+        serviceTypeId: 5,
+        items: mergedHeavyItems,
+        actualWeight: mergedHeavyItems.reduce(
+          (sum, item) => sum + Number(item.weight || 0),
+          0,
+        ),
+        height: GHN_PACKAGE_DEFAULT.height * mergedHeavyItems.length,
+      }),
+    ];
+  }
+
+  const totalLightWeight = normalizedDetails.reduce(
+    (sum, item) => sum + item.unitWeight * item.quantity,
+    0,
+  );
+  if (totalLightWeight > GHN_LIGHT_MAX_WEIGHT) {
+    const lightItemsAsHeavy = normalizedDetails.flatMap((item) =>
+      Array.from({ length: item.quantity }, () =>
+        createGhnPackageItem(item.invoiceDetail, 1, item.unitWeight),
+      ),
+    );
+
+    return [
+      createGhnPricingPackage({
+        serviceTypeId: 5,
+        items: lightItemsAsHeavy,
+        actualWeight: totalLightWeight,
+        height: GHN_PACKAGE_DEFAULT.height * lightItemsAsHeavy.length,
+      }),
+    ];
+  }
+
+  const lightPackages = [];
+  for (const { invoiceDetail, quantity, unitWeight } of normalizedDetails) {
     let remainingQuantity = quantity;
     while (remainingQuantity > 0) {
       let currentPackage = lightPackages[lightPackages.length - 1];
@@ -974,7 +1058,7 @@ function buildGhnPricingPackages(invoiceDetails = []) {
     }
   }
 
-  const pricingPackages = lightPackages
+  return lightPackages
     .filter((item) => item.items.length > 0)
     .map((item) =>
       createGhnPricingPackage({
@@ -984,22 +1068,6 @@ function buildGhnPricingPackages(invoiceDetails = []) {
         height: GHN_PACKAGE_DEFAULT.height,
       }),
     );
-
-  if (heavyItems.length > 0) {
-    pricingPackages.push(
-      createGhnPricingPackage({
-        serviceTypeId: 5,
-        items: heavyItems,
-        actualWeight: heavyItems.reduce(
-          (sum, item) => sum + Number(item.weight || 0),
-          0,
-        ),
-        height: GHN_PACKAGE_DEFAULT.height * heavyItems.length,
-      }),
-    );
-  }
-
-  return pricingPackages;
 }
 
 function getGhnShippingFeeValue(response = {}) {
