@@ -709,6 +709,24 @@ function getProductPriceBook(product, customerType) {
   return null;
 }
 
+function getProductUnitPrice(product, item, customerType) {
+  const priceBook = getProductPriceBook(product, customerType);
+  const customerLePriceBook = getProductPriceBook(product, "khach_le");
+  const outsidePrice =
+    Number(product?.price ?? product?.basePrice ?? item?.price ?? 0) || 0;
+
+  if (String(customerType || "").toLowerCase() === "khach_le") {
+    return (
+      Number(priceBook?.price ?? customerLePriceBook?.price ?? outsidePrice) ||
+      0
+    );
+  }
+
+  return outsidePrice > 0
+    ? outsidePrice
+    : Number(customerLePriceBook?.price ?? 0) || 0;
+}
+
 function getProductTaxInfo(product) {
   const saleTax = product?.saleTax || {};
   const productTax = Array.isArray(product?.productTaxs)
@@ -934,14 +952,8 @@ function buildGhnPricingPackages(invoiceDetails = []) {
   const normalizedDetails = invoiceDetails
     .map((invoiceDetail) => ({
       invoiceDetail,
-      quantity: Math.max(
-        0,
-        Math.ceil(Number(invoiceDetail?.Quantity || 0)),
-      ),
-      unitWeight: Math.max(
-        0,
-        Math.round(Number(invoiceDetail?.Weight || 0)),
-      ),
+      quantity: Math.max(0, Math.ceil(Number(invoiceDetail?.Quantity || 0))),
+      unitWeight: Math.max(0, Math.round(Number(invoiceDetail?.Weight || 0))),
     }))
     .filter((item) => item.quantity > 0);
   const heavyItems = [];
@@ -1162,14 +1174,16 @@ async function getGhnShippingQuote({
     weight: item.weight,
     insurance_value: 0,
     coupon: null,
-    items: item.items.map(({ name, quantity, length, width, height, weight }) => ({
-      name,
-      quantity,
-      length,
-      width,
-      height,
-      weight,
-    })),
+    items: item.items.map(
+      ({ name, quantity, length, width, height, weight }) => ({
+        name,
+        quantity,
+        length,
+        width,
+        height,
+        weight,
+      }),
+    ),
   }));
   console.log("TaoDonHang GHN check price payloads", payloads);
 
@@ -1258,7 +1272,7 @@ function buildGhnCreateOrderPayloads({
   return pricingPackages.map((item, index) => ({
     payment_type_id: 2,
     note: String(invoice?.Description || "").trim(),
-    required_note: "KHONGCHOXEMHANG",
+    required_note: "CHOXEMHANGKHONGTHU",
     return_phone: fromPhone,
     return_address: branchAddress?.senderFullAddress || "",
     return_district_id: null,
@@ -1395,17 +1409,7 @@ function buildInvoiceDetailLine({ item, product, customerType }) {
   const masterProductId =
     product?.id ?? item?.masterProductId ?? item?.productId ?? null;
   const priceBook = getProductPriceBook(product, customerType);
-  const customerLePriceBook = getProductPriceBook(product, "khach_le");
-  const outsidePrice =
-    Number(product?.price ?? product?.basePrice ?? item?.price ?? 0) || 0;
-  const selectedUnitPrice =
-    String(customerType || "").toLowerCase() === "khach_le"
-      ? Number(
-          priceBook?.price ?? customerLePriceBook?.price ?? outsidePrice,
-        ) || 0
-      : outsidePrice > 0
-        ? outsidePrice
-        : Number(customerLePriceBook?.price ?? 0) || 0;
+  const selectedUnitPrice = getProductUnitPrice(product, item, customerType);
   const baseAmount = roundMoney(selectedUnitPrice * quantity);
   const { taxId, taxName, taxRate } = getProductTaxInfo(product);
   const lineTax = roundMoney((baseAmount * taxRate) / 100);
@@ -1497,13 +1501,13 @@ async function buildInvoiceDetailLines(
     const productEntries = await Promise.all(
       uniqueCodes.map(async (code) => {
         try {
-          const product = await getProductByCode(
+          const response = await getProductByCode(
             retailer,
             accessPrivateToken,
             accessToken,
             code,
           );
-          return [code, product];
+          return [code, extractProductRecord(response)];
         } catch (error) {
           console.error("getProductByCode error:", code, error);
           return [code, null];
@@ -2540,9 +2544,7 @@ async function buildInvoicePayload({
           : (retailerConfig?.priceBookId ?? 0),
       OrderCode: "",
       Code: `Hóa đơn ${customerName || customerCode || customerId || "1"}`,
-      ...(String(customerType).toLowerCase() === "dai_ly"
-        ? { Description: String(description || "").trim() }
-        : {}),
+      Description: String(description || "").trim(),
       DiscountAfterTax: 0,
       DiscountRatioAfterTax: 0,
       DiscountByPromotion: 0,
@@ -2965,13 +2967,13 @@ export default function TaoDonHang() {
           Promise.all(
             productCodes.map(async (code) => {
               try {
-                const product = await getProductByCode(
+                const response = await getProductByCode(
                   selectedRetailerId,
                   accessPrivateToken,
                   accessToken,
                   code,
                 );
-                return [code, product];
+                return [code, extractProductRecord(response)];
               } catch (error) {
                 console.error("getProductByCode error:", code, error);
                 return [code, null];
@@ -3449,10 +3451,6 @@ export default function TaoDonHang() {
                 <h1 className="text-lg font-black tracking-tight text-slate-900 md:text-2xl">
                   Tạo đơn hàng
                 </h1>
-                <p className="text-xs text-slate-500 md:text-sm">
-                  Nhập dữ liệu thô, kiểm tra sản phẩm và khuyến mãi, sau đó tạo
-                  hóa đơn trực tiếp trên KiotViet.
-                </p>
               </div>
             </div>
           </div>
@@ -3480,11 +3478,11 @@ export default function TaoDonHang() {
           <div className="rounded-3xl border border-slate-200 bg-white shadow-sm">
             <div className="border-b border-slate-100 px-5 py-4">
               <h2 className="text-base font-bold text-slate-900 md:text-xl">
-                Ô nhập dữ liệu thô
+                Nhập dữ liệu
               </h2>
-              <p className="mt-1 text-xs text-slate-500 md:text-sm">
+              {/* <p className="mt-1 text-xs text-slate-500 md:text-sm">
                 Dán toàn bộ nội dung đơn hàng vào đây theo kiểu một cục.
-              </p>
+              </p> */}
             </div>
 
             <div className="space-y-4 px-5 py-5">
@@ -3538,22 +3536,18 @@ export default function TaoDonHang() {
                 </label>
               </div>
 
-              {String(customerType).toLowerCase() === "dai_ly" ? (
-                <label className="block space-y-2">
-                  <span className="text-xs font-semibold text-slate-600">
-                    Ghi chú đại lý
-                  </span>
-                  <textarea
-                    value={agencyDescription}
-                    onChange={(event) =>
-                      setAgencyDescription(event.target.value)
-                    }
-                    rows={3}
-                    className="w-full resize-y rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
-                    placeholder="Nhập ghi chú cho hóa đơn đại lý..."
-                  />
-                </label>
-              ) : null}
+              <label className="block space-y-2">
+                <span className="text-xs font-semibold text-slate-600">
+                  Ghi chú hóa đơn
+                </span>
+                <textarea
+                  value={agencyDescription}
+                  onChange={(event) => setAgencyDescription(event.target.value)}
+                  rows={3}
+                  className="w-full resize-y rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
+                  placeholder="Nhập ghi chú cho hóa đơn..."
+                />
+              </label>
 
               <textarea
                 value={rawText}
@@ -3611,7 +3605,7 @@ export default function TaoDonHang() {
           </div>
 
           <div className="space-y-4">
-            <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+            {/* <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
               <div className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-700">
                 Tóm tắt
               </div>
@@ -3653,10 +3647,10 @@ export default function TaoDonHang() {
                   </div>
                 </div>
               </div>
-            </div>
+            </div> */}
 
             <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-              <div className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-700">
+              {/* <div className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-700">
                 Thông tin đã tách
               </div>
 
@@ -3666,9 +3660,9 @@ export default function TaoDonHang() {
                 <FieldCard label="Địa chỉ cũ" value={parsed.oldAddress} />
                 <FieldCard label="Địa chỉ mới" value={parsed.newAddress} />
                 <FieldCard label="NVC" value={parsed.nvc} />
-              </div>
+              </div> */}
 
-              <div className="mt-4 rounded-2xl border border-cyan-100 bg-cyan-50/60 px-4 py-3">
+              {/* <div className="mt-4 rounded-2xl border border-cyan-100 bg-cyan-50/60 px-4 py-3">
                 <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-cyan-700">
                   Thông tin người dùng Kiot
                 </div>
@@ -3702,7 +3696,7 @@ export default function TaoDonHang() {
                     </div>
                   )}
                 </div>
-              </div>
+              </div> */}
 
               <div className="mt-4 rounded-2xl border border-amber-100 bg-amber-50/70 px-4 py-3">
                 <div className="flex items-center justify-between gap-3">
@@ -3735,6 +3729,20 @@ export default function TaoDonHang() {
                       const productCode = String(item.sku || "").trim();
                       const product =
                         orderPreparation.productMap.get(productCode);
+                      const displayProductName = product
+                        ? getProductDisplayName(product)
+                        : item.productName;
+                      const displayProductCode = product
+                        ? getProductDisplayCode(product) || productCode
+                        : productCode;
+                      const displayProductUnit =
+                        product?.unit || item.unit || "Chưa có";
+                      const displayProductPrice = product
+                        ? getProductUnitPrice(product, item, customerType)
+                        : item.price;
+                      const displayProductWeight = product
+                        ? getProductWeightFromProduct(product)
+                        : null;
                       const productCampaigns =
                         orderPreparation.productCampaignMap.get(productCode) ||
                         [];
@@ -3747,17 +3755,23 @@ export default function TaoDonHang() {
                           className="rounded-2xl border border-white bg-white px-3 py-3 shadow-sm"
                         >
                           <div className="text-sm font-semibold text-slate-900">
-                            {item.quantity} x {item.productName}
+                            {item.quantity} x {displayProductName}
                           </div>
                           <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500">
-                            <span>SKU: {item.sku}</span>
-                            <span>Đơn vị: {item.unit}</span>
+                            <span>SKU: {displayProductCode}</span>
+                            <span>Đơn vị: {displayProductUnit}</span>
                             <span>
                               Giá:{" "}
-                              {typeof item.price === "number"
-                                ? item.price.toLocaleString("vi-VN")
+                              {typeof displayProductPrice === "number"
+                                ? displayProductPrice.toLocaleString("vi-VN")
                                 : "Chưa có"}
                             </span>
+                            {displayProductWeight != null ? (
+                              <span>
+                                Trọng lượng:{" "}
+                                {displayProductWeight.toLocaleString("vi-VN")}g
+                              </span>
+                            ) : null}
                           </div>
 
                           {orderPreparation.status === "ready" ? (
