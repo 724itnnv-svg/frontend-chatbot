@@ -117,8 +117,8 @@ export default function SalaryAdvanceManager() {
       const rawAmount = window.prompt("Số tiền duyệt:", String(request.requestedAmount || ""));
       if (rawAmount == null) return;
       const approvedAmount = Number(String(rawAmount).replace(/[^\d.-]/g, ""));
-      if (!Number.isFinite(approvedAmount) || approvedAmount < 100000 || approvedAmount > 2500000) {
-        window.alert("Số tiền duyệt phải từ 100.000 đ đến 2.500.000 đ.");
+      if (!Number.isFinite(approvedAmount) || approvedAmount < 100000 || approvedAmount > 2600000) {
+        window.alert("Số tiền duyệt phải từ 100.000 đ đến 2.600.000 đ.");
         return;
       }
       const payrollPeriod = window.prompt("Kỳ lương khấu trừ (YYYY-MM):", request.payrollPeriod || period);

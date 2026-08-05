@@ -2044,8 +2044,8 @@ export default function PayrollManager() {
       const amount = window.prompt("Số tiền duyệt:", String(request.requestedAmount || ""));
       if (amount == null) return;
       const approvedAmount = toNumber(amount);
-      if (approvedAmount < 100000 || approvedAmount > 2500000) {
-        window.alert("Số tiền duyệt phải từ 100.000 đ đến 2.500.000 đ.");
+      if (approvedAmount < 100000 || approvedAmount > 2600000) {
+        window.alert("Số tiền duyệt phải từ 100.000 đ đến 2.600.000 đ.");
         return;
       }
       const nextPeriod = window.prompt("Kỳ lương khấu trừ (YYYY-MM):", request.payrollPeriod || period);
