@@ -1237,6 +1237,15 @@ export default function PayrollManager() {
   const canEdit = payrollPerms.edit === true;
   const canCreate = payrollPerms.create === true;
   const canDelete = payrollPerms.delete === true;
+  const salaryAdvancePerms = hasFullAccess
+    ? { view: true, edit: true }
+    : (user?.action?.salary_advance_management || {});
+  const canViewSalaryAdvances = hasFullAccess
+    || salaryAdvancePerms.view === true
+    || salaryAdvancePerms.edit === true
+    || payrollPerms.view === true
+    || payrollPerms.edit === true;
+  const canEditSalaryAdvances = hasFullAccess || salaryAdvancePerms.edit === true || payrollPerms.edit === true;
   const canImportCommission = hasFullAccess || hasPayrollScreen || canEdit;
   const canViewPayroll = hasFullAccess || payrollPerms.view === true || canEdit || canCreate || canDelete;
   const commissionOnlyMode = canImportCommission && !canViewPayroll;
@@ -1999,7 +2008,7 @@ export default function PayrollManager() {
   };
 
   const loadSalaryAdvancePendingTotal = async () => {
-    if (!canEdit || !period) {
+    if (!canViewSalaryAdvances || !period) {
       setSalaryAdvancePendingTotal(0);
       return;
     }
@@ -2015,11 +2024,11 @@ export default function PayrollManager() {
 
   useEffect(() => {
     loadSalaryAdvancePendingTotal();
-    if (!canEdit || !period) return undefined;
+    if (!canViewSalaryAdvances || !period) return undefined;
     const timer = window.setInterval(loadSalaryAdvancePendingTotal, 30000);
     return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [period, canEdit, authHeader]);
+  }, [period, canViewSalaryAdvances, authHeader]);
 
   const openSalaryAdvances = () => {
     setShowSalaryAdvances(true);
@@ -2029,6 +2038,7 @@ export default function PayrollManager() {
   };
 
   const reviewSalaryAdvance = async (request, action) => {
+    if (!canEditSalaryAdvances) return;
     const body = { action };
     if (action === "approve") {
       const amount = window.prompt("Số tiền duyệt:", String(request.requestedAmount || ""));
@@ -2480,7 +2490,7 @@ export default function PayrollManager() {
                 Lấy chấm công
               </button>
             )}
-            {canEdit && (
+            {canViewSalaryAdvances && (
               <button onClick={openSalaryAdvances} className="inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700 hover:bg-emerald-100">
                 <HandCoins className="h-4 w-4" /> Phiếu ứng lương
                 {salaryAdvancePendingTotal > 0 && (
@@ -2966,9 +2976,9 @@ export default function PayrollManager() {
                     <td className="px-3 py-2"><span className="rounded-full bg-slate-100 px-2 py-1 font-semibold">{label}</span></td>
                     <td className="px-3 py-2"><div className="flex min-w-40 flex-wrap gap-1">
                       {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <>
-                        {request.status === "pending" && <><button onClick={() => reviewSalaryAdvance(request, "approve")} className="rounded-lg bg-emerald-600 px-2 py-1 font-semibold text-white">Duyệt</button><button onClick={() => reviewSalaryAdvance(request, "reject")} className="rounded-lg bg-rose-50 px-2 py-1 font-semibold text-rose-700">Từ chối</button></>}
-                        {request.status === "approved" && <><button onClick={() => reviewSalaryAdvance(request, "mark_paid")} className="rounded-lg bg-sky-600 px-2 py-1 font-semibold text-white">Đã chi</button><button onClick={() => reviewSalaryAdvance(request, "cancel")} className="rounded-lg bg-rose-50 px-2 py-1 font-semibold text-rose-700">Hủy</button></>}
-                        {request.status === "cancel_pending" && <><button onClick={() => reviewSalaryAdvance(request, "approve_cancel")} className="rounded-lg bg-rose-600 px-2 py-1 font-semibold text-white">Duyệt hủy</button><button onClick={() => reviewSalaryAdvance(request, "reject_cancel")} className="rounded-lg bg-slate-100 px-2 py-1 font-semibold">Giữ phiếu</button></>}
+                        {canEditSalaryAdvances && request.status === "pending" && <><button onClick={() => reviewSalaryAdvance(request, "approve")} className="rounded-lg bg-emerald-600 px-2 py-1 font-semibold text-white">Duyệt</button><button onClick={() => reviewSalaryAdvance(request, "reject")} className="rounded-lg bg-rose-50 px-2 py-1 font-semibold text-rose-700">Từ chối</button></>}
+                        {canEditSalaryAdvances && request.status === "approved" && <><button onClick={() => reviewSalaryAdvance(request, "mark_paid")} className="rounded-lg bg-sky-600 px-2 py-1 font-semibold text-white">Đã chi</button><button onClick={() => reviewSalaryAdvance(request, "cancel")} className="rounded-lg bg-rose-50 px-2 py-1 font-semibold text-rose-700">Hủy</button></>}
+                        {canEditSalaryAdvances && request.status === "cancel_pending" && <><button onClick={() => reviewSalaryAdvance(request, "approve_cancel")} className="rounded-lg bg-rose-600 px-2 py-1 font-semibold text-white">Duyệt hủy</button><button onClick={() => reviewSalaryAdvance(request, "reject_cancel")} className="rounded-lg bg-slate-100 px-2 py-1 font-semibold">Giữ phiếu</button></>}
                       </>}
                     </div></td>
                   </tr>;
