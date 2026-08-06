@@ -32,7 +32,7 @@ import {
   getIdWards,
   getFullIdProvinceDistrictWard,
 } from "../services/cashflowService/kiotService";
-import { convertAddress } from "../address/addressApi";
+import { autoConvertAddress2 } from "../address2/address2Api";
 import { useAuth } from "../context/AuthContext";
 const RETAILERS = [
   { id: "nnvtv", label: "Công ty Phân Bón Nông Nghiệp Việt" },
@@ -330,7 +330,9 @@ function extractConvertedAddress(payload) {
   }
 
   const convertedAddress = String(
-    payload?.normalized_address ||
+    payload?.normalized_text ||
+      payload?.normalizedText ||
+      payload?.normalized_address ||
       payload?.normalizedAddress ||
       payload?.result?.display ||
       payload?.mapping?.display ||
@@ -3085,7 +3087,7 @@ export default function TaoDonHang() {
 
         if (!enteredNewAddress && oldAddress) {
           console.log("Converting missing new address:", oldAddress);
-          const convertedResponse = await convertAddress(oldAddress);
+          const convertedResponse = await autoConvertAddress2(oldAddress);
           convertedNewAddress = extractConvertedAddress(convertedResponse);
           if (!convertedNewAddress) {
             throw new Error(
