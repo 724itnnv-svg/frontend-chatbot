@@ -2745,7 +2745,7 @@ function parseRawOrder(rawText = "") {
       .replace(/\s+/g, " ")
       .trim();
     const keyMatch = line.match(
-      /^(Khách hàng|SĐT|Địa chỉ cũ|Địa chỉ mới|NVC)\s*:\s*(.+)$/iu,
+      /^(Khách hàng|SĐT|Số điện thoại|Địa chỉ cũ|Địa chỉ mới|Địa chỉ|NVC)\s*:\s*(.+)$/iu,
     );
 
     if (keyMatch) {
@@ -2753,8 +2753,8 @@ function parseRawOrder(rawText = "") {
       const value = keyMatch[2].trim();
 
       if (key === "khách hàng") result.customerName = value;
-      if (key === "sđt") result.phoneNumber = value;
-      if (key === "địa chỉ cũ") result.oldAddress = value;
+      if (key === "sđt" || key === "số điện thoại") result.phoneNumber = value;
+      if (key === "địa chỉ cũ" || key === "địa chỉ") result.oldAddress = value;
       if (key === "địa chỉ mới") result.newAddress = value;
       if (key === "nvc") result.nvc = value;
       continue;
@@ -2823,9 +2823,7 @@ function FieldCard({ label, value, placeholder = "Chưa có dữ liệu" }) {
 function CreateOrderProgressPanel({ steps = [], error = "", isCreating }) {
   if (steps.length === 0) return null;
 
-  const successCount = steps.filter(
-    (step) => step.status === "success",
-  ).length;
+  const successCount = steps.filter((step) => step.status === "success").length;
 
   return (
     <div
@@ -4062,7 +4060,6 @@ export default function TaoDonHang() {
                   {isCreatingOrder ? "Đang tạo đơn..." : "Tạo đơn hàng"}
                 </button>
               </div>
-
             </div>
           </div>
 
