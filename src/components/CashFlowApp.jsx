@@ -1243,6 +1243,7 @@ export default function CashFlowApp() {
           retailer={retailer}
           accessToken={currentAccessToken}
           accessPrivateToken={currentAccessPrivateToken}
+          user={user}
           partnerDeliveries={partnerDeliveries}
           bankAccounts={bankAccounts}
           onSwitchToCashflow={() => setActiveTab("cashflow")}

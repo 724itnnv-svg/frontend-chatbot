@@ -711,7 +711,7 @@ export async function checkPriceVTP(
 ) {
   try {
     const url = `https://shipping.kiotapi.com/api/v3/check-price/VTPFW`;
-    console.log("ádhadadad", payload);
+
     const headers = {
       Accept: "application/json, text/plain, */*",
 
@@ -1323,5 +1323,56 @@ export async function getListCustomer(
       error.message;
 
     throw new Error(`Lấy danh sách khách hàng thất bại: ${apiMessage}`);
+  }
+}
+
+//tạo log hóa đơn điện tử
+export async function createEInVoicesLog(payload) {
+  try {
+    const url = `${tokenURL}/einvoice-logs`;
+
+    const headers = {
+      Accept: "application/json, text/plain, */*",
+      Authorization: `Bearer ${Localtoken}`,
+    };
+
+    const response = await axios.post(url, payload, {
+      headers,
+    });
+
+    return response.data;
+  } catch (error) {
+    const message =
+      error.response?.data?.error?.ResponseStatus?.Message ||
+      error.response?.data?.ResponseStatus?.Message ||
+      error.response?.data?.message ||
+      error.message;
+
+    throw new Error(`Failed to call administrative area API: ${message}`);
+  }
+}
+
+export async function getEInVoicesLog() {
+  try {
+    const url = `${tokenURL}/einvoice-logs`;
+
+    const headers = {
+      Accept: "application/json, text/plain, */*",
+      Authorization: `Bearer ${Localtoken}`,
+    };
+
+    const response = await axios.get(url, {
+      headers,
+    });
+
+    return response.data;
+  } catch (error) {
+    const message =
+      error.response?.data?.error?.ResponseStatus?.Message ||
+      error.response?.data?.ResponseStatus?.Message ||
+      error.response?.data?.message ||
+      error.message;
+
+    throw new Error(`Failed to call administrative area API: ${message}`);
   }
 }
