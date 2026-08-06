@@ -30,7 +30,7 @@ const RETAILER_CONFIG = {
     retailerId: 500846190,
     BranchTakingAddressId: null,
     BranchTakingAddressStr:
-      "Ấp Đa Cần, Phường Hòa Thuận, Tỉnh Vĩnh Long - +84 915 283 017",
+      "Ấp Đa Cần, Xã Hòa Thuận, Huyện Châu Thành, Trà Vinh - 0915283017",
     Token_GHN: "b5beb0fd-2c1a-11f1-a3eb-52dcb54263af",
     ShopId_GHN: 5788767,
   },
@@ -711,7 +711,7 @@ export async function checkPriceVTP(
 ) {
   try {
     const url = `https://shipping.kiotapi.com/api/v3/check-price/VTPFW`;
-    console.log("ádhadadad", payload);
+
     const headers = {
       Accept: "application/json, text/plain, */*",
 
@@ -1181,6 +1181,192 @@ export async function createOrderGHN(
 
     const response = await axios.post(url, payload, {
       headers,
+    });
+
+    return response.data;
+  } catch (error) {
+    const message =
+      error.response?.data?.error?.ResponseStatus?.Message ||
+      error.response?.data?.ResponseStatus?.Message ||
+      error.response?.data?.message ||
+      error.message;
+
+    throw new Error(`Failed to call administrative area API: ${message}`);
+  }
+}
+
+// Lấy danh sách khách hàng theo công ty
+export async function getListCustomer(
+  retailer = "kingfarm",
+  accessPrivateToken,
+  pagination = {},
+) {
+  try {
+    if (!accessPrivateToken) {
+      throw new Error("Thiếu accessPrivateToken");
+    }
+
+    const params = new URLSearchParams();
+
+    params.append("format", "json");
+
+    // Includes được truyền lặp lại giống URL gốc
+    params.append("Includes", "TotalInvoiced");
+    params.append("Includes", "Location");
+    params.append("Includes", "WardName");
+    params.append("Includes", "CustomerToManageByUsers");
+
+    params.append("ForManageScreen", "true");
+    params.append("ForSummaryRow", "true");
+    params.append("UsingTotalApi", "true");
+    params.append("UsingStoreProcedure", "false");
+    params.append("SwitchToOrmLite", "true");
+
+    params.append("$inlinecount", "allpages");
+    params.append("GroupId", "0");
+
+    params.append("DateFilterType", "alltime");
+    params.append("NewCustomerDateFilterType", "alltime");
+    params.append("NewCustomerLastTradingDateFilterType", "alltime");
+    params.append("CustomerBirthDateFilterType", "alltime");
+
+    params.append("IsActive", "true");
+
+    params.append("InvoiceCode", "");
+    params.append("Comments", "");
+    params.append("Address", "");
+    params.append("EmailKeyword", "");
+
+    params.append("ForCustomerManagement", "true");
+    const paginationOptions =
+      typeof pagination === "number" ? { limit: pagination } : pagination;
+    const safeLimit = Math.min(
+      Math.max(Number(paginationOptions?.limit) || 50, 1),
+      500,
+    );
+    const safeSkip = Math.max(Number(paginationOptions?.skip) || 0, 0);
+    const debtLevel = String(paginationOptions?.debtLevel || "all");
+    const formatODataDate = (date) => {
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, "0");
+      const day = String(date.getDate()).padStart(2, "0");
+      return `${year}-${month}-${day}T00:00:00`;
+    };
+    const cutoff30Days = new Date();
+    cutoff30Days.setHours(0, 0, 0, 0);
+    cutoff30Days.setDate(cutoff30Days.getDate() - 30);
+    const cutoff60Days = new Date();
+    cutoff60Days.setHours(0, 0, 0, 0);
+    cutoff60Days.setDate(cutoff60Days.getDate() - 60);
+    const cutoff30 = `datetime'${formatODataDate(cutoff30Days)}'`;
+    const cutoff60 = `datetime'${formatODataDate(cutoff60Days)}'`;
+    const debtFilters = {
+      green: `Debt gt 0 and LastTradingDateByDebt ge ${cutoff30}`,
+      yellow: `Debt gt 0 and LastTradingDateByDebt ge ${cutoff60} and LastTradingDateByDebt lt ${cutoff30}`,
+      red: `Debt gt 0 and LastTradingDateByDebt lt ${cutoff60}`,
+      unknown: "Debt gt 0 and LastTradingDateByDebt eq null",
+    };
+
+    if (debtFilters[debtLevel]) {
+      params.append("$filter", debtFilters[debtLevel]);
+    }
+    params.append("$top", String(safeLimit));
+    params.append("$skip", String(safeSkip));
+
+    const response = await axios.get(
+      "https://api-man1.kiotviet.vn/api/customers",
+      {
+        params,
+
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessPrivateToken}`,
+          Retailer: retailer,
+        },
+      },
+    );
+
+    const responseData = response.data?.Data ?? response.data?.data;
+
+    // KiotViet có thể trả Data: [summary, [customers]] hoặc mảng customer trực tiếp.
+    if (Array.isArray(responseData?.[1])) {
+      return responseData[1];
+    }
+
+    if (Array.isArray(responseData)) {
+      return responseData.filter(
+        (item) =>
+          item &&
+          typeof item === "object" &&
+          !Array.isArray(item) &&
+          Number(item.Id ?? item.id) !== -1 &&
+          (item.Id !== undefined ||
+            item.id !== undefined ||
+            item.Code !== undefined ||
+            item.code !== undefined),
+      );
+    }
+
+    const nestedCustomers =
+      responseData?.Items ||
+      responseData?.items ||
+      responseData?.Customers ||
+      responseData?.customers;
+
+    return Array.isArray(nestedCustomers) ? nestedCustomers : [];
+  } catch (error) {
+    const apiMessage =
+      error.response?.data?.ResponseStatus?.Message ||
+      error.response?.data?.responseStatus?.message ||
+      error.response?.data?.message ||
+      error.message;
+
+    throw new Error(`Lấy danh sách khách hàng thất bại: ${apiMessage}`);
+  }
+}
+
+//tạo log hóa đơn điện tử
+export async function createEInVoicesLog(payload) {
+  try {
+    const url = `${tokenURL}/einvoice-logs`;
+
+    const headers = {
+      Accept: "application/json, text/plain, */*",
+      Authorization: `Bearer ${Localtoken}`,
+    };
+
+    const response = await axios.post(url, payload, {
+      headers,
+    });
+
+    return response.data;
+  } catch (error) {
+    const message =
+      error.response?.data?.error?.ResponseStatus?.Message ||
+      error.response?.data?.ResponseStatus?.Message ||
+      error.response?.data?.message ||
+      error.message;
+
+    throw new Error(`Failed to call administrative area API: ${message}`);
+  }
+}
+
+export async function getEInVoicesLog({ page = 1, limit = 50 } = {}) {
+  try {
+    const url = `${tokenURL}/einvoice-logs`;
+
+    const headers = {
+      Accept: "application/json, text/plain, */*",
+      Authorization: `Bearer ${Localtoken}`,
+    };
+
+    const response = await axios.get(url, {
+      headers,
+      params: {
+        page,
+        limit,
+      },
     });
 
     return response.data;

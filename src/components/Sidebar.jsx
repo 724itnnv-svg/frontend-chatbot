@@ -44,6 +44,7 @@ import {
   FlaskConical,
   Globe2,
   HandCoins,
+  CircleDollarSign,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { canAccessScreen, hasFullAccess } from "../utils/screenAccess";
@@ -106,6 +107,12 @@ const MENU_CONFIG = [
     path: "/admin/business-stats",
     label: "Thống kê kinh doanh",
     icon: TrendingUp,
+  },
+  {
+    id: "debt_tracking",
+    path: "/admin/debt-tracking",
+    label: "Theo dõi công nợ",
+    icon: CircleDollarSign,
   },
   {
     id: "employee_profiles",
@@ -281,6 +288,7 @@ const MENU_GROUPS = [
     icon: MessageCircle,
     items: [
       "business_stats",
+      "debt_tracking",
       "pages",
       "pagesmessage",
       "webmessage",
