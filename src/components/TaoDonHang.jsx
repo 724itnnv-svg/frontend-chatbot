@@ -66,7 +66,7 @@ const GHN_REQUIRED_NOTE_OPTIONS = [
   },
 ];
 
-const ORDER_PREPARATION_DELAY_MS = 10000;
+const ORDER_PREPARATION_DELAY_MS = 2000;
 
 const CREATE_ORDER_STEP_DEFINITIONS = {
   customer: "Khách hàng",
@@ -2820,6 +2820,109 @@ function FieldCard({ label, value, placeholder = "Chưa có dữ liệu" }) {
   );
 }
 
+function CreateOrderProgressPanel({ steps = [], error = "", isCreating }) {
+  if (steps.length === 0) return null;
+
+  const successCount = steps.filter(
+    (step) => step.status === "success",
+  ).length;
+
+  return (
+    <div
+      aria-live="polite"
+      className="overflow-hidden rounded-2xl border border-cyan-100 bg-gradient-to-br from-cyan-50 via-white to-sky-50 shadow-sm"
+    >
+      <div className="flex items-center justify-between gap-3 border-b border-cyan-100 px-4 py-3">
+        <div>
+          <div className="text-[11px] font-black uppercase tracking-[0.18em] text-cyan-700">
+            Tiến trình tạo đơn
+          </div>
+          <div className="mt-0.5 text-sm font-semibold text-slate-800">
+            {error
+              ? "Có bước chưa hoàn tất"
+              : isCreating
+                ? "Hệ thống đang xử lý theo thứ tự"
+                : "Tạo đơn hàng hoàn tất"}
+          </div>
+        </div>
+        <div className="rounded-full border border-cyan-200 bg-white px-3 py-1 text-xs font-bold text-cyan-800">
+          {successCount}/{steps.length}
+        </div>
+      </div>
+
+      <div className="h-1.5 bg-cyan-100/70">
+        <div
+          className={`h-full transition-all duration-500 ${
+            error ? "bg-rose-500" : "bg-cyan-500"
+          }`}
+          style={{ width: `${(successCount / steps.length) * 100}%` }}
+        />
+      </div>
+
+      <div className="space-y-1.5 p-3">
+        {steps.map((step, index) => {
+          const isLoading = step.status === "loading";
+          const isSuccess = step.status === "success";
+          const isError = step.status === "error";
+
+          return (
+            <div
+              key={step.id}
+              className={`flex gap-3 rounded-xl border px-3 py-2.5 transition-colors ${
+                isLoading
+                  ? "border-cyan-200 bg-white shadow-sm"
+                  : isSuccess
+                    ? "border-emerald-100 bg-emerald-50/70"
+                    : isError
+                      ? "border-rose-200 bg-rose-50"
+                      : "border-transparent bg-white/45"
+              }`}
+            >
+              <div className="mt-0.5 shrink-0">
+                {isLoading ? (
+                  <LoaderCircle className="h-5 w-5 animate-spin text-cyan-600" />
+                ) : isSuccess ? (
+                  <CheckCircle2 className="h-5 w-5 text-emerald-600" />
+                ) : isError ? (
+                  <XCircle className="h-5 w-5 text-rose-600" />
+                ) : (
+                  <Circle className="h-5 w-5 text-slate-300" />
+                )}
+              </div>
+              <div className="min-w-0 flex-1">
+                <div
+                  className={`text-sm font-bold ${
+                    isError
+                      ? "text-rose-800"
+                      : isSuccess
+                        ? "text-emerald-900"
+                        : "text-slate-800"
+                  }`}
+                >
+                  {index + 1}. {step.label}
+                </div>
+                <div
+                  className={`mt-0.5 text-xs leading-5 ${
+                    isError
+                      ? "text-rose-700"
+                      : isSuccess
+                        ? "text-emerald-700"
+                        : isLoading
+                          ? "font-medium text-cyan-700"
+                          : "text-slate-400"
+                  }`}
+                >
+                  {step.message}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export default function TaoDonHang() {
   const [selectedShippingPartner, setSelectedShippingPartner] = useState("GHN");
   const [ghnRequiredNote, setGhnRequiredNote] = useState(
@@ -3255,7 +3358,7 @@ export default function TaoDonHang() {
   const orderPreparationMessage = tokenLoading
     ? "Đang lấy token để chuẩn bị dữ liệu..."
     : orderPreparation.status === "waiting"
-      ? "Đang chờ bạn ngưng nhập 10 giây..."
+      ? "Đang chờ bạn ngưng nhập dữ liệu..."
       : orderPreparation.status === "loading"
         ? "Đang tải khách hàng, sản phẩm, khuyến mãi, nhóm khách và địa chỉ..."
         : orderPreparation.status === "ready"
@@ -3732,21 +3835,21 @@ export default function TaoDonHang() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <Link
+            {/* <Link
               to="/admin/orders"
               className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
             >
               <ClipboardList className="h-4 w-4" />
               Vào quản lý đơn
-            </Link>
-            <button
+            </Link> */}
+            {/* <button
               type="button"
               onClick={handleReset}
               className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
             >
               <Sparkles className="h-4 w-4" />
               Điền mẫu
-            </button>
+            </button> */}
           </div>
         </div>
 
@@ -3960,113 +4063,6 @@ export default function TaoDonHang() {
                 </button>
               </div>
 
-              {createOrderProgress.length > 0 ? (
-                <div
-                  aria-live="polite"
-                  className="overflow-hidden rounded-2xl border border-cyan-100 bg-gradient-to-br from-cyan-50 via-white to-sky-50 shadow-sm"
-                >
-                  <div className="flex items-center justify-between gap-3 border-b border-cyan-100 px-4 py-3">
-                    <div>
-                      <div className="text-[11px] font-black uppercase tracking-[0.18em] text-cyan-700">
-                        Tiến trình tạo đơn
-                      </div>
-                      <div className="mt-0.5 text-sm font-semibold text-slate-800">
-                        {createOrderError
-                          ? "Có bước chưa hoàn tất"
-                          : isCreatingOrder
-                            ? "Hệ thống đang xử lý theo thứ tự"
-                            : "Tạo đơn hàng hoàn tất"}
-                      </div>
-                    </div>
-                    <div className="rounded-full border border-cyan-200 bg-white px-3 py-1 text-xs font-bold text-cyan-800">
-                      {
-                        createOrderProgress.filter(
-                          (step) => step.status === "success",
-                        ).length
-                      }
-                      /{createOrderProgress.length}
-                    </div>
-                  </div>
-
-                  <div className="h-1.5 bg-cyan-100/70">
-                    <div
-                      className={`h-full transition-all duration-500 ${
-                        createOrderError ? "bg-rose-500" : "bg-cyan-500"
-                      }`}
-                      style={{
-                        width: `${
-                          (createOrderProgress.filter(
-                            (step) => step.status === "success",
-                          ).length /
-                            createOrderProgress.length) *
-                          100
-                        }%`,
-                      }}
-                    />
-                  </div>
-
-                  <div className="space-y-1.5 p-3">
-                    {createOrderProgress.map((step, index) => {
-                      const isLoading = step.status === "loading";
-                      const isSuccess = step.status === "success";
-                      const isError = step.status === "error";
-
-                      return (
-                        <div
-                          key={step.id}
-                          className={`flex gap-3 rounded-xl border px-3 py-2.5 transition-colors ${
-                            isLoading
-                              ? "border-cyan-200 bg-white shadow-sm"
-                              : isSuccess
-                                ? "border-emerald-100 bg-emerald-50/70"
-                                : isError
-                                  ? "border-rose-200 bg-rose-50"
-                                  : "border-transparent bg-white/45"
-                          }`}
-                        >
-                          <div className="mt-0.5 shrink-0">
-                            {isLoading ? (
-                              <LoaderCircle className="h-5 w-5 animate-spin text-cyan-600" />
-                            ) : isSuccess ? (
-                              <CheckCircle2 className="h-5 w-5 text-emerald-600" />
-                            ) : isError ? (
-                              <XCircle className="h-5 w-5 text-rose-600" />
-                            ) : (
-                              <Circle className="h-5 w-5 text-slate-300" />
-                            )}
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <div
-                              className={`text-sm font-bold ${
-                                isError
-                                  ? "text-rose-800"
-                                  : isSuccess
-                                    ? "text-emerald-900"
-                                    : "text-slate-800"
-                              }`}
-                            >
-                              {index + 1}. {step.label}
-                            </div>
-                            <div
-                              className={`mt-0.5 text-xs leading-5 ${
-                                isError
-                                  ? "text-rose-700"
-                                  : isSuccess
-                                    ? "text-emerald-700"
-                                    : isLoading
-                                      ? "font-medium text-cyan-700"
-                                      : "text-slate-400"
-                              }`}
-                            >
-                              {step.message}
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              ) : null}
             </div>
           </div>
 
@@ -4197,15 +4193,14 @@ export default function TaoDonHang() {
                         orderPreparation.productMap.get(productCode);
                       const displayProductName = product
                         ? getProductDisplayName(product)
-                        : item.productName;
+                        : "";
                       const displayProductCode = product
                         ? getProductDisplayCode(product) || productCode
                         : productCode;
-                      const displayProductUnit =
-                        product?.unit || item.unit || "Chưa có";
+                      const displayProductUnit = product?.unit || "Chưa có";
                       const displayProductPrice = product
                         ? getProductUnitPrice(product, item, customerType)
-                        : item.price;
+                        : null;
                       const displayProductWeight = product
                         ? getProductWeightFromProduct(product)
                         : null;
@@ -4220,28 +4215,61 @@ export default function TaoDonHang() {
                           key={`${item.sku}-${index}`}
                           className="rounded-2xl border border-white bg-white px-3 py-3 shadow-sm"
                         >
-                          <div className="text-sm font-semibold text-slate-900">
-                            {item.quantity} x {displayProductName}
-                          </div>
-                          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500">
-                            <span>SKU: {displayProductCode}</span>
-                            <span>Đơn vị: {displayProductUnit}</span>
-                            <span>
-                              Giá:{" "}
-                              {typeof displayProductPrice === "number"
-                                ? displayProductPrice.toLocaleString("vi-VN")
-                                : "Chưa có"}
-                            </span>
-                            {displayProductWeight != null ? (
-                              <span>
-                                Trọng lượng:{" "}
-                                {displayProductWeight.toLocaleString("vi-VN")}g
+                          {product ? (
+                            <>
+                              <div className="text-sm font-semibold text-slate-900">
+                                {item.quantity} x {displayProductName}
+                              </div>
+                              <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500">
+                                <span>SKU: {displayProductCode}</span>
+                                <span>Đơn vị: {displayProductUnit}</span>
+                                <span>
+                                  Giá:{" "}
+                                  {typeof displayProductPrice === "number"
+                                    ? displayProductPrice.toLocaleString(
+                                        "vi-VN",
+                                      )
+                                    : "Chưa có"}
+                                </span>
+                                {displayProductWeight != null ? (
+                                  <span>
+                                    Trọng lượng:{" "}
+                                    {displayProductWeight.toLocaleString(
+                                      "vi-VN",
+                                    )}
+                                    g
+                                  </span>
+                                ) : null}
+                              </div>
+                            </>
+                          ) : orderPreparation.status !== "ready" ? (
+                            <div className="text-xs font-medium text-slate-500">
+                              Đang kiểm tra sản phẩm mã{" "}
+                              <span className="font-mono font-bold text-slate-700">
+                                {productCode || "trống"}
                               </span>
-                            ) : null}
-                          </div>
+                              ...
+                            </div>
+                          ) : null}
 
                           {orderPreparation.status === "ready" ? (
-                            productCampaigns.length > 0 ? (
+                            !product ? (
+                              <div className="mt-3 flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-xs text-rose-700">
+                                <XCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                                <div>
+                                  <div className="font-bold">
+                                    Không tìm thấy sản phẩm
+                                  </div>
+                                  <div className="mt-0.5 leading-5">
+                                    Không có sản phẩm nào khớp với mã{" "}
+                                    <span className="font-mono font-bold">
+                                      {productCode || "trống"}
+                                    </span>{" "}
+                                    trên KiotViet.
+                                  </div>
+                                </div>
+                              </div>
+                            ) : productCampaigns.length > 0 ? (
                               <div className="mt-3 space-y-2 rounded-xl border border-emerald-200 bg-emerald-50/80 px-3 py-2.5">
                                 <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-emerald-700">
                                   Chọn 1 trong {productCampaigns.length} chương
@@ -4432,6 +4460,16 @@ export default function TaoDonHang() {
                   )}
                 </div>
               </div>
+
+              {createOrderProgress.length > 0 ? (
+                <div className="mt-4">
+                  <CreateOrderProgressPanel
+                    steps={createOrderProgress}
+                    error={createOrderError}
+                    isCreating={isCreatingOrder}
+                  />
+                </div>
+              ) : null}
             </div>
           </div>
         </div>

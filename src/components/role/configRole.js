@@ -3,9 +3,10 @@ const APP_PERMISSIONS = {
     {
       id: "business",
       name: "Kinh doanh",
-      description: "Thống kê, Page, tin nhắn, chatbot và đơn hàng",
+      description: "Thống kê, công nợ, Page, tin nhắn, chatbot và đơn hàng",
       screenIds: [
         "business_stats",
+        "debt_tracking",
         "pages",
         "pagesmessage",
         "donhang",
@@ -82,6 +83,7 @@ const APP_PERMISSIONS = {
   ],
   screens: [
     { id: "business_stats", name: "Thống kê kinh doanh" },
+    { id: "debt_tracking", name: "Theo dõi công nợ" },
     { id: "pages", name: "Quản Lý Page" },
     { id: "pagesmessage", name: "Tin Nhắn Page" },
     { id: "donhang", name: "Đơn Hàng" },

@@ -1202,14 +1202,7 @@ export default function CashFlowApp() {
     <div className="min-h-screen w-full bg-[radial-gradient(circle_at_top_left,rgba(14,165,233,0.16),transparent_34%),radial-gradient(circle_at_top_right,rgba(16,185,129,0.12),transparent_28%),linear-gradient(180deg,#f8fbff_0%,#f3f8ff_46%,#eef6f4_100%)] p-3.5 text-left text-sm text-slate-900 sm:p-6">
       <div className="mx-auto mb-4 max-w-[1600px] rounded-[22px] border border-slate-400/20 bg-white/85 p-4 shadow-[0_16px_40px_rgba(15,23,42,0.08)] backdrop-blur-xl">
         <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-          <div>
-            <p className="text-[11px] font-extrabold uppercase tracking-[0.22em] text-cyan-600">
-              Công ty dùng chung
-            </p>
-            <p className="mt-1 text-sm leading-6 text-slate-600">
-              Dropdown này áp dụng cho cả tab sổ quỹ và tab hóa đơn điện tử.
-            </p>
-          </div>
+          <div></div>
           <label className="grid gap-2 md:min-w-[320px]">
             <span className="text-[11px] font-extrabold uppercase tracking-[0.04em] text-slate-600">
               Công ty
@@ -1264,38 +1257,6 @@ export default function CashFlowApp() {
               <h1 className="m-0 text-[clamp(1.65rem,2.5vw,2.55rem)] font-black leading-[1.04] tracking-[-0.04em] text-slate-950">
                 Tạo sổ quỹ từ file Excel và gửi lên KiotViet
               </h1>
-              <p className="mt-3.5 max-w-[72ch] text-sm leading-7 text-slate-600">
-                Dành cho team vận hành và marketing dùng nhanh mà không cần hiểu
-                kỹ cấu trúc dữ liệu. Làm theo 3 bước dưới đây là xong:
-              </p>
-              <ol className="mt-[22px] grid list-none gap-3 p-0">
-                <li className="grid gap-1 rounded-[18px] border border-slate-400/20 bg-white/70 px-4 py-3.5">
-                  <strong className="text-xs font-extrabold text-slate-900">
-                    1. Chọn nguồn dữ liệu
-                  </strong>
-                  <span className="text-[11px] leading-[1.55] text-slate-500">
-                    Chọn công ty, nhân viên và tải file Excel cần xử lý.
-                  </span>
-                </li>
-                <li className="grid gap-1 rounded-[18px] border border-slate-400/20 bg-white/70 px-4 py-3.5">
-                  <strong className="text-xs font-extrabold text-slate-900">
-                    2. Chọn dòng cần tạo sổ quỹ
-                  </strong>
-                  <span className="text-[11px] leading-[1.55] text-slate-500">
-                    Tick những dòng cần dùng, hoặc để trống nếu muốn lấy toàn bộ
-                    dữ liệu đang hiển thị.
-                  </span>
-                </li>
-                <li className="grid gap-1 rounded-[18px] border border-slate-400/20 bg-white/70 px-4 py-3.5">
-                  <strong className="text-xs font-extrabold text-slate-900">
-                    3. Kiểm tra payload rồi gửi lên KiotViet
-                  </strong>
-                  <span className="text-[11px] leading-[1.55] text-slate-500">
-                    Dòng được tự động tách thành payload dựa trên dữ liệu. Kiểm
-                    tra chi tiết rồi nhấn "Gửi dữ liệu lên KiotViet".
-                  </span>
-                </li>
-              </ol>
             </div>
 
             <ControlsPanel
