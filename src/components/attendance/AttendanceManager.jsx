@@ -1185,9 +1185,7 @@ export default function AttendanceManager() {
   }
 
   async function reviewLeaveRequest(request, action) {
-    if (action === "approve" && request.needsEvidence) {
-      return showFlash(false, "Đơn off đột xuất chưa có ảnh minh chứng nên chưa thể duyệt.");
-    }
+    const approveWithoutEvidence = action === "approve" && request.needsEvidence;
     const actionMeta = {
       approve: { verb: "duyệt", prompt: "Ghi chú duyệt (không bắt buộc):" },
       reject: { verb: "từ chối", prompt: "Lý do từ chối (không bắt buộc):" },
@@ -1197,13 +1195,20 @@ export default function AttendanceManager() {
     }[action];
     if (!actionMeta) return;
     const verb = actionMeta.verb;
-    if (!window.confirm(`Xác nhận ${verb} đơn nghỉ của ${request.userName || "nhân viên này"}?`)) return;
+    const confirmationMessage = approveWithoutEvidence
+      ? `${request.userName || "Nhân viên này"} chưa có ảnh minh chứng cho đơn off đột xuất. Bạn có đồng ý duyệt đơn không?`
+      : `Xác nhận ${verb} đơn nghỉ của ${request.userName || "nhân viên này"}?`;
+    if (!window.confirm(confirmationMessage)) return;
     const reviewNote = window.prompt(actionMeta.prompt, "");
     if (reviewNote === null) return;
     if (action === "cancel" && !reviewNote.trim()) return showFlash(false, "Vui lòng nhập lý do hủy đơn.");
     setReviewingLeaveId(request._id);
     try {
-      const res = await api.patch(`/attendance-leave-requests/${request._id}/review`, { action, reviewNote });
+      const res = await api.patch(`/attendance-leave-requests/${request._id}/review`, {
+        action,
+        reviewNote,
+        approveWithoutEvidence,
+      });
       showFlash(true, res.data?.message || `Đã ${verb} đơn nghỉ phép.`);
       await Promise.all([loadLeaveRequests(leavePage), loadLeavePendingCount()]);
     } catch (err) {
@@ -3461,7 +3466,7 @@ export default function AttendanceManager() {
                             </div>
                              <p className="mt-2 whitespace-pre-wrap text-sm text-slate-600">{request.reason}</p>
                              {request.convertedFromAnnual && <p className="mt-1 text-xs font-semibold text-amber-700">Đã chuyển từ phép năm sang phép thường không lương do không đủ số dư.</p>}
-                             {request.autoApproved && <p className="mt-1 text-xs font-semibold text-violet-700">Hệ thống tự động duyệt · báo trước {Number(request.autoApprovalNoticeDays || 0)}/{Number(request.autoApprovalRequiredDays || 0)} ngày.</p>}
+                             {request.autoApproved && <p className="mt-1 text-xs font-semibold text-violet-700">Hệ thống tự động duyệt · báo trước {Number(request.autoApprovalNoticeDays || 0)}/{Number(request.autoApprovalRequiredDays || 0)} ngày{request.leaveType === "regular" ? " · không trừ phép năm" : ""}.</p>}
                              {(request.status === "approved" || request.status === "cancel_pending") && <p className="mt-1 text-xs font-semibold text-emerald-700">Đã duyệt: {request.leaveType === "emergency" ? `${Number(request.approvedMinutes || 0)} phút nghỉ` : `${Number(request.approvedDays || 0)} ngày nghỉ`}</p>}
                              {request.leaveType === "emergency" && request.evidence?.url && (
                                <div className={`mt-3 rounded-xl border p-3 text-xs ${request.aiReview?.recommendation === "recommend_approve" ? TONE.emerald : request.aiReview?.status === "failed" ? TONE.rose : TONE.amber}`}>
@@ -3493,7 +3498,7 @@ export default function AttendanceManager() {
                             )}
                             {request.status === "pending" && (
                               <>
-                                <button type="button" disabled={isReviewing || request.needsEvidence} onClick={() => reviewLeaveRequest(request, "approve")} title={request.needsEvidence ? "Cần ảnh minh chứng trước khi duyệt" : "Duyệt đơn"} className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3 py-2 text-xs font-bold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-45">
+                                <button type="button" disabled={isReviewing} onClick={() => reviewLeaveRequest(request, "approve")} title={request.needsEvidence ? "Duyệt đơn chưa có ảnh minh chứng" : "Duyệt đơn"} className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3 py-2 text-xs font-bold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-45">
                                   {isReviewing ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />} Duyệt
                                 </button>
                                 <button type="button" disabled={isReviewing} onClick={() => reviewLeaveRequest(request, "reject")} className="inline-flex items-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700 hover:bg-rose-100 disabled:opacity-45"><XCircle size={14} /> Từ chối</button>

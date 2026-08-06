@@ -17,6 +17,7 @@ import {
   FileSpreadsheet,
   HandCoins,
   ListChecks,
+  Lock,
   Loader2,
   Plus,
   RefreshCw,
@@ -26,6 +27,7 @@ import {
   Settings2,
   Trash2,
   UploadCloud,
+  Unlock,
   Wallet,
   X,
 } from "lucide-react";
@@ -1288,6 +1290,8 @@ export default function PayrollManager() {
   const [commissionResult, setCommissionResult] = useState(null);
   const [isCloning, setIsCloning] = useState(false);
   const [isDeletingMonth, setIsDeletingMonth] = useState(false);
+  const [periodLocked, setPeriodLocked] = useState(false);
+  const [lockLoading, setLockLoading] = useState(false);
   const [attendanceHoursPerDay, setAttendanceHoursPerDay] = useState(8);
   const [showAttendanceSync, setShowAttendanceSync] = useState(false);
   const [attendanceSyncLoading, setAttendanceSyncLoading] = useState(false);
@@ -1463,6 +1467,24 @@ export default function PayrollManager() {
     () => (salaryAdvanceSyncResult?.rows || []).filter((row) => row.statusText === "Khớp"),
     [salaryAdvanceSyncResult]
   );
+  const payrollReadOnly = periodLocked || lockLoading;
+
+  const fetchPeriodLock = async () => {
+    if (!period) return;
+    setLockLoading(true);
+    try {
+      const res = await fetch(`/api/payroll/period/${encodeURIComponent(period)}/lock`, { headers: authHeader });
+      const data = await res.json();
+      if (!res.ok || data?.success === false) throw new Error(data?.message || "Không tải được trạng thái khóa bảng lương");
+      setPeriodLocked(data.isLocked === true);
+    } catch (error) {
+      console.error(error);
+      setPeriodLocked(true);
+      setMessage(error.message || "Không tải được trạng thái khóa bảng lương");
+    } finally {
+      setLockLoading(false);
+    }
+  };
 
   const fetchFormulaSettings = async () => {
     try {
@@ -1535,6 +1557,7 @@ export default function PayrollManager() {
   useEffect(() => {
     if (!period) return;
     localStorage.setItem(STORAGE_PAYROLL_PERIOD, period);
+    fetchPeriodLock();
     if (canViewPayroll) fetchPayroll();
     else setLoading(false);
     setImportRows([]);
@@ -1577,7 +1600,7 @@ export default function PayrollManager() {
   };
 
   const updateCell = (rowId, key, value) => {
-    if (!canEdit) return;
+    if (!canEdit || payrollReadOnly) return;
     setRows((current) =>
       current.map((row) => {
         if (row.__clientId !== rowId) return row;
@@ -1592,7 +1615,7 @@ export default function PayrollManager() {
   };
 
   const addRow = () => {
-    if (!canCreate) return;
+    if (!canCreate || payrollReadOnly) return;
     const newRow = normalizePayrollRow(
       {
         period,
@@ -1612,7 +1635,7 @@ export default function PayrollManager() {
   };
 
   const saveRows = async (targetRows) => {
-    if (!(canEdit || canCreate) || targetRows.length === 0) return;
+    if (!(canEdit || canCreate) || payrollReadOnly || targetRows.length === 0) return;
     const invalid = targetRows
       .map((row) => ({ row, missing: validateRow(row) }))
       .find((item) => item.missing);
@@ -1659,7 +1682,7 @@ export default function PayrollManager() {
   };
 
   const deleteRow = async (row) => {
-    if (!canDelete) return;
+    if (!canDelete || payrollReadOnly) return;
     const deleteLabel = row.tenNhanVien || row.maNhanVien || "dòng này";
     if (!window.confirm(`Xóa bảng lương của ${deleteLabel}?`)) return;
 
@@ -1689,7 +1712,7 @@ export default function PayrollManager() {
   };
 
   const deleteCurrentPeriodPayrolls = async () => {
-    if (!canDelete || !period) return;
+    if (!canDelete || payrollReadOnly || !period) return;
     const count = rows.length;
     if (
       !window.confirm(
@@ -1758,7 +1781,7 @@ export default function PayrollManager() {
   };
 
   const importPayroll = async () => {
-    if (!(canCreate || canEdit)) return;
+    if (!(canCreate || canEdit) || payrollReadOnly) return;
     if (!importRows.length) return;
     const updateFields = Array.from(selectedImportColumns);
     if (!updateFields.length) {
@@ -1849,7 +1872,7 @@ export default function PayrollManager() {
   };
 
   const importCommission = async () => {
-    if (!canImportCommission || !commissionRows.length) return;
+    if (!canImportCommission || payrollReadOnly || !commissionRows.length) return;
     setCommissionImporting(true);
     try {
       const res = await fetch("/api/payroll/import-commission", {
@@ -1881,7 +1904,7 @@ export default function PayrollManager() {
   };
 
   const clonePayroll = async () => {
-    if (!canCreate) return;
+    if (!canCreate || payrollReadOnly) return;
     if (!period) {
       setMessage("Vui lòng chọn kỳ lương để nhân bản.");
       return;
@@ -1960,7 +1983,7 @@ export default function PayrollManager() {
   };
 
   const applyAttendanceSync = async () => {
-    if (!canEdit || !validAttendanceSyncRows.length || !selectedAttendanceSyncFields.size) return;
+    if (!canEdit || payrollReadOnly || !validAttendanceSyncRows.length || !selectedAttendanceSyncFields.size) return;
     setAttendanceSyncApplying(true);
     try {
       const res = await fetch("/api/payroll/sync-attendance", {
@@ -2103,7 +2126,7 @@ export default function PayrollManager() {
   };
 
   const applySalaryAdvanceSync = async () => {
-    if (!validSalaryAdvanceSyncRows.length || !window.confirm(`Cập nhật tạm ứng cho ${validSalaryAdvanceSyncRows.length} nhân viên vào kỳ ${period}?`)) return;
+    if (payrollReadOnly || !validSalaryAdvanceSyncRows.length || !window.confirm(`Cập nhật tạm ứng cho ${validSalaryAdvanceSyncRows.length} nhân viên vào kỳ ${period}?`)) return;
     setSalaryAdvanceSyncApplying(true);
     try {
       const res = await fetch("/api/payroll/sync-salary-advances", {
@@ -2152,6 +2175,7 @@ export default function PayrollManager() {
   };
 
   const openBulkEdit = () => {
+    if (payrollReadOnly) return;
     setBulkScope(selectedRowIds.size ? "selected" : "filtered");
     setBulkField(bulkField || "thuNhapTheoNgayCong.diemKPI");
     setBulkValue("");
@@ -2159,7 +2183,7 @@ export default function PayrollManager() {
   };
 
   const applyBulkEdit = () => {
-    if (!canEdit || !bulkColumn || !bulkTargetRows.length) return;
+    if (!canEdit || payrollReadOnly || !bulkColumn || !bulkTargetRows.length) return;
     const targetIds = new Set(bulkTargetRows.map((row) => row.__clientId));
     const nextValue = bulkColumn.type === "number"
       ? parsePayrollNumberInput(bulkValue)
@@ -2272,6 +2296,34 @@ export default function PayrollManager() {
     }
   };
 
+  const togglePeriodLock = async () => {
+    if (!canEdit || lockLoading || !period) return;
+    const nextLocked = !periodLocked;
+    const prompt = nextLocked && dirtyRows.length
+      ? `Khóa bảng lương ${formatPayrollPeriod(period)}? ${dirtyRows.length} dòng chưa lưu sẽ bị hủy.`
+      : `${nextLocked ? "Khóa" : "Mở khóa"} bảng lương ${formatPayrollPeriod(period)}?`;
+    if (!window.confirm(prompt)) return;
+
+    setLockLoading(true);
+    try {
+      const res = await fetch(`/api/payroll/period/${encodeURIComponent(period)}/lock`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", ...authHeader },
+        body: JSON.stringify({ isLocked: nextLocked }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data?.success === false) throw new Error(data?.message || "Không cập nhật được trạng thái khóa");
+      setPeriodLocked(data.isLocked === true);
+      setMessage(`Đã ${data.isLocked ? "khóa" : "mở khóa"} bảng lương ${formatPayrollPeriod(period)}.`);
+      if (data.isLocked) await fetchPayroll();
+    } catch (error) {
+      console.error(error);
+      setMessage(error.message || "Không cập nhật được trạng thái khóa bảng lương");
+    } finally {
+      setLockLoading(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="grid min-h-screen place-items-center bg-slate-50">
@@ -2307,10 +2359,10 @@ export default function PayrollManager() {
           {commissionTemplateLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
           Tải mẫu tháng này
         </button>
-        <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl bg-sky-600 px-3 py-2 text-sm font-semibold text-white hover:bg-sky-700">
+        <label className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold text-white ${payrollReadOnly ? "cursor-not-allowed bg-slate-400 opacity-60" : "cursor-pointer bg-sky-600 hover:bg-sky-700"}`}>
           <UploadCloud className="h-4 w-4" />
           Chọn file Excel
-          <input type="file" accept=".xlsx,.xls" onChange={handleCommissionExcelUpload} className="hidden" />
+          <input type="file" accept=".xlsx,.xls" onChange={handleCommissionExcelUpload} disabled={payrollReadOnly} className="hidden" />
         </label>
       </div>
       <div className="rounded-xl border bg-slate-50 px-3 py-2 text-sm text-slate-600">
@@ -2385,7 +2437,7 @@ export default function PayrollManager() {
         {!commissionOnlyMode && (
           <button onClick={() => setShowCommissionImport(false)} className="rounded-xl border bg-white px-4 py-2 text-sm font-semibold hover:bg-slate-50">Đóng</button>
         )}
-        <button disabled={!commissionRows.length || commissionImporting} onClick={importCommission} className="inline-flex items-center gap-2 rounded-xl bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700 disabled:opacity-50">
+        <button disabled={payrollReadOnly || !commissionRows.length || commissionImporting} onClick={importCommission} className="inline-flex items-center gap-2 rounded-xl bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700 disabled:opacity-50">
           {commissionImporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}
           Import doanh số/hoa hồng
         </button>
@@ -2436,6 +2488,16 @@ export default function PayrollManager() {
               <RefreshCw className="h-4 w-4" />
               Tải lại
             </button>
+            {canEdit && (
+              <button
+                onClick={togglePeriodLock}
+                disabled={lockLoading}
+                className={`inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-sm font-semibold disabled:opacity-50 ${periodLocked ? "border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100" : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"}`}
+              >
+                {lockLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : periodLocked ? <Unlock className="h-4 w-4" /> : <Lock className="h-4 w-4" />}
+                {periodLocked ? "Mở khóa bảng lương" : "Khóa bảng lương"}
+              </button>
+            )}
             <button
               onClick={handleExportPayroll}
               disabled={exporting}
@@ -2457,7 +2519,7 @@ export default function PayrollManager() {
               Ẩn/hiện cột
             </button>
             {canEdit && (
-              <button onClick={openFormulaSettings} className="inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-50">
+              <button onClick={openFormulaSettings} disabled={payrollReadOnly} className="inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-50 disabled:opacity-50">
                 <Calculator className="h-4 w-4" />
                 Công thức
               </button>
@@ -2465,7 +2527,7 @@ export default function PayrollManager() {
             {canEdit && (
               <button
                 onClick={openBulkEdit}
-                disabled={!sortedRows.length}
+                disabled={payrollReadOnly || !sortedRows.length}
                 className="inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-50 disabled:opacity-50"
               >
                 <ListChecks className="h-4 w-4" />
@@ -2473,19 +2535,19 @@ export default function PayrollManager() {
               </button>
             )}
             {(canCreate || canEdit) && (
-              <button onClick={() => setShowImport(true)} className="inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-50">
+              <button onClick={() => setShowImport(true)} disabled={payrollReadOnly} className="inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-50 disabled:opacity-50">
                 <UploadCloud className="h-4 w-4" />
                 Import
               </button>
             )}
             {canImportCommission && (
-              <button onClick={() => setShowCommissionImport(true)} className="inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-50">
+              <button onClick={() => setShowCommissionImport(true)} disabled={payrollReadOnly} className="inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-50 disabled:opacity-50">
                 <UploadCloud className="h-4 w-4" />
                 Import doanh số/hoa hồng
               </button>
             )}
             {canEdit && (
-              <button onClick={previewAttendanceSync} disabled={attendanceSyncLoading || !rows.length} className="inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-50 disabled:opacity-50">
+              <button onClick={previewAttendanceSync} disabled={payrollReadOnly || attendanceSyncLoading || !rows.length} className="inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-50 disabled:opacity-50">
                 {attendanceSyncLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
                 Lấy chấm công
               </button>
@@ -2503,7 +2565,7 @@ export default function PayrollManager() {
             {canCreate && (
               <button
                 onClick={clonePayroll}
-                disabled={isCloning || rows.length > 0}
+                disabled={payrollReadOnly || isCloning || rows.length > 0}
                 title={rows.length > 0 ? "Kỳ lương này đã có dữ liệu, không thể nhân bản" : "Nhân bản dữ liệu lương từ tháng trước vào tháng hiện tại"}
                 className="inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
               >
@@ -2514,7 +2576,7 @@ export default function PayrollManager() {
             {canDelete && (
               <button
                 onClick={deleteCurrentPeriodPayrolls}
-                disabled={isDeletingMonth || loading || rows.length === 0}
+                disabled={payrollReadOnly || isDeletingMonth || loading || rows.length === 0}
                 className="inline-flex items-center gap-2 rounded-xl border border-rose-200 bg-white px-3 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-50"
               >
                 {isDeletingMonth ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
@@ -2522,14 +2584,14 @@ export default function PayrollManager() {
               </button>
             )}
             {canCreate && (
-              <button onClick={addRow} className="inline-flex items-center gap-2 rounded-xl bg-sky-600 px-3 py-2 text-sm font-semibold text-white hover:bg-sky-700">
+              <button onClick={addRow} disabled={payrollReadOnly} className="inline-flex items-center gap-2 rounded-xl bg-sky-600 px-3 py-2 text-sm font-semibold text-white hover:bg-sky-700 disabled:opacity-50">
                 <Plus className="h-4 w-4" />
                 Thêm nhân viên
               </button>
             )}
             {(canEdit || canCreate) && (
               <button
-                disabled={!dirtyRows.length}
+                disabled={payrollReadOnly || !dirtyRows.length}
                 onClick={() => saveRows(dirtyRows)}
                 className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
               >
@@ -2551,6 +2613,11 @@ export default function PayrollManager() {
                 {dirtyRows.length > 0 && (
                   <span className="inline-flex items-center gap-1 rounded-full bg-rose-100 px-2 py-0.5 text-[11px] font-bold text-rose-700">
                     <ShieldAlert className="h-3.5 w-3.5" /> {dirtyRows.length} dòng chưa lưu
+                  </span>
+                )}
+                {periodLocked && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-slate-800 px-2 py-0.5 text-[11px] font-bold text-white">
+                    <Lock className="h-3.5 w-3.5" /> Đã khóa - chỉ xem
                   </span>
                 )}
               </div>
@@ -2684,7 +2751,7 @@ export default function PayrollManager() {
                           <CellInput
                             column={column}
                             value={getDeep(row, column.key)}
-                            readOnly={!canEdit || isSaving || column.readOnly}
+                            readOnly={!canEdit || payrollReadOnly || isSaving || column.readOnly}
                             onChange={(value) => updateCell(row.__clientId, column.key, value)}
                           />
                         </td>
@@ -2696,7 +2763,7 @@ export default function PayrollManager() {
                           <>
                             {canEdit && (
                               <button
-                                disabled={!isDirty || isSaving}
+                                disabled={payrollReadOnly || !isDirty || isSaving}
                                 onClick={() => saveRows([row])}
                                 className="rounded-lg p-2 text-emerald-700 hover:bg-emerald-50 disabled:text-slate-300"
                                 title={`Lưu dòng vào ${formatPayrollPeriod(period)}`}
@@ -2705,7 +2772,7 @@ export default function PayrollManager() {
                               </button>
                             )}
                             {canDelete && (
-                              <button onClick={() => deleteRow(row)} disabled={isSaving} className="rounded-lg p-2 text-rose-700 hover:bg-rose-50 disabled:text-slate-300" title={`Xóa dòng khỏi ${formatPayrollPeriod(period)}`}>
+                              <button onClick={() => deleteRow(row)} disabled={payrollReadOnly || isSaving} className="rounded-lg p-2 text-rose-700 hover:bg-rose-50 disabled:text-slate-300" title={`Xóa dòng khỏi ${formatPayrollPeriod(period)}`}>
                                 <Trash2 className="h-4 w-4" />
                               </button>
                             )}
@@ -2841,7 +2908,7 @@ export default function PayrollManager() {
               Dong
             </button>
             <button
-              disabled={!bulkTargetRows.length || (!["status", "boolean"].includes(bulkColumn?.type) && bulkValue === "")}
+              disabled={payrollReadOnly || !bulkTargetRows.length || (!["status", "boolean"].includes(bulkColumn?.type) && bulkValue === "")}
               onClick={applyBulkEdit}
               className="inline-flex items-center gap-2 rounded-xl bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700 disabled:opacity-50"
             >
@@ -2934,7 +3001,7 @@ export default function PayrollManager() {
           ) : null}
           <div className="flex justify-end gap-2">
             <button onClick={() => setShowImport(false)} className="rounded-xl border bg-white px-4 py-2 text-sm font-semibold hover:bg-slate-50">Đóng</button>
-            <button disabled={!importRows.length || !selectedImportColumns.size || importing} onClick={importPayroll} className="inline-flex items-center gap-2 rounded-xl bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700 disabled:opacity-50">
+            <button disabled={payrollReadOnly || !importRows.length || !selectedImportColumns.size || importing} onClick={importPayroll} className="inline-flex items-center gap-2 rounded-xl bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700 disabled:opacity-50">
               {importing ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}
               Import dữ liệu
             </button>
@@ -2956,7 +3023,7 @@ export default function PayrollManager() {
             </label>
             <div className="flex gap-2">
               <button onClick={() => Promise.all([loadSalaryAdvances(), loadSalaryAdvancePendingTotal()])} disabled={salaryAdvanceLoading} className="inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-sm font-semibold hover:bg-slate-50 disabled:opacity-50"><RefreshCw className={`h-4 w-4 ${salaryAdvanceLoading ? "animate-spin" : ""}`} /> Tải lại</button>
-              <button onClick={previewSalaryAdvanceSync} disabled={salaryAdvanceLoading || !rows.length} className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"><HandCoins className="h-4 w-4" /> Lấy phiếu đã chi</button>
+              <button onClick={previewSalaryAdvanceSync} disabled={payrollReadOnly || salaryAdvanceLoading || !rows.length} className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"><HandCoins className="h-4 w-4" /> Lấy phiếu đã chi</button>
             </div>
           </div>
 
@@ -2989,7 +3056,7 @@ export default function PayrollManager() {
           </div>
 
           {salaryAdvanceSyncResult && <div className="space-y-3 rounded-xl border border-emerald-200 bg-emerald-50/40 p-3">
-            <div className="flex flex-wrap items-center justify-between gap-2"><div className="text-sm text-slate-700">Preview: {salaryAdvanceSyncResult.totalRequests || 0} phiếu đã chi, khớp {salaryAdvanceSyncResult.matched || 0} nhân viên.</div><button onClick={applySalaryAdvanceSync} disabled={!validSalaryAdvanceSyncRows.length || salaryAdvanceSyncApplying} className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">{salaryAdvanceSyncApplying ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Cập nhật vào lương</button></div>
+            <div className="flex flex-wrap items-center justify-between gap-2"><div className="text-sm text-slate-700">Preview: {salaryAdvanceSyncResult.totalRequests || 0} phiếu đã chi, khớp {salaryAdvanceSyncResult.matched || 0} nhân viên.</div><button onClick={applySalaryAdvanceSync} disabled={payrollReadOnly || !validSalaryAdvanceSyncRows.length || salaryAdvanceSyncApplying} className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">{salaryAdvanceSyncApplying ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Cập nhật vào lương</button></div>
             <div className="max-h-64 overflow-auto rounded-lg border bg-white"><table className="w-full text-left text-xs"><thead className="sticky top-0 bg-slate-100"><tr><th className="px-3 py-2">Mã NV</th><th className="px-3 py-2">Nhân viên</th><th className="px-3 py-2 text-right">Điều chỉnh tay</th><th className="px-3 py-2 text-right">Từ phiếu</th><th className="px-3 py-2 text-right">Tổng tạm ứng</th><th className="px-3 py-2">Kết quả</th></tr></thead><tbody>{salaryAdvanceSyncResult.rows?.map((row, index) => <tr key={`${row._id || row.maNhanVien}-${index}`} className="border-t"><td className="px-3 py-2 font-mono">{row.maNhanVien}</td><td className="px-3 py-2">{row.tenNhanVien}</td><td className="px-3 py-2 text-right">{formatPayrollNumber(row.manualAmount)}</td><td className="px-3 py-2 text-right font-semibold text-emerald-700">{formatPayrollNumber(row.requestAmount)}</td><td className="px-3 py-2 text-right font-semibold">{formatPayrollNumber(row.totalAdvance)}</td><td className="px-3 py-2">{row.statusText}</td></tr>)}</tbody></table></div>
           </div>}
         </div>
@@ -3131,7 +3198,7 @@ export default function PayrollManager() {
 
           <div className="flex justify-end gap-2">
             <button onClick={() => setShowAttendanceSync(false)} className="rounded-xl border bg-white px-4 py-2 text-sm font-semibold hover:bg-slate-50">Đóng</button>
-            <button disabled={!validAttendanceSyncRows.length || !selectedAttendanceSyncFields.size || attendanceSyncApplying} onClick={applyAttendanceSync} className="inline-flex items-center gap-2 rounded-xl bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700 disabled:opacity-50">
+            <button disabled={payrollReadOnly || !validAttendanceSyncRows.length || !selectedAttendanceSyncFields.size || attendanceSyncApplying} onClick={applyAttendanceSync} className="inline-flex items-center gap-2 rounded-xl bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700 disabled:opacity-50">
               {attendanceSyncApplying ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
               Cập nhật {selectedAttendanceSyncFields.size} cột ({validAttendanceSyncRows.length} NV)
             </button>

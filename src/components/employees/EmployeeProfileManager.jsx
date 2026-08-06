@@ -226,6 +226,43 @@ function Field({ label, value, onChange, type = "text", disabled = false }) {
 function SelectField({ label, value, onChange, options }) {
   return <label><span className={labelClass}>{label}</span><select value={value} onChange={(e) => onChange(e.target.value)} className={inputClass}>{options.map(([v, n]) => <option key={v} value={v}>{n}</option>)}</select></label>;
 }
+const TOAST_TONE = {
+  success: "border-emerald-200 bg-emerald-50 text-emerald-800",
+  error: "border-red-200 bg-red-50 text-red-800",
+  warning: "border-amber-200 bg-amber-50 text-amber-800",
+};
+function ToastStack({ toasts, onDismiss }) {
+  if (!toasts.length) return null;
+  return createPortal(
+    <div className="fixed right-4 top-4 z-[220] flex w-full max-w-sm flex-col gap-2">
+      {toasts.map((toast) => (
+        <div key={toast.id} className={`flex items-start gap-2 rounded-xl border p-3 text-sm font-semibold shadow-lg ${TOAST_TONE[toast.type] || TOAST_TONE.success}`}>
+          <span className="mr-auto whitespace-pre-line">{toast.message}</span>
+          <button onClick={() => onDismiss(toast.id)} className="shrink-0 rounded-lg p-0.5 opacity-60 hover:opacity-100"><X size={14} /></button>
+        </div>
+      ))}
+    </div>,
+    document.body,
+  );
+}
+function ConfirmDialog({ state, onCancel, onConfirm }) {
+  if (!state) return null;
+  return createPortal(
+    <div className="fixed inset-0 z-[230] flex items-center justify-center bg-slate-950/55 p-4">
+      <div className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-2xl">
+        <div className="flex items-start gap-3">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-amber-100 text-amber-600"><AlertTriangle size={18} /></span>
+          <p className="whitespace-pre-line text-sm text-slate-700">{state.message}</p>
+        </div>
+        <div className="mt-5 flex justify-end gap-2">
+          <button onClick={onCancel} className="rounded-xl border px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50">Hủy</button>
+          <button onClick={onConfirm} className="rounded-xl bg-red-600 px-4 py-2 text-sm font-bold text-white hover:bg-red-700">Xác nhận</button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
 function mergeDocumentSettings(defaults, value = {}) {
   return {
     ...clone(defaults || {}), ...clone(value || {}),
@@ -332,7 +369,36 @@ export default function EmployeeProfileManager({ users, onClose, standalone = fa
   const [auditHistory, setAuditHistory] = useState({ items: [], total: 0 });
   const [auditLoading, setAuditLoading] = useState(false);
   const [profileUsers, setProfileUsers] = useState(users || []);
+  const [toasts, setToasts] = useState([]);
+  const [confirmState, setConfirmState] = useState(null);
+  const [editorSnapshot, setEditorSnapshot] = useState(null);
   const canProfileAction = (action) => String(user?.role || "").toLowerCase() === "superadmin" || Number(user?.allpage) === 1 || user?.action?.employee_profiles?.[action] === true;
+
+  const dismissToast = (id) => setToasts((current) => current.filter((toast) => toast.id !== id));
+  const notify = (message, type = "success") => {
+    const id = `${Date.now()}-${Math.random()}`;
+    setToasts((current) => [...current, { id, message, type }]);
+    setTimeout(() => dismissToast(id), type === "error" ? 6000 : 4000);
+  };
+  const confirmAction = (message) => new Promise((resolve) => setConfirmState({ message, resolve }));
+  const resolveConfirm = (result) => { confirmState?.resolve(result); setConfirmState(null); };
+
+  const isEditorDirty = Boolean(editor) && editorSnapshot !== null && JSON.stringify(editor) !== editorSnapshot;
+  const requestCloseEditor = async () => {
+    if (isEditorDirty && !(await confirmAction("Hồ sơ có thay đổi chưa lưu. Rời khỏi trang và bỏ các thay đổi này?"))) return;
+    setEditor(null);
+    setEditorSnapshot(null);
+  };
+  const requestClose = async () => {
+    if (isEditorDirty && !(await confirmAction("Hồ sơ có thay đổi chưa lưu. Đóng và bỏ các thay đổi này?"))) return;
+    onClose();
+  };
+
+  useEffect(() => {
+    const handler = (event) => { if (isEditorDirty) { event.preventDefault(); event.returnValue = ""; } };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [isEditorDirty]);
 
   useEffect(() => {
     if (standalone) return undefined;
@@ -360,7 +426,7 @@ export default function EmployeeProfileManager({ users, onClose, standalone = fa
   }, [users]); // eslint-disable-line react-hooks/exhaustive-deps
   const loadProfiles = async () => {
     try { setLoading(true); const data = await request("/api/employee-profiles?limit=200"); setProfiles(data?.data?.items || []); }
-    catch (error) { alert(error.message); } finally { setLoading(false); }
+    catch (error) { notify(error.message, "error"); } finally { setLoading(false); }
   };
   const loadAlerts = async () => {
     try {
@@ -395,7 +461,11 @@ export default function EmployeeProfileManager({ users, onClose, standalone = fa
     }).sort((a, b) => b._score - a._score || a.name.localeCompare(b.name, "vi"));
   }, [contractTemplates, editor?.employment?.department, editor?.employment?.jobTitle]);
   const setNested = (section, key, value) => setEditor((old) => ({ ...old, [section]: { ...old[section], [key]: value } }));
-  const openNew = () => setEditor(clone(emptyProfile));
+  const openNew = () => {
+    const fresh = clone(emptyProfile);
+    setEditor(fresh);
+    setEditorSnapshot(JSON.stringify(fresh));
+  };
   const openProfile = async (profile) => {
     try {
       setAuditLoading(true);
@@ -406,36 +476,37 @@ export default function EmployeeProfileManager({ users, onClose, standalone = fa
       const value = result.data;
       const normalized = { ...clone(emptyProfile), ...value, userId: value.userId?._id || value.userId || "", personal: { ...emptyProfile.personal, ...value.personal, dateOfBirth: dateInput(value.personal?.dateOfBirth) }, identityDocument: { ...emptyProfile.identityDocument, ...value.identityDocument, issuedDate: dateInput(value.identityDocument?.issuedDate) }, employment: { ...emptyProfile.employment, ...value.employment, startDate: dateInput(value.employment?.startDate), officialDate: dateInput(value.employment?.officialDate), endDate: dateInput(value.employment?.endDate) }, payrollBankAccount: { ...emptyProfile.payrollBankAccount, ...value.payrollBankAccount }, annualLeaveBalance: { ...emptyProfile.annualLeaveBalance, ...value.annualLeaveBalance }, contracts: value.contracts || [] };
       setEditor(normalized);
+      setEditorSnapshot(JSON.stringify(normalized));
       setAuditHistory(historyResult.data || { items: [], total: 0 });
       return normalized;
-    } catch (error) { alert(error.message); }
+    } catch (error) { notify(error.message, "error"); }
     finally { setAuditLoading(false); }
   };
   const saveProfile = async () => {
     try {
       const isNew = !editor._id;
       const result = await request(isNew ? "/api/employee-profiles" : `/api/employee-profiles/${editor._id}`, { method: isNew ? "POST" : "PUT", body: JSON.stringify(editor) });
-      await Promise.all([loadProfiles(), loadAlerts()]); if (isNew) await openProfile(result.data); else { await openProfile(editor); alert("Đã lưu hồ sơ nhân sự"); }
-    } catch (error) { alert(error.message); }
+      await Promise.all([loadProfiles(), loadAlerts()]); if (isNew) await openProfile(result.data); else { await openProfile(editor); notify("Đã lưu hồ sơ nhân sự"); }
+    } catch (error) { notify(error.message, "error"); }
   };
   const saveContract = async () => {
     try {
       const isNew = !contractEditor._id;
       await request(`/api/employee-profiles/${editor._id}/contracts${isNew ? "" : `/${contractEditor._id}`}`, { method: isNew ? "POST" : "PUT", body: JSON.stringify(contractEditor) });
-      setContractEditor(null); await Promise.all([openProfile(editor), loadAlerts()]); alert("Đã lưu hợp đồng");
-    } catch (error) { alert(error.message); }
+      setContractEditor(null); await Promise.all([openProfile(editor), loadAlerts()]); notify("Đã lưu hợp đồng");
+    } catch (error) { notify(error.message, "error"); }
   };
   const deleteContract = async (contract) => {
     const appendixCount = contract.appendices?.length || 0;
     const appendixWarning = appendixCount ? `\nHợp đồng có ${appendixCount} phụ lục và các phụ lục này cũng sẽ bị xóa.` : "";
-    if (!window.confirm(`Xóa hợp đồng “${contract.contractNumber}”?${appendixWarning}\n\nThao tác này không thể hoàn tác.`)) return;
+    if (!(await confirmAction(`Xóa hợp đồng "${contract.contractNumber}"?${appendixWarning}\n\nThao tác này không thể hoàn tác.`))) return;
     try {
       setDeletingContractId(contract._id);
       await request(`/api/employee-profiles/${editor._id}/contracts/${contract._id}`, { method: "DELETE" });
       if (contractEditor?._id === contract._id) setContractEditor(null);
       await Promise.all([openProfile(editor), loadProfiles(), loadAlerts()]);
-      alert("Đã xóa hợp đồng");
-    } catch (error) { alert(error.message); }
+      notify("Đã xóa hợp đồng");
+    } catch (error) { notify(error.message, "error"); }
     finally { setDeletingContractId(""); }
   };
   const deleteAppendix = async (appendix, index) => {
@@ -443,14 +514,14 @@ export default function EmployeeProfileManager({ users, onClose, standalone = fa
       setContractEditor((current) => ({ ...current, appendices: current.appendices.filter((_, itemIndex) => itemIndex !== index) }));
       return;
     }
-    if (!window.confirm(`Xóa phụ lục “${appendix.appendixNumber}”?\n\nThao tác này có hiệu lực ngay và không thể hoàn tác.`)) return;
+    if (!(await confirmAction(`Xóa phụ lục "${appendix.appendixNumber}"?\n\nThao tác này có hiệu lực ngay và không thể hoàn tác.`))) return;
     try {
       setDeletingAppendixId(appendix._id);
       await request(`/api/employee-profiles/${editor._id}/contracts/${contractEditor._id}/appendices/${appendix._id}`, { method: "DELETE" });
       setContractEditor((current) => ({ ...current, appendices: current.appendices.filter((item) => item._id !== appendix._id) }));
       await Promise.all([openProfile(editor), loadAlerts()]);
-      alert("Đã xóa phụ lục hợp đồng");
-    } catch (error) { alert(error.message); }
+      notify("Đã xóa phụ lục hợp đồng");
+    } catch (error) { notify(error.message, "error"); }
     finally { setDeletingAppendixId(""); }
   };
   const normalizeTemplateEditor = (template) => ({
@@ -471,24 +542,24 @@ export default function EmployeeProfileManager({ users, onClose, standalone = fa
       const result = await request(isNew ? "/api/employee-profiles/contract-templates" : `/api/employee-profiles/contract-templates/${templateEditor._id}`, { method: isNew ? "POST" : "PUT", body: JSON.stringify(templateEditor) });
       await loadContractTemplates();
       setTemplateEditor(normalizeTemplateEditor(result.data));
-      alert("Đã lưu bản nháp mẫu hợp đồng");
-    } catch (error) { alert(error.message); } finally { setSavingTemplate(false); }
+      notify("Đã lưu bản nháp mẫu hợp đồng");
+    } catch (error) { notify(error.message, "error"); } finally { setSavingTemplate(false); }
   };
   const bootstrapContractTemplates = async () => {
     try { setSavingTemplate(true); await request("/api/employee-profiles/contract-templates-bootstrap", { method: "POST" }); const data = await request("/api/employee-profiles/contract-templates"); const items = data.data || []; setContractTemplates(items); setTemplateEditor(normalizeTemplateEditor(items.find((item) => item.status === "active") || items[0])); }
-    catch (error) { alert(error.message); } finally { setSavingTemplate(false); }
+    catch (error) { notify(error.message, "error"); } finally { setSavingTemplate(false); }
   };
   const createTemplateVersion = async () => {
     try { setSavingTemplate(true); const result = await request(`/api/employee-profiles/contract-templates/${templateEditor._id}/versions`, { method: "POST", body: JSON.stringify({}) }); await loadContractTemplates(); setTemplateEditor(normalizeTemplateEditor(result.data)); }
-    catch (error) { alert(error.message); } finally { setSavingTemplate(false); }
+    catch (error) { notify(error.message, "error"); } finally { setSavingTemplate(false); }
   };
   const changeTemplateStatus = async (action) => {
     try { setSavingTemplate(true); const result = await request(`/api/employee-profiles/contract-templates/${templateEditor._id}/${action}`, { method: "POST" }); await loadContractTemplates(); setTemplateEditor(normalizeTemplateEditor(result.data)); }
-    catch (error) { alert(error.message); } finally { setSavingTemplate(false); }
+    catch (error) { notify(error.message, "error"); } finally { setSavingTemplate(false); }
   };
   const deleteTemplate = async () => {
     const statusLabel = templateEditor.status === "active" ? "đang dùng" : templateEditor.status === "archived" ? "lưu trữ" : "bản nháp";
-    if (!window.confirm(`Xóa mẫu “${templateEditor.name}” (${statusLabel})?\n\nThao tác này không thể hoàn tác. Mẫu đã được áp dụng cho hợp đồng sẽ không thể xóa.`)) return;
+    if (!(await confirmAction(`Xóa mẫu "${templateEditor.name}" (${statusLabel})?\n\nThao tác này không thể hoàn tác. Mẫu đã được áp dụng cho hợp đồng sẽ không thể xóa.`))) return;
     try {
       setSavingTemplate(true);
       await request(`/api/employee-profiles/contract-templates/${templateEditor._id}`, { method: "DELETE" });
@@ -496,9 +567,9 @@ export default function EmployeeProfileManager({ users, onClose, standalone = fa
       const items = data.data || [];
       setContractTemplates(items);
       setTemplateEditor(normalizeTemplateEditor(items.find((item) => item.status === "active") || items[0]));
-      alert("Đã xóa mẫu hợp đồng");
+      notify("Đã xóa mẫu hợp đồng");
     }
-    catch (error) { alert(error.message); } finally { setSavingTemplate(false); }
+    catch (error) { notify(error.message, "error"); } finally { setSavingTemplate(false); }
   };
   const applyContractTemplate = (templateId) => {
     const template = activeContractTemplates.find((item) => item._id === templateId);
@@ -561,7 +632,7 @@ export default function EmployeeProfileManager({ users, onClose, standalone = fa
     if (!detail) return;
     if (!detail.contracts?.length) {
       setShowDocumentPicker(false);
-      alert("Nhân viên này chưa có hợp đồng để chỉnh nội dung và định dạng");
+      notify("Nhân viên này chưa có hợp đồng để chỉnh nội dung và định dạng", "warning");
       return;
     }
     setShowDocumentPicker(false);
@@ -577,8 +648,8 @@ export default function EmployeeProfileManager({ users, onClose, standalone = fa
       await request(`/api/employee-profiles/${editor._id}/contracts/${documentEditor.contractId}`, { method: "PUT", body: JSON.stringify({ documentSettings: documentEditor.settings }) });
       await openProfile(editor);
       setDocumentEditor(null);
-      alert("Đã lưu nội dung và định dạng hợp đồng");
-    } catch (error) { alert(error.message); } finally { setSavingDocument(false); }
+      notify("Đã lưu nội dung và định dạng hợp đồng");
+    } catch (error) { notify(error.message, "error"); } finally { setSavingDocument(false); }
   };
   const exportContract = async (contract, format) => {
     try {
@@ -586,7 +657,7 @@ export default function EmployeeProfileManager({ users, onClose, standalone = fa
       if (!response.ok) { const data = await response.json(); throw new Error(data.message || "Không thể xuất hợp đồng"); }
       const blob = await response.blob(); const url = URL.createObjectURL(blob); const a = document.createElement("a");
       a.href = url; a.download = `HDLD_${editor.employeeCode}_${contract.contractNumber.replace(/[^a-zA-Z0-9_-]/g, "_")}.${format}`; a.click(); URL.revokeObjectURL(url);
-    } catch (error) { alert(error.message); }
+    } catch (error) { notify(error.message, "error"); }
   };
   const toggleProfileSelection = (profileId) => {
     setSelectedProfileIds((current) => current.includes(profileId)
@@ -594,7 +665,7 @@ export default function EmployeeProfileManager({ users, onClose, standalone = fa
       : [...current, profileId]);
   };
   const handleBulkExport = async (format) => {
-    if (!selectedProfileIds.length) return alert("Vui lòng chọn ít nhất một nhân viên");
+    if (!selectedProfileIds.length) return notify("Vui lòng chọn ít nhất một nhân viên", "warning");
     try {
       setBulkExporting(true);
       const zip = new JSZip();
@@ -629,9 +700,9 @@ export default function EmployeeProfileManager({ users, onClose, standalone = fa
       if (!exported) throw new Error(skipped.join("\n") || "Không có hợp đồng nào để xuất");
       saveAs(await zip.generateAsync({ type: "blob" }), `Hop_dong_lao_dong_${format}_${new Date().toISOString().slice(0, 10)}.zip`);
       setShowBulkExport(false);
-      if (skipped.length) alert(`Đã xuất ${exported} hợp đồng. Bỏ qua ${skipped.length} nhân viên:\n${skipped.join("\n")}`);
+      if (skipped.length) notify(`Đã xuất ${exported} hợp đồng. Bỏ qua ${skipped.length} nhân viên:\n${skipped.join("\n")}`, "warning");
     } catch (error) {
-      alert(error.message || "Không thể xuất hợp đồng hàng loạt");
+      notify(error.message || "Không thể xuất hợp đồng hàng loạt", "error");
     } finally {
       setBulkExporting(false);
     }
@@ -643,11 +714,11 @@ export default function EmployeeProfileManager({ users, onClose, standalone = fa
       const raw = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { defval: "", raw: true });
       const parsed = raw.map(parseEmployeeRow).filter((row) => row.employeeCode || row.personal.fullName);
       setImportRows(parsed); setImportFileName(file.name); setImportResult(null);
-    } catch { alert("Không đọc được file Excel"); }
+    } catch { notify("Không đọc được file Excel", "error"); }
   };
   const confirmImport = async () => {
     try { setImporting(true); const data = await request("/api/employee-profiles/import", { method: "POST", body: JSON.stringify({ rows: importRows }) }); setImportResult(data.data); await loadProfiles(); }
-    catch (error) { alert(error.message); } finally { setImporting(false); }
+    catch (error) { notify(error.message, "error"); } finally { setImporting(false); }
   };
   const downloadTemplate = () => {
     const sample = Object.fromEntries(HEADERS.map((header) => [header, ""]));
@@ -674,21 +745,21 @@ export default function EmployeeProfileManager({ users, onClose, standalone = fa
       if (!rows.length) throw new Error("File không có dữ liệu phép năm");
       const previewResponse = await request("/api/employee-profiles/annual-leave-import/preview", { method: "PUT", body: JSON.stringify({ rows }) });
       setAnnualLeaveImport({ fileName: file.name, rows, preview: previewResponse.data, result: null });
-    } catch (error) { alert(error.message || "Không đọc được file phép năm"); }
+    } catch (error) { notify(error.message || "Không đọc được file phép năm", "error"); }
     finally { setAnnualLeaveImporting(false); }
   };
   const confirmAnnualLeaveImport = async () => {
     const preview = annualLeaveImport.preview;
     if (!preview?.valid) return;
     const warningText = preview.warnings ? `\nCó ${preview.warnings} dòng làm giảm số ngày phép còn lại.` : "";
-    if (!window.confirm(`Cập nhật ${preview.valid} dòng hợp lệ?${warningText}\nCác dòng lỗi sẽ được bỏ qua.`)) return;
+    if (!(await confirmAction(`Cập nhật ${preview.valid} dòng hợp lệ?${warningText}\nCác dòng lỗi sẽ được bỏ qua.`))) return;
     try {
       setAnnualLeaveImporting(true);
       const response = await request("/api/employee-profiles/annual-leave-import/commit", { method: "PUT", body: JSON.stringify({ rows: annualLeaveImport.rows }) });
       setAnnualLeaveImport((current) => ({ ...current, result: response.data }));
       await loadProfiles();
-      alert(response.message || "Đã import phép năm");
-    } catch (error) { alert(error.message); }
+      notify(response.message || "Đã import phép năm");
+    } catch (error) { notify(error.message, "error"); }
     finally { setAnnualLeaveImporting(false); }
   };
   const downloadAnnualLeaveImportResult = () => {
@@ -715,7 +786,7 @@ export default function EmployeeProfileManager({ users, onClose, standalone = fa
       setExportingProfiles(true);
       const result = await request("/api/employee-profiles/export-data");
       const items = result.data?.items || [];
-      if (!items.length) return alert("Chưa có hồ sơ nhân viên để xuất");
+      if (!items.length) return notify("Chưa có hồ sơ nhân viên để xuất", "warning");
       const rows = items.map(profileToExcelRow);
       const sheet = XLSX.utils.json_to_sheet(rows, { header: HEADERS });
       sheet["!cols"] = HEADERS.map((header) => ({ wch: Math.min(42, Math.max(16, header.length + 3)) }));
@@ -723,28 +794,28 @@ export default function EmployeeProfileManager({ users, onClose, standalone = fa
       const book = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(book, sheet, "Hồ sơ nhân viên");
       XLSX.writeFile(book, `ho_so_nhan_vien_day_du_${new Date().toISOString().slice(0, 10)}.xlsx`);
-    } catch (error) { alert(error.message || "Không thể xuất hồ sơ nhân viên"); }
+    } catch (error) { notify(error.message || "Không thể xuất hồ sơ nhân viên", "error"); }
     finally { setExportingProfiles(false); }
   };
   const verifyBankAccount = async (isVerified) => {
     if (!editor?._id) return;
     const message = isVerified ? "Xác nhận thông tin tài khoản này đã được đối chiếu chính xác?" : "Hủy trạng thái xác minh tài khoản nhận lương?";
-    if (!window.confirm(message)) return;
+    if (!(await confirmAction(message))) return;
     try {
       await request(`/api/employee-profiles/${editor._id}/bank-account/verify`, { method: "PATCH", body: JSON.stringify({ isVerified }) });
       await openProfile(editor);
-    } catch (error) { alert(error.message); }
+    } catch (error) { notify(error.message, "error"); }
   };
 
   const annualLeaveImportItems = annualLeaveImport.result?.items || annualLeaveImport.preview?.items || [];
   const content = <div className={standalone ? "min-h-full overflow-y-auto bg-slate-50 p-3" : "fixed inset-0 z-[100] overflow-y-auto bg-slate-950/45 p-3 backdrop-blur-sm"}>
     <div className={`mx-auto max-w-[1500px] rounded-3xl border border-cyan-100 bg-gradient-to-b from-cyan-50 to-white shadow-2xl ${standalone ? "min-h-[calc(100vh-48px)]" : "min-h-[calc(100vh-24px)]"}`}>
       <header className="sticky top-0 z-10 flex flex-wrap items-center gap-3 rounded-t-3xl border-b border-cyan-100 bg-white/95 px-5 py-4 backdrop-blur">
-        {(editor || !standalone) && <button onClick={editor ? () => setEditor(null) : onClose} className="rounded-xl border border-cyan-100 p-2 text-cyan-700 hover:bg-cyan-50"><ArrowLeft size={18} /></button>}
-        <div className="mr-auto"><h2 className="text-lg font-black text-slate-900">{editor ? `Hồ sơ ${editor.personal?.fullName || "nhân viên"}` : "Quản lý hồ sơ nhân sự"}</h2><p className="text-xs text-slate-500">Hồ sơ, hợp đồng, phụ lục và xuất biểu mẫu</p></div>
+        {(editor || !standalone) && <button onClick={editor ? requestCloseEditor : onClose} className="rounded-xl border border-cyan-100 p-2 text-cyan-700 hover:bg-cyan-50"><ArrowLeft size={18} /></button>}
+        <div className="mr-auto"><h2 className="flex items-center gap-2 text-lg font-black text-slate-900">{editor ? `Hồ sơ ${editor.personal?.fullName || "nhân viên"}` : "Quản lý hồ sơ nhân sự"}{isEditorDirty && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-bold text-amber-700">Chưa lưu</span>}</h2><p className="text-xs text-slate-500">Hồ sơ, hợp đồng, phụ lục và xuất biểu mẫu</p></div>
         {!editor && <>{canProfileAction("edit") && <button onClick={downloadAnnualLeaveTemplate} className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-white px-3 py-2 text-sm font-semibold text-emerald-700"><Download size={16} /> Mẫu phép năm</button>}{canProfileAction("edit") && <label className="flex cursor-pointer items-center gap-2 rounded-xl bg-emerald-600 px-3 py-2 text-sm font-bold text-white"><Upload size={16} /> {annualLeaveImporting ? "Đang xử lý..." : "Import phép năm"}<input type="file" accept=".xlsx,.xls,.csv" disabled={annualLeaveImporting} className="hidden" onChange={readAnnualLeaveExcel} /></label>}<button onClick={downloadTemplate} className="flex items-center gap-2 rounded-xl border border-cyan-200 bg-white px-3 py-2 text-sm font-semibold text-cyan-700"><Download size={16} /> File mẫu</button>{canProfileAction("edit") && <button disabled={!documentDefaults} onClick={openTemplateManager} className="flex items-center gap-2 rounded-xl bg-violet-600 px-3 py-2 text-sm font-bold text-white disabled:opacity-50"><FileText size={16} /> Thư viện mẫu HĐ</button>}{canProfileAction("edit") && <button disabled={!documentDefaults} onClick={openDocumentPicker} className="flex items-center gap-2 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-sm font-bold text-violet-700 disabled:opacity-50"><FileText size={16} /> Chỉnh HĐ nhân viên</button>}{canProfileAction("create") && <label className="flex cursor-pointer items-center gap-2 rounded-xl bg-emerald-600 px-3 py-2 text-sm font-bold text-white"><Upload size={16} /> Import Excel<input type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={readExcel} /></label>}{canProfileAction("export") && <button disabled={exportingProfiles} onClick={exportEmployeeProfiles} className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-bold text-emerald-700 disabled:opacity-50"><Download size={16} /> {exportingProfiles ? "Đang xuất..." : "Xuất hồ sơ Excel"}</button>}{canProfileAction("create") && <button onClick={openNew} className="flex items-center gap-2 rounded-xl bg-cyan-600 px-3 py-2 text-sm font-bold text-white"><Plus size={16} /> Thêm hồ sơ</button>}</>}
         {editor && canProfileAction(editor._id ? "edit" : "create") && <button onClick={saveProfile} className="flex items-center gap-2 rounded-xl bg-cyan-600 px-4 py-2 text-sm font-bold text-white"><Save size={16} /> Lưu hồ sơ</button>}
-        {!standalone && <button onClick={onClose} className="rounded-xl p-2 text-slate-400 hover:bg-slate-100"><X size={18} /></button>}
+        {!standalone && <button onClick={requestClose} className="rounded-xl p-2 text-slate-400 hover:bg-slate-100"><X size={18} /></button>}
       </header>
 
       {!editor ? <main className="p-5">
@@ -819,5 +890,9 @@ export default function EmployeeProfileManager({ users, onClose, standalone = fa
     {showTemplateManager && templateEditor && <ContractTemplateManagerModal templates={contractTemplates} value={templateEditor} defaults={documentDefaults} saving={savingTemplate} onChange={setTemplateEditor} onSelect={(item) => setTemplateEditor(normalizeTemplateEditor(item))} onNew={() => setTemplateEditor(normalizeTemplateEditor())} onBootstrap={bootstrapContractTemplates} onSave={saveTemplate} onNewVersion={createTemplateVersion} onActivate={() => changeTemplateStatus("activate")} onArchive={() => changeTemplateStatus("archive")} onDelete={deleteTemplate} onClose={() => setShowTemplateManager(false)} />}
     {contractEditor && <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/50 p-4"><div className="max-h-[94vh] w-full max-w-4xl overflow-y-auto rounded-2xl bg-white p-5 shadow-2xl"><div className="mb-4 flex items-center"><h3 className="mr-auto text-lg font-black">{contractEditor._id ? "Sửa hợp đồng" : "Thêm hợp đồng"}</h3><button onClick={() => setContractEditor(null)}><X /></button></div><div className="mb-5 rounded-2xl border border-violet-200 bg-violet-50 p-4"><label><span className={labelClass}>Mẫu hợp đồng theo vị trí</span><select value={contractEditor.templateId || ""} disabled={Boolean(contractEditor._id && contractEditor.status !== "draft")} onChange={(e) => applyContractTemplate(e.target.value)} className={`${inputClass} disabled:bg-slate-100`}><option value="">Không dùng mẫu / nhập thủ công</option>{contractEditor.templateId && !activeContractTemplates.some((item) => item._id === contractEditor.templateId) && <option value={contractEditor.templateId}>{contractEditor.templateName || contractEditor.templateCode} · v{contractEditor.templateVersion}</option>}{activeContractTemplates.map((item) => <option key={item._id} value={item._id}>{item._suggested ? "★ Gợi ý · " : ""}{item.name} · v{item.version}</option>)}</select></label><p className="mt-2 text-xs text-violet-700">Mẫu được gợi ý từ bộ phận “{editor.employment?.department || "chưa xác định"}” và chức danh “{editor.employment?.jobTitle || "chưa xác định"}”. Chỉ hợp đồng nháp mới được đổi hoặc áp dụng lại mẫu.</p></div><div className="grid gap-3 md:grid-cols-3"><Field label="Số hợp đồng" value={contractEditor.contractNumber} onChange={(v) => setContractEditor({ ...contractEditor, contractNumber: v })} /><SelectField label="Loại hợp đồng" value={contractEditor.contractType} onChange={(v) => setContractEditor({ ...contractEditor, contractType: v })} options={[["probation", "Thử việc"], ["fixed_term", "Xác định thời hạn"], ["indefinite", "Không xác định thời hạn"], ["seasonal", "Mùa vụ"], ["other", "Khác"]]} /><SelectField label="Trạng thái hợp đồng" value={contractEditor.status} onChange={(v) => setContractEditor({ ...contractEditor, status: v })} options={[["draft", "Bản nháp"], ["active", "Đang hiệu lực"], ["expired", "Hết hạn"], ["terminated", "Đã chấm dứt"], ["cancelled", "Đã hủy"]]} /><Field label="Thời hạn (tháng)" type="number" value={contractEditor.durationMonths ?? ""} onChange={(v) => setContractEditor({ ...contractEditor, durationMonths: v ? Number(v) : null })} /><Field label="Ngày ký" type="date" value={contractEditor.signedDate} onChange={(v) => setContractEditor({ ...contractEditor, signedDate: v })} /><Field label="Ngày hiệu lực" type="date" value={contractEditor.effectiveDate} onChange={(v) => setContractEditor({ ...contractEditor, effectiveDate: v })} /><Field label="Ngày hết hạn" type="date" value={contractEditor.expiryDate} onChange={(v) => setContractEditor({ ...contractEditor, expiryDate: v })} /><Field label="Ngày nhắc gia hạn" type="date" value={contractEditor.renewalDueDate} onChange={(v) => setContractEditor({ ...contractEditor, renewalDueDate: v })} /><Field label="Lương cơ bản" type="number" value={contractEditor.baseSalary} onChange={(v) => setContractEditor({ ...contractEditor, baseSalary: Number(v) })} /><Field label="Nơi làm việc" value={contractEditor.workplace} onChange={(v) => setContractEditor({ ...contractEditor, workplace: v })} /><Field label="Người đại diện" value={contractEditor.companyRepresentative.fullName} onChange={(v) => setContractEditor({ ...contractEditor, companyRepresentative: { ...contractEditor.companyRepresentative, fullName: v } })} /><Field label="Chức vụ đại diện" value={contractEditor.companyRepresentative.title} onChange={(v) => setContractEditor({ ...contractEditor, companyRepresentative: { ...contractEditor.companyRepresentative, title: v } })} /><Field label="Phụ cấp" value={contractEditor.allowances} onChange={(v) => setContractEditor({ ...contractEditor, allowances: v })} /></div><div className="mt-5 rounded-xl border border-cyan-100 bg-cyan-50/50 p-3"><div className="mb-3 flex items-center"><b className="mr-auto text-sm text-cyan-800">Phụ lục hợp đồng</b><button onClick={() => setContractEditor({ ...contractEditor, appendices: [...(contractEditor.appendices || []), { appendixNumber: "", signedDate: "", effectiveDate: "", expiryDate: "", summary: "", status: "draft" }] })} className="rounded-lg bg-cyan-600 px-2.5 py-1.5 text-xs font-bold text-white">+ Thêm phụ lục</button></div>{(contractEditor.appendices || []).map((appendix, index) => { const update = (key, value) => setContractEditor({ ...contractEditor, appendices: contractEditor.appendices.map((item, i) => i === index ? { ...item, [key]: value } : item) }); return <div key={appendix._id || index} className="mb-3 grid gap-2 rounded-xl bg-white p-3 md:grid-cols-4"><Field label="Số phụ lục" value={appendix.appendixNumber} onChange={(v) => update("appendixNumber", v)} /><SelectField label="Trạng thái phụ lục" value={appendix.status} onChange={(v) => update("status", v)} options={[["draft", "Bản nháp"], ["active", "Đang hiệu lực"], ["expired", "Hết hạn"], ["cancelled", "Đã hủy"]]} /><Field label="Ngày ký" type="date" value={appendix.signedDate} onChange={(v) => update("signedDate", v)} /><Field label="Ngày hiệu lực" type="date" value={appendix.effectiveDate} onChange={(v) => update("effectiveDate", v)} /><Field label="Ngày hết hạn" type="date" value={appendix.expiryDate} onChange={(v) => update("expiryDate", v)} /><div className="md:col-span-3"><Field label="Nội dung tóm tắt" value={appendix.summary} onChange={(v) => update("summary", v)} /></div><button disabled={deletingAppendixId === appendix._id} onClick={() => deleteAppendix(appendix, index)} className="self-end flex items-center justify-center gap-2 rounded-xl border border-red-200 px-3 py-2 text-sm text-red-600 hover:bg-red-50 disabled:opacity-50"><Trash2 size={14} />{deletingAppendixId === appendix._id ? "Đang xóa..." : "Xóa phụ lục"}</button></div>; })}</div><div className="mt-5 flex justify-end gap-2"><button onClick={() => setContractEditor(null)} className="rounded-xl border px-4 py-2">Hủy</button><button onClick={saveContract} className="rounded-xl bg-cyan-600 px-5 py-2 font-bold text-white">Lưu hợp đồng</button></div></div></div>}
   </div>;
-  return standalone ? content : createPortal(content, document.body);
+  return <>
+    {standalone ? content : createPortal(content, document.body)}
+    <ToastStack toasts={toasts} onDismiss={dismissToast} />
+    <ConfirmDialog state={confirmState} onCancel={() => resolveConfirm(false)} onConfirm={() => resolveConfirm(true)} />
+  </>;
 }

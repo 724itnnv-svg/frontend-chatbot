@@ -1071,7 +1071,7 @@ export default function AttendancePage() {
   const [advanceLoading, setAdvanceLoading] = useState(false);
   const [advanceSaving, setAdvanceSaving] = useState(false);
   const [deletingAdvanceId, setDeletingAdvanceId] = useState("");
-  const [advanceLimit, setAdvanceLimit] = useState({ minAmount: 100000, maxAmount: 2600000 });
+  const [advanceLimit, setAdvanceLimit] = useState({ minAmount: 100000, maxAmount: 2600000, canRequest: false, restrictionMessage: "Đang kiểm tra điều kiện ứng lương..." });
   const [advanceLimitLoading, setAdvanceLimitLoading] = useState(false);
   const [approvalNotifications, setApprovalNotifications] = useState([]);
   const [notificationHistory, setNotificationHistory] = useState([]);
@@ -1082,6 +1082,13 @@ export default function AttendancePage() {
   const [evidencePreview, setEvidencePreview] = useState(null);
   const [evidencePreviewLoading, setEvidencePreviewLoading] = useState(false);
   const [evidencePreviewError, setEvidencePreviewError] = useState("");
+  const currentPeriodAdvance = useMemo(
+    () => advanceRequests.find((request) => request.payrollPeriod === advanceForm.payrollPeriod),
+    [advanceForm.payrollPeriod, advanceRequests],
+  );
+  const advanceRestrictionMessage = advanceLimit.restrictionMessage
+    || (currentPeriodAdvance ? "Bạn đã tạo phiếu ứng lương trong tháng này. Mỗi tháng chỉ được ứng lương một lần." : "");
+  const advanceFormDisabled = advanceSaving || advanceLimitLoading || advanceLimit.canRequest !== true || Boolean(currentPeriodAdvance);
   const [myAutoAttendance, setMyAutoAttendance] = useState(null);
   const [showTaskbarRunner, setShowTaskbarRunner] = useState(() => {
     try { return localStorage.getItem("attendance_show_taskbar_runner") === "true"; } catch { return SHOW_ATTENDANCE_TASKBAR_RUNNER_DEFAULT; }
@@ -1425,9 +1432,9 @@ export default function AttendancePage() {
     setAdvanceLimitLoading(true);
     try {
       const res = await api.get(`/salary-advance-requests/my-limit?period=${encodeURIComponent(period)}`);
-      setAdvanceLimit(res.data?.data || { minAmount: 100000, maxAmount: 2600000 });
+      setAdvanceLimit(res.data?.data || { minAmount: 100000, maxAmount: 2600000, canRequest: false, restrictionMessage: "Không xác định được điều kiện ứng lương." });
     } catch {
-      setAdvanceLimit({ minAmount: 100000, maxAmount: 2600000 });
+      setAdvanceLimit({ minAmount: 100000, maxAmount: 2600000, canRequest: false, restrictionMessage: "Không thể kiểm tra điều kiện ứng lương. Vui lòng thử lại." });
     } finally {
       setAdvanceLimitLoading(false);
     }
@@ -1828,6 +1835,7 @@ export default function AttendancePage() {
 
   async function submitAdvanceRequest(event) {
     event.preventDefault();
+    if (advanceFormDisabled) return showMsg(false, advanceRestrictionMessage || "Hiện chưa thể tạo phiếu ứng lương.");
     const requestedAmount = Number(advanceForm.requestedAmount);
     if (!Number.isFinite(requestedAmount) || requestedAmount < 100000) return showMsg(false, "Số tiền muốn ứng tối thiểu là 100.000 đ.");
     if (requestedAmount > Number(advanceLimit.maxAmount || 2600000)) return showMsg(false, "Số tiền muốn ứng tối đa là 2.600.000 đ.");
@@ -1840,6 +1848,7 @@ export default function AttendancePage() {
         reason: advanceForm.reason.trim(),
       });
       showMsg(true, res.data?.message || "Đã gửi phiếu ứng lương.");
+      setAdvanceLimit((current) => ({ ...current, canRequest: false, hasRequestedThisPeriod: true, restrictionMessage: "Bạn đã tạo phiếu ứng lương trong tháng này. Mỗi tháng chỉ được ứng lương một lần." }));
       setAdvanceForm(createAdvanceForm());
       await loadAdvanceRequests();
     } catch (err) {
@@ -1854,7 +1863,7 @@ export default function AttendancePage() {
     if (request.status === "approved") {
       cancellationReason = window.prompt("Nhập lý do yêu cầu hủy phiếu đã duyệt:", "")?.trim();
       if (!cancellationReason) return;
-    } else if (!window.confirm("Bạn có chắc muốn xóa phiếu ứng lương này?")) return;
+    } else if (!window.confirm("Bạn có chắc muốn hủy phiếu ứng lương này? Lượt ứng lương của tháng vẫn được ghi nhận.")) return;
     setDeletingAdvanceId(request._id);
     try {
       const res = await api.delete(`/salary-advance-requests/${request._id}`, { data: cancellationReason ? { cancellationReason } : undefined });
@@ -2891,17 +2900,18 @@ export default function AttendancePage() {
                   <span className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600"><HandCoins size={22} /></span>
                   <div>
                     <h2 className="font-bold text-slate-900">Tạo phiếu ứng lương</h2>
-                    <p className="text-xs text-slate-500">Phiếu chỉ được khấu trừ vào lương sau khi quản trị xác nhận đã chi tiền.</p>
+                    <p className="text-xs text-slate-500">Chỉ gửi từ ngày 01–20 và mỗi nhân viên chỉ được ứng lương một lần trong tháng.</p>
                   </div>
                 </div>
                 <div className="space-y-3">
                   <label className="block text-xs font-semibold text-slate-600">SỐ TIỀN MUỐN ỨNG
-                    <input type="number" required min="100000" max="2600000" step="1000" value={advanceForm.requestedAmount} onChange={(event) => setAdvanceForm((current) => ({ ...current, requestedAmount: event.target.value }))} placeholder="Từ 100.000 đ đến 2.600.000 đ" className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-emerald-400" />
+                    <input type="number" required disabled={advanceFormDisabled} min="100000" max="2600000" step="1000" value={advanceForm.requestedAmount} onChange={(event) => setAdvanceForm((current) => ({ ...current, requestedAmount: event.target.value }))} placeholder="Từ 100.000 đ đến 2.600.000 đ" className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-emerald-400 disabled:cursor-not-allowed disabled:opacity-60" />
                   </label>
                   {Number(advanceForm.requestedAmount) > 0 && <p className="-mt-1 text-sm font-bold text-emerald-700">{money(advanceForm.requestedAmount)}</p>}
                   <div className={`rounded-xl border px-3 py-2 text-xs ${TONE.emerald}`}>
                     {advanceLimitLoading ? "Đang tải hạn mức ứng lương..." : <>Được ứng từ <strong>{money(advanceLimit.minAmount || 100000)}</strong> đến tối đa <strong>{money(advanceLimit.maxAmount || 2600000)}</strong>.</>}
                   </div>
+                  {!advanceLimitLoading && advanceRestrictionMessage && <div className={`rounded-xl border px-3 py-2 text-xs font-semibold ${TONE.amber}`}>{advanceRestrictionMessage}</div>}
                   <div className="grid grid-cols-2 gap-3">
                     <label className="block text-xs font-semibold text-slate-600">NGÀY MUỐN NHẬN
                       <input type="date" required disabled value={advanceForm.requestedPayDate} className="mt-1.5 w-full cursor-not-allowed rounded-xl border border-slate-200 bg-slate-100 px-3 py-2.5 text-sm text-slate-500" />
@@ -2916,9 +2926,9 @@ export default function AttendancePage() {
                     </select>
                   </label>
                   <label className="block text-xs font-semibold text-slate-600">LÝ DO <span className="font-normal text-slate-400">(KHÔNG BẮT BUỘC)</span>
-                    <textarea maxLength={1000} rows={4} value={advanceForm.reason} onChange={(event) => setAdvanceForm((current) => ({ ...current, reason: event.target.value }))} placeholder="Có thể để trống..." className="mt-1.5 w-full resize-none rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100" />
+                    <textarea disabled={advanceFormDisabled} maxLength={1000} rows={4} value={advanceForm.reason} onChange={(event) => setAdvanceForm((current) => ({ ...current, reason: event.target.value }))} placeholder="Có thể để trống..." className="mt-1.5 w-full resize-none rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 disabled:cursor-not-allowed disabled:opacity-60" />
                   </label>
-                  <button type="submit" disabled={advanceSaving || advanceLimitLoading} className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-emerald-700 disabled:opacity-60">
+                  <button type="submit" disabled={advanceFormDisabled} className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60">
                     {advanceSaving ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />} Gửi phiếu chờ duyệt
                   </button>
                 </div>
@@ -2943,7 +2953,7 @@ export default function AttendancePage() {
                     {request.paymentNote && <p className="mt-2 text-xs text-slate-500"><strong>Ghi chú chi:</strong> {request.paymentNote}</p>}
                     {request.cancellationReason && <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700"><strong>Lý do hủy:</strong> {request.cancellationReason}</p>}
                     <div className="mt-3 flex flex-wrap items-center gap-2">
-                      {["pending", "rejected", "approved"].includes(request.status) && <button type="button" disabled={deletingAdvanceId === request._id} onClick={() => deleteAdvanceRequest(request)} className="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-100 disabled:opacity-60">{deletingAdvanceId === request._id ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}{request.status === "approved" ? "Yêu cầu hủy" : "Xóa phiếu"}</button>}
+                      {["pending", "rejected", "approved"].includes(request.status) && <button type="button" disabled={deletingAdvanceId === request._id} onClick={() => deleteAdvanceRequest(request)} className="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-100 disabled:opacity-60">{deletingAdvanceId === request._id ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}{request.status === "approved" ? "Yêu cầu hủy" : "Hủy phiếu"}</button>}
                       <span className="text-[11px] text-slate-400">Gửi lúc {new Date(request.createdAt).toLocaleString("vi-VN")}</span>
                     </div>
                   </div>;
