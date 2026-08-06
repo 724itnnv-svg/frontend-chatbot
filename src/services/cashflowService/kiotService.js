@@ -1352,7 +1352,7 @@ export async function createEInVoicesLog(payload) {
   }
 }
 
-export async function getEInVoicesLog() {
+export async function getEInVoicesLog({ page = 1, limit = 50 } = {}) {
   try {
     const url = `${tokenURL}/einvoice-logs`;
 
@@ -1363,6 +1363,10 @@ export async function getEInVoicesLog() {
 
     const response = await axios.get(url, {
       headers,
+      params: {
+        page,
+        limit,
+      },
     });
 
     return response.data;

@@ -162,6 +162,27 @@ const extractEInvoiceLogs = (response) => {
       : [];
 };
 
+const extractEInvoiceLogPagination = (
+  response,
+  fallbackPage,
+  fallbackLimit,
+  itemCount,
+) => {
+  const metadataSource =
+    response && typeof response === "object" && !Array.isArray(response)
+      ? response
+      : {};
+  const total = Number(metadataSource?.total);
+  const page = Number(metadataSource?.page);
+  const limit = Number(metadataSource?.limit);
+
+  return {
+    total: Number.isFinite(total) ? total : itemCount,
+    page: Number.isFinite(page) && page > 0 ? page : fallbackPage,
+    limit: Number.isFinite(limit) && limit > 0 ? limit : fallbackLimit,
+  };
+};
+
 const formatLogDate = (value) => {
   const date = new Date(value);
   if (!value || Number.isNaN(date.getTime())) return "-";
@@ -268,6 +289,7 @@ const FILTER_MODE_OPTIONS = [
 ];
 
 const ROWS_PER_PAGE_OPTIONS = [15, 30, 50, 100];
+const EINVOICE_LOG_PAGE_SIZE = 50;
 
 const EINVOICE_STATUS_OPTIONS = [
   { value: 0, label: "Chưa phát hành" },
@@ -693,6 +715,11 @@ export default function EinvoicesTab({
   const [invoiceLogs, setInvoiceLogs] = useState([]);
   const [invoiceLogsLoading, setInvoiceLogsLoading] = useState(false);
   const [invoiceLogsError, setInvoiceLogsError] = useState("");
+  const [invoiceLogPagination, setInvoiceLogPagination] = useState({
+    total: 0,
+    page: 1,
+    limit: EINVOICE_LOG_PAGE_SIZE,
+  });
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [visibleColumnIds, setVisibleColumnIds] = useState(() =>
@@ -970,13 +997,26 @@ export default function EinvoicesTab({
     [user],
   );
 
-  const loadInvoiceLogs = useCallback(async () => {
+  const loadInvoiceLogs = useCallback(async (requestedPage = 1) => {
+    const page = Math.max(1, Number(requestedPage) || 1);
     setInvoiceLogsLoading(true);
     setInvoiceLogsError("");
 
     try {
-      const response = await getEInVoicesLog();
-      setInvoiceLogs(extractEInvoiceLogs(response));
+      const response = await getEInVoicesLog({
+        page,
+        limit: EINVOICE_LOG_PAGE_SIZE,
+      });
+      const logs = extractEInvoiceLogs(response);
+      setInvoiceLogs(logs);
+      setInvoiceLogPagination(
+        extractEInvoiceLogPagination(
+          response,
+          page,
+          EINVOICE_LOG_PAGE_SIZE,
+          logs.length,
+        ),
+      );
     } catch (error) {
       setInvoiceLogs([]);
       setInvoiceLogsError(
@@ -989,7 +1029,13 @@ export default function EinvoicesTab({
 
   const handleOpenLogModal = () => {
     setIsLogModalOpen(true);
-    void loadInvoiceLogs();
+    setInvoiceLogs([]);
+    setInvoiceLogPagination({
+      total: 0,
+      page: 1,
+      limit: EINVOICE_LOG_PAGE_SIZE,
+    });
+    void loadInvoiceLogs(1);
   };
 
   useEffect(() => {
@@ -1437,6 +1483,19 @@ export default function EinvoicesTab({
       grandTotal,
     };
   }, [visibleRows]);
+
+  const invoiceLogTotalPages = Math.max(
+    1,
+    Math.ceil(invoiceLogPagination.total / invoiceLogPagination.limit),
+  );
+  const invoiceLogRangeStart =
+    invoiceLogPagination.total > 0
+      ? (invoiceLogPagination.page - 1) * invoiceLogPagination.limit + 1
+      : 0;
+  const invoiceLogRangeEnd = Math.min(
+    invoiceLogPagination.page * invoiceLogPagination.limit,
+    invoiceLogPagination.total,
+  );
 
   return (
     <>
@@ -1966,7 +2025,7 @@ export default function EinvoicesTab({
 
               <button
                 type="button"
-                onClick={() => void loadInvoiceLogs()}
+                onClick={() => void loadInvoiceLogs(invoiceLogPagination.page)}
                 disabled={invoiceLogsLoading}
                 className="rounded-[14px] border border-sky-200 bg-sky-50 px-3.5 py-2 text-xs font-extrabold text-sky-700 transition hover:bg-sky-100 disabled:cursor-wait disabled:opacity-60"
               >
@@ -1995,21 +2054,22 @@ export default function EinvoicesTab({
                   Chưa có lịch sử thao tác thành công.
                 </div>
               ) : (
-                <div className="overflow-hidden rounded-[20px] border border-slate-200">
-                  <div className="overflow-auto">
-                    <table className="w-full min-w-[760px] border-separate border-spacing-0 text-left text-sm">
+                <div className="grid min-h-0 gap-3">
+                  <div className="overflow-hidden rounded-[20px] border border-slate-200">
+                    <div className="max-h-[55vh] overflow-auto">
+                      <table className="w-full min-w-[760px] border-separate border-spacing-0 text-left text-sm">
                       <thead>
                         <tr className="bg-slate-50 text-[11px] uppercase tracking-[0.12em] text-slate-500">
-                          <th className="sticky top-0 px-4 py-3 font-black">
+                          <th className="sticky top-0 z-10 bg-slate-50 px-4 py-3 font-black">
                             Thời gian
                           </th>
-                          <th className="sticky top-0 px-4 py-3 font-black">
+                          <th className="sticky top-0 z-10 bg-slate-50 px-4 py-3 font-black">
                             Nhân viên
                           </th>
-                          <th className="sticky top-0 px-4 py-3 font-black">
+                          <th className="sticky top-0 z-10 bg-slate-50 px-4 py-3 font-black">
                             Thao tác
                           </th>
-                          <th className="sticky top-0 px-4 py-3 font-black">
+                          <th className="sticky top-0 z-10 bg-slate-50 px-4 py-3 font-black">
                             Mã hóa đơn
                           </th>
                         </tr>
@@ -2067,7 +2127,45 @@ export default function EinvoicesTab({
                           );
                         })}
                       </tbody>
-                    </table>
+                      </table>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col gap-2 rounded-[16px] border border-slate-200 bg-slate-50 px-3 py-2.5 sm:flex-row sm:items-center">
+                    <div className="mr-auto text-xs font-semibold text-slate-500">
+                      Hiển thị {invoiceLogRangeStart}-{invoiceLogRangeEnd} /{" "}
+                      {invoiceLogPagination.total} log
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          void loadInvoiceLogs(invoiceLogPagination.page - 1)
+                        }
+                        disabled={
+                          invoiceLogsLoading || invoiceLogPagination.page <= 1
+                        }
+                        className="rounded-[12px] border border-slate-200 bg-white px-3 py-1.5 text-xs font-extrabold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-45"
+                      >
+                        Trang trước
+                      </button>
+                      <span className="min-w-20 text-center text-xs font-extrabold text-slate-700">
+                        Trang {invoiceLogPagination.page}/{invoiceLogTotalPages}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          void loadInvoiceLogs(invoiceLogPagination.page + 1)
+                        }
+                        disabled={
+                          invoiceLogsLoading ||
+                          invoiceLogPagination.page >= invoiceLogTotalPages
+                        }
+                        className="rounded-[12px] border border-slate-200 bg-white px-3 py-1.5 text-xs font-extrabold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-45"
+                      >
+                        Trang sau
+                      </button>
+                    </div>
                   </div>
                 </div>
               )}
