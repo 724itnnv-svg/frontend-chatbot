@@ -30,7 +30,7 @@ const RETAILER_CONFIG = {
     retailerId: 500846190,
     BranchTakingAddressId: null,
     BranchTakingAddressStr:
-      "Ấp Đa Cần, Phường Hòa Thuận, Tỉnh Vĩnh Long - +84 915 283 017",
+      "Ấp Đa Cần, Xã Hòa Thuận, Huyện Châu Thành, Trà Vinh - 0915283017",
     Token_GHN: "b5beb0fd-2c1a-11f1-a3eb-52dcb54263af",
     ShopId_GHN: 5788767,
   },
