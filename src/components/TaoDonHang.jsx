@@ -1786,6 +1786,95 @@ function getSinglePromotionSelection(productSelections = {}) {
   );
 }
 
+function mergeInvoicePromotionsByCampaign(promotions = []) {
+  const mergedPromotions = new Map();
+
+  promotions.forEach((promotion) => {
+    const key = `${promotion?.PromotionId ?? ""}:${promotion?.SalePromotionId ?? ""}`;
+    const current = mergedPromotions.get(key);
+
+    if (!current) {
+      mergedPromotions.set(key, {
+        ...promotion,
+        __productIds: new Set(
+          String(promotion?.ProductIds || promotion?.ProductId || "")
+            .split(",")
+            .map((id) => id.trim())
+            .filter(Boolean),
+        ),
+        __relatedProductQuantities: new Map([
+          [
+            String(promotion?.RelatedProductId || ""),
+            Number(promotion?.RelatedProductQty || 0),
+          ],
+        ]),
+        __promotionInfos: new Set(
+          [promotion?.PromotionInfo].filter(Boolean),
+        ),
+        __printPromotionInfos: new Set(
+          [promotion?.PrintPromotionInfo].filter(Boolean),
+        ),
+      });
+      return;
+    }
+
+    String(promotion?.ProductIds || promotion?.ProductId || "")
+      .split(",")
+      .map((id) => id.trim())
+      .filter(Boolean)
+      .forEach((id) => current.__productIds.add(id));
+
+    const relatedProductId = String(promotion?.RelatedProductId || "");
+    const relatedProductQuantity = Number(promotion?.RelatedProductQty || 0);
+    current.__relatedProductQuantities.set(
+      relatedProductId,
+      Math.max(
+        current.__relatedProductQuantities.get(relatedProductId) || 0,
+        relatedProductQuantity,
+      ),
+    );
+    current.ProductQty =
+      Number(current.ProductQty || 0) + Number(promotion?.ProductQty || 0);
+    if (promotion?.PromotionInfo) {
+      current.__promotionInfos.add(promotion.PromotionInfo);
+    }
+    if (promotion?.PrintPromotionInfo) {
+      current.__printPromotionInfos.add(promotion.PrintPromotionInfo);
+    }
+  });
+
+  return [...mergedPromotions.values()].map((promotion) => {
+    const {
+      __productIds,
+      __relatedProductQuantities,
+      __promotionInfos,
+      __printPromotionInfos,
+      ...mergedPromotion
+    } = promotion;
+    const productIds = [...__productIds];
+    const relatedProductIds = [...__relatedProductQuantities.keys()].filter(
+      Boolean,
+    );
+
+    return {
+      ...mergedPromotion,
+      ProductId: Number(productIds[0]) || mergedPromotion.ProductId,
+      ProductIds: productIds.join(","),
+      RelatedProductId:
+        Number(relatedProductIds[0]) || mergedPromotion.RelatedProductId,
+      RelatedProductIds: relatedProductIds.join(","),
+      RelatedProductQty: [...__relatedProductQuantities.values()].reduce(
+        (sum, quantity) => sum + quantity,
+        0,
+      ),
+      PromotionInfo: [...__promotionInfos].join("; "),
+      ...(__printPromotionInfos.size > 0
+        ? { PrintPromotionInfo: [...__printPromotionInfos].join("; ") }
+        : {}),
+    };
+  });
+}
+
 function applySelectedPromotions({
   invoiceDetails = [],
   parsedItems = [],
@@ -1980,7 +2069,7 @@ function applySelectedPromotions({
 
   return {
     invoiceDetails: nextLines,
-    invoicePromotions,
+    invoicePromotions: mergeInvoicePromotionsByCampaign(invoicePromotions),
     productDiscount,
     totalTax: nextTotalTax,
     totalAfterTax: nextTotalAfterTax,
