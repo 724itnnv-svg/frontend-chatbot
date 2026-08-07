@@ -118,7 +118,13 @@ SĐT: 0964294979
 
 function getCustomerTypeOptions(retailerId) {
   if (String(retailerId || "").toLowerCase() === "abctv") {
-    return [{ value: "phan_bon", label: "Phân bón" }];
+    return [
+      { value: "phan_bon", label: "Phân bón" },
+      { value: "cay_giong", label: "Cây giống" },
+      { value: "dscp", label: "DSCP" },
+      { value: "dua_sap_trai", label: "Dừa sáp trái" },
+      { value: "dua_giong", label: "Dừa giống" },
+    ];
   }
 
   return [
@@ -590,6 +596,10 @@ function generateCustomerCodeV2({
 
 function pickCustomerGroupName(customerType) {
   if (customerType === "phan_bon") return "Phân bón";
+  if (customerType === "cay_giong") return "Cây giống";
+  if (customerType === "dscp") return "DSCP";
+  if (customerType === "dua_sap_trai") return "Dừa sáp trái";
+  if (customerType === "dua_giong") return "Dừa giống";
   if (customerType === "khach_le") return "Khách lẻ";
   return "Đại lý";
 }
@@ -1356,6 +1366,7 @@ function buildGhnCreateOrderPayloads({
   invoicePayload,
   ghnShipping,
   senderName,
+  customerType,
   requiredNote = DEFAULT_GHN_REQUIRED_NOTE,
 }) {
   const invoice = invoicePayload?.Invoice || {};
@@ -1382,9 +1393,11 @@ function buildGhnCreateOrderPayloads({
   )
     ? requiredNote
     : DEFAULT_GHN_REQUIRED_NOTE;
+  const paymentTypeId =
+    customerType === "khach_le" && Number(invoice?.Total || 0) < 160000 ? 2 : 1;
 
   return pricingPackages.map((item, index) => ({
-    payment_type_id: 2,
+    payment_type_id: paymentTypeId,
     note: String(invoice?.Description || "").trim(),
     required_note: resolvedRequiredNote,
     return_phone: fromPhone,
@@ -1420,7 +1433,7 @@ function buildGhnCreateOrderPayloads({
     pick_station_id: null,
     deliver_station_id: null,
     insurance_value: Math.min(
-      10000000,
+      5000000,
       Math.max(0, Math.round(packageValues[index] || 0)),
     ),
     service_type_id: item.serviceTypeId,
@@ -2818,7 +2831,7 @@ function parseRawOrder(rawText = "") {
       .replace(/\s+/g, " ")
       .trim();
     const keyMatch = line.match(
-      /^(Khách hàng|SĐT|Số điện thoại|Địa chỉ cũ|Địa chỉ mới|Địa chỉ|NVC)\s*:\s*(.+)$/iu,
+      /^(Khách hàng|SĐT|Số điện thoại|Địa chỉ cũ|Địa chỉ mới|Địa chỉ|ĐC CŨ|ĐC MỚI|NVC)\s*:\s*(.+)$/iu,
     );
 
     if (keyMatch) {
@@ -2827,8 +2840,12 @@ function parseRawOrder(rawText = "") {
 
       if (key === "khách hàng") result.customerName = value;
       if (key === "sđt" || key === "số điện thoại") result.phoneNumber = value;
-      if (key === "địa chỉ cũ" || key === "địa chỉ") result.oldAddress = value;
-      if (key === "địa chỉ mới") result.newAddress = value;
+      if (key === "địa chỉ cũ" || key === "địa chỉ" || key === "đc cũ") {
+        result.oldAddress = value;
+      }
+      if (key === "địa chỉ mới" || key === "đc mới") {
+        result.newAddress = value;
+      }
       if (key === "nvc") result.nvc = value;
       continue;
     }
@@ -2842,6 +2859,22 @@ function parseRawOrder(rawText = "") {
         quantity: Number(compactItemMatch[1] || 0),
         productName: "",
         sku: compactItemMatch[2].trim(),
+        price: null,
+        unit: "",
+        rawLine: line,
+      });
+      continue;
+    }
+
+    const parenthesizedSkuMatch = normalizedLine.match(
+      /^(\d+)\s+(.+?)\s*\(([A-Za-z0-9._-]+)\)$/u,
+    );
+
+    if (parenthesizedSkuMatch) {
+      result.items.push({
+        quantity: Number(parenthesizedSkuMatch[1] || 0),
+        productName: parenthesizedSkuMatch[2].trim(),
+        sku: parenthesizedSkuMatch[3].trim(),
         price: null,
         unit: "",
         rawLine: line,
@@ -3943,6 +3976,7 @@ export default function TaoDonHang() {
         const ghnOrderPayloads = buildGhnCreateOrderPayloads({
           invoicePayload,
           ghnShipping,
+          customerType,
           requiredNote: ghnRequiredNote,
           senderName:
             getKiotUserDisplayName(matchedKiotUser) ||
@@ -4175,7 +4209,7 @@ export default function TaoDonHang() {
                 <label className="block space-y-2">
                   <span className="text-xs font-semibold text-slate-600">
                     {selectedRetailerId.toLowerCase() === "abctv"
-                      ? "Phân bón"
+                      ? "Nhóm khách hàng"
                       : "Đại lý / khách lẻ"}
                   </span>
                   <select
