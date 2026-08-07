@@ -114,7 +114,7 @@ SĐT: 0964294979
 Địa chỉ cũ: 27/19 Ấp Tân Hưng, Xã Tân Hạnh, Huyện Long Hồ, Tỉnh Vĩnh Long
 Địa chỉ mới: Ấp Tân hưng, Phường Tân Hạnh, Vĩnh Long
 1 Xô Siêu Phục Hồi 30-10-10+TE 22kg  - KFB1 (giá 859.000₫/xô)
-NVC: Viettel`;
+`;
 
 function getCustomerTypeOptions(retailerId) {
   if (String(retailerId || "").toLowerCase() === "abctv") {
@@ -1780,6 +1780,12 @@ function getPromotionSelectionDetails({ item, product, campaign, selection }) {
   };
 }
 
+function getSinglePromotionSelection(productSelections = {}) {
+  return Object.values(productSelections || {}).find(
+    (selection) => selection?.campaignId != null,
+  );
+}
+
 function applySelectedPromotions({
   invoiceDetails = [],
   parsedItems = [],
@@ -1799,179 +1805,175 @@ function applySelectedPromotions({
 
   parsedItems.forEach((item) => {
     const productCode = String(item?.sku || "").trim();
-    const productSelections = Object.values(
+    const selection = getSinglePromotionSelection(
       promotionSelections[productCode] || {},
     );
-    if (productSelections.length === 0) return;
+    if (!selection) return;
     const parentProduct = productMap?.get(productCode);
-    productSelections.forEach((selection) => {
-      const campaign = (productCampaignMap?.get(productCode) || []).find(
-        (candidate) => String(candidate?.Id) === String(selection.campaignId),
+    const campaign = (productCampaignMap?.get(productCode) || []).find(
+      (candidate) => String(candidate?.Id) === String(selection.campaignId),
+    );
+    const promotion = getCampaignPromotionForProduct(campaign, parentProduct);
+    if (!campaign || !promotion) return;
+
+    const prerequisiteQuantity = Number(promotion?.PrereqQuantity || 0);
+    const purchasedQuantity = Number(item?.quantity || 0);
+    const applicationCount =
+      prerequisiteQuantity > 0
+        ? Math.floor(purchasedQuantity / prerequisiteQuantity)
+        : 0;
+    if (applicationCount < 1) return;
+
+    const parentLineIndex = nextLines.findIndex(
+      (line) => String(line?.ProductCode || "").trim() === productCode,
+    );
+    if (parentLineIndex < 0) return;
+
+    const parentLine = nextLines[parentLineIndex];
+    const parentProductId =
+      parentLine?.ProductId ?? parentProduct?.id ?? parentProduct?.Id;
+    const promotionType = Number(
+      promotion?.PromotionType ?? campaign?.PromotionType ?? 0,
+    );
+
+    if (promotionType === 8 && Number(promotion?.ProductPrice || 0) > 0) {
+      const promotionPrice = Number(promotion.ProductPrice);
+      const originalPrice = Number(parentLine.Price || 0);
+      const quantity = Number(parentLine.Quantity || 0);
+      const taxRate = Number(parentLine.DetailTaxIds?.[0]?.Value || 0);
+      const originalTax = Number(
+        parentLine.InvoiceDetailTaxs?.[0]?.DetailTax || 0,
       );
-      const promotion = getCampaignPromotionForProduct(campaign, parentProduct);
-      if (!campaign || !promotion) return;
-
-      const prerequisiteQuantity = Number(promotion?.PrereqQuantity || 0);
-      const purchasedQuantity = Number(item?.quantity || 0);
-      const applicationCount =
-        prerequisiteQuantity > 0
-          ? Math.floor(purchasedQuantity / prerequisiteQuantity)
-          : 0;
-      if (applicationCount < 1) return;
-
-      const parentLineIndex = nextLines.findIndex(
-        (line) => String(line?.ProductCode || "").trim() === productCode,
+      const promotedBaseAmount = roundMoney(promotionPrice * quantity);
+      const promotedTax = roundMoney((promotedBaseAmount * taxRate) / 100);
+      const promotedAfterTax = roundMoney(promotedBaseAmount + promotedTax);
+      const originalAfterTax = Number(parentLine.PriceAfterTax || 0);
+      const discountBeforeTax = roundMoney(
+        Math.max(0, (originalPrice - promotionPrice) * quantity),
       );
-      if (parentLineIndex < 0) return;
-
-      const parentLine = nextLines[parentLineIndex];
-      const parentProductId =
-        parentLine?.ProductId ?? parentProduct?.id ?? parentProduct?.Id;
-      const promotionType = Number(
-        promotion?.PromotionType ?? campaign?.PromotionType ?? 0,
+      const discountAfterTax = roundMoney(
+        Math.max(0, originalAfterTax - promotedAfterTax),
       );
 
-      if (promotionType === 8 && Number(promotion?.ProductPrice || 0) > 0) {
-        const promotionPrice = Number(promotion.ProductPrice);
-        const originalPrice = Number(parentLine.Price || 0);
-        const quantity = Number(parentLine.Quantity || 0);
-        const taxRate = Number(parentLine.DetailTaxIds?.[0]?.Value || 0);
-        const originalTax = Number(
-          parentLine.InvoiceDetailTaxs?.[0]?.DetailTax || 0,
-        );
-        const promotedBaseAmount = roundMoney(promotionPrice * quantity);
-        const promotedTax = roundMoney((promotedBaseAmount * taxRate) / 100);
-        const promotedAfterTax = roundMoney(promotedBaseAmount + promotedTax);
-        const originalAfterTax = Number(parentLine.PriceAfterTax || 0);
-        const discountBeforeTax = roundMoney(
-          Math.max(0, (originalPrice - promotionPrice) * quantity),
-        );
-        const discountAfterTax = roundMoney(
-          Math.max(0, originalAfterTax - promotedAfterTax),
-        );
-
-        nextLines[parentLineIndex] = {
-          ...parentLine,
-          Price: promotionPrice,
+      nextLines[parentLineIndex] = {
+        ...parentLine,
+        Price: promotionPrice,
+        PriceAfterTax: promotedAfterTax,
+        SalePromotionId: promotion.Id,
+        OriginPrice: originalPrice,
+        PriceByPromotion: promotionPrice,
+        DiscountByPromotionAfterTax: discountAfterTax,
+        InvoiceDetailTaxs: (parentLine.InvoiceDetailTaxs || []).map((tax) => ({
+          ...tax,
+          DetailTax: promotedTax,
+          OldDetailTax: originalTax,
           PriceAfterTax: promotedAfterTax,
-          SalePromotionId: promotion.Id,
-          OriginPrice: originalPrice,
-          PriceByPromotion: promotionPrice,
           DiscountByPromotionAfterTax: discountAfterTax,
-          InvoiceDetailTaxs: (parentLine.InvoiceDetailTaxs || []).map(
-            (tax) => ({
-              ...tax,
-              DetailTax: promotedTax,
-              OldDetailTax: originalTax,
-              PriceAfterTax: promotedAfterTax,
-              DiscountByPromotionAfterTax: discountAfterTax,
-            }),
-          ),
-        };
-        nextTotalTax = roundMoney(nextTotalTax - originalTax + promotedTax);
-        nextTotalAfterTax = roundMoney(
-          nextTotalAfterTax - originalAfterTax + promotedAfterTax,
-        );
-        productDiscount = roundMoney(productDiscount + discountBeforeTax);
-        invoicePromotions.push({
-          Type: promotionType,
-          TargetType: promotion.Type ?? 1,
-          SalePromotionId: promotion.Id,
-          PromotionId: campaign.Id,
-          ProductId: parentProductId,
-          RelatedProductId: parentProductId,
-          RelatedProductQty: purchasedQuantity,
-          ProductQty: purchasedQuantity,
-          IsFixedQuantity: campaign.IsFixedQuantity ?? false,
-          LimitPromotionUsage: campaign.LimitPromotionUsage ?? false,
-          LimitPromotionUsageType: campaign.LimitPromotionUsageType ?? 2,
-          PromotionInfo: buildPromotionInfo({
-            campaign,
-            promotion,
-            parentProduct,
-          }),
-          ProductIds: String(parentProductId || ""),
-          RelatedProductIds: String(parentProductId || ""),
-          RelatedCategoryIds: "",
-          BackupSelectedSerials: {},
-        });
-        return;
-      }
-
-      if (promotionType !== 6) return;
-
-      const expectedGiftQuantity =
-        applicationCount * Number(promotion?.ReceivedQuantity || 0);
-      const selectedGiftEntries = Object.entries(selection.giftQuantities || {})
-        .map(([id, quantity]) => [Number(id), Number(quantity || 0)])
-        .filter(([id, quantity]) => Number.isFinite(id) && quantity > 0);
-      const selectedGiftQuantity = selectedGiftEntries.reduce(
-        (sum, [, quantity]) => sum + quantity,
-        0,
+        })),
+      };
+      nextTotalTax = roundMoney(nextTotalTax - originalTax + promotedTax);
+      nextTotalAfterTax = roundMoney(
+        nextTotalAfterTax - originalAfterTax + promotedAfterTax,
       );
-      const allowedReceivedProductIds = new Set(
-        getPromotionReceivedProductIds(promotion),
-      );
-      const selectedGiftProductsAreValid = selectedGiftEntries.every(
-        ([id]) =>
-          allowedReceivedProductIds.has(id) &&
-          Boolean(promotionProductMap?.get(id)),
-      );
-      if (
-        expectedGiftQuantity <= 0 ||
-        selectedGiftQuantity !== expectedGiftQuantity ||
-        !selectedGiftProductsAreValid
-      ) {
-        return;
-      }
+      productDiscount = roundMoney(productDiscount + discountBeforeTax);
+      invoicePromotions.push({
+        Type: promotionType,
+        TargetType: promotion.Type ?? 1,
+        SalePromotionId: promotion.Id,
+        PromotionId: campaign.Id,
+        ProductId: parentProductId,
+        RelatedProductId: parentProductId,
+        RelatedProductQty: purchasedQuantity,
+        ProductQty: purchasedQuantity,
+        IsFixedQuantity: campaign.IsFixedQuantity ?? false,
+        LimitPromotionUsage: campaign.LimitPromotionUsage ?? false,
+        LimitPromotionUsageType: campaign.LimitPromotionUsageType ?? 2,
+        PromotionInfo: buildPromotionInfo({
+          campaign,
+          promotion,
+          parentProduct,
+        }),
+        ProductIds: String(parentProductId || ""),
+        RelatedProductIds: String(parentProductId || ""),
+        RelatedCategoryIds: "",
+        BackupSelectedSerials: {},
+      });
+      return;
+    }
 
-      selectedGiftEntries.forEach(([receivedProductId, quantity]) => {
-        const receivedProduct = promotionProductMap?.get(receivedProductId);
-        if (!receivedProduct) return;
+    if (promotionType !== 6) return;
 
-        const giftLine = buildGiftPromotionLine({
-          product: receivedProduct,
-          quantity,
-          customerType,
-          salePromotionId: promotion.Id,
-          parentProductId,
-        });
-        nextLines.push(giftLine);
-        productDiscount = roundMoney(
-          productDiscount +
-            Number(giftLine.Discount || 0) * Number(giftLine.Quantity || 0),
-        );
-        invoicePromotions.push({
-          Type: promotionType,
-          TargetType: promotion.Type ?? 1,
-          SalePromotionId: promotion.Id,
-          PromotionId: campaign.Id,
-          ProductId: receivedProductId,
-          RelatedProductId: parentProductId,
-          RelatedProductQty: prerequisiteQuantity * applicationCount,
-          ProductQty: quantity,
-          IsFixedQuantity: campaign.IsFixedQuantity ?? false,
-          LimitPromotionUsage: campaign.LimitPromotionUsage ?? false,
-          LimitPromotionUsageType: campaign.LimitPromotionUsageType ?? 2,
-          PromotionInfo: buildPromotionInfo({
-            campaign,
-            promotion,
-            parentProduct,
-            receivedProduct,
-            receivedQuantity: quantity,
-          }),
-          PrintPromotionInfo: buildPromotionInfo({
-            campaign,
-            promotion,
-            parentProduct,
-            receivedProduct,
-            receivedQuantity: quantity,
-          }),
-          ProductIds: String(receivedProductId),
-          RelatedProductIds: String(parentProductId || ""),
-          RelatedCategoryIds: "",
-          BackupSelectedSerials: {},
-        });
+    const expectedGiftQuantity =
+      applicationCount * Number(promotion?.ReceivedQuantity || 0);
+    const selectedGiftEntries = Object.entries(selection.giftQuantities || {})
+      .map(([id, quantity]) => [Number(id), Number(quantity || 0)])
+      .filter(([id, quantity]) => Number.isFinite(id) && quantity > 0);
+    const selectedGiftQuantity = selectedGiftEntries.reduce(
+      (sum, [, quantity]) => sum + quantity,
+      0,
+    );
+    const allowedReceivedProductIds = new Set(
+      getPromotionReceivedProductIds(promotion),
+    );
+    const selectedGiftProductsAreValid = selectedGiftEntries.every(
+      ([id]) =>
+        allowedReceivedProductIds.has(id) &&
+        Boolean(promotionProductMap?.get(id)),
+    );
+    if (
+      expectedGiftQuantity <= 0 ||
+      selectedGiftQuantity !== expectedGiftQuantity ||
+      !selectedGiftProductsAreValid
+    ) {
+      return;
+    }
+
+    selectedGiftEntries.forEach(([receivedProductId, quantity]) => {
+      const receivedProduct = promotionProductMap?.get(receivedProductId);
+      if (!receivedProduct) return;
+
+      const giftLine = buildGiftPromotionLine({
+        product: receivedProduct,
+        quantity,
+        customerType,
+        salePromotionId: promotion.Id,
+        parentProductId,
+      });
+      nextLines.push(giftLine);
+      productDiscount = roundMoney(
+        productDiscount +
+          Number(giftLine.Discount || 0) * Number(giftLine.Quantity || 0),
+      );
+      invoicePromotions.push({
+        Type: promotionType,
+        TargetType: promotion.Type ?? 1,
+        SalePromotionId: promotion.Id,
+        PromotionId: campaign.Id,
+        ProductId: receivedProductId,
+        RelatedProductId: parentProductId,
+        RelatedProductQty: prerequisiteQuantity * applicationCount,
+        ProductQty: quantity,
+        IsFixedQuantity: campaign.IsFixedQuantity ?? false,
+        LimitPromotionUsage: campaign.LimitPromotionUsage ?? false,
+        LimitPromotionUsageType: campaign.LimitPromotionUsageType ?? 2,
+        PromotionInfo: buildPromotionInfo({
+          campaign,
+          promotion,
+          parentProduct,
+          receivedProduct,
+          receivedQuantity: quantity,
+        }),
+        PrintPromotionInfo: buildPromotionInfo({
+          campaign,
+          promotion,
+          parentProduct,
+          receivedProduct,
+          receivedQuantity: quantity,
+        }),
+        ProductIds: String(receivedProductId),
+        RelatedProductIds: String(parentProductId || ""),
+        RelatedCategoryIds: "",
+        BackupSelectedSerials: {},
       });
     });
   });
@@ -2757,6 +2759,22 @@ function parseRawOrder(rawText = "") {
       if (key === "địa chỉ cũ" || key === "địa chỉ") result.oldAddress = value;
       if (key === "địa chỉ mới") result.newAddress = value;
       if (key === "nvc") result.nvc = value;
+      continue;
+    }
+
+    const compactItemMatch = normalizedLine.match(
+      /^(\d+)\s*[-–—]\s*([A-Za-z0-9._-]+)$/u,
+    );
+
+    if (compactItemMatch) {
+      result.items.push({
+        quantity: Number(compactItemMatch[1] || 0),
+        productName: "",
+        sku: compactItemMatch[2].trim(),
+        price: null,
+        unit: "",
+        rawLine: line,
+      });
       continue;
     }
 
