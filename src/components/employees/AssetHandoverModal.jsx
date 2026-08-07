@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Eraser, FileSignature, Loader2, X } from "lucide-react";
 
 const CONDITIONS = { new: "Mới", good: "Tốt", fair: "Đã qua sử dụng", damaged: "Hư hỏng" };
+const COMPANY_LEGAL_NAME = "CÔNG TY TNHH TM DV NÔNG NGHIỆP VIỆT";
 const dateVN = (value) => value ? new Intl.DateTimeFormat("vi-VN").format(new Date(value)) : "-";
 
 function SignaturePad({ title, signerName, value, onChange }) {
@@ -81,10 +82,10 @@ export default function AssetHandoverModal({ handover, saving, onComplete, onCan
       <header className="sticky top-0 z-20 flex items-center gap-3 border-b bg-white px-5 py-4"><span className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-white"><FileSignature size={20} /></span><div className="mr-auto"><h3 className="font-black text-slate-800">Ký biên bản bàn giao</h3><p className="text-xs text-slate-500">{handover.documentNumber} · Thiết bị đang được giữ chỗ trong lúc ký</p></div><button disabled={saving} onClick={onCancel} className="rounded-xl p-2 text-slate-400 hover:bg-slate-100 disabled:opacity-50"><X /></button></header>
       <div className="grid gap-4 p-4 lg:grid-cols-[1.25fr_.75fr]">
         <article className="mx-auto min-h-[760px] w-full max-w-[794px] bg-white px-8 py-9 font-serif text-[15px] leading-relaxed text-slate-900 shadow-sm sm:px-14">
-          <div className="grid grid-cols-2 text-center text-sm leading-tight"><b className="uppercase">{snapshot.company?.name || "CÔNG TY"}</b><b>CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM<br /><u>Độc lập - Tự do - Hạnh phúc</u></b></div>
+          <div className="grid grid-cols-2 text-center text-sm leading-tight"><b className="uppercase">{COMPANY_LEGAL_NAME}</b><b>CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM<br /><u>Độc lập - Tự do - Hạnh phúc</u></b></div>
           <h1 className="mt-10 text-center text-xl font-bold">BIÊN BẢN BÀN GIAO THIẾT BỊ, TÀI SẢN</h1><p className="text-center text-sm">Số: {handover.documentNumber}</p>
           <p className="mt-7">Hôm nay, ngày {dateVN(assignment.assignedAt)}, các bên tiến hành bàn giao thiết bị, tài sản với nội dung sau:</p>
-          <h2 className="mt-5 font-bold uppercase">1. Người giao</h2><p>Họ và tên: <b>{snapshot.giver?.fullName || "-"}</b></p><p>Đơn vị: {snapshot.company?.name || "-"}</p>
+          <h2 className="mt-5 font-bold uppercase">1. Người giao</h2><p>Họ và tên: <b>{snapshot.giver?.fullName || "-"}</b></p><p>Đơn vị: {COMPANY_LEGAL_NAME}</p>
           <h2 className="mt-4 font-bold uppercase">2. Người nhận</h2><p>Họ và tên: <b>{employee.fullName}</b></p><p>Mã nhân viên: {employee.employeeCode} · Bộ phận: {employee.department || "-"} · Chức danh: {employee.jobTitle || "-"}</p>
           <h2 className="mt-4 font-bold uppercase">3. Thiết bị bàn giao</h2><table className="mt-2 w-full border-collapse text-sm"><thead><tr className="bg-slate-100"><th className="border p-2">Mã</th><th className="border p-2">Thiết bị</th><th className="border p-2">Serial/IMEI/SIM</th><th className="border p-2">Tình trạng</th></tr></thead><tbody><tr><td className="border p-2">{asset.assetCode}</td><td className="border p-2">{[asset.name, asset.brand, asset.model].filter(Boolean).join(" · ")}</td><td className="border p-2">{asset.serialNumber || asset.imei || asset.phoneNumber || "-"}</td><td className="border p-2">{CONDITIONS[assignment.assignedCondition] || assignment.assignedCondition}</td></tr></tbody></table>
           <p className="mt-3"><b>Phụ kiện:</b> {assignment.accessories?.join(", ") || "Không"}</p><p><b>Dự kiến thu hồi:</b> {dateVN(assignment.expectedReturnDate)}</p><p><b>Ghi chú:</b> {assignment.note || "Không"}</p>
