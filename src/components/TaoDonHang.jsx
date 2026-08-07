@@ -3049,7 +3049,8 @@ export default function TaoDonHang() {
   const [selectedRetailerId, setSelectedRetailerId] = useState(() =>
     mapTeamIdToRetailerId(user?.teamId),
   );
-  const [selectedShippingPartner, setSelectedShippingPartner] = useState("GHN");
+  const [selectedShippingPartner, setSelectedShippingPartner] =
+    useState("VTPFW");
   const [ghnRequiredNote, setGhnRequiredNote] = useState(
     DEFAULT_GHN_REQUIRED_NOTE,
   );
@@ -3092,7 +3093,7 @@ export default function TaoDonHang() {
     error: "",
   });
   const [tokenLoading, setTokenLoading] = useState(false);
-  const [tokenError, setTokenError] = useState("");
+  const [, setTokenError] = useState("");
   const selectedRetailer = useMemo(
     () =>
       RETAILERS.find(
@@ -3771,7 +3772,7 @@ export default function TaoDonHang() {
   };
 
   const handleReset = () => {
-    setSelectedShippingPartner("GHN");
+    setSelectedShippingPartner("VTPFW");
     setGhnRequiredNote(DEFAULT_GHN_REQUIRED_NOTE);
     setCustomerType("dai_ly");
     setAgencyTaxCode("");
