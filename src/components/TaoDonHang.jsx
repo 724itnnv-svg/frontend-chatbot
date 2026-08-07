@@ -3038,6 +3038,14 @@ export default function TaoDonHang() {
   const [createOrderProgress, setCreateOrderProgress] = useState([]);
   const [createOrderError, setCreateOrderError] = useState("");
   const [promotionSelections, setPromotionSelections] = useState({});
+  const [shippingQuotePreview, setShippingQuotePreview] = useState({
+    status: "idle",
+    fee: null,
+    productTotal: null,
+    serviceCode: "",
+    serviceName: "",
+    error: "",
+  });
   const [orderPreparation, setOrderPreparation] = useState({
     status: "idle",
     key: "",
@@ -3070,9 +3078,6 @@ export default function TaoDonHang() {
   const shippingLabel =
     SHIPPING_PARTNERS.find((item) => item.id === selectedShippingPartner)
       ?.label || selectedShippingPartner;
-  const customerTypeLabel =
-    customerTypeOptions.find((item) => item.value === customerType)?.label ||
-    customerType;
 
   useEffect(() => {
     if (hasMappedUserRetailerRef.current || !user?.teamId) return;
@@ -3499,6 +3504,166 @@ export default function TaoDonHang() {
       return details.isComplete && selectedGiftProductsLoaded;
     });
   });
+
+  useEffect(() => {
+    let active = true;
+    let timerId = null;
+
+    if (
+      !isOrderPreparationReady ||
+      !promotionSelectionsAreComplete ||
+      !accessPrivateToken ||
+      !accessToken ||
+      parsed.items.length === 0
+    ) {
+      setShippingQuotePreview({
+        status: "idle",
+        fee: null,
+        productTotal: null,
+        serviceCode: "",
+        serviceName: "",
+        error: "",
+      });
+      return () => {
+        active = false;
+      };
+    }
+
+    setShippingQuotePreview((current) => ({
+      ...current,
+      status: "loading",
+      error: "",
+    }));
+
+    timerId = window.setTimeout(async () => {
+      try {
+        const invoiceDetailsResult = await buildInvoiceDetailLines(
+          parsed.items,
+          {
+            retailer: selectedRetailerId,
+            accessPrivateToken,
+            accessToken,
+            customerType,
+            productMap: orderPreparation.productMap,
+          },
+        );
+        const promotionResult = applySelectedPromotions({
+          invoiceDetails: invoiceDetailsResult.lines || [],
+          parsedItems: parsed.items,
+          productMap: orderPreparation.productMap,
+          productCampaignMap: orderPreparation.productCampaignMap,
+          promotionProductMap: orderPreparation.promotionProductMap,
+          promotionSelections,
+          customerType,
+          totalTax: invoiceDetailsResult.totalTax || 0,
+          totalAfterTax: invoiceDetailsResult.totalAfterTax || 0,
+        });
+        const invoiceDetails = promotionResult.invoiceDetails;
+        const invoiceAddress = String(
+          effectiveParsed.oldAddress || effectiveParsed.newAddress || "",
+        ).trim();
+        const deliveryParts = parseVietnamAddressParts(invoiceAddress);
+        const deliveryAddressText = [
+          deliveryParts.street,
+          deliveryParts.ward,
+          deliveryParts.district,
+          deliveryParts.province,
+        ]
+          .map((value) => normalizeDisplayText(value))
+          .filter(Boolean)
+          .join(", ");
+        const selectedPartnerDelivery = getSelectedPartnerDelivery(
+          partnerDeliveries,
+          selectedShippingPartner,
+        );
+        const partnerCode =
+          selectedPartnerDelivery?.code ||
+          selectedPartnerDelivery?.Code ||
+          selectedPartnerDelivery?.CompareCode ||
+          selectedShippingPartner;
+        const partnerName =
+          selectedPartnerDelivery?.name ||
+          selectedPartnerDelivery?.Name ||
+          selectedPartnerDelivery?.CompareName ||
+          selectedShippingPartner;
+        const customerRecord = orderPreparation.customerRecord || {};
+        const quoteResult = await buildDeliveryDetailPayload({
+          parsed: effectiveParsed,
+          customerId:
+            customerRecord?.Id ??
+            customerRecord?.id ??
+            customerRecord?.CustomerId ??
+            null,
+          customerCode:
+            customerRecord?.Code ||
+            customerRecord?.CompareCode ||
+            customerRecord?.CustomerCode ||
+            "",
+          totalBeforeDiscount: invoiceDetailsResult.totalBeforeDiscount || 0,
+          totalProductPrice: promotionResult.totalAfterTax || 0,
+          totalWeight: getInvoiceTotalWeight(invoiceDetails),
+          invoiceDetails,
+          selectedShippingPartner,
+          selectedPartnerDelivery,
+          partnerCode,
+          partnerName,
+          retailerId: getRetailerConfig(selectedRetailerId)?.retailerId ?? null,
+          soldById: matchedKiotUser?.Id ?? matchedKiotUser?.UserId ?? null,
+          invoiceAddress,
+          deliveryParts,
+          deliveryAddressText,
+          accessPrivateToken,
+          accessToken,
+          retailer: selectedRetailerId,
+          invoiceUuid:
+            globalThis?.crypto?.randomUUID?.() ||
+            `quote-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+          resolvedAddressDetails:
+            orderPreparation.addressDetails.get(invoiceAddress),
+        });
+        const deliveryDetail = quoteResult?.deliveryDetail || quoteResult;
+
+        if (!active) return;
+        setShippingQuotePreview({
+          status: "success",
+          fee: Number(deliveryDetail?.FeeShip || 0),
+          productTotal: Number(promotionResult.totalAfterTax || 0),
+          serviceCode: String(deliveryDetail?.ServiceCode || ""),
+          serviceName: String(deliveryDetail?.ServiceCodeText || ""),
+          error: "",
+        });
+      } catch (error) {
+        if (!active) return;
+        setShippingQuotePreview({
+          status: "error",
+          fee: null,
+          productTotal: null,
+          serviceCode: "",
+          serviceName: "",
+          error: error?.message || "Không tính được phí vận chuyển.",
+        });
+      }
+    }, 400);
+
+    return () => {
+      active = false;
+      if (timerId !== null) window.clearTimeout(timerId);
+    };
+  }, [
+    accessPrivateToken,
+    accessToken,
+    customerType,
+    effectiveParsed,
+    isOrderPreparationReady,
+    matchedKiotUser,
+    orderPreparation,
+    parsed.items,
+    partnerDeliveries,
+    promotionSelections,
+    promotionSelectionsAreComplete,
+    selectedRetailerId,
+    selectedShippingPartner,
+  ]);
 
   const handlePromotionCampaignToggle = (
     productCode,
@@ -4139,6 +4304,78 @@ export default function TaoDonHang() {
                 }`}
               >
                 {orderPreparationMessage}
+              </div>
+
+              <div
+                className={`rounded-2xl border px-4 py-3 ${
+                  shippingQuotePreview.status === "success"
+                    ? "border-emerald-200 bg-emerald-50"
+                    : shippingQuotePreview.status === "error"
+                      ? "border-rose-200 bg-rose-50"
+                      : "border-sky-200 bg-sky-50"
+                }`}
+                aria-live="polite"
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-sky-700">
+                      Phí vận chuyển dự kiến
+                    </div>
+                    <div className="mt-1 text-xs text-slate-500">
+                      {shippingLabel}
+                    </div>
+                  </div>
+                  {shippingQuotePreview.status === "loading" ? (
+                    <LoaderCircle className="h-5 w-5 animate-spin text-sky-600" />
+                  ) : null}
+                </div>
+
+                <div className="mt-2">
+                  {shippingQuotePreview.status === "success" ? (
+                    <>
+                      <div className="mb-2 flex items-center justify-between gap-3 rounded-xl border border-white/80 bg-white/70 px-3 py-2">
+                        <span className="text-sm font-semibold text-slate-600">
+                          Tổng tiền sản phẩm
+                        </span>
+                        <span className="text-base font-black text-slate-900">
+                          {Number(
+                            shippingQuotePreview.productTotal || 0,
+                          ).toLocaleString("vi-VN")}
+                          đ
+                        </span>
+                      </div>
+                      <div className="text-xl font-black text-emerald-700">
+                        {Number(shippingQuotePreview.fee || 0).toLocaleString(
+                          "vi-VN",
+                        )}
+                        đ
+                      </div>
+                      {shippingQuotePreview.serviceCode ||
+                      shippingQuotePreview.serviceName ? (
+                        <div className="mt-1 text-xs text-emerald-700/80">
+                          Dịch vụ: {shippingQuotePreview.serviceName || "VTPFW"}
+                          {shippingQuotePreview.serviceCode
+                            ? ` (${shippingQuotePreview.serviceCode})`
+                            : ""}
+                        </div>
+                      ) : null}
+                    </>
+                  ) : shippingQuotePreview.status === "error" ? (
+                    <div className="text-sm font-medium text-rose-700">
+                      {shippingQuotePreview.error}
+                    </div>
+                  ) : shippingQuotePreview.status === "loading" ? (
+                    <div className="text-sm font-medium text-sky-700">
+                      Đang kiểm tra phí sau khi áp dụng sản phẩm và khuyến
+                      mãi...
+                    </div>
+                  ) : (
+                    <div className="text-sm text-slate-500">
+                      Hoàn tất kiểm tra sản phẩm và lựa chọn khuyến mãi để xem
+                      phí.
+                    </div>
+                  )}
+                </div>
               </div>
 
               <div className="flex flex-wrap gap-2">
