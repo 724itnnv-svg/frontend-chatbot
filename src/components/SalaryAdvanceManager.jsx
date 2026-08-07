@@ -78,20 +78,20 @@ function loadExcelJS() {
   return excelJsLoadPromise;
 }
 
-async function savePaidRequestsExcel(rows, period) {
+async function saveApprovedRequestsExcel(rows, period) {
   const ExcelJS = await loadExcelJS();
   const workbook = new ExcelJS.Workbook();
   workbook.creator = "NNV";
   workbook.created = new Date();
-  const sheet = workbook.addWorksheet("Phiếu đã chi", { views: [{ state: "frozen", ySplit: 4 }] });
-  const headers = ["STT", "Mã NV", "Tên NV", "Tên ngân hàng", "Tên người thụ hưởng", "Số tài khoản thụ hưởng", "Chi nhánh ngân hàng", "Số tiền", "Ngày chi", "Kỳ khấu trừ", "Người xác nhận chi", "Ghi chú"];
-  sheet.mergeCells("A1:L1");
-  sheet.getCell("A1").value = "DANH SÁCH PHIẾU ỨNG LƯƠNG ĐÃ CHI";
+  const sheet = workbook.addWorksheet("Phiếu đã duyệt", { views: [{ state: "frozen", ySplit: 4 }] });
+  const headers = ["STT", "Mã NV", "Tên NV", "Công ty đóng BHXH", "Tên ngân hàng", "Tên người thụ hưởng", "Số tài khoản thụ hưởng", "Chi nhánh ngân hàng", "Số tiền duyệt", "Ngày duyệt", "Kỳ khấu trừ", "Người duyệt", "Lý do / Ghi chú duyệt"];
+  sheet.mergeCells("A1:M1");
+  sheet.getCell("A1").value = "DANH SÁCH PHIẾU ỨNG LƯƠNG ĐÃ DUYỆT";
   sheet.getCell("A1").font = { bold: true, size: 16, color: { argb: "FFFFFFFF" } };
   sheet.getCell("A1").alignment = { horizontal: "center", vertical: "middle" };
   sheet.getCell("A1").fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF047857" } };
   sheet.getRow(1).height = 28;
-  sheet.mergeCells("A2:L2");
+  sheet.mergeCells("A2:M2");
   sheet.getCell("A2").value = `Kỳ khấu trừ: ${period || "Tất cả"} · Xuất lúc: ${new Date().toLocaleString("vi-VN")}`;
   sheet.getCell("A2").alignment = { horizontal: "center" };
   sheet.getCell("A2").font = { italic: true, color: { argb: "FF475569" } };
@@ -106,25 +106,29 @@ async function savePaidRequestsExcel(rows, period) {
       index + 1,
       recipient.employeeCode || request.employeeCode || "",
       recipient.employeeName || request.userName || "",
+      request.congTyDongBHXH || "",
       recipient.bankName || "",
       recipient.accountHolder || "",
       recipient.accountNumber || "",
       recipient.bankBranch || "",
       Number(request.approvedAmount || request.requestedAmount || 0),
-      request.paidAt ? new Date(request.paidAt) : "",
+      request.reviewedAt ? new Date(request.reviewedAt) : "",
       request.payrollPeriod || "",
-      request.paidByName || "",
-      request.paymentNote || request.reason || "",
+      request.reviewedByName || "",
+      [
+        request.reason ? `Lý do: ${request.reason}` : "",
+        request.reviewNote ? `Ghi chú duyệt: ${request.reviewNote}` : "",
+      ].filter(Boolean).join("\n"),
     ]);
   });
-  const totalRow = sheet.addRow(["", "", "", "", "", "", "TỔNG CỘNG", { formula: `SUM(H5:H${4 + rows.length})` }, "", "", "", ""]);
+  const totalRow = sheet.addRow(["", "", "", "", "", "", "", "TỔNG CỘNG", { formula: `SUM(I5:I${4 + rows.length})` }, "", "", "", ""]);
   totalRow.font = { bold: true };
   totalRow.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFD1FAE5" } };
-  sheet.columns = [8, 14, 24, 22, 25, 23, 22, 18, 20, 15, 24, 36].map((width) => ({ width }));
-  sheet.getColumn(6).numFmt = "@";
-  sheet.getColumn(8).numFmt = "#,##0 [$₫-vi-VN]";
-  sheet.getColumn(9).numFmt = "dd/mm/yyyy hh:mm";
-  sheet.autoFilter = { from: "A4", to: `L${Math.max(4, sheet.rowCount - 1)}` };
+  sheet.columns = [8, 14, 24, 20, 22, 25, 23, 22, 18, 20, 15, 24, 36].map((width) => ({ width }));
+  sheet.getColumn(7).numFmt = "@";
+  sheet.getColumn(9).numFmt = "#,##0 [$₫-vi-VN]";
+  sheet.getColumn(10).numFmt = "dd/mm/yyyy hh:mm";
+  sheet.autoFilter = { from: "A4", to: `M${Math.max(4, sheet.rowCount - 1)}` };
   sheet.eachRow({ includeEmpty: true }, (row, rowNumber) => {
     if (rowNumber >= 4) row.alignment = { vertical: "top", wrapText: true };
     row.eachCell({ includeEmpty: true }, (cell) => {
@@ -135,7 +139,7 @@ async function savePaidRequestsExcel(rows, period) {
   const url = URL.createObjectURL(new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
   const link = document.createElement("a");
   link.href = url;
-  link.download = `Phieu_ung_luong_da_chi_${period || new Date().toISOString().slice(0, 10)}.xlsx`;
+  link.download = `Phieu_ung_luong_da_duyet_${period || new Date().toISOString().slice(0, 10)}.xlsx`;
   document.body.appendChild(link);
   link.click();
   link.remove();
@@ -284,7 +288,7 @@ export default function SalaryAdvanceManager() {
     await reviewRequest(paymentDialog, "mark_paid", paymentForm);
   }
 
-  async function exportPaidRequests() {
+  async function exportApprovedRequests() {
     if (exporting) return;
     setExporting(true);
     setMessage(null);
@@ -292,13 +296,13 @@ export default function SalaryAdvanceManager() {
       const params = new URLSearchParams();
       if (period) params.set("period", period);
       if (search.trim()) params.set("search", search.trim());
-      const response = await fetch(`/api/salary-advance-requests/paid-export?${params}`, { headers: authHeader });
+      const response = await fetch(`/api/salary-advance-requests/approved-export?${params}`, { headers: authHeader });
       const data = await response.json();
       if (!response.ok || data?.ok === false) throw new Error(data?.message || "Không tải được dữ liệu xuất Excel");
       const exportRows = data.data || [];
-      if (!exportRows.length) throw new Error("Không có phiếu đã chi theo kỳ và bộ lọc hiện tại.");
-      await savePaidRequestsExcel(exportRows, period);
-      setMessage({ ok: true, text: `Đã xuất ${exportRows.length} phiếu ứng lương đã chi.` });
+      if (!exportRows.length) throw new Error("Không có phiếu đã duyệt theo kỳ và bộ lọc hiện tại.");
+      await saveApprovedRequestsExcel(exportRows, period);
+      setMessage({ ok: true, text: `Đã xuất ${exportRows.length} phiếu ứng lương đã duyệt.` });
     } catch (error) {
       setMessage({ ok: false, text: error.message || "Không thể xuất Excel" });
     } finally {
@@ -326,8 +330,8 @@ export default function SalaryAdvanceManager() {
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <button onClick={exportPaidRequests} disabled={exporting} className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-3 py-2 text-sm font-bold text-white hover:bg-emerald-700 disabled:opacity-50">
-                {exporting ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />} {exporting ? "Đang xuất..." : "Xuất phiếu đã chi"}
+              <button onClick={exportApprovedRequests} disabled={exporting} className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-3 py-2 text-sm font-bold text-white hover:bg-emerald-700 disabled:opacity-50">
+                {exporting ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />} {exporting ? "Đang xuất..." : "Xuất phiếu đã duyệt"}
               </button>
               <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-700"><ShieldCheck size={14} /> Phạm vi thủ quỹ</span>
             </div>
@@ -357,8 +361,8 @@ export default function SalaryAdvanceManager() {
           </div>
 
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[1500px] text-left text-sm">
-              <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500"><tr><th className="px-4 py-3">Nhân viên</th><th className="px-4 py-3">Ngân hàng</th><th className="px-4 py-3">Người thụ hưởng</th><th className="px-4 py-3 text-right">Số tiền</th><th className="px-4 py-3">Ngày nhận / kỳ trừ</th><th className="px-4 py-3">Ghi chú</th><th className="px-4 py-3">Trạng thái</th><th className="px-4 py-3">Thao tác</th></tr></thead>
+            <table className="w-full min-w-[1650px] text-left text-sm">
+              <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500"><tr><th className="px-4 py-3">Nhân viên</th><th className="px-4 py-3">Cty đóng BHXH</th><th className="px-4 py-3">Ngân hàng</th><th className="px-4 py-3">Người thụ hưởng</th><th className="px-4 py-3 text-right">Số tiền</th><th className="px-4 py-3">Ngày nhận / kỳ trừ</th><th className="px-4 py-3">Ghi chú</th><th className="px-4 py-3">Trạng thái</th><th className="px-4 py-3">Thao tác</th></tr></thead>
               <tbody>
                 {rows.map((request) => {
                   const [label, tone] = STATUS_META[request.status] || [request.status, "bg-slate-100 text-slate-600"];
@@ -367,6 +371,7 @@ export default function SalaryAdvanceManager() {
                   return (
                     <tr key={request._id} className="border-t align-top">
                       <td className="px-4 py-3"><div className="font-bold">{recipient.employeeName || request.userName || "-"}</div><div className="font-mono text-xs text-slate-500">{recipient.employeeCode || request.employeeCode || "-"}</div></td>
+                      <td className="px-4 py-3"><span className="inline-flex rounded-lg bg-indigo-50 px-2.5 py-1 font-bold text-indigo-700">{request.congTyDongBHXH || "Chưa cập nhật"}</span></td>
                       <td className="px-4 py-3"><div className="flex items-center gap-1.5 font-semibold"><Building2 size={14} className="text-slate-400" />{recipient.bankName || "Chưa cập nhật"}</div><div className="mt-1 text-xs text-slate-500">{recipient.bankBranch || "Chưa có chi nhánh"}</div></td>
                       <td className="px-4 py-3"><div className="flex items-center gap-1.5 font-semibold">{recipient.accountHolder || "Chưa cập nhật"}{recipient.bankAccountVerified && <BadgeCheck size={15} className="text-emerald-600" />}</div><div className="mt-1 font-mono text-xs text-slate-600">{recipient.accountNumber || "Chưa có số tài khoản"}</div></td>
                       <td className="px-4 py-3 text-right"><div className="font-bold text-emerald-700">{money(request.approvedAmount || request.requestedAmount)}</div>{request.approvedAmount > 0 && request.approvedAmount !== request.requestedAmount && <div className="mt-1 text-xs text-slate-400">Yêu cầu {money(request.requestedAmount)}</div>}</td>
