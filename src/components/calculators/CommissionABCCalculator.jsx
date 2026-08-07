@@ -23,6 +23,7 @@ import {
   makeShouldProcess,
   makeGetEmployeeType,
   AD_COST_HEADERS,
+  ensureAdCostHeaders,
   calculateAdCostDeduction,
   VN_LOCALE,
   formatMoney,
@@ -68,19 +69,9 @@ const FILE_DEFS_ABC = [
   {
     key: "adcost",
     label: "File chi phí quảng cáo",
-    headers: [...AD_COST_HEADERS, "Sản phẩm chạy quảng cáo", "Nhân viên"],
+    headers: AD_COST_HEADERS,
   },
 ];
-
-const AD_COST_NON_BLOCKING_HEADERS = new Set([
-  "CP CHƯA TĂNG",
-  "CP TĂNG TN",
-  "ROAS THỰC TẾ",
-  "ROAS ĐÁNH GIÁ",
-  "MỨC HƯỞNG DT",
-  "CPQC TÍNH HH",
-  "TEAM",
-]);
 
 const CG_SKUS = new Set([
   "NNVCB1",
@@ -1577,7 +1568,6 @@ export default function CommissionABCCalculator() {
     const storedPrices = await getStoredManualPrices("abc");
 
     const newErrors = [];
-    const nonBlockingErrors = [];
     const newWarnings = [];
     const missingReturnsLocal = [];
     const missingGiftsLocal = [];
@@ -2516,21 +2506,10 @@ export default function CommissionABCCalculator() {
               `${def.label}: Không tìm thấy sheet "${sheetName}".`,
             );
           } else {
-            const { headerMap, missing } = ensureHeaders(headers, def.headers);
-            const blockingMissing = missing.filter(
-              (header) => !AD_COST_NON_BLOCKING_HEADERS.has(header),
-            );
-            const nonBlockingMissing = missing.filter((header) =>
-              AD_COST_NON_BLOCKING_HEADERS.has(header),
-            );
-            if (nonBlockingMissing.length) {
-              nonBlockingErrors.push(
-                `${def.label}: Thiếu cột ${nonBlockingMissing.join(", ")}.`,
-              );
-            }
-            if (blockingMissing.length) {
+            const { headerMap, missing } = ensureAdCostHeaders(headers);
+            if (missing.length) {
               newErrors.push(
-                `${def.label}: Thiếu cột ${blockingMissing.join(", ")}.`,
+                `${def.label}: Thiếu cột ${missing.join(", ")}.`,
               );
             } else {
               rows.forEach((row) => {
@@ -2623,13 +2602,13 @@ export default function CommissionABCCalculator() {
           ),
         );
         setAdCostModalOpen(true);
-        setErrors(nonBlockingErrors);
+        setErrors([]);
         setWarnings(newWarnings);
         return;
       }
 
       if (newErrors.length) {
-        setErrors([...newErrors, ...nonBlockingErrors]);
+        setErrors(newErrors);
         setWarnings(newWarnings);
         return;
       }
@@ -2689,7 +2668,7 @@ export default function CommissionABCCalculator() {
         }
         setMissingPriceModalOpen(true);
         setMissingPriceModalMode("calculation");
-        setErrors(nonBlockingErrors);
+        setErrors([]);
         setWarnings(newWarnings);
         return;
       }
@@ -2699,7 +2678,7 @@ export default function CommissionABCCalculator() {
         setMissingGifts([]);
         setMissingPriceModalMode("calculation");
         setMissingPriceModalOpen(true);
-        setErrors(nonBlockingErrors);
+        setErrors([]);
         setWarnings(newWarnings);
         return;
       }
@@ -2851,7 +2830,7 @@ export default function CommissionABCCalculator() {
         })
         .sort((a, b) => a["Nhân viên"].localeCompare(b["Nhân viên"]));
       setLogRows(logRowsLocal);
-      setErrors(nonBlockingErrors);
+      setErrors([]);
       setWarnings(newWarnings);
     } catch (err) {
       console.error(err);

@@ -154,19 +154,19 @@ export const sanitizeEmployeeSheetName = (name) => {
   return baseName.slice(0, Math.max(maxNameLen, 0));
 };
 
-// Bộ cột bắt buộc của file "Thống kê chi phí quảng cáo" — dùng chung cho mọi calculator hoa hồng.
+// Chỉ 2 cột này là bắt buộc trong file chi phí quảng cáo.
 export const AD_COST_HEADERS = [
   "Nhân viên",
-  "CP CHƯA TĂNG",
-  "CP TĂNG TN",
   "TỔNG CHI",
-  "DOANH THU",
-  "ROAS THỰC TẾ",
-  "ROAS ĐÁNH GIÁ",
-  "MỨC HƯỞNG DT",
-  "CPQC TÍNH HH",
-  "TEAM",
 ];
+
+export const ensureAdCostHeaders = (headers) => {
+  const headerMap = getHeaderIndex(headers);
+  const missing = [];
+  if (!headerMap.has(normalizeHeader("Nhân viên"))) missing.push("Nhân viên");
+  if (!headerMap.has(normalizeHeader("TỔNG CHI"))) missing.push("TỔNG CHI");
+  return { headerMap, missing };
+};
 
 /**
  * Công thức trừ chi phí quảng cáo dùng chung cho các calculator hoa hồng.
