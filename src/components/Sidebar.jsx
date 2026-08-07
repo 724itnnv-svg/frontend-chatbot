@@ -364,7 +364,7 @@ const MENU_GROUPS = [
 
 function getLinkClass({ isActive, isFocused, isCollapsed }) {
   return [
-    "flex w-full min-w-0 items-center gap-3 rounded-xl px-3 py-2.5 transition",
+    "relative flex w-full min-w-0 items-center gap-3 rounded-xl px-3 py-2.5 transition",
     isCollapsed ? "md:justify-center md:gap-0 md:px-2" : "text-left",
     isActive
       ? "border border-cyan-200 bg-gradient-to-r from-cyan-50 via-sky-50 to-teal-50 text-cyan-800 shadow-[0_12px_28px_rgba(6,182,212,0.16)]"
@@ -393,7 +393,7 @@ function formatRoleLabel(user) {
 }
 
 const Sidebar = memo(() => {
-  const { logout, user } = useAuth();
+  const { api, logout, user } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -403,6 +403,7 @@ const Sidebar = memo(() => {
   );
   const [focusedIndex, setFocusedIndex] = useState(-1);
   const [openGroups, setOpenGroups] = useState({});
+  const [attendanceLeavePendingTotal, setAttendanceLeavePendingTotal] = useState(0);
   const focusedIndexRef = useRef(-1);
   const menuItemRefs = useRef([]);
   const navRef = useRef(null);
@@ -412,6 +413,40 @@ const Sidebar = memo(() => {
   }, [isCollapsed]);
 
   const isFullAdmin = hasFullAccess(user);
+  const canViewAttendance = canAccessScreen(user, "attendance");
+
+  const loadAttendanceLeavePendingTotal = useCallback(async () => {
+    if (!canViewAttendance) {
+      setAttendanceLeavePendingTotal(0);
+      return;
+    }
+    try {
+      const response = await api.get("/attendance-leave-requests/pending-count");
+      setAttendanceLeavePendingTotal(Number(response.data?.total) || 0);
+    } catch {
+      // Bộ đếm nền không làm gián đoạn điều hướng sidebar.
+    }
+  }, [api, canViewAttendance]);
+
+  useEffect(() => {
+    if (!canViewAttendance) {
+      setAttendanceLeavePendingTotal(0);
+      return undefined;
+    }
+
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") void loadAttendanceLeavePendingTotal();
+    };
+    void loadAttendanceLeavePendingTotal();
+    const intervalId = window.setInterval(loadAttendanceLeavePendingTotal, 30000);
+    window.addEventListener("focus", loadAttendanceLeavePendingTotal);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener("focus", loadAttendanceLeavePendingTotal);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
+  }, [canViewAttendance, loadAttendanceLeavePendingTotal]);
 
   const filteredMenus = useMemo(
     () =>
@@ -669,6 +704,7 @@ const Sidebar = memo(() => {
                         );
                         const isFocused = focusedIndex === idx;
                         const Icon = m.icon;
+                        const badgeTotal = m.id === "attendance" ? attendanceLeavePendingTotal : 0;
 
                         return (
                           <NavLink
@@ -705,7 +741,16 @@ const Sidebar = memo(() => {
                                     {m.label}
                                   </span>
                                 </span>
-                                {!isCollapsed && isActive && (
+                                {badgeTotal > 0 && (
+                                  <span
+                                    className={`ml-auto inline-flex min-w-5 items-center justify-center rounded-full bg-rose-600 px-1.5 py-0.5 text-[10px] font-black leading-none text-white shadow-sm ${isCollapsed ? "md:absolute md:right-1 md:top-1 md:min-w-4 md:px-1" : ""}`}
+                                    aria-label={`${badgeTotal} đơn nghỉ phép chờ xử lý`}
+                                    title={`${badgeTotal} đơn nghỉ phép chờ xử lý`}
+                                  >
+                                    {badgeTotal > 99 ? "99+" : badgeTotal}
+                                  </span>
+                                )}
+                                {!isCollapsed && isActive && badgeTotal === 0 && (
                                   <span className="ml-auto h-2 w-2 rounded-full bg-cyan-500 shadow-[0_0_12px_rgba(6,182,212,0.65)]" />
                                 )}
                                 {!isCollapsed && isFocused && !isActive && (

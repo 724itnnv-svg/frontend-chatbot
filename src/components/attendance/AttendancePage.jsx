@@ -89,7 +89,7 @@ const LEAVE_SESSION_LABELS = {
 
 function createLeaveForm() {
   const today = dateKey(new Date());
-  return { leaveType: "regular", startDate: today, endDate: today, startTime: "07:30", endTime: "17:00", session: "full_day", reason: "", evidence: null };
+  return { leaveType: "emergency", startDate: today, endDate: today, startTime: "07:30", endTime: "17:00", session: "full_day", reason: "", evidence: null };
 }
 
 function createAdvanceForm() {
@@ -349,6 +349,13 @@ function fmtShortDate(str) {
 function fmtTime(iso) {
   if (!iso) return "-";
   return new Date(iso).toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" });
+}
+
+function hasPendingEmergencyLeaveStarted(request, now = Date.now()) {
+  if (request?.status !== "pending" || request?.leaveType !== "emergency") return false;
+  if (!request.startDate || !request.startTime) return false;
+  const startsAt = Date.parse(`${request.startDate}T${request.startTime}:00+07:00`);
+  return Number.isFinite(startsAt) && now >= startsAt;
 }
 
 function punchLocationName(punch, fallback = "") {
@@ -1082,6 +1089,14 @@ export default function AttendancePage() {
   const [evidencePreview, setEvidencePreview] = useState(null);
   const [evidencePreviewLoading, setEvidencePreviewLoading] = useState(false);
   const [evidencePreviewError, setEvidencePreviewError] = useState("");
+  const pendingEmergencyEvidenceCount = useMemo(
+    () => leaveRequests.filter((request) => (
+      request.leaveType === "emergency"
+      && request.status === "pending"
+      && (request.needsEvidence === true || !request.evidence?.url)
+    )).length,
+    [leaveRequests],
+  );
   const currentPeriodAdvance = useMemo(
     () => advanceRequests.find((request) => request.payrollPeriod === advanceForm.payrollPeriod),
     [advanceForm.payrollPeriod, advanceRequests],
@@ -1922,6 +1937,10 @@ export default function AttendancePage() {
   }
 
   async function deleteLeaveRequest(request) {
+    if (hasPendingEmergencyLeaveStarted(request)) {
+      showMsg(false, "Đã đến giờ off trong đơn. Bạn không thể xoá đơn off đột xuất đang chờ duyệt.");
+      return;
+    }
     let cancellationReason = "";
     if (request.status === "approved") {
       cancellationReason = window.prompt("Nhập lý do yêu cầu hủy đơn đã duyệt:", "")?.trim();
@@ -2249,10 +2268,12 @@ export default function AttendancePage() {
               {ATTENDANCE_TABS.map((tab) => {
                 const Icon = tab.Icon;
                 const active = activeTab === tab.id;
+                const notificationCount = tab.id === "leave" ? pendingEmergencyEvidenceCount : 0;
                 return (
                   <button
                     key={tab.id}
                     onClick={() => changeTab(tab.id)}
+                    aria-label={notificationCount > 0 ? `${tab.label}, ${notificationCount} đơn chưa có ảnh minh chứng` : tab.label}
                     className={`flex min-h-11 items-center justify-center gap-1.5 rounded-xl px-2 py-2 text-xs font-bold transition sm:text-sm ${active
                       ? "bg-sky-600 text-white shadow-sm"
                       : "text-slate-600 hover:bg-slate-50"
@@ -2260,6 +2281,17 @@ export default function AttendancePage() {
                   >
                     <Icon size={15} />
                     <span className="leading-tight">{tab.label}</span>
+                    {notificationCount > 0 && (
+                      <span
+                        className={`inline-flex min-w-5 items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] font-black leading-none ${active
+                          ? "bg-white text-rose-600"
+                          : "bg-rose-600 text-white"
+                          }`}
+                        title={`${notificationCount} đơn off đột xuất chưa tải ảnh minh chứng`}
+                      >
+                        {notificationCount > 99 ? "99+" : notificationCount}
+                      </span>
+                    )}
                   </button>
                 );
               })}
@@ -2766,8 +2798,8 @@ export default function AttendancePage() {
                       })}
                       className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
                     >
-                      <option value="regular">Nghỉ phép thường</option>
                       <option value="emergency">Off đột xuất</option>
+                      <option value="regular">Nghỉ phép thường</option>
                       <option value="annual">Phép năm</option>
                     </select>
                   </label>
@@ -2846,6 +2878,7 @@ export default function AttendancePage() {
                   <div className="divide-y divide-slate-100">
                     {leaveRequests.map((request) => {
                       const status = leaveStatusMeta(request.status, request.needsEvidence);
+                      const pendingEmergencyOffStarted = hasPendingEmergencyLeaveStarted(request, clockNow);
                       return (
                         <div key={request._id} className="p-4 sm:px-5">
                           <div className="flex flex-wrap items-start justify-between gap-2">
@@ -2871,7 +2904,7 @@ export default function AttendancePage() {
                                 {uploadingLeaveId === request._id ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />} Bổ sung ảnh
                               </label>
                             ) : null}
-                            {(request.status === "pending" || request.status === "rejected" || (request.status === "approved" && request.startDate > dateKey(new Date()))) && (
+                            {((request.status === "pending" && !pendingEmergencyOffStarted) || request.status === "rejected" || (request.status === "approved" && request.startDate > dateKey(new Date()))) && (
                               <button
                                 type="button"
                                 disabled={deletingLeaveId === request._id}
@@ -2882,6 +2915,7 @@ export default function AttendancePage() {
                                 {request.status === "approved" ? "Yêu cầu hủy" : "Xoá đơn"}
                               </button>
                             )}
+                            {pendingEmergencyOffStarted && <span className="text-[11px] font-semibold text-amber-600">Đã đến giờ off, không thể xoá đơn đang chờ duyệt</span>}
                             {request.status === "approved" && request.startDate <= dateKey(new Date()) && <span className="text-[11px] font-semibold text-amber-600">Liên hệ quản trị nếu ngày nghỉ đã bắt đầu hoặc đã qua</span>}
                             <span className="text-[11px] text-slate-400">Gửi lúc {new Date(request.createdAt).toLocaleString("vi-VN")}</span>
                           </div>
