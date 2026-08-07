@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   CheckCircle2,
@@ -722,7 +722,8 @@ async function buildNewCustomerPayloadV2({
       LastLocation: formatCustomerLocationName(customerAddress),
       WardId: null,
       NameEInvoice: invoiceName,
-      AddressEInvoice: invoiceAddress,
+      AddressEInvoice: invoiceAddress || customerAddressParts.street,
+      AddressEInvoiceCombine: invoiceAddress,
       AdministrativeAreaIdEInvoice: invoiceAddressDetails.districtId,
       AdministrativeAreaId: null,
       RetailerId: retailerId,
@@ -1808,9 +1809,7 @@ function mergeInvoicePromotionsByCampaign(promotions = []) {
             Number(promotion?.RelatedProductQty || 0),
           ],
         ]),
-        __promotionInfos: new Set(
-          [promotion?.PromotionInfo].filter(Boolean),
-        ),
+        __promotionInfos: new Set([promotion?.PromotionInfo].filter(Boolean)),
         __printPromotionInfos: new Set(
           [promotion?.PrintPromotionInfo].filter(Boolean),
         ),
@@ -3029,6 +3028,11 @@ function CreateOrderProgressPanel({ steps = [], error = "", isCreating }) {
 }
 
 export default function TaoDonHang() {
+  const { user } = useAuth() || {};
+  const hasMappedUserRetailerRef = useRef(false);
+  const [selectedRetailerId, setSelectedRetailerId] = useState(() =>
+    mapTeamIdToRetailerId(user?.teamId),
+  );
   const [selectedShippingPartner, setSelectedShippingPartner] = useState("GHN");
   const [ghnRequiredNote, setGhnRequiredNote] = useState(
     DEFAULT_GHN_REQUIRED_NOTE,
@@ -3065,11 +3069,6 @@ export default function TaoDonHang() {
   });
   const [tokenLoading, setTokenLoading] = useState(false);
   const [, setTokenError] = useState("");
-  const { user } = useAuth() || {};
-  const selectedRetailerId = useMemo(
-    () => mapTeamIdToRetailerId(user?.teamId),
-    [user?.teamId],
-  );
   const selectedRetailer = useMemo(
     () =>
       RETAILERS.find(
@@ -3085,6 +3084,13 @@ export default function TaoDonHang() {
     () => getCustomerTypeOptions(selectedRetailerId),
     [selectedRetailerId],
   );
+
+  useEffect(() => {
+    if (hasMappedUserRetailerRef.current || !user?.teamId) return;
+
+    setSelectedRetailerId(mapTeamIdToRetailerId(user.teamId));
+    hasMappedUserRetailerRef.current = true;
+  }, [user?.teamId]);
 
   const updateCreateOrderProgress = (id, status, message) => {
     setCreateOrderProgress((current) =>
@@ -3971,18 +3977,30 @@ export default function TaoDonHang() {
 
             <div className="space-y-4 px-5 py-5">
               <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                <div className="rounded-xl border border-cyan-100 bg-cyan-50/70 px-3 py-2.5 text-sm text-cyan-900 md:col-span-1">
-                  <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-cyan-700">
-                    Công ty hiện tại
-                  </div>
-                  <div className="mt-1 font-semibold">
-                    {selectedRetailer.label}
-                  </div>
-                  <div className="text-xs text-cyan-700/80">
-                    Team: {user?.teamId || "Chưa có"} - Retailer:{" "}
-                    {selectedRetailerId}
-                  </div>
-                </div>
+                <label className="block space-y-2">
+                  <span className="text-xs font-semibold text-slate-600">
+                    Công ty
+                  </span>
+                  <select
+                    value={selectedRetailerId}
+                    onChange={(event) => {
+                      setSelectedRetailerId(event.target.value);
+                      setPreparedInvoicePayload(null);
+                      setCreateOrderProgress([]);
+                      setCreateOrderError("");
+                    }}
+                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100"
+                  >
+                    {RETAILERS.map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.label}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="block text-[11px] text-slate-400">
+                    Mặc định theo team {user?.teamId || "chưa xác định"}
+                  </span>
+                </label>
                 <label className="block space-y-2">
                   <span className="text-xs font-semibold text-slate-600">
                     Đối tác giao hàng
