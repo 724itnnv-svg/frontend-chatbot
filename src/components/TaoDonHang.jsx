@@ -97,9 +97,9 @@ const VTP_PRICE_CHECK_DEFAULT = {
 const VTP_DEFAULT_SERVICE_EXTRA = [
   {
     Code: "ShipperNote",
-    Value: "KHONGCHOXEMHANG",
+    Value: "CHOXEMHANGKHONGTHU",
     ViewType: "DropdownList",
-    Name: "Không cho xem hàng",
+    Name: "Cho xem, không thử",
   },
   {
     Code: "PaymentBy",
@@ -2277,12 +2277,21 @@ function pickLowestVtpService(responsePayload = {}) {
   );
 }
 
+function getVtpServiceCode(retailer = "") {
+  return String(retailer || "")
+    .trim()
+    .toLowerCase() === "vietnhattv"
+    ? "ECOD"
+    : "VSL5";
+}
+
 function buildVtpCheckPricePayload({
   parsed,
   totalBeforeDiscount,
   totalProductPrice,
   totalWeight,
   invoiceUuid,
+  serviceCode,
 }) {
   const productQuantity = (parsed?.items || []).reduce(
     (sum, item) => sum + (Number(item?.quantity || 0) || 0),
@@ -2299,38 +2308,7 @@ function buildVtpCheckPricePayload({
     MONEY_COLLECTION: totalProductPrice,
     PRODUCT_PRICE: totalBeforeDiscount,
     UUID: invoiceUuid,
-    SERVICES: [
-      { CODE: "VTK" },
-      { CODE: "PHS" },
-      { CODE: "LCOD" },
-      { CODE: "VCBO" },
-      { CODE: "VSL3" },
-      { CODE: "VSL1" },
-      { CODE: "VSL5" },
-      { CODE: "VSL2" },
-      { CODE: "VSL6" },
-      { CODE: "VSL4" },
-      { CODE: "VSL7" },
-      { CODE: "VCK" },
-      { CODE: "ECOD" },
-      { CODE: "SCOD" },
-      { CODE: "QTK" },
-      { CODE: "VMCH" },
-      { CODE: "VMCV" },
-      { CODE: "EDC" },
-      { CODE: "EDS" },
-      { CODE: "VCG" },
-      { CODE: "VSL8" },
-      { CODE: "VNT" },
-      { CODE: "BTK" },
-      { CODE: "VSL9" },
-      { CODE: "VBAY" },
-      { CODE: "V2CK" },
-      { CODE: "V1CK" },
-      { CODE: "STK" },
-      { CODE: "V1NS" },
-      { CODE: "VDL" },
-    ],
+    SERVICES: [{ CODE: serviceCode }],
     SERVICE_EXTRA: VTP_DEFAULT_SERVICE_EXTRA,
   };
 }
@@ -2474,12 +2452,14 @@ async function buildDeliveryDetailPayload({
 
   onProgress?.("address", "success", "Lấy địa chỉ giao hàng thành công.");
 
+  const requestedVtpServiceCode = getVtpServiceCode(retailer);
   const checkPricePayload = buildVtpCheckPricePayload({
     parsed,
     totalBeforeDiscount,
     totalProductPrice,
     totalWeight,
     invoiceUuid,
+    serviceCode: requestedVtpServiceCode,
   });
   console.log("TaoDonHang VTP check price payload", checkPricePayload);
   onProgress?.("price", "loading", "Đang tính phí vận chuyển Viettel Post...");
@@ -2496,7 +2476,10 @@ async function buildDeliveryDetailPayload({
     "success",
     `Tính phí Viettel Post thành công: ${selectedVtpFee.toLocaleString("vi-VN")}đ.`,
   );
-  const selectedVtpServiceCode = selectedVtpService?.code || "VTK";
+  const selectedVtpServiceCode =
+    selectedVtpService?.code ||
+    selectedVtpService?.Code ||
+    requestedVtpServiceCode;
   const selectedVtpServiceName =
     selectedVtpService?.name || selectedVtpServiceCode;
   const selectedVtpServiceImage =
@@ -3068,7 +3051,7 @@ export default function TaoDonHang() {
     error: "",
   });
   const [tokenLoading, setTokenLoading] = useState(false);
-  const [, setTokenError] = useState("");
+  const [tokenError, setTokenError] = useState("");
   const selectedRetailer = useMemo(
     () =>
       RETAILERS.find(
@@ -3084,6 +3067,12 @@ export default function TaoDonHang() {
     () => getCustomerTypeOptions(selectedRetailerId),
     [selectedRetailerId],
   );
+  const shippingLabel =
+    SHIPPING_PARTNERS.find((item) => item.id === selectedShippingPartner)
+      ?.label || selectedShippingPartner;
+  const customerTypeLabel =
+    customerTypeOptions.find((item) => item.value === customerType)?.label ||
+    customerType;
 
   useEffect(() => {
     if (hasMappedUserRetailerRef.current || !user?.teamId) return;
@@ -4234,7 +4223,7 @@ export default function TaoDonHang() {
             </div> */}
 
             <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-              {/* <div className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-700">
+              <div className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-700">
                 Thông tin đã tách
               </div>
 
@@ -4244,7 +4233,7 @@ export default function TaoDonHang() {
                 <FieldCard label="Địa chỉ cũ" value={parsed.oldAddress} />
                 <FieldCard label="Địa chỉ mới" value={parsed.newAddress} />
                 <FieldCard label="NVC" value={parsed.nvc} />
-              </div> */}
+              </div>
 
               {/* <div className="mt-4 rounded-2xl border border-cyan-100 bg-cyan-50/60 px-4 py-3">
                 <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-cyan-700">
