@@ -53,8 +53,16 @@ const getProblemRowLabel = (row) => {
     return "Thiếu mã hóa đơn";
   }
 
+  if (row.__orderDeliveryFeeMismatch) {
+    return "Tiền phí không khớp với Kiot";
+  }
+
+  if (row.__orderDeliveryCodMismatch) {
+    return "Tiền thu hộ vượt quá so với Kiot";
+  }
+
   if (row.__orderDeliveryMoneyMismatch) {
-    return "Tiền Excel > orderDelivery";
+    return "Lệch tiền với Kiot";
   }
 
   return "Vận đơn lỗi";
@@ -160,7 +168,10 @@ function DetailModal({
   ];
 
   const modalContent = (
-    <div className="fixed inset-0 z-[80] grid place-items-center bg-[radial-gradient(circle_at_top,rgba(56,189,248,0.22),transparent_34%),radial-gradient(circle_at_bottom_right,rgba(16,185,129,0.16),transparent_28%),rgba(15,23,42,0.58)] p-[18px] backdrop-blur-[14px]" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-[80] grid place-items-center bg-[radial-gradient(circle_at_top,rgba(56,189,248,0.22),transparent_34%),radial-gradient(circle_at_bottom_right,rgba(16,185,129,0.16),transparent_28%),rgba(15,23,42,0.58)] p-[18px] backdrop-blur-[14px]"
+      onClick={onClose}
+    >
       <div
         className="relative isolate flex max-h-[88vh] w-[min(100%,calc(100vw-28px))] flex-col gap-[18px] overflow-auto rounded-[22px] border border-white/60 bg-gradient-to-b from-white/95 to-slate-50/95 p-[18px] shadow-[0_40px_120px_rgba(15,23,42,0.32),0_12px_28px_rgba(14,165,233,0.12)] sm:max-h-[min(82vh,860px)] sm:w-[min(1320px,calc(100vw-36px))] sm:rounded-[30px] sm:p-6"
         role="dialog"
@@ -170,13 +181,17 @@ function DetailModal({
       >
         <div className="mb-0.5 flex flex-col items-start justify-between gap-4 md:flex-row [&_h4]:mt-1 [&_h4]:text-[clamp(1.35rem,2vw,1.85rem)] [&_h4]:font-black [&_h4]:leading-[1.08] [&_h4]:tracking-[-0.04em] [&_h4]:text-slate-900">
           <div>
-            <p className="m-0 text-[11px] font-black uppercase tracking-[0.18em] text-teal-700">{summary.code || "Phiếu"}</p>
+            <p className="m-0 text-[11px] font-black uppercase tracking-[0.18em] text-teal-700">
+              {summary.code || "Phiếu"}
+            </p>
             <h4>{payloadTitle}</h4>
             <p className="mt-1.5 text-xs leading-[1.6] text-slate-500">
               {summary.partner || "Không có đối tác"} ·{" "}
               {summary.employee || "Không có nhân viên"}
             </p>
-            <p className="mt-1.5 text-xs leading-[1.6] text-slate-500">Số payload: 1</p>
+            <p className="mt-1.5 text-xs leading-[1.6] text-slate-500">
+              Số payload: 1
+            </p>
           </div>
 
           <div className="flex gap-2.5 [&>*]:flex-auto md:[&>*]:flex-none">
@@ -216,10 +231,7 @@ function DetailModal({
             </div>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               {getDetailFields(primaryPayload).map((item) => (
-                <div
-                  key={item.label}
-                  className={detailCardClass}
-                >
+                <div key={item.label} className={detailCardClass}>
                   <span>{item.label}</span>
                   <strong>{item.value}</strong>
                 </div>
@@ -240,10 +252,7 @@ function DetailModal({
             </div>
             <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
               {entryFields.map((item) => (
-                <div
-                  key={item.label}
-                  className={detailCardClass}
-                >
+                <div key={item.label} className={detailCardClass}>
                   <span>{item.label}</span>
                   <strong>{item.value}</strong>
                 </div>
@@ -327,10 +336,10 @@ export default function SelectedRowsPanel({
       <div className="mb-4 flex flex-col items-start justify-between gap-3.5 md:flex-row [&_h2]:m-0 [&_h2]:text-lg [&_h2]:font-black [&_h2]:leading-[1.2] [&_h2]:tracking-[-0.03em] [&_h2]:text-slate-900 [&_p]:mt-1.5 [&_p]:text-xs [&_p]:leading-[1.55] [&_p]:text-slate-500">
         <div>
           <h2>Dữ liệu đã chọn</h2>
-          <p>
+          {/* <p>
             Danh sách bên dưới có thanh cuộn. Bấm “Xem chi tiết” để mở modal và
             xem đúng nội dung sẽ gửi lên KiotViet.
-          </p>
+          </p> */}
         </div>
       </div>
 
@@ -386,7 +395,6 @@ export default function SelectedRowsPanel({
                     ) : null}
                   </div>
                 </div>
-
               </article>
             );
           })
@@ -398,10 +406,10 @@ export default function SelectedRowsPanel({
           <div className={sectionHeadingClass}>
             <div>
               <h3>Vận đơn lỗi</h3>
-              <p>
+              {/* <p>
                 {missingInvoiceRows.length} dòng không hợp lệ. Các dòng này
                 không được đưa vào payload và cần kiểm tra lại trên KiotViet.
-              </p>
+              </p> */}
             </div>
           </div>
 
@@ -412,7 +420,9 @@ export default function SelectedRowsPanel({
                 <article key={row.__rowId} className={cardClass}>
                   <div className="flex flex-col items-start justify-between gap-3 md:flex-row [&_strong]:text-[13px] [&_strong]:font-black [&_strong]:text-slate-900 [&_p]:mt-1 [&_p]:text-[11px] [&_p]:leading-[1.6] [&_p]:text-slate-500">
                     <div>
-                      <strong>{summary.deliveryCode || `Dòng ${row.__rowId}`}</strong>
+                      <strong>
+                        {summary.deliveryCode || `Dòng ${row.__rowId}`}
+                      </strong>
                       <p>
                         {summary.partner || "Không có đối tác"} ·{" "}
                         {summary.employee || "Không có nhân viên"}
@@ -466,7 +476,9 @@ export default function SelectedRowsPanel({
                   {sendProgressCompleted}/{sendProgressTotal} payload
                 </strong>
               </div>
-              <em className="text-sm font-black not-italic text-violet-700">{sendProgressPercent}%</em>
+              <em className="text-sm font-black not-italic text-violet-700">
+                {sendProgressPercent}%
+              </em>
             </div>
             <progress
               className={`h-2.5 w-full overflow-hidden rounded-full bg-slate-400/20 [&::-moz-progress-bar]:rounded-full [&::-moz-progress-bar]:bg-violet-500 [&::-webkit-progress-bar]:rounded-full [&::-webkit-progress-bar]:bg-slate-400/20 [&::-webkit-progress-value]:rounded-full [&::-webkit-progress-value]:bg-gradient-to-r [&::-webkit-progress-value]:from-violet-500 [&::-webkit-progress-value]:to-cyan-500 ${sendProgressActive ? "shadow-[0_0_0_1px_rgba(139,92,246,0.08)]" : ""}`}
@@ -496,9 +508,7 @@ export default function SelectedRowsPanel({
         <div className={sectionHeadingClass}>
           <div>
             <h3>Thông tin tổng quan</h3>
-            <p>
-              Nguồn dữ liệu: {payloadSourceCount} dòng
-            </p>
+            <p>Nguồn dữ liệu: {payloadSourceCount} dòng</p>
           </div>
         </div>
 

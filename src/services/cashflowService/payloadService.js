@@ -197,8 +197,10 @@ const buildCashflowPayloadEntriesForRow = ({
   );
   const checkVanDon = normalizeText(row["Mã Vận Đơn"]);
   const shipCodePrefix = checkVanDon.startsWith("CH") ? "PCCH_" : "PCGH_";
-  const hasMoneyCashflow = moneyValue !== 0;
-  const hasShipCashflow = shipValue !== 0;
+  const hasMoneyCashflow =
+    moneyValue !== 0 && row.__orderDeliveryCodMismatch !== true;
+  const hasShipCashflow =
+    shipValue !== 0 && row.__orderDeliveryFeeMismatch !== true;
   const isPairedCashflow = hasMoneyCashflow && hasShipCashflow;
   const entries = [];
 

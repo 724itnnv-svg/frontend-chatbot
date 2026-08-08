@@ -102,14 +102,42 @@ const parseMoneyValue = (value) => {
 const getExcelMoneyValue = (row = {}) =>
   parseMoneyValue(row["Tiền thu hộ(VNĐ)"] ?? row["Tiền hàng"] ?? row["(1)"]);
 
-const getOrderDeliveryMoneyValue = (orderDelivery = {}) =>
-  parseMoneyValue(orderDelivery.TotalCod);
+const getOrderDeliveryInvoiceTotalValue = (orderDelivery = {}) =>
+  parseMoneyValue(orderDelivery.invoiceTotal);
 
-const isOrderDeliveryMoneyMismatch = (row = {}, orderDelivery = {}) => {
+const getExcelDeliveryFeeRawValue = (row = {}) =>
+  row["Phí giao hàng"] ??
+  row["Tiền cước (VNĐ)"] ??
+  row["Phí ship NVC thu"] ??
+  row["(5)"];
+
+const getExcelDeliveryFeeValue = (row = {}) =>
+  parseMoneyValue(getExcelDeliveryFeeRawValue(row));
+
+const getOrderDeliveryFeeValue = (orderDelivery = {}) =>
+  parseMoneyValue(orderDelivery.totalPrice);
+
+const getOrderDeliveryMoneyMismatch = (row = {}, orderDelivery = {}) => {
   const excelMoneyValue = getExcelMoneyValue(row);
-  const orderDeliveryMoneyValue = getOrderDeliveryMoneyValue(orderDelivery);
+  const orderDeliveryMoneyValue =
+    getOrderDeliveryInvoiceTotalValue(orderDelivery);
+  const isGhnRow = row.__sourceFormat === "ghn";
+  const excelDeliveryFeeValue = getExcelDeliveryFeeValue(row);
+  const orderDeliveryFeeValue = getOrderDeliveryFeeValue(orderDelivery);
 
-  return excelMoneyValue > 0 && excelMoneyValue > orderDeliveryMoneyValue;
+  const isCodMismatch =
+    excelMoneyValue > 0 && excelMoneyValue > orderDeliveryMoneyValue;
+  const isGhnDeliveryFeeMismatch =
+    isGhnRow &&
+    normalizeText(orderDelivery.totalPrice) !== "" &&
+    (normalizeText(getExcelDeliveryFeeRawValue(row)) === "" ||
+      excelDeliveryFeeValue !== orderDeliveryFeeValue);
+
+  return {
+    isCodMismatch,
+    isGhnDeliveryFeeMismatch,
+    hasMismatch: isCodMismatch || isGhnDeliveryFeeMismatch,
+  };
 };
 
 const extractKiotResponseStatus = (error) =>
@@ -186,7 +214,18 @@ const buildOrderDeliveryValidationErrorSummary = (rows = []) => {
         reasons.push("thiếu mã hóa đơn");
       }
 
-      if (row.__orderDeliveryMoneyMismatch === true) {
+      if (row.__orderDeliveryFeeMismatch === true) {
+        reasons.push("Tiền phí không khớp với Kiot");
+      }
+      if (row.__orderDeliveryCodMismatch === true) {
+        reasons.push("Tiền thu hộ vượt quá so với Kiot");
+      }
+
+      if (
+        row.__orderDeliveryMoneyMismatch === true &&
+        row.__orderDeliveryCodMismatch !== true &&
+        row.__orderDeliveryFeeMismatch !== true
+      ) {
         reasons.push("lệch tiền");
       }
 
@@ -244,41 +283,46 @@ const stripOrderDeliveryData = (row) => {
     __orderDeliveryLoaded,
     __orderDeliveryMissingInvoice,
     __orderDeliveryMoneyMismatch,
+    __orderDeliveryCodMismatch,
+    __orderDeliveryFeeMismatch,
     ...rest
   } = row || {};
   return rest;
 };
 
-const mergeOrderDeliveryIntoRow = (row, orderDelivery) => ({
-  ...row,
-  "Mã HD Kiot":
-    normalizeText(orderDelivery.invoiceId || orderDelivery.invoiceIdCode) ||
-    row["Mã HD Kiot"] ||
-    "",
-  "Đối tác chuyển tiền":
-    orderDelivery.partnerDeliveryName || row["Đối tác chuyển tiền"] || "",
-  "Nhân viên":
-    orderDelivery.employeeName ||
-    orderDelivery.givenName ||
-    row["Nhân viên"] ||
-    "",
-  "Tiền hàng":
-    row["Tiền thu hộ(VNĐ)"] ?? row["(1)"] ?? orderDelivery.invoiceTotal ?? "",
-  "Phí ship NVC thu":
-    row["Tiền cước (VNĐ)"] ?? row["(5)"] ?? orderDelivery.totalPrice ?? "",
-  "Số điện thoại": orderDelivery.phoneNumber || row["Số điện thoại"] || "",
-  PartnerName: orderDelivery.partnerDeliveryName || row.PartnerName || "",
-  PartnerCode: orderDelivery.partnerDeliveryCode || row.PartnerCode || "",
-  __orderDelivery: orderDelivery,
-  __orderDeliveryLoaded: true,
-  __orderDeliveryMissingInvoice: !normalizeText(
-    orderDelivery.invoiceId || orderDelivery.invoiceIdCode,
-  ),
-  __orderDeliveryMoneyMismatch: isOrderDeliveryMoneyMismatch(
-    row,
-    orderDelivery,
-  ),
-});
+const mergeOrderDeliveryIntoRow = (row, orderDelivery) => {
+  const moneyMismatch = getOrderDeliveryMoneyMismatch(row, orderDelivery);
+
+  return {
+    ...row,
+    "Mã HD Kiot":
+      normalizeText(orderDelivery.invoiceId || orderDelivery.invoiceIdCode) ||
+      row["Mã HD Kiot"] ||
+      "",
+    "Đối tác chuyển tiền":
+      orderDelivery.partnerDeliveryName || row["Đối tác chuyển tiền"] || "",
+    "Nhân viên":
+      orderDelivery.employeeName ||
+      orderDelivery.givenName ||
+      row["Nhân viên"] ||
+      "",
+    "Tiền hàng":
+      row["Tiền thu hộ(VNĐ)"] ?? row["(1)"] ?? orderDelivery.invoiceTotal ?? "",
+    "Phí ship NVC thu":
+      row["Tiền cước (VNĐ)"] ?? row["(5)"] ?? orderDelivery.totalPrice ?? "",
+    "Số điện thoại": orderDelivery.phoneNumber || row["Số điện thoại"] || "",
+    PartnerName: orderDelivery.partnerDeliveryName || row.PartnerName || "",
+    PartnerCode: orderDelivery.partnerDeliveryCode || row.PartnerCode || "",
+    __orderDelivery: orderDelivery,
+    __orderDeliveryLoaded: true,
+    __orderDeliveryMissingInvoice: !normalizeText(
+      orderDelivery.invoiceId || orderDelivery.invoiceIdCode,
+    ),
+    __orderDeliveryMoneyMismatch: moneyMismatch.hasMismatch,
+    __orderDeliveryCodMismatch: moneyMismatch.isCodMismatch,
+    __orderDeliveryFeeMismatch: moneyMismatch.isGhnDeliveryFeeMismatch,
+  };
+};
 
 export default function CashFlowApp() {
   const { user, token } = useAuth();
@@ -633,8 +677,7 @@ export default function CashFlowApp() {
       payloadSourceRows.filter(
         (row) =>
           hasCashflowInvoiceId(row) &&
-          !row.__orderDeliveryMissingInvoice &&
-          !row.__orderDeliveryMoneyMismatch,
+          !row.__orderDeliveryMissingInvoice,
       ),
     [payloadSourceRows],
   );
