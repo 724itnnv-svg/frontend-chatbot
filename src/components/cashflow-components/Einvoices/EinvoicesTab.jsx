@@ -691,7 +691,7 @@ export default function EinvoicesTab({
   onSwitchToCashflow,
 }) {
   const [apiRows, setApiRows] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [filterMode, setFilterMode] = useState("range");
   const [timeRange, setTimeRange] = useState("month");
@@ -721,6 +721,7 @@ export default function EinvoicesTab({
     limit: EINVOICE_LOG_PAGE_SIZE,
   });
   const [loadingMore, setLoadingMore] = useState(false);
+  const [exportingExcel, setExportingExcel] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [visibleColumnIds, setVisibleColumnIds] = useState(() =>
     INVOICE_COLUMNS.filter((column) => column.defaultVisible !== false).map(
@@ -1384,6 +1385,7 @@ export default function EinvoicesTab({
     }
 
     setHddtStatusMessage("Đang tải toàn bộ dữ liệu để xuất Excel...");
+    setExportingExcel(true);
 
     const exportBatchSize = Math.max(rowsPerPage, 100);
     const exportRowsSource = [];
@@ -1458,6 +1460,8 @@ export default function EinvoicesTab({
       setHddtStatusMessage(
         error?.message || "Không thể tải đủ dữ liệu để xuất Excel.",
       );
+    } finally {
+      setExportingExcel(false);
     }
   };
 
@@ -1496,9 +1500,47 @@ export default function EinvoicesTab({
     invoiceLogPagination.page * invoiceLogPagination.limit,
     invoiceLogPagination.total,
   );
+  const isPageLoading =
+    loading || operationProgress.visible || exportingExcel;
+  const pageLoadingLabel = operationProgress.visible
+    ? operationProgress.label || "Đang xử lý hóa đơn điện tử..."
+    : exportingExcel
+      ? "Đang tải dữ liệu để xuất Excel..."
+      : "Đang tải danh sách hóa đơn...";
 
   return (
     <>
+      {isPageLoading ? (
+        <div
+          className="fixed inset-0 z-[210] grid place-items-center bg-slate-950/45 p-5 backdrop-blur-sm"
+          role="status"
+          aria-live="polite"
+          aria-label={pageLoadingLabel}
+        >
+          <div className="flex w-full max-w-sm flex-col items-center rounded-[28px] border border-white/70 bg-white/95 px-7 py-8 text-center shadow-[0_32px_100px_rgba(15,23,42,0.35)]">
+            <span className="h-12 w-12 animate-spin rounded-full border-4 border-cyan-100 border-t-cyan-600" />
+            <strong className="mt-5 text-base font-black text-slate-900">
+              {pageLoadingLabel}
+            </strong>
+            <p className="mt-2 text-xs font-semibold leading-5 text-slate-500">
+              Vui lòng đợi API xử lý xong trước khi tiếp tục thao tác.
+            </p>
+            {operationProgress.visible ? (
+              <div className="mt-5 w-full">
+                <div className="mb-2 text-right text-xs font-black text-cyan-700">
+                  {operationProgress.value}%
+                </div>
+                <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-cyan-500 to-emerald-500 transition-all duration-300"
+                    style={{ width: `${operationProgress.value}%` }}
+                  />
+                </div>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
       <section className="mx-auto grid max-w-[1660px] grid-cols-1 gap-[18px] xl:grid-cols-[minmax(0,1.55fr)_minmax(300px,0.45fr)]">
         <div className="rounded-[22px] border border-slate-400/20 bg-white/90 p-[18px] shadow-[0_18px_42px_rgba(15,23,42,0.08)] backdrop-blur-xl sm:rounded-[28px] sm:p-[22px]">
           <div className="mb-5 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
