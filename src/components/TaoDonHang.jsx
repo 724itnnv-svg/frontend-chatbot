@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   CheckCircle2,
@@ -97,9 +97,9 @@ const VTP_PRICE_CHECK_DEFAULT = {
 const VTP_DEFAULT_SERVICE_EXTRA = [
   {
     Code: "ShipperNote",
-    Value: "KHONGCHOXEMHANG",
+    Value: "CHOXEMHANGKHONGTHU",
     ViewType: "DropdownList",
-    Name: "Không cho xem hàng",
+    Name: "Cho xem, không thử",
   },
   {
     Code: "PaymentBy",
@@ -118,7 +118,13 @@ SĐT: 0964294979
 
 function getCustomerTypeOptions(retailerId) {
   if (String(retailerId || "").toLowerCase() === "abctv") {
-    return [{ value: "phan_bon", label: "Phân bón" }];
+    return [
+      { value: "phan_bon", label: "Phân bón" },
+      { value: "cay_giong", label: "Cây giống" },
+      { value: "dscp", label: "DSCP" },
+      { value: "dua_sap_trai", label: "Dừa sáp trái" },
+      { value: "dua_giong", label: "Dừa giống" },
+    ];
   }
 
   return [
@@ -590,6 +596,10 @@ function generateCustomerCodeV2({
 
 function pickCustomerGroupName(customerType) {
   if (customerType === "phan_bon") return "Phân bón";
+  if (customerType === "cay_giong") return "Cây giống";
+  if (customerType === "dscp") return "DSCP";
+  if (customerType === "dua_sap_trai") return "Dừa sáp trái";
+  if (customerType === "dua_giong") return "Dừa giống";
   if (customerType === "khach_le") return "Khách lẻ";
   return "Đại lý";
 }
@@ -722,7 +732,8 @@ async function buildNewCustomerPayloadV2({
       LastLocation: formatCustomerLocationName(customerAddress),
       WardId: null,
       NameEInvoice: invoiceName,
-      AddressEInvoice: invoiceAddress,
+      AddressEInvoice: invoiceAddress || customerAddressParts.street,
+      AddressEInvoiceCombine: invoiceAddress,
       AdministrativeAreaIdEInvoice: invoiceAddressDetails.districtId,
       AdministrativeAreaId: null,
       RetailerId: retailerId,
@@ -1355,6 +1366,7 @@ function buildGhnCreateOrderPayloads({
   invoicePayload,
   ghnShipping,
   senderName,
+  customerType,
   requiredNote = DEFAULT_GHN_REQUIRED_NOTE,
 }) {
   const invoice = invoicePayload?.Invoice || {};
@@ -1381,9 +1393,11 @@ function buildGhnCreateOrderPayloads({
   )
     ? requiredNote
     : DEFAULT_GHN_REQUIRED_NOTE;
+  const paymentTypeId =
+    customerType === "khach_le" && Number(invoice?.Total || 0) < 160000 ? 2 : 1;
 
   return pricingPackages.map((item, index) => ({
-    payment_type_id: 2,
+    payment_type_id: paymentTypeId,
     note: String(invoice?.Description || "").trim(),
     required_note: resolvedRequiredNote,
     return_phone: fromPhone,
@@ -1419,7 +1433,7 @@ function buildGhnCreateOrderPayloads({
     pick_station_id: null,
     deliver_station_id: null,
     insurance_value: Math.min(
-      10000000,
+      5000000,
       Math.max(0, Math.round(packageValues[index] || 0)),
     ),
     service_type_id: item.serviceTypeId,
@@ -1786,6 +1800,93 @@ function getSinglePromotionSelection(productSelections = {}) {
   );
 }
 
+function mergeInvoicePromotionsByCampaign(promotions = []) {
+  const mergedPromotions = new Map();
+
+  promotions.forEach((promotion) => {
+    const key = `${promotion?.PromotionId ?? ""}:${promotion?.SalePromotionId ?? ""}`;
+    const current = mergedPromotions.get(key);
+
+    if (!current) {
+      mergedPromotions.set(key, {
+        ...promotion,
+        __productIds: new Set(
+          String(promotion?.ProductIds || promotion?.ProductId || "")
+            .split(",")
+            .map((id) => id.trim())
+            .filter(Boolean),
+        ),
+        __relatedProductQuantities: new Map([
+          [
+            String(promotion?.RelatedProductId || ""),
+            Number(promotion?.RelatedProductQty || 0),
+          ],
+        ]),
+        __promotionInfos: new Set([promotion?.PromotionInfo].filter(Boolean)),
+        __printPromotionInfos: new Set(
+          [promotion?.PrintPromotionInfo].filter(Boolean),
+        ),
+      });
+      return;
+    }
+
+    String(promotion?.ProductIds || promotion?.ProductId || "")
+      .split(",")
+      .map((id) => id.trim())
+      .filter(Boolean)
+      .forEach((id) => current.__productIds.add(id));
+
+    const relatedProductId = String(promotion?.RelatedProductId || "");
+    const relatedProductQuantity = Number(promotion?.RelatedProductQty || 0);
+    current.__relatedProductQuantities.set(
+      relatedProductId,
+      Math.max(
+        current.__relatedProductQuantities.get(relatedProductId) || 0,
+        relatedProductQuantity,
+      ),
+    );
+    current.ProductQty =
+      Number(current.ProductQty || 0) + Number(promotion?.ProductQty || 0);
+    if (promotion?.PromotionInfo) {
+      current.__promotionInfos.add(promotion.PromotionInfo);
+    }
+    if (promotion?.PrintPromotionInfo) {
+      current.__printPromotionInfos.add(promotion.PrintPromotionInfo);
+    }
+  });
+
+  return [...mergedPromotions.values()].map((promotion) => {
+    const {
+      __productIds,
+      __relatedProductQuantities,
+      __promotionInfos,
+      __printPromotionInfos,
+      ...mergedPromotion
+    } = promotion;
+    const productIds = [...__productIds];
+    const relatedProductIds = [...__relatedProductQuantities.keys()].filter(
+      Boolean,
+    );
+
+    return {
+      ...mergedPromotion,
+      ProductId: Number(productIds[0]) || mergedPromotion.ProductId,
+      ProductIds: productIds.join(","),
+      RelatedProductId:
+        Number(relatedProductIds[0]) || mergedPromotion.RelatedProductId,
+      RelatedProductIds: relatedProductIds.join(","),
+      RelatedProductQty: [...__relatedProductQuantities.values()].reduce(
+        (sum, quantity) => sum + quantity,
+        0,
+      ),
+      PromotionInfo: [...__promotionInfos].join("; "),
+      ...(__printPromotionInfos.size > 0
+        ? { PrintPromotionInfo: [...__printPromotionInfos].join("; ") }
+        : {}),
+    };
+  });
+}
+
 function applySelectedPromotions({
   invoiceDetails = [],
   parsedItems = [],
@@ -1980,7 +2081,7 @@ function applySelectedPromotions({
 
   return {
     invoiceDetails: nextLines,
-    invoicePromotions,
+    invoicePromotions: mergeInvoicePromotionsByCampaign(invoicePromotions),
     productDiscount,
     totalTax: nextTotalTax,
     totalAfterTax: nextTotalAfterTax,
@@ -2189,12 +2290,21 @@ function pickLowestVtpService(responsePayload = {}) {
   );
 }
 
+function getVtpServiceCode(retailer = "") {
+  return String(retailer || "")
+    .trim()
+    .toLowerCase() === "vietnhattv"
+    ? "ECOD"
+    : "VSL5";
+}
+
 function buildVtpCheckPricePayload({
   parsed,
   totalBeforeDiscount,
   totalProductPrice,
   totalWeight,
   invoiceUuid,
+  serviceCode,
 }) {
   const productQuantity = (parsed?.items || []).reduce(
     (sum, item) => sum + (Number(item?.quantity || 0) || 0),
@@ -2211,38 +2321,7 @@ function buildVtpCheckPricePayload({
     MONEY_COLLECTION: totalProductPrice,
     PRODUCT_PRICE: totalBeforeDiscount,
     UUID: invoiceUuid,
-    SERVICES: [
-      { CODE: "VTK" },
-      { CODE: "PHS" },
-      { CODE: "LCOD" },
-      { CODE: "VCBO" },
-      { CODE: "VSL3" },
-      { CODE: "VSL1" },
-      { CODE: "VSL5" },
-      { CODE: "VSL2" },
-      { CODE: "VSL6" },
-      { CODE: "VSL4" },
-      { CODE: "VSL7" },
-      { CODE: "VCK" },
-      { CODE: "ECOD" },
-      { CODE: "SCOD" },
-      { CODE: "QTK" },
-      { CODE: "VMCH" },
-      { CODE: "VMCV" },
-      { CODE: "EDC" },
-      { CODE: "EDS" },
-      { CODE: "VCG" },
-      { CODE: "VSL8" },
-      { CODE: "VNT" },
-      { CODE: "BTK" },
-      { CODE: "VSL9" },
-      { CODE: "VBAY" },
-      { CODE: "V2CK" },
-      { CODE: "V1CK" },
-      { CODE: "STK" },
-      { CODE: "V1NS" },
-      { CODE: "VDL" },
-    ],
+    SERVICES: [{ CODE: serviceCode }],
     SERVICE_EXTRA: VTP_DEFAULT_SERVICE_EXTRA,
   };
 }
@@ -2386,12 +2465,14 @@ async function buildDeliveryDetailPayload({
 
   onProgress?.("address", "success", "Lấy địa chỉ giao hàng thành công.");
 
+  const requestedVtpServiceCode = getVtpServiceCode(retailer);
   const checkPricePayload = buildVtpCheckPricePayload({
     parsed,
     totalBeforeDiscount,
     totalProductPrice,
     totalWeight,
     invoiceUuid,
+    serviceCode: requestedVtpServiceCode,
   });
   console.log("TaoDonHang VTP check price payload", checkPricePayload);
   onProgress?.("price", "loading", "Đang tính phí vận chuyển Viettel Post...");
@@ -2408,7 +2489,10 @@ async function buildDeliveryDetailPayload({
     "success",
     `Tính phí Viettel Post thành công: ${selectedVtpFee.toLocaleString("vi-VN")}đ.`,
   );
-  const selectedVtpServiceCode = selectedVtpService?.code || "VTK";
+  const selectedVtpServiceCode =
+    selectedVtpService?.code ||
+    selectedVtpService?.Code ||
+    requestedVtpServiceCode;
   const selectedVtpServiceName =
     selectedVtpService?.name || selectedVtpServiceCode;
   const selectedVtpServiceImage =
@@ -2747,7 +2831,7 @@ function parseRawOrder(rawText = "") {
       .replace(/\s+/g, " ")
       .trim();
     const keyMatch = line.match(
-      /^(Khách hàng|SĐT|Số điện thoại|Địa chỉ cũ|Địa chỉ mới|Địa chỉ|NVC)\s*:\s*(.+)$/iu,
+      /^(Khách hàng|SĐT|Số điện thoại|Địa chỉ cũ|Địa chỉ mới|Địa chỉ|ĐC CŨ|ĐC MỚI|NVC)\s*:\s*(.+)$/iu,
     );
 
     if (keyMatch) {
@@ -2756,8 +2840,12 @@ function parseRawOrder(rawText = "") {
 
       if (key === "khách hàng") result.customerName = value;
       if (key === "sđt" || key === "số điện thoại") result.phoneNumber = value;
-      if (key === "địa chỉ cũ" || key === "địa chỉ") result.oldAddress = value;
-      if (key === "địa chỉ mới") result.newAddress = value;
+      if (key === "địa chỉ cũ" || key === "địa chỉ" || key === "đc cũ") {
+        result.oldAddress = value;
+      }
+      if (key === "địa chỉ mới" || key === "đc mới") {
+        result.newAddress = value;
+      }
       if (key === "nvc") result.nvc = value;
       continue;
     }
@@ -2771,6 +2859,22 @@ function parseRawOrder(rawText = "") {
         quantity: Number(compactItemMatch[1] || 0),
         productName: "",
         sku: compactItemMatch[2].trim(),
+        price: null,
+        unit: "",
+        rawLine: line,
+      });
+      continue;
+    }
+
+    const parenthesizedSkuMatch = normalizedLine.match(
+      /^(\d+)\s+(.+?)\s*\(([A-Za-z0-9._-]+)\)$/u,
+    );
+
+    if (parenthesizedSkuMatch) {
+      result.items.push({
+        quantity: Number(parenthesizedSkuMatch[1] || 0),
+        productName: parenthesizedSkuMatch[2].trim(),
+        sku: parenthesizedSkuMatch[3].trim(),
         price: null,
         unit: "",
         rawLine: line,
@@ -2940,7 +3044,13 @@ function CreateOrderProgressPanel({ steps = [], error = "", isCreating }) {
 }
 
 export default function TaoDonHang() {
-  const [selectedShippingPartner, setSelectedShippingPartner] = useState("GHN");
+  const { user } = useAuth() || {};
+  const hasMappedUserRetailerRef = useRef(false);
+  const [selectedRetailerId, setSelectedRetailerId] = useState(() =>
+    mapTeamIdToRetailerId(user?.teamId),
+  );
+  const [selectedShippingPartner, setSelectedShippingPartner] =
+    useState("VTPFW");
   const [ghnRequiredNote, setGhnRequiredNote] = useState(
     DEFAULT_GHN_REQUIRED_NOTE,
   );
@@ -2962,6 +3072,14 @@ export default function TaoDonHang() {
   const [createOrderProgress, setCreateOrderProgress] = useState([]);
   const [createOrderError, setCreateOrderError] = useState("");
   const [promotionSelections, setPromotionSelections] = useState({});
+  const [shippingQuotePreview, setShippingQuotePreview] = useState({
+    status: "idle",
+    fee: null,
+    productTotal: null,
+    serviceCode: "",
+    serviceName: "",
+    error: "",
+  });
   const [orderPreparation, setOrderPreparation] = useState({
     status: "idle",
     key: "",
@@ -2976,11 +3094,6 @@ export default function TaoDonHang() {
   });
   const [tokenLoading, setTokenLoading] = useState(false);
   const [, setTokenError] = useState("");
-  const { user } = useAuth() || {};
-  const selectedRetailerId = useMemo(
-    () => mapTeamIdToRetailerId(user?.teamId),
-    [user?.teamId],
-  );
   const selectedRetailer = useMemo(
     () =>
       RETAILERS.find(
@@ -2996,6 +3109,16 @@ export default function TaoDonHang() {
     () => getCustomerTypeOptions(selectedRetailerId),
     [selectedRetailerId],
   );
+  const shippingLabel =
+    SHIPPING_PARTNERS.find((item) => item.id === selectedShippingPartner)
+      ?.label || selectedShippingPartner;
+
+  useEffect(() => {
+    if (hasMappedUserRetailerRef.current || !user?.teamId) return;
+
+    setSelectedRetailerId(mapTeamIdToRetailerId(user.teamId));
+    hasMappedUserRetailerRef.current = true;
+  }, [user?.teamId]);
 
   const updateCreateOrderProgress = (id, status, message) => {
     setCreateOrderProgress((current) =>
@@ -3416,6 +3539,166 @@ export default function TaoDonHang() {
     });
   });
 
+  useEffect(() => {
+    let active = true;
+    let timerId = null;
+
+    if (
+      !isOrderPreparationReady ||
+      !promotionSelectionsAreComplete ||
+      !accessPrivateToken ||
+      !accessToken ||
+      parsed.items.length === 0
+    ) {
+      setShippingQuotePreview({
+        status: "idle",
+        fee: null,
+        productTotal: null,
+        serviceCode: "",
+        serviceName: "",
+        error: "",
+      });
+      return () => {
+        active = false;
+      };
+    }
+
+    setShippingQuotePreview((current) => ({
+      ...current,
+      status: "loading",
+      error: "",
+    }));
+
+    timerId = window.setTimeout(async () => {
+      try {
+        const invoiceDetailsResult = await buildInvoiceDetailLines(
+          parsed.items,
+          {
+            retailer: selectedRetailerId,
+            accessPrivateToken,
+            accessToken,
+            customerType,
+            productMap: orderPreparation.productMap,
+          },
+        );
+        const promotionResult = applySelectedPromotions({
+          invoiceDetails: invoiceDetailsResult.lines || [],
+          parsedItems: parsed.items,
+          productMap: orderPreparation.productMap,
+          productCampaignMap: orderPreparation.productCampaignMap,
+          promotionProductMap: orderPreparation.promotionProductMap,
+          promotionSelections,
+          customerType,
+          totalTax: invoiceDetailsResult.totalTax || 0,
+          totalAfterTax: invoiceDetailsResult.totalAfterTax || 0,
+        });
+        const invoiceDetails = promotionResult.invoiceDetails;
+        const invoiceAddress = String(
+          effectiveParsed.oldAddress || effectiveParsed.newAddress || "",
+        ).trim();
+        const deliveryParts = parseVietnamAddressParts(invoiceAddress);
+        const deliveryAddressText = [
+          deliveryParts.street,
+          deliveryParts.ward,
+          deliveryParts.district,
+          deliveryParts.province,
+        ]
+          .map((value) => normalizeDisplayText(value))
+          .filter(Boolean)
+          .join(", ");
+        const selectedPartnerDelivery = getSelectedPartnerDelivery(
+          partnerDeliveries,
+          selectedShippingPartner,
+        );
+        const partnerCode =
+          selectedPartnerDelivery?.code ||
+          selectedPartnerDelivery?.Code ||
+          selectedPartnerDelivery?.CompareCode ||
+          selectedShippingPartner;
+        const partnerName =
+          selectedPartnerDelivery?.name ||
+          selectedPartnerDelivery?.Name ||
+          selectedPartnerDelivery?.CompareName ||
+          selectedShippingPartner;
+        const customerRecord = orderPreparation.customerRecord || {};
+        const quoteResult = await buildDeliveryDetailPayload({
+          parsed: effectiveParsed,
+          customerId:
+            customerRecord?.Id ??
+            customerRecord?.id ??
+            customerRecord?.CustomerId ??
+            null,
+          customerCode:
+            customerRecord?.Code ||
+            customerRecord?.CompareCode ||
+            customerRecord?.CustomerCode ||
+            "",
+          totalBeforeDiscount: invoiceDetailsResult.totalBeforeDiscount || 0,
+          totalProductPrice: promotionResult.totalAfterTax || 0,
+          totalWeight: getInvoiceTotalWeight(invoiceDetails),
+          invoiceDetails,
+          selectedShippingPartner,
+          selectedPartnerDelivery,
+          partnerCode,
+          partnerName,
+          retailerId: getRetailerConfig(selectedRetailerId)?.retailerId ?? null,
+          soldById: matchedKiotUser?.Id ?? matchedKiotUser?.UserId ?? null,
+          invoiceAddress,
+          deliveryParts,
+          deliveryAddressText,
+          accessPrivateToken,
+          accessToken,
+          retailer: selectedRetailerId,
+          invoiceUuid:
+            globalThis?.crypto?.randomUUID?.() ||
+            `quote-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+          resolvedAddressDetails:
+            orderPreparation.addressDetails.get(invoiceAddress),
+        });
+        const deliveryDetail = quoteResult?.deliveryDetail || quoteResult;
+
+        if (!active) return;
+        setShippingQuotePreview({
+          status: "success",
+          fee: Number(deliveryDetail?.FeeShip || 0),
+          productTotal: Number(promotionResult.totalAfterTax || 0),
+          serviceCode: String(deliveryDetail?.ServiceCode || ""),
+          serviceName: String(deliveryDetail?.ServiceCodeText || ""),
+          error: "",
+        });
+      } catch (error) {
+        if (!active) return;
+        setShippingQuotePreview({
+          status: "error",
+          fee: null,
+          productTotal: null,
+          serviceCode: "",
+          serviceName: "",
+          error: error?.message || "Không tính được phí vận chuyển.",
+        });
+      }
+    }, 400);
+
+    return () => {
+      active = false;
+      if (timerId !== null) window.clearTimeout(timerId);
+    };
+  }, [
+    accessPrivateToken,
+    accessToken,
+    customerType,
+    effectiveParsed,
+    isOrderPreparationReady,
+    matchedKiotUser,
+    orderPreparation,
+    parsed.items,
+    partnerDeliveries,
+    promotionSelections,
+    promotionSelectionsAreComplete,
+    selectedRetailerId,
+    selectedShippingPartner,
+  ]);
+
   const handlePromotionCampaignToggle = (
     productCode,
     campaignId,
@@ -3489,7 +3772,7 @@ export default function TaoDonHang() {
   };
 
   const handleReset = () => {
-    setSelectedShippingPartner("GHN");
+    setSelectedShippingPartner("VTPFW");
     setGhnRequiredNote(DEFAULT_GHN_REQUIRED_NOTE);
     setCustomerType("dai_ly");
     setAgencyTaxCode("");
@@ -3694,6 +3977,7 @@ export default function TaoDonHang() {
         const ghnOrderPayloads = buildGhnCreateOrderPayloads({
           invoicePayload,
           ghnShipping,
+          customerType,
           requiredNote: ghnRequiredNote,
           senderName:
             getKiotUserDisplayName(matchedKiotUser) ||
@@ -3882,18 +4166,30 @@ export default function TaoDonHang() {
 
             <div className="space-y-4 px-5 py-5">
               <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                <div className="rounded-xl border border-cyan-100 bg-cyan-50/70 px-3 py-2.5 text-sm text-cyan-900 md:col-span-1">
-                  <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-cyan-700">
-                    Công ty hiện tại
-                  </div>
-                  <div className="mt-1 font-semibold">
-                    {selectedRetailer.label}
-                  </div>
-                  <div className="text-xs text-cyan-700/80">
-                    Team: {user?.teamId || "Chưa có"} - Retailer:{" "}
-                    {selectedRetailerId}
-                  </div>
-                </div>
+                <label className="block space-y-2">
+                  <span className="text-xs font-semibold text-slate-600">
+                    Công ty
+                  </span>
+                  <select
+                    value={selectedRetailerId}
+                    onChange={(event) => {
+                      setSelectedRetailerId(event.target.value);
+                      setPreparedInvoicePayload(null);
+                      setCreateOrderProgress([]);
+                      setCreateOrderError("");
+                    }}
+                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100"
+                  >
+                    {RETAILERS.map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.label}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="block text-[11px] text-slate-400">
+                    Mặc định theo team {user?.teamId || "chưa xác định"}
+                  </span>
+                </label>
                 <label className="block space-y-2">
                   <span className="text-xs font-semibold text-slate-600">
                     Đối tác giao hàng
@@ -3914,7 +4210,7 @@ export default function TaoDonHang() {
                 <label className="block space-y-2">
                   <span className="text-xs font-semibold text-slate-600">
                     {selectedRetailerId.toLowerCase() === "abctv"
-                      ? "Phân bón"
+                      ? "Nhóm khách hàng"
                       : "Đại lý / khách lẻ"}
                   </span>
                   <select
@@ -4045,6 +4341,78 @@ export default function TaoDonHang() {
                 {orderPreparationMessage}
               </div>
 
+              <div
+                className={`rounded-2xl border px-4 py-3 ${
+                  shippingQuotePreview.status === "success"
+                    ? "border-emerald-200 bg-emerald-50"
+                    : shippingQuotePreview.status === "error"
+                      ? "border-rose-200 bg-rose-50"
+                      : "border-sky-200 bg-sky-50"
+                }`}
+                aria-live="polite"
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-sky-700">
+                      Phí vận chuyển dự kiến
+                    </div>
+                    <div className="mt-1 text-xs text-slate-500">
+                      {shippingLabel}
+                    </div>
+                  </div>
+                  {shippingQuotePreview.status === "loading" ? (
+                    <LoaderCircle className="h-5 w-5 animate-spin text-sky-600" />
+                  ) : null}
+                </div>
+
+                <div className="mt-2">
+                  {shippingQuotePreview.status === "success" ? (
+                    <>
+                      <div className="mb-2 flex items-center justify-between gap-3 rounded-xl border border-white/80 bg-white/70 px-3 py-2">
+                        <span className="text-sm font-semibold text-slate-600">
+                          Tổng tiền sản phẩm
+                        </span>
+                        <span className="text-base font-black text-slate-900">
+                          {Number(
+                            shippingQuotePreview.productTotal || 0,
+                          ).toLocaleString("vi-VN")}
+                          đ
+                        </span>
+                      </div>
+                      <div className="text-xl font-black text-emerald-700">
+                        {Number(shippingQuotePreview.fee || 0).toLocaleString(
+                          "vi-VN",
+                        )}
+                        đ
+                      </div>
+                      {shippingQuotePreview.serviceCode ||
+                      shippingQuotePreview.serviceName ? (
+                        <div className="mt-1 text-xs text-emerald-700/80">
+                          Dịch vụ: {shippingQuotePreview.serviceName || "VTPFW"}
+                          {shippingQuotePreview.serviceCode
+                            ? ` (${shippingQuotePreview.serviceCode})`
+                            : ""}
+                        </div>
+                      ) : null}
+                    </>
+                  ) : shippingQuotePreview.status === "error" ? (
+                    <div className="text-sm font-medium text-rose-700">
+                      {shippingQuotePreview.error}
+                    </div>
+                  ) : shippingQuotePreview.status === "loading" ? (
+                    <div className="text-sm font-medium text-sky-700">
+                      Đang kiểm tra phí sau khi áp dụng sản phẩm và khuyến
+                      mãi...
+                    </div>
+                  ) : (
+                    <div className="text-sm text-slate-500">
+                      Hoàn tất kiểm tra sản phẩm và lựa chọn khuyến mãi để xem
+                      phí.
+                    </div>
+                  )}
+                </div>
+              </div>
+
               <div className="flex flex-wrap gap-2">
                 <button
                   type="button"
@@ -4127,7 +4495,7 @@ export default function TaoDonHang() {
             </div> */}
 
             <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-              {/* <div className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-700">
+              <div className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-700">
                 Thông tin đã tách
               </div>
 
@@ -4137,7 +4505,7 @@ export default function TaoDonHang() {
                 <FieldCard label="Địa chỉ cũ" value={parsed.oldAddress} />
                 <FieldCard label="Địa chỉ mới" value={parsed.newAddress} />
                 <FieldCard label="NVC" value={parsed.nvc} />
-              </div> */}
+              </div>
 
               {/* <div className="mt-4 rounded-2xl border border-cyan-100 bg-cyan-50/60 px-4 py-3">
                 <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-cyan-700">
@@ -4392,10 +4760,10 @@ export default function TaoDonHang() {
                                               return (
                                                 <label
                                                   key={productId}
-                                                  className="flex items-center gap-3 rounded-xl border border-emerald-100 bg-white px-3 py-2"
+                                                  className="flex items-start gap-2 rounded-xl border border-emerald-100 bg-white px-2.5 py-2"
                                                 >
                                                   <div className="min-w-0 flex-1">
-                                                    <div className="truncate text-xs font-semibold text-slate-800">
+                                                    <div className="break-words text-xs font-semibold leading-4 text-slate-800">
                                                       {receivedProduct
                                                         ? getProductDisplayName(
                                                             receivedProduct,
@@ -4424,7 +4792,7 @@ export default function TaoDonHang() {
                                                         event.target.value,
                                                       )
                                                     }
-                                                    className="w-20 rounded-lg border border-slate-200 px-2 py-1.5 text-center text-sm outline-none focus:border-emerald-300"
+                                                    className="w-12 shrink-0 rounded-lg border border-slate-200 px-1 py-1.5 text-center text-sm outline-none focus:border-emerald-300"
                                                   />
                                                 </label>
                                               );

@@ -102,14 +102,42 @@ const parseMoneyValue = (value) => {
 const getExcelMoneyValue = (row = {}) =>
   parseMoneyValue(row["Tiền thu hộ(VNĐ)"] ?? row["Tiền hàng"] ?? row["(1)"]);
 
-const getOrderDeliveryMoneyValue = (orderDelivery = {}) =>
-  parseMoneyValue(orderDelivery.TotalCod);
+const getOrderDeliveryInvoiceTotalValue = (orderDelivery = {}) =>
+  parseMoneyValue(orderDelivery.invoiceTotal);
 
-const isOrderDeliveryMoneyMismatch = (row = {}, orderDelivery = {}) => {
+const getExcelDeliveryFeeRawValue = (row = {}) =>
+  row["Phí giao hàng"] ??
+  row["Tiền cước (VNĐ)"] ??
+  row["Phí ship NVC thu"] ??
+  row["(5)"];
+
+const getExcelDeliveryFeeValue = (row = {}) =>
+  parseMoneyValue(getExcelDeliveryFeeRawValue(row));
+
+const getOrderDeliveryFeeValue = (orderDelivery = {}) =>
+  parseMoneyValue(orderDelivery.totalPrice);
+
+const getOrderDeliveryMoneyMismatch = (row = {}, orderDelivery = {}) => {
   const excelMoneyValue = getExcelMoneyValue(row);
-  const orderDeliveryMoneyValue = getOrderDeliveryMoneyValue(orderDelivery);
+  const orderDeliveryMoneyValue =
+    getOrderDeliveryInvoiceTotalValue(orderDelivery);
+  const isGhnRow = row.__sourceFormat === "ghn";
+  const excelDeliveryFeeValue = getExcelDeliveryFeeValue(row);
+  const orderDeliveryFeeValue = getOrderDeliveryFeeValue(orderDelivery);
 
-  return excelMoneyValue > 0 && excelMoneyValue > orderDeliveryMoneyValue;
+  const isCodMismatch =
+    excelMoneyValue > 0 && excelMoneyValue > orderDeliveryMoneyValue;
+  const isGhnDeliveryFeeMismatch =
+    isGhnRow &&
+    normalizeText(orderDelivery.totalPrice) !== "" &&
+    (normalizeText(getExcelDeliveryFeeRawValue(row)) === "" ||
+      excelDeliveryFeeValue !== orderDeliveryFeeValue);
+
+  return {
+    isCodMismatch,
+    isGhnDeliveryFeeMismatch,
+    hasMismatch: isCodMismatch || isGhnDeliveryFeeMismatch,
+  };
 };
 
 const extractKiotResponseStatus = (error) =>
@@ -186,7 +214,18 @@ const buildOrderDeliveryValidationErrorSummary = (rows = []) => {
         reasons.push("thiếu mã hóa đơn");
       }
 
-      if (row.__orderDeliveryMoneyMismatch === true) {
+      if (row.__orderDeliveryFeeMismatch === true) {
+        reasons.push("Tiền phí không khớp với Kiot");
+      }
+      if (row.__orderDeliveryCodMismatch === true) {
+        reasons.push("Tiền thu hộ vượt quá so với Kiot");
+      }
+
+      if (
+        row.__orderDeliveryMoneyMismatch === true &&
+        row.__orderDeliveryCodMismatch !== true &&
+        row.__orderDeliveryFeeMismatch !== true
+      ) {
         reasons.push("lệch tiền");
       }
 
@@ -244,41 +283,46 @@ const stripOrderDeliveryData = (row) => {
     __orderDeliveryLoaded,
     __orderDeliveryMissingInvoice,
     __orderDeliveryMoneyMismatch,
+    __orderDeliveryCodMismatch,
+    __orderDeliveryFeeMismatch,
     ...rest
   } = row || {};
   return rest;
 };
 
-const mergeOrderDeliveryIntoRow = (row, orderDelivery) => ({
-  ...row,
-  "Mã HD Kiot":
-    normalizeText(orderDelivery.invoiceId || orderDelivery.invoiceIdCode) ||
-    row["Mã HD Kiot"] ||
-    "",
-  "Đối tác chuyển tiền":
-    orderDelivery.partnerDeliveryName || row["Đối tác chuyển tiền"] || "",
-  "Nhân viên":
-    orderDelivery.employeeName ||
-    orderDelivery.givenName ||
-    row["Nhân viên"] ||
-    "",
-  "Tiền hàng":
-    row["Tiền thu hộ(VNĐ)"] ?? row["(1)"] ?? orderDelivery.invoiceTotal ?? "",
-  "Phí ship NVC thu":
-    row["Tiền cước (VNĐ)"] ?? row["(5)"] ?? orderDelivery.totalPrice ?? "",
-  "Số điện thoại": orderDelivery.phoneNumber || row["Số điện thoại"] || "",
-  PartnerName: orderDelivery.partnerDeliveryName || row.PartnerName || "",
-  PartnerCode: orderDelivery.partnerDeliveryCode || row.PartnerCode || "",
-  __orderDelivery: orderDelivery,
-  __orderDeliveryLoaded: true,
-  __orderDeliveryMissingInvoice: !normalizeText(
-    orderDelivery.invoiceId || orderDelivery.invoiceIdCode,
-  ),
-  __orderDeliveryMoneyMismatch: isOrderDeliveryMoneyMismatch(
-    row,
-    orderDelivery,
-  ),
-});
+const mergeOrderDeliveryIntoRow = (row, orderDelivery) => {
+  const moneyMismatch = getOrderDeliveryMoneyMismatch(row, orderDelivery);
+
+  return {
+    ...row,
+    "Mã HD Kiot":
+      normalizeText(orderDelivery.invoiceId || orderDelivery.invoiceIdCode) ||
+      row["Mã HD Kiot"] ||
+      "",
+    "Đối tác chuyển tiền":
+      orderDelivery.partnerDeliveryName || row["Đối tác chuyển tiền"] || "",
+    "Nhân viên":
+      orderDelivery.employeeName ||
+      orderDelivery.givenName ||
+      row["Nhân viên"] ||
+      "",
+    "Tiền hàng":
+      row["Tiền thu hộ(VNĐ)"] ?? row["(1)"] ?? orderDelivery.invoiceTotal ?? "",
+    "Phí ship NVC thu":
+      row["Tiền cước (VNĐ)"] ?? row["(5)"] ?? orderDelivery.totalPrice ?? "",
+    "Số điện thoại": orderDelivery.phoneNumber || row["Số điện thoại"] || "",
+    PartnerName: orderDelivery.partnerDeliveryName || row.PartnerName || "",
+    PartnerCode: orderDelivery.partnerDeliveryCode || row.PartnerCode || "",
+    __orderDelivery: orderDelivery,
+    __orderDeliveryLoaded: true,
+    __orderDeliveryMissingInvoice: !normalizeText(
+      orderDelivery.invoiceId || orderDelivery.invoiceIdCode,
+    ),
+    __orderDeliveryMoneyMismatch: moneyMismatch.hasMismatch,
+    __orderDeliveryCodMismatch: moneyMismatch.isCodMismatch,
+    __orderDeliveryFeeMismatch: moneyMismatch.isGhnDeliveryFeeMismatch,
+  };
+};
 
 export default function CashFlowApp() {
   const { user, token } = useAuth();
@@ -291,6 +335,8 @@ export default function CashFlowApp() {
   const [partnerDeliveryError, setPartnerDeliveryError] = useState("");
   const [bankAccounts, setBankAccounts] = useState([]);
   const [bankAccountError, setBankAccountError] = useState("");
+  const [isInitializingRetailerData, setIsInitializingRetailerData] =
+    useState(true);
   const [fileInfo, setFileInfo] = useState(null);
   const [sheetName, setSheetName] = useState("");
   const [sourceWorkbook, setSourceWorkbook] = useState(null);
@@ -537,10 +583,13 @@ export default function CashFlowApp() {
     let ignore = false;
 
     async function loadRetailerData() {
+      setIsInitializingRetailerData(true);
       setPartnerDeliveryError("");
       setBankAccountError("");
       setPartnerDeliveries([]);
       setBankAccounts([]);
+      setCurrentAccessToken("");
+      setCurrentAccessPrivateToken("");
 
       try {
         const accessToken = await getAccessToken(retailer);
@@ -565,6 +614,10 @@ export default function CashFlowApp() {
           setBankAccountError(
             error.message || "Không lấy được danh sách bank account",
           );
+        }
+      } finally {
+        if (!ignore) {
+          setIsInitializingRetailerData(false);
         }
       }
     }
@@ -633,8 +686,7 @@ export default function CashFlowApp() {
       payloadSourceRows.filter(
         (row) =>
           hasCashflowInvoiceId(row) &&
-          !row.__orderDeliveryMissingInvoice &&
-          !row.__orderDeliveryMoneyMismatch,
+          !row.__orderDeliveryMissingInvoice,
       ),
     [payloadSourceRows],
   );
@@ -1199,7 +1251,30 @@ export default function CashFlowApp() {
   };
 
   return (
-    <div className="min-h-screen w-full bg-[radial-gradient(circle_at_top_left,rgba(14,165,233,0.16),transparent_34%),radial-gradient(circle_at_top_right,rgba(16,185,129,0.12),transparent_28%),linear-gradient(180deg,#f8fbff_0%,#f3f8ff_46%,#eef6f4_100%)] p-3.5 text-left text-sm text-slate-900 sm:p-6">
+    <div
+      className="min-h-screen w-full bg-[radial-gradient(circle_at_top_left,rgba(14,165,233,0.16),transparent_34%),radial-gradient(circle_at_top_right,rgba(16,185,129,0.12),transparent_28%),linear-gradient(180deg,#f8fbff_0%,#f3f8ff_46%,#eef6f4_100%)] p-3.5 text-left text-sm text-slate-900 sm:p-6"
+      aria-busy={isInitializingRetailerData}
+    >
+      {isInitializingRetailerData && (
+        <div
+          className="fixed inset-0 z-[200] grid place-items-center bg-slate-950/45 p-5 backdrop-blur-sm"
+          role="status"
+          aria-live="polite"
+          aria-label="Đang tải dữ liệu KiotViet"
+        >
+          <div className="flex w-full max-w-sm flex-col items-center rounded-[28px] border border-white/70 bg-white/95 px-7 py-8 text-center shadow-[0_32px_100px_rgba(15,23,42,0.35)]">
+            <span className="h-12 w-12 animate-spin rounded-full border-4 border-sky-100 border-t-sky-600" />
+            <strong className="mt-5 text-base font-black text-slate-900">
+              Đang tải dữ liệu KiotViet
+            </strong>
+            <p className="mt-2 text-xs font-semibold leading-5 text-slate-500">
+              Đang khởi tạo token, đối tác giao hàng và tài khoản ngân hàng cho {" "}
+              <span className="font-black text-slate-700">{retailer}</span>.
+              Vui lòng đợi tải xong trước khi thao tác.
+            </p>
+          </div>
+        </div>
+      )}
       <div className="mx-auto mb-4 max-w-[1600px] rounded-[22px] border border-slate-400/20 bg-white/85 p-4 shadow-[0_16px_40px_rgba(15,23,42,0.08)] backdrop-blur-xl">
         <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
           <div></div>

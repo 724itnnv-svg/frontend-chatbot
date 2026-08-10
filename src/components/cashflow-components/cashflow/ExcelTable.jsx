@@ -109,11 +109,11 @@ export default function ExcelTable({
       <div className="mb-4 flex flex-col items-start justify-between gap-3.5 md:flex-row [&_h2]:m-0 [&_h2]:text-lg [&_h2]:font-black [&_h2]:leading-[1.2] [&_h2]:tracking-[-0.03em] [&_h2]:text-slate-900 [&_p]:mt-1.5 [&_p]:text-xs [&_p]:leading-[1.55] [&_p]:text-slate-500">
         <div>
           <h2>Bảng Excel</h2>
-          <p>
+          {/* <p>
             Đang hiển thị {rows.length} dòng. Đã chọn {selectedCountInView} dòng
             trong vùng lọc hiện tại. Kéo thả tiêu đề cột để đổi thứ tự.
             <strong> Nhấn đúp vào ô bất kỳ để sửa.</strong>
-          </p>
+          </p> */}
         </div>
 
         <div className="flex w-full flex-wrap items-end justify-stretch gap-2.5 md:w-auto md:justify-end [&>*]:flex-auto md:[&>*]:flex-none">
@@ -124,7 +124,9 @@ export default function ExcelTable({
             <input
               type="date"
               value={cashflowTransDate}
-              onChange={(event) => onCashflowTransDateChange(event.target.value)}
+              onChange={(event) =>
+                onCashflowTransDateChange(event.target.value)
+              }
               className="min-h-[44px] rounded-[14px] border border-slate-400/20 bg-white/95 px-3 py-[11px] text-xs font-bold text-slate-800 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-200"
               title="Để trống thì hệ thống sẽ lấy thời điểm hiện tại"
             />
@@ -180,7 +182,9 @@ export default function ExcelTable({
                   className={[
                     "cursor-grab select-none",
                     index === 0 ? "sticky left-[46px] z-[3] bg-inherit" : "",
-                    draggedHeader === header ? "cursor-grabbing opacity-60" : "",
+                    draggedHeader === header
+                      ? "cursor-grabbing opacity-60"
+                      : "",
                   ]
                     .filter(Boolean)
                     .join(" ")}
@@ -191,7 +195,9 @@ export default function ExcelTable({
                   onDragEnd={() => setDraggedHeader("")}
                   title="Kéo để đổi vị trí cột"
                 >
-                  <span className="mr-2 font-black tracking-[-0.12em] text-slate-400">⋮⋮</span>
+                  <span className="mr-2 font-black tracking-[-0.12em] text-slate-400">
+                    ⋮⋮
+                  </span>
                   <span>{header}</span>
                 </th>
               ))}
@@ -244,7 +250,9 @@ export default function ExcelTable({
                         <td
                           key={header}
                           className={
-                            index === 0 ? "sticky left-[46px] z-[1] bg-inherit" : ""
+                            index === 0
+                              ? "sticky left-[46px] z-[1] bg-inherit"
+                              : ""
                           }
                           // Bắt sự kiện double click để sửa
                           onDoubleClick={(e) => {
