@@ -1997,7 +1997,7 @@ export default function EinvoicesTab({
             </div>
           ) : null}
 
-          <div className="mt-5 rounded-[20px] border border-slate-200/90 bg-gradient-to-b from-slate-50 to-white p-4">
+          {/* <div className="mt-5 rounded-[20px] border border-slate-200/90 bg-gradient-to-b from-slate-50 to-white p-4">
             <div className="mb-2 flex items-center justify-between gap-3">
               <div className="text-[11px] font-extrabold uppercase tracking-[0.16em] text-slate-500">
                 Payload đã chọn
@@ -2033,7 +2033,7 @@ export default function EinvoicesTab({
                 ? JSON.stringify(previewPayloadRows, null, 2)
                 : "[]"}
             </pre>
-          </div>
+          </div> */}
         </aside>
       </section>
 

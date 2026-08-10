@@ -146,32 +146,17 @@ const extractKiotResponseStatus = (error) =>
   error?.response?.data?.ResponseStatus ||
   {};
 
-const extractKiotHttpStatus = (error) =>
-  error?.response?.status || error?.status || "";
-
 const formatKiotErrorMessage = (error) => {
   const responseStatus = extractKiotResponseStatus(error);
-  const httpStatus = extractKiotHttpStatus(error);
-  const errorCode = normalizeText(
-    responseStatus.ErrorCode ||
-      error?.errorCode ||
-      error?.response?.data?.error?.ErrorCode ||
-      error?.response?.data?.error?.ResponseStatus?.ErrorCode,
-  );
-  const message =
+  return (
     normalizeText(
       responseStatus.Message ||
         error?.response?.data?.error?.ResponseStatus?.Message ||
         error?.response?.data?.error?.message ||
         error?.response?.data?.message ||
         error?.message,
-    ) || "Không gửi được payload";
-
-  const parts = [];
-  if (httpStatus) parts.push(`HTTP ${httpStatus}`);
-  if (errorCode) parts.push(errorCode);
-
-  return parts.length > 0 ? `[${parts.join(" | ")}] ${message}` : message;
+    ) || "Không gửi được payload"
+  );
 };
 
 const buildPayloadErrorSummary = (detailRows = []) => {
@@ -231,27 +216,6 @@ const buildOrderDeliveryValidationErrorSummary = (rows = []) => {
 
       const reasonText = reasons.join(", ") || "Dữ liệu không hợp lệ";
       return `${deliveryCode ? `Mã vận đơn ${deliveryCode}: ` : ""}${reasonText}`;
-    })
-    .join("\n");
-};
-
-const buildFailedOrderDeliveryErrorSummary = (detailRows = []) => {
-  const failedRows = detailRows.filter((row) => row.failed > 0);
-
-  if (failedRows.length === 0) {
-    return "";
-  }
-
-  return failedRows
-    .map((row) => {
-      const deliveryCode = normalizeText(
-        row.details?.find((detail) => detail.deliveryCode)?.deliveryCode ||
-          row.deliveryCode ||
-          "",
-      );
-      const message = normalizeText(row.message || "Không gửi được payload");
-
-      return `${deliveryCode ? `Mã vận đơn ${deliveryCode}: ` : ""}${message}`;
     })
     .join("\n");
 };
@@ -988,9 +952,7 @@ export default function CashFlowApp() {
             status: "error",
             deliveryCode,
             errorCode: entryResult?.reason?.errorCode || "",
-            message: deliveryCode
-              ? `${deliveryCode}: ${errorMessage}`
-              : errorMessage,
+            message: errorMessage,
           });
         }
 
@@ -1012,15 +974,11 @@ export default function CashFlowApp() {
         });
       });
 
-      detailRows = Array.from(rowResults.values());
       const payloadErrorSummary = buildPayloadErrorSummary(detailRows);
-      const failedOrderDeliverySummary =
-        buildFailedOrderDeliveryErrorSummary(detailRows);
 
       const mergedPayloadErrorSummary = mergePayloadErrorSummaries(
         preSendErrorSummary,
         payloadErrorSummary,
-        failedOrderDeliverySummary,
       );
 
       if (mergedPayloadErrorSummary) {

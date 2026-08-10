@@ -1,10 +1,81 @@
 import { api } from "./api";
 import axios from "axios";
-// import { useAuth } from "../../context/AuthContext";
-// let { user, token } = useAuth();
 const tokenURL = "/api/cashflow";
 
-const Localtoken = localStorage.getItem("token");
+const cashflowApi = axios.create({
+  baseURL: tokenURL,
+  withCredentials: true,
+  headers: {
+    "Content-Type": "application/json",
+  },
+});
+const kiotDirectApi = axios.create();
+
+const KIOT_RETRY_DELAY_MS = 1000;
+const KIOT_RETRY_LIMIT = 1;
+const KIOT_RETRY_STATUS_CODES = new Set([401, 500, 504]);
+const SAFE_RETRY_POST_PATHS = new Set(["/token", "/login"]);
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const canSafelyRetryRequest = (config = {}) => {
+  const method = String(config.method || "get").toLowerCase();
+  if (["get", "head", "options"].includes(method)) return true;
+
+  return method === "post" && SAFE_RETRY_POST_PATHS.has(config.url);
+};
+
+const getFriendlyKiotErrorMessage = (status, retried) => {
+  const retryText = retried ? " Hệ thống đã tự thử lại 1 lần." : "";
+
+  if (status === 401) {
+    return `Phiên đăng nhập không còn hợp lệ hoặc chưa được máy chủ xác nhận.${retryText} Vui lòng đăng nhập lại nếu lỗi tiếp tục.`;
+  }
+  if (status === 500) {
+    return `Máy chủ Kiot đang gặp lỗi tạm thời.${retryText} Vui lòng thử lại sau ít phút.`;
+  }
+  if (status === 504) {
+    return `Kiot phản hồi quá chậm và đã hết thời gian chờ.${retryText} Vui lòng thử lại.`;
+  }
+
+  return "Không thể kết nối đến Kiot lúc này. Vui lòng thử lại.";
+};
+
+const attachKiotRetryInterceptor = (client) => {
+  client.interceptors.response.use(
+    (response) => response,
+    async (error) => {
+      const status = error.response?.status;
+      const config = error.config;
+      const retryCount = Number(config?.__kiotRetryCount || 0);
+      const shouldRetry =
+        config &&
+        KIOT_RETRY_STATUS_CODES.has(status) &&
+        retryCount < KIOT_RETRY_LIMIT &&
+        canSafelyRetryRequest(config);
+
+      if (shouldRetry) {
+        config.__kiotRetryCount = retryCount + 1;
+        await sleep(KIOT_RETRY_DELAY_MS);
+        return client.request(config);
+      }
+
+      if (KIOT_RETRY_STATUS_CODES.has(status)) {
+        const friendlyMessage = getFriendlyKiotErrorMessage(
+          status,
+          retryCount > 0,
+        );
+        error.userMessage = friendlyMessage;
+        error.message = friendlyMessage;
+      }
+
+      return Promise.reject(error);
+    },
+  );
+};
+
+attachKiotRetryInterceptor(cashflowApi);
+attachKiotRetryInterceptor(kiotDirectApi);
 
 const RETAILER_CONFIG = {
   kingfarm: {
@@ -55,10 +126,7 @@ export async function getEmployeesByRetailer(
 ) {
   const response = await api.get("/user", {
     params: { retailer, accessToken },
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${Localtoken}`,
-    },
+    withCredentials: true,
   });
 
   const payload = response.data;
@@ -75,16 +143,7 @@ export async function getEmployeesByRetailer(
 
 export async function getAccessToken(retailer = "kingfarm") {
   try {
-    const response = await axios.post(
-      tokenURL + "/token",
-      { retailer },
-      {
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${Localtoken}`,
-        },
-      },
-    );
+    const response = await cashflowApi.post("/token", { retailer });
     return response.data.access_token;
   } catch (error) {
     throw new Error(`Failed to call API with auth: ${error.message}`);
@@ -99,16 +158,11 @@ export async function createCashFlow(
 ) {
   // console.log("Creating cash flow with payload:", payload);
   try {
-    const response = await axios.post(`${tokenURL}/cashflow`, payload, {
+    const response = await cashflowApi.post("/cashflow", payload, {
       params: {
         retailer,
         accessToken,
         accessPrivateToken,
-      },
-
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${Localtoken}`,
       },
     });
     return response.data;
@@ -118,11 +172,13 @@ export async function createCashFlow(
       error.response?.data?.ResponseStatus ||
       {};
     const message =
+      error.userMessage ||
       responseStatus.Message ||
       error.response?.data?.error?.message ||
       error.response?.data?.message ||
       error.message;
     const enhancedError = new Error(message);
+    enhancedError.status = error.response?.status || "";
     enhancedError.errorCode = responseStatus.ErrorCode || "";
     enhancedError.responseStatus = responseStatus;
     enhancedError.responseData = error.response?.data;
@@ -132,16 +188,7 @@ export async function createCashFlow(
 
 export async function getAccessPrivateToken(retailer = "kingfarm") {
   try {
-    const response = await axios.post(
-      `${tokenURL}/login`,
-      { retailer },
-      {
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${Localtoken}`,
-        },
-      },
-    );
+    const response = await cashflowApi.post("/login", { retailer });
     return response.data;
   } catch (error) {
     throw new Error(`Failed to call API with auth: ${error.message}`);
@@ -153,14 +200,10 @@ export async function getPartnerDelivery(
   accessPrivateToken,
 ) {
   try {
-    const response = await axios.get(`${tokenURL}/partnerdelivery`, {
+    const response = await cashflowApi.get("/partnerdelivery", {
       params: {
         retailer,
         accessPrivateToken,
-      },
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${Localtoken}`,
       },
     });
     return response.data;
@@ -181,15 +224,10 @@ export async function getBankAccount(
   accessPrivateToken,
 ) {
   try {
-    const response = await axios.get(`${tokenURL}/bankaccount`, {
+    const response = await cashflowApi.get("/bankaccount", {
       params: {
         retailer,
         accessPrivateToken,
-      },
-
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${Localtoken}`,
       },
     });
     return response.data;
@@ -206,17 +244,12 @@ export async function getOrderDelivery(
 ) {
   // console.log("ahsdaskhdasd", accessToken);
   try {
-    const response = await axios.get(`${tokenURL}/orderdelivery`, {
+    const response = await cashflowApi.get("/orderdelivery", {
       params: {
         retailer,
         accessPrivateToken,
         deliveryCode,
         accessToken,
-      },
-
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${Localtoken}`,
       },
     });
     return response.data;
@@ -234,7 +267,7 @@ export async function getListOrder(
   queryParams = {},
 ) {
   try {
-    const response = await axios.get(`${tokenURL}/list-order`, {
+    const response = await cashflowApi.get("/list-order", {
       params: {
         retailer,
         accessPrivateToken,
@@ -242,11 +275,6 @@ export async function getListOrder(
         timeRange,
         EInvoiceStatus,
         ...queryParams,
-      },
-
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${Localtoken}`,
       },
     });
     return response.data;
@@ -264,7 +292,7 @@ export async function getLocationSuggest(
   wardName,
 ) {
   try {
-    const response = await axios.get(`${tokenURL}/location-suggest`, {
+    const response = await cashflowApi.get("/location-suggest", {
       params: {
         retailer,
         accessPrivateToken,
@@ -272,11 +300,6 @@ export async function getLocationSuggest(
         provinceName,
         districtName,
         wardName,
-      },
-
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${Localtoken}`,
       },
     });
     return response.data;
@@ -295,7 +318,7 @@ export async function updateCustomerAddress(
 ) {
   try {
     const customerCode = payload.Code ?? payload.CompareCode;
-    const responseGetCustomer = await axios.get(
+    const responseGetCustomer = await kiotDirectApi.get(
       `https://api-man1.kiotviet.vn/api/customers?format=json&Code=${customerCode}`,
 
       {
@@ -396,7 +419,7 @@ export async function getCustomerGroup(
   accessPrivateToken,
 ) {
   try {
-    const response = await axios.get(
+    const response = await kiotDirectApi.get(
       `https://api-man1.kiotviet.vn/api/customers/group`,
 
       {
@@ -482,7 +505,7 @@ export async function getCustomerByPhoneNumber(
     params.append("$top", "15");
     params.append("$filter", filter);
 
-    const response = await axios.get(
+    const response = await kiotDirectApi.get(
       "https://api-man1.kiotviet.vn/api/customers",
       {
         params,
@@ -546,7 +569,7 @@ export async function getIdAdministrativearea(
       Authorization: `Bearer ${tokenToUse}`,
     };
 
-    const response = await axios.get(url, {
+    const response = await kiotDirectApi.get(url, {
       params: {
         tearm: data,
         lname: Number(level) === 2 ? provinceName : "",
@@ -558,6 +581,7 @@ export async function getIdAdministrativearea(
     return response.data;
   } catch (error) {
     const message =
+      error.userMessage ||
       error.response?.data?.error?.ResponseStatus?.Message ||
       error.response?.data?.ResponseStatus?.Message ||
       error.response?.data?.message ||
@@ -575,19 +599,14 @@ export async function publishEInvoice(
   payload,
 ) {
   try {
-    const response = await axios.post(
-      `${tokenURL}/publishEInvoice`,
+    const response = await cashflowApi.post(
+      "/publishEInvoice",
       { payload },
       {
         params: {
           retailer,
           accessPrivateToken,
           accessToken,
-        },
-
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${Localtoken}`,
         },
       },
     );
@@ -608,13 +627,14 @@ export async function getUserInKiot(retailer = "kingfarm", accessPrivateToken) {
       Authorization: `Bearer ${accessPrivateToken}`,
     };
 
-    const response = await axios.get(url, {
+    const response = await kiotDirectApi.get(url, {
       headers,
     });
 
     return response.data;
   } catch (error) {
     const message =
+      error.userMessage ||
       error.response?.data?.error?.ResponseStatus?.Message ||
       error.response?.data?.ResponseStatus?.Message ||
       error.response?.data?.message ||
@@ -632,21 +652,13 @@ export async function getProductByCode(
   code,
 ) {
   try {
-    const url = `${tokenURL}/getProductByCode`;
-
-    const headers = {
-      Accept: "application/json, text/plain, */*",
-      Authorization: `Bearer ${Localtoken}`,
-    };
-
-    const response = await axios.get(url, {
+    const response = await cashflowApi.get("/getProductByCode", {
       params: {
         retailer,
         accessPrivateToken,
         accessToken,
         code,
       },
-      headers,
     });
 
     console.log("getProductByCode response:", response.data);
@@ -654,6 +666,7 @@ export async function getProductByCode(
     return response.data;
   } catch (error) {
     const message =
+      error.userMessage ||
       error.response?.data?.error?.ResponseStatus?.Message ||
       error.response?.data?.ResponseStatus?.Message ||
       error.response?.data?.message ||
@@ -693,6 +706,7 @@ export async function createInvoices(
     return response.data;
   } catch (error) {
     const message =
+      error.userMessage ||
       error.response?.data?.error?.ResponseStatus?.Message ||
       error.response?.data?.ResponseStatus?.Message ||
       error.response?.data?.message ||
@@ -729,6 +743,7 @@ export async function checkPriceVTP(
     return response.data;
   } catch (error) {
     const message =
+      error.userMessage ||
       error.response?.data?.error?.ResponseStatus?.Message ||
       error.response?.data?.ResponseStatus?.Message ||
       error.response?.data?.message ||
@@ -773,7 +788,7 @@ export async function getIdLocations(
       Authorization: `Bearer ${tokenToUse}`,
     };
 
-    const response = await axios.get(url, {
+    const response = await kiotDirectApi.get(url, {
       params: {
         tearm: data,
         lname: Number(level) === 2 ? provinceName : "",
@@ -785,6 +800,7 @@ export async function getIdLocations(
     return response.data;
   } catch (error) {
     const message =
+      error.userMessage ||
       error.response?.data?.error?.ResponseStatus?.Message ||
       error.response?.data?.ResponseStatus?.Message ||
       error.response?.data?.message ||
@@ -830,7 +846,7 @@ export async function getIdWards(
       Authorization: `Bearer ${tokenToUse}`,
     };
 
-    const response = await axios.get(url, {
+    const response = await kiotDirectApi.get(url, {
       params: {
         tearm: data,
         lid,
@@ -843,6 +859,7 @@ export async function getIdWards(
     return response.data;
   } catch (error) {
     const message =
+      error.userMessage ||
       error.response?.data?.error?.ResponseStatus?.Message ||
       error.response?.data?.ResponseStatus?.Message ||
       error.response?.data?.message ||
@@ -877,6 +894,7 @@ export async function createInvoicesDelivery(
     return response.data;
   } catch (error) {
     const message =
+      error.userMessage ||
       error.response?.data?.error?.ResponseStatus?.Message ||
       error.response?.data?.ResponseStatus?.Message ||
       error.response?.data?.message ||
@@ -1053,6 +1071,7 @@ export async function getFullIdProvinceDistrictWard(
     };
   } catch (error) {
     const message =
+      error.userMessage ||
       error.response?.data?.error?.ResponseStatus?.Message ||
       error.response?.data?.ResponseStatus?.Message ||
       error.response?.data?.message ||
@@ -1073,7 +1092,7 @@ export async function getCampaign(retailer = "kingfarm", accessPrivateToken) {
       Authorization: `Bearer ${accessPrivateToken}`,
     };
 
-    const response = await axios.get(url, {
+    const response = await kiotDirectApi.get(url, {
       headers,
     });
 
@@ -1082,6 +1101,7 @@ export async function getCampaign(retailer = "kingfarm", accessPrivateToken) {
     return response.data.Data;
   } catch (error) {
     const message =
+      error.userMessage ||
       error.response?.data?.error?.ResponseStatus?.Message ||
       error.response?.data?.ResponseStatus?.Message ||
       error.response?.data?.message ||
@@ -1098,21 +1118,13 @@ export async function getProductById(
   id,
 ) {
   try {
-    const url = `${tokenURL}/getProductById`;
-
-    const headers = {
-      Accept: "application/json, text/plain, */*",
-      Authorization: `Bearer ${Localtoken}`,
-    };
-
-    const response = await axios.get(url, {
+    const response = await cashflowApi.get("/getProductById", {
       params: {
         retailer,
         accessPrivateToken,
         accessToken,
         id,
       },
-      headers,
     });
 
     console.log("getProductById response:", response.data);
@@ -1120,6 +1132,7 @@ export async function getProductById(
     return response.data;
   } catch (error) {
     const message =
+      error.userMessage ||
       error.response?.data?.error?.ResponseStatus?.Message ||
       error.response?.data?.ResponseStatus?.Message ||
       error.response?.data?.message ||
@@ -1153,6 +1166,7 @@ export async function checkPriceGHN(
     return response.data;
   } catch (error) {
     const message =
+      error.userMessage ||
       error.response?.data?.error?.ResponseStatus?.Message ||
       error.response?.data?.ResponseStatus?.Message ||
       error.response?.data?.message ||
@@ -1273,7 +1287,7 @@ export async function getListCustomer(
     params.append("$top", String(safeLimit));
     params.append("$skip", String(safeSkip));
 
-    const response = await axios.get(
+    const response = await kiotDirectApi.get(
       "https://api-man1.kiotviet.vn/api/customers",
       {
         params,
@@ -1329,20 +1343,12 @@ export async function getListCustomer(
 //tạo log hóa đơn điện tử
 export async function createEInVoicesLog(payload) {
   try {
-    const url = `${tokenURL}/einvoice-logs`;
-
-    const headers = {
-      Accept: "application/json, text/plain, */*",
-      Authorization: `Bearer ${Localtoken}`,
-    };
-
-    const response = await axios.post(url, payload, {
-      headers,
-    });
+    const response = await cashflowApi.post("/einvoice-logs", payload);
 
     return response.data;
   } catch (error) {
     const message =
+      error.userMessage ||
       error.response?.data?.error?.ResponseStatus?.Message ||
       error.response?.data?.ResponseStatus?.Message ||
       error.response?.data?.message ||
@@ -1354,15 +1360,7 @@ export async function createEInVoicesLog(payload) {
 
 export async function getEInVoicesLog({ page = 1, limit = 50 } = {}) {
   try {
-    const url = `${tokenURL}/einvoice-logs`;
-
-    const headers = {
-      Accept: "application/json, text/plain, */*",
-      Authorization: `Bearer ${Localtoken}`,
-    };
-
-    const response = await axios.get(url, {
-      headers,
+    const response = await cashflowApi.get("/einvoice-logs", {
       params: {
         page,
         limit,
@@ -1372,6 +1370,7 @@ export async function getEInVoicesLog({ page = 1, limit = 50 } = {}) {
     return response.data;
   } catch (error) {
     const message =
+      error.userMessage ||
       error.response?.data?.error?.ResponseStatus?.Message ||
       error.response?.data?.ResponseStatus?.Message ||
       error.response?.data?.message ||
