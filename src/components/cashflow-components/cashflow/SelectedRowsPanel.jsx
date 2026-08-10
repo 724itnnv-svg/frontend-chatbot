@@ -490,21 +490,21 @@ export default function SelectedRowsPanel({
         ) : null}
 
         <div className="mt-3.5 grid gap-2.5">
-          <div className="flex flex-col items-start justify-between gap-3 md:flex-row [&>strong]:text-[13px] [&>strong]:font-black [&>strong]:text-slate-900">
+          {/* <div className="flex flex-col items-start justify-between gap-3 md:flex-row [&>strong]:text-[13px] [&>strong]:font-black [&>strong]:text-slate-900">
             <strong>Payload xem nhanh</strong>
             <span className="mt-1 text-[11px] leading-[1.6] text-slate-500">
               {generatedPayloads.length > 0
                 ? `${generatedPayloads.length} payload`
                 : "Chưa có payload (chưa chọn dòng hoặc chưa có dữ liệu)"}
             </span>
-          </div>
-          <pre className="m-0 max-h-80 overflow-auto rounded-[18px] border border-slate-200/90 bg-slate-900 p-3.5 text-[11px] leading-[1.6] text-blue-100">
+          </div> */}
+          {/* <pre className="m-0 max-h-80 overflow-auto rounded-[18px] border border-slate-200/90 bg-slate-900 p-3.5 text-[11px] leading-[1.6] text-blue-100">
             {JSON.stringify(generatedPayloads, null, 2)}
-          </pre>
+          </pre> */}
         </div>
       </div>
 
-      <div className="mt-3.5 rounded-[22px] border border-slate-400/20 bg-white/90 p-[18px] shadow-[0_18px_42px_rgba(15,23,42,0.08)] sm:rounded-3xl">
+      {/* <div className="mt-3.5 rounded-[22px] border border-slate-400/20 bg-white/90 p-[18px] shadow-[0_18px_42px_rgba(15,23,42,0.08)] sm:rounded-3xl">
         <div className={sectionHeadingClass}>
           <div>
             <h3>Thông tin tổng quan</h3>
@@ -516,7 +516,7 @@ export default function SelectedRowsPanel({
           <span>Đã chọn: {selectedRows.length} dòng</span>
           <span>Payload đã tạo: {generatedPayloads.length}</span>
         </div>
-      </div>
+      </div> */}
 
       {modalPayloadEntry ? (
         <DetailModal

@@ -109,11 +109,11 @@ const VTP_DEFAULT_SERVICE_EXTRA = [
   },
 ];
 
-const SAMPLE_TEXT = `Khách hàng: Thành
-SĐT: 0964294979
-Địa chỉ cũ: 27/19 Ấp Tân Hưng, Xã Tân Hạnh, Huyện Long Hồ, Tỉnh Vĩnh Long
-Địa chỉ mới: Ấp Tân hưng, Phường Tân Hạnh, Vĩnh Long
-1 Xô Siêu Phục Hồi 30-10-10+TE 22kg  - KFB1 (giá 859.000₫/xô)
+const SAMPLE_TEXT = `Khách hàng: Trần Minh Phúc
+SĐT: 0388041242
+ĐC CŨ: Ấp Rạch Nghệ, Xã Thông Hòa, Huyện Cầu Kè, Tỉnh Trà Vinh
+ĐC MỚI: Ấp Rạch Nghệ, Xã Tam Ngãi, Vĩnh Long
+1 xô Đạm organic xô 22kg - OKF74
 `;
 
 function getCustomerTypeOptions(retailerId) {
@@ -2882,6 +2882,22 @@ function parseRawOrder(rawText = "") {
       continue;
     }
 
+    const namedSkuMatch = normalizedLine.match(
+      /^(\d+)\s+(.+?)\s*[-–—]\s*([A-Za-z0-9._-]+)$/u,
+    );
+
+    if (namedSkuMatch) {
+      result.items.push({
+        quantity: Number(namedSkuMatch[1] || 0),
+        productName: namedSkuMatch[2].trim(),
+        sku: namedSkuMatch[3].trim(),
+        price: null,
+        unit: "",
+        rawLine: line,
+      });
+      continue;
+    }
+
     const priceIndex = normalizedLine.toLowerCase().lastIndexOf("(giá");
     if (priceIndex > 0) {
       const head = normalizedLine.slice(0, priceIndex).trim();
@@ -3044,7 +3060,8 @@ function CreateOrderProgressPanel({ steps = [], error = "", isCreating }) {
 }
 
 export default function TaoDonHang() {
-  const { user } = useAuth() || {};
+  const { user, token } = useAuth() || {};
+  console.log("ádadadadad", user);
   const hasMappedUserRetailerRef = useRef(false);
   const [selectedRetailerId, setSelectedRetailerId] = useState(() =>
     mapTeamIdToRetailerId(user?.teamId),
@@ -4543,7 +4560,7 @@ export default function TaoDonHang() {
                 </div>
               </div> */}
 
-              <div className="mt-4 rounded-2xl border border-amber-100 bg-amber-50/70 px-4 py-3">
+              {/* <div className="mt-4 rounded-2xl border border-amber-100 bg-amber-50/70 px-4 py-3">
                 <div className="flex items-center justify-between gap-3">
                   <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-amber-700">
                     Payload hóa đơn
@@ -4562,7 +4579,7 @@ export default function TaoDonHang() {
                     payload hóa đơn theo mẫu.
                   </div>
                 )}
-              </div>
+              </div> */}
 
               <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-3">
                 <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">
