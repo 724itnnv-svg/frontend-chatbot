@@ -404,6 +404,7 @@ const Sidebar = memo(() => {
   const [focusedIndex, setFocusedIndex] = useState(-1);
   const [openGroups, setOpenGroups] = useState({});
   const [attendanceLeavePendingTotal, setAttendanceLeavePendingTotal] = useState(0);
+  const [salaryAdvancePendingTotal, setSalaryAdvancePendingTotal] = useState(0);
   const focusedIndexRef = useRef(-1);
   const menuItemRefs = useRef([]);
   const navRef = useRef(null);
@@ -414,6 +415,7 @@ const Sidebar = memo(() => {
 
   const isFullAdmin = hasFullAccess(user);
   const canViewAttendance = canAccessScreen(user, "attendance");
+  const canViewSalaryAdvances = canAccessScreen(user, "salary_advance_management");
 
   const loadAttendanceLeavePendingTotal = useCallback(async () => {
     if (!canViewAttendance) {
@@ -447,6 +449,39 @@ const Sidebar = memo(() => {
       document.removeEventListener("visibilitychange", refreshWhenVisible);
     };
   }, [canViewAttendance, loadAttendanceLeavePendingTotal]);
+
+  const loadSalaryAdvancePendingTotal = useCallback(async () => {
+    if (!canViewSalaryAdvances) {
+      setSalaryAdvancePendingTotal(0);
+      return;
+    }
+    try {
+      const response = await api.get("/salary-advance-requests/pending-count");
+      setSalaryAdvancePendingTotal(Number(response.data?.total) || 0);
+    } catch {
+      // Bộ đếm nền không làm gián đoạn điều hướng sidebar.
+    }
+  }, [api, canViewSalaryAdvances]);
+
+  useEffect(() => {
+    if (!canViewSalaryAdvances) {
+      setSalaryAdvancePendingTotal(0);
+      return undefined;
+    }
+
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") void loadSalaryAdvancePendingTotal();
+    };
+    void loadSalaryAdvancePendingTotal();
+    const intervalId = window.setInterval(loadSalaryAdvancePendingTotal, 30000);
+    window.addEventListener("focus", loadSalaryAdvancePendingTotal);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener("focus", loadSalaryAdvancePendingTotal);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
+  }, [canViewSalaryAdvances, loadSalaryAdvancePendingTotal]);
 
   const filteredMenus = useMemo(
     () =>
@@ -704,7 +739,14 @@ const Sidebar = memo(() => {
                         );
                         const isFocused = focusedIndex === idx;
                         const Icon = m.icon;
-                        const badgeTotal = m.id === "attendance" ? attendanceLeavePendingTotal : 0;
+                        const badgeTotal = m.id === "attendance"
+                          ? attendanceLeavePendingTotal
+                          : m.id === "salary_advance_management"
+                            ? salaryAdvancePendingTotal
+                            : 0;
+                        const badgeLabel = m.id === "salary_advance_management"
+                          ? `${badgeTotal} phiếu ứng lương chờ xử lý`
+                          : `${badgeTotal} đơn nghỉ phép chờ xử lý`;
 
                         return (
                           <NavLink
@@ -744,8 +786,8 @@ const Sidebar = memo(() => {
                                 {badgeTotal > 0 && (
                                   <span
                                     className={`ml-auto inline-flex min-w-5 items-center justify-center rounded-full bg-rose-600 px-1.5 py-0.5 text-[10px] font-black leading-none text-white shadow-sm ${isCollapsed ? "md:absolute md:right-1 md:top-1 md:min-w-4 md:px-1" : ""}`}
-                                    aria-label={`${badgeTotal} đơn nghỉ phép chờ xử lý`}
-                                    title={`${badgeTotal} đơn nghỉ phép chờ xử lý`}
+                                    aria-label={badgeLabel}
+                                    title={badgeLabel}
                                   >
                                     {badgeTotal > 99 ? "99+" : badgeTotal}
                                   </span>

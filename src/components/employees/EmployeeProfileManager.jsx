@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { AlertTriangle, ArrowLeft, BadgeCheck, Building2, CalendarClock, Download, FileText, History, PanelLeftClose, PanelLeftOpen, Plus, RefreshCcw, Save, Search, Trash2, Upload, UserRound, X } from "lucide-react";
+import { AlertTriangle, ArrowLeft, BadgeCheck, Building2, CalendarClock, Download, Eye, FileText, History, PanelLeftClose, PanelLeftOpen, Plus, RefreshCcw, Save, Search, Sparkles, Trash2, Upload, UserRound, X } from "lucide-react";
 import * as XLSX from "xlsx";
 import JSZip from "jszip";
 import { saveAs } from "file-saver";
@@ -37,15 +37,17 @@ const emptyContract = {
   contractNumber: "", contractType: "fixed_term", durationMonths: 12, signedDate: "", effectiveDate: "", expiryDate: "", renewalDueDate: "",
   status: "draft", workplace: "", workingHours: "08 giờ/ngày, 48 giờ/tuần", baseSalary: 0, salaryText: "", allowances: "",
   paymentMethod: "Chuyển khoản", jobDescription: "Theo mô tả công việc và sự phân công của cấp quản lý",
-  companyRepresentative: { fullName: "", title: "", authorizationBasis: "" }, appendices: [], notes: "",
+  companyRepresentative: { fullName: "", title: "", authorizationBasis: "" }, templateFieldValues: {}, templateFieldDefinitions: [], appendices: [], notes: "",
 };
 
 const emptyContractTemplate = {
-  code: "", name: "", description: "", category: "other", status: "draft", version: 1, isDefault: false, priority: 0,
+  code: "", name: "", description: "", category: "other", status: "draft", version: 1, engine: "legacy_generated", isDefault: false, priority: 0,
   contractTypes: ["fixed_term", "indefinite"], applicableDepartments: [], applicableJobTitles: [],
   defaultValues: { contractType: "fixed_term", durationMonths: 12, workplace: "", workingHours: "08 giờ/ngày, 48 giờ/tuần", baseSalary: 0, salaryText: "", allowances: "", paymentMethod: "Chuyển khoản", jobDescription: "Theo mô tả công việc và sự phân công của cấp quản lý", companyRepresentative: { fullName: "", title: "", authorizationBasis: "" } },
   documentSettings: {},
   layoutSchema: null,
+  fieldDefinitions: [],
+  sourceDocx: { originalName: "", size: 0, sha256: "", placeholders: [], uploadedAt: null, autoPlacedAt: null, autoPlacementCount: 0 },
 };
 
 const norm = (value) => String(value ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/Đ/g, "D").replace(/đ/g, "d").toLowerCase().replace(/\s+/g, " ").trim();
@@ -69,6 +71,11 @@ const isoDate = (value) => {
 };
 const dateInput = (value) => value ? new Date(value).toISOString().slice(0, 10) : "";
 const clone = (value) => JSON.parse(JSON.stringify(value));
+const mergeTemplateFieldDefinitions = (...groups) => {
+  const definitions = new Map();
+  groups.flat().filter(Boolean).forEach((definition) => definitions.set(definition.key, definition));
+  return [...definitions.values()];
+};
 const genderValue = (v) => norm(v).includes("nu") ? "female" : norm(v).includes("nam") ? "male" : "unknown";
 const maritalValue = (v) => {
   const text = norm(v);
@@ -227,6 +234,18 @@ function Field({ label, value, onChange, type = "text", disabled = false }) {
 function SelectField({ label, value, onChange, options }) {
   return <label><span className={labelClass}>{label}</span><select value={value} onChange={(e) => onChange(e.target.value)} className={inputClass}>{options.map(([v, n]) => <option key={v} value={v}>{n}</option>)}</select></label>;
 }
+function ContractTemplateDynamicFields({ definitions = [], values = {}, onChange, title = "Dữ liệu Word của hợp đồng", description = "Các giá trị được lưu riêng theo hợp đồng và có thể thay đổi so với giá trị mặc định của mẫu." }) {
+  if (!definitions.length) return null;
+  const displayTitle = description.startsWith("Đây là các biến chưa có dữ liệu") ? "Thông tin bổ sung theo mẫu Word" : title;
+  return <section className="mt-5 rounded-2xl border border-amber-200 bg-amber-50/70 p-4">
+    <div className="mb-3"><h4 className="font-black text-amber-900">{displayTitle}</h4><p className="mt-1 text-xs text-amber-700">{description}</p></div>
+    <div className="grid gap-3 md:grid-cols-2">{definitions.map((definition) => {
+      const value = values?.[definition.key] ?? definition.defaultValue ?? "";
+      const update = (nextValue) => onChange(definition.key, nextValue);
+      return <label key={definition.key} className={definition.type === "textarea" ? "md:col-span-2" : ""}><span className={labelClass}>{definition.label}{definition.required ? " *" : ""}</span>{definition.type === "textarea" ? <textarea rows={3} value={value} onChange={(event) => update(event.target.value)} className={inputClass} /> : <input type={definition.type === "number" ? "number" : definition.type === "date" ? "date" : "text"} value={value} onChange={(event) => update(event.target.value)} className={inputClass} />}<code className="mt-1 block text-[10px] text-amber-700">{`{{${definition.key}}}`}</code></label>;
+    })}</div>
+  </section>;
+}
 const TOAST_TONE = {
   success: "border-emerald-200 bg-emerald-50 text-emerald-800",
   error: "border-red-200 bg-red-50 text-red-800",
@@ -303,9 +322,10 @@ function ContractDocumentEditorModal({ contracts, value, defaults, saving, onCha
   </div>;
 }
 
-function ContractTemplateManagerModal({ templates, value, defaults, saving, onChange, onSelect, onNew, onBootstrap, onSave, onNewVersion, onActivate, onArchive, onDelete, onClose }) {
+function ContractTemplateManagerModal({ templates, profiles, value, defaults, saving, importing, analyzing, analysis, sampleProfileId, onChange, onSelect, onNew, onImportWord, onPreview, onFormat, onAutoPlace, onAnalyzeProfile, onSampleProfileChange, onMissingValueChange, onBootstrap, onSave, onNewVersion, onActivate, onArchive, onDelete, onClose }) {
   const [libraryCollapsed, setLibraryCollapsed] = useState(false);
   const editable = !value._id || value.status === "draft";
+  const sourceDocxMode = Boolean(value._sourceFile || value.sourceDocx?.originalName || value.engine === "source_docx");
   const settings = mergeDocumentSettings(defaults, value.documentSettings);
   const update = (key, next) => onChange({ ...value, [key]: next });
   const updateDefault = (key, next) => update("defaultValues", { ...value.defaultValues, [key]: next });
@@ -315,7 +335,7 @@ function ContractTemplateManagerModal({ templates, value, defaults, saving, onCh
   return <div className="fixed inset-0 z-[130] bg-slate-950/65 backdrop-blur-sm">
     <div className="flex h-dvh w-screen overflow-hidden bg-white shadow-2xl">
       <aside className={`flex shrink-0 flex-col bg-slate-50 transition-[width] duration-200 ${libraryCollapsed ? "w-0 overflow-hidden border-r-0" : "w-[340px] border-r border-violet-100"}`}>
-        <div className="border-b p-4"><div className="flex items-center gap-2"><div className="mr-auto"><h3 className="font-black text-slate-900">Thư viện mẫu hợp đồng</h3><p className="text-xs text-slate-500">Quản lý theo phiên bản</p></div><button onClick={onClose} className="rounded-lg p-2 text-slate-400 hover:bg-white"><X size={18} /></button></div><button onClick={onNew} className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-violet-600 px-3 py-2 text-sm font-bold text-white"><Plus size={16} /> Tạo mẫu mới</button></div>
+        <div className="border-b p-4"><div className="flex items-center gap-2"><div className="mr-auto"><h3 className="font-black text-slate-900">Thư viện mẫu hợp đồng</h3><p className="text-xs text-slate-500">Quản lý theo phiên bản</p></div><button onClick={onClose} className="rounded-lg p-2 text-slate-400 hover:bg-white"><X size={18} /></button></div><div className="mt-3 grid grid-cols-2 gap-2"><button onClick={onNew} className="flex items-center justify-center gap-2 rounded-xl bg-violet-600 px-3 py-2 text-sm font-bold text-white"><Plus size={16} /> Tạo mới</button><label className={`flex items-center justify-center gap-2 rounded-xl border border-violet-200 bg-white px-3 py-2 text-sm font-bold text-violet-700 ${importing ? "cursor-wait opacity-60" : "cursor-pointer hover:bg-violet-50"}`}><Upload size={16} /> {importing ? "Đang đọc..." : "Import Word"}<input type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" disabled={importing} className="hidden" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) onImportWord(file); }} /></label></div><p className="mt-2 text-[11px] leading-4 text-slate-500">DOCX được lưu nguyên bản. Nội dung và định dạng được quản lý trực tiếp trong file Word; hệ thống chỉ đặt biến và điền dữ liệu.</p></div>
         <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3">{!templates.length && <div className="rounded-xl border border-dashed border-violet-300 bg-white p-4 text-center"><p className="text-sm font-bold text-slate-700">Thư viện đang trống</p><p className="mt-1 text-xs text-slate-500">Tạo nhanh mẫu IT, Marketing, công nhân sản xuất và công nhân vườn.</p><button disabled={saving} onClick={onBootstrap} className="mt-3 rounded-xl bg-emerald-600 px-3 py-2 text-xs font-bold text-white disabled:opacity-50">Tạo bộ mẫu khởi đầu</button></div>}{templates.map((item) => <button key={item._id} onClick={() => onSelect(item)} className={`w-full rounded-xl border p-3 text-left ${value._id === item._id ? "border-violet-300 bg-violet-50" : "border-slate-100 bg-white hover:border-violet-200"}`}><div className="flex items-start gap-2"><b className="mr-auto text-sm text-slate-800">{item.name}</b><span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${item.status === "active" ? "bg-emerald-100 text-emerald-700" : item.status === "draft" ? "bg-amber-100 text-amber-700" : "bg-slate-200 text-slate-600"}`}>{item.status === "active" ? "Đang dùng" : item.status === "draft" ? "Bản nháp" : "Lưu trữ"}</span></div><div className="mt-1 text-xs text-slate-500">{item.code} · Phiên bản {item.version}</div></button>)}</div>
       </aside>
       <div className="flex min-w-0 flex-1 flex-col">
@@ -324,14 +344,169 @@ function ContractTemplateManagerModal({ templates, value, defaults, saving, onCh
           {!editable && <div className="rounded-xl border border-sky-200 bg-sky-50 p-3 text-sm text-sky-800">Phiên bản đã kích hoạt hoặc lưu trữ chỉ được xem. Hãy tạo phiên bản mới để chỉnh sửa.</div>}
           <fieldset disabled={!editable} className="space-y-5 disabled:opacity-75">
             <section className="rounded-2xl border bg-white p-4"><h4 className="mb-3 font-black text-violet-800">Nhận diện và phạm vi áp dụng</h4><div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4"><Field label="Mã mẫu" value={value.code} disabled={Boolean(value._id)} onChange={(v) => update("code", v.toUpperCase())} /><Field label="Tên mẫu" value={value.name} onChange={(v) => update("name", v)} /><Field label="Nhóm mẫu" value={value.category} onChange={(v) => update("category", v)} /><Field label="Độ ưu tiên" type="number" value={value.priority} onChange={(v) => update("priority", Number(v))} /><div className="md:col-span-2"><Field label="Bộ phận áp dụng (phân cách bằng dấu phẩy)" value={(value.applicableDepartments || []).join(", ")} onChange={(v) => update("applicableDepartments", v.split(",").map((x) => x.trim()).filter(Boolean))} /></div><div className="md:col-span-2"><Field label="Chức danh áp dụng (phân cách bằng dấu phẩy)" value={(value.applicableJobTitles || []).join(", ")} onChange={(v) => update("applicableJobTitles", v.split(",").map((x) => x.trim()).filter(Boolean))} /></div><div className="md:col-span-4"><Field label="Mô tả" value={value.description} onChange={(v) => update("description", v)} /></div></div><div className="mt-4 flex flex-wrap gap-4 text-sm">{[["probation", "Thử việc"], ["fixed_term", "Có thời hạn"], ["indefinite", "Không thời hạn"], ["seasonal", "Mùa vụ"], ["other", "Khác"]].map(([key, label]) => <label key={key} className="flex items-center gap-2"><input type="checkbox" checked={(value.contractTypes || []).includes(key)} onChange={(e) => update("contractTypes", e.target.checked ? [...(value.contractTypes || []), key] : (value.contractTypes || []).filter((x) => x !== key))} className="accent-violet-600" />{label}</label>)}<label className="ml-auto flex items-center gap-2"><input type="checkbox" checked={Boolean(value.isDefault)} onChange={(e) => update("isDefault", e.target.checked)} className="accent-violet-600" />Mẫu mặc định</label></div></section>
+            <section className="rounded-2xl border bg-white p-4"><div className="flex flex-wrap items-start gap-3"><div className="mr-auto"><h4 className="font-black text-violet-800">File Word gốc giữ nguyên định dạng</h4><p className="mt-1 text-xs text-slate-500">Khi xuất Word cho nhân viên, hệ thống thay trực tiếp biến trong DOCX này thay vì dựng lại tài liệu.</p></div>{value._sourceFile ? <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-bold text-amber-700">Chờ lưu file gốc</span> : value.sourceDocx?.originalName ? <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold text-emerald-700">Đã lưu DOCX gốc</span> : <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600">Chưa có DOCX gốc</span>}</div>{(value._sourceFile || value.sourceDocx?.originalName) && <div className="mt-3 rounded-xl border border-violet-100 bg-violet-50 p-3 text-sm"><b className="text-violet-900">{value._sourceFile?.name || value.sourceDocx.originalName}</b><span className="ml-2 text-xs text-violet-600">{Math.max(1, Math.round(Number(value._sourceFile?.size || value.sourceDocx?.size || 0) / 1024))} KB</span></div>}<div className="mt-3"><div className="text-xs font-black uppercase text-slate-500">Biến tìm thấy ({value.sourceDocx?.placeholders?.length || 0})</div>{value.sourceDocx?.placeholders?.length ? <div className="mt-2 flex flex-wrap gap-1.5">{value.sourceDocx.placeholders.map((key) => <code key={key} className="rounded-lg bg-slate-100 px-2 py-1 text-[11px] text-slate-700">{`{{${key}}}`}</code>)}</div> : <div className="mt-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs leading-5 text-amber-800">{value._sourceFile ? "Danh sách biến sẽ được quét khi lưu bản nháp." : <>File chưa có biến dữ liệu. Hãy đặt các biến như <code>{"{{employee.fullName}}"}</code>, <code>{"{{employee.identityNumber}}"}</code>, <code>{"{{contract.number}}"}</code> trong Word rồi import lại.</>}</div>}</div></section>
+            {sourceDocxMode && <section className="rounded-2xl border border-amber-200 bg-white p-4"><div className="flex flex-wrap items-end gap-3"><label className="min-w-[280px] flex-1"><span className={labelClass}>Nhân viên dùng để điền thử mẫu Word</span><select value={sampleProfileId || ""} disabled={!value._id || analyzing} onChange={(event) => onSampleProfileChange(event.target.value)} className={`${inputClass} disabled:bg-slate-100`}><option value="">Chọn một nhân viên</option>{profiles.map((profile) => <option key={profile._id} value={profile._id}>{profile.personal?.fullName || "Chưa có tên"} · {profile.employeeCode || "Chưa có MSNV"}</option>)}</select></label><button type="button" disabled={!value._id || !sampleProfileId || analyzing} onClick={onAnalyzeProfile} className="rounded-xl bg-amber-600 px-4 py-2 text-sm font-black text-white disabled:opacity-50">{analyzing ? "Đang kiểm tra..." : "Điền thử & tìm trường thiếu"}</button></div>{!value._id && <p className="mt-2 text-xs text-amber-700">Hãy lưu bản nháp và file Word trước khi chọn nhân viên điền thử.</p>}{analysis && <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">Đã điền được <b>{analysis.resolvedCount}/{analysis.placeholderCount}</b> biến từ hồ sơ “{analysis.profile?.fullName || analysis.profile?.employeeCode}”. {analysis.missingDefinitions?.length ? `Còn ${analysis.missingDefinitions.length} trường cần nhập.` : "Không còn trường thiếu."}</div>}<ContractTemplateDynamicFields definitions={analysis?.missingDefinitions || []} values={Object.fromEntries((value.fieldDefinitions || []).map((item) => [item.key, item.defaultValue || ""]))} onChange={onMissingValueChange} description="Đây là các biến chưa có dữ liệu khi thử với nhân viên đã chọn. Giá trị nhập sẽ làm mặc định cho mẫu và được sao chép vào hợp đồng khi áp dụng mẫu." /></section>}
             <section className="rounded-2xl border bg-white p-4"><h4 className="mb-3 font-black text-violet-800">Giá trị hợp đồng mặc định</h4><div className="grid gap-3 md:grid-cols-3"><SelectField label="Loại hợp đồng" value={value.defaultValues?.contractType || "fixed_term"} onChange={(v) => updateDefault("contractType", v)} options={[["probation", "Thử việc"], ["fixed_term", "Xác định thời hạn"], ["indefinite", "Không xác định thời hạn"], ["seasonal", "Mùa vụ"], ["other", "Khác"]]} /><Field label="Thời hạn (tháng)" type="number" value={value.defaultValues?.durationMonths ?? ""} onChange={(v) => updateDefault("durationMonths", v ? Number(v) : null)} /><Field label="Nơi làm việc" value={value.defaultValues?.workplace} onChange={(v) => updateDefault("workplace", v)} /><Field label="Thời gian làm việc" value={value.defaultValues?.workingHours} onChange={(v) => updateDefault("workingHours", v)} /><Field label="Phụ cấp mặc định" value={value.defaultValues?.allowances} onChange={(v) => updateDefault("allowances", v)} /><Field label="Hình thức trả lương" value={value.defaultValues?.paymentMethod} onChange={(v) => updateDefault("paymentMethod", v)} /><div className="md:col-span-3"><Field label="Mô tả công việc mặc định" value={value.defaultValues?.jobDescription} onChange={(v) => updateDefault("jobDescription", v)} /></div></div></section>
-            <section className="rounded-2xl border bg-white p-4"><h4 className="mb-3 font-black text-violet-800">Thông tin và định dạng tài liệu</h4><div className="grid gap-3 md:grid-cols-3 lg:grid-cols-4"><Field label="Tiêu đề" value={settings.documentTitle} onChange={(v) => updateSettings("documentTitle", v)} /><SelectField label="Font chữ" value={settings.fontFamily} onChange={(v) => updateSettings("fontFamily", v)} options={[["Times New Roman", "Times New Roman"], ["Arial", "Arial"], ["Calibri", "Calibri"]]} /><Field label="Cỡ chữ" type="number" value={settings.fontSize} onChange={(v) => updateSettings("fontSize", Number(v))} /><Field label="Cỡ tiêu đề" type="number" value={settings.titleSize} onChange={(v) => updateSettings("titleSize", Number(v))} /><Field label="Tên đơn vị (đầu trang, in đậm)" value={settings.company?.shortName} onChange={(v) => updateSettingsGroup("company", "shortName", v)} /><Field label="Tên đơn vị đầy đủ" value={settings.company?.name} onChange={(v) => updateSettingsGroup("company", "name", v)} /><Field label="Địa chỉ đơn vị" value={settings.company?.address} onChange={(v) => updateSettingsGroup("company", "address", v)} /><Field label="Mã số thuế" value={settings.company?.taxCode} onChange={(v) => updateSettingsGroup("company", "taxCode", v)} /><Field label="Điện thoại" value={settings.company?.phone} onChange={(v) => updateSettingsGroup("company", "phone", v)} /><Field label="Nơi ký hợp đồng (VD: Vĩnh Long)" value={settings.company?.signingLocation} onChange={(v) => updateSettingsGroup("company", "signingLocation", v)} /><Field label="Người đại diện pháp luật" value={settings.company?.representativeName} onChange={(v) => updateSettingsGroup("company", "representativeName", v)} /><Field label="Chức vụ người đại diện" value={settings.company?.representativeTitle} onChange={(v) => updateSettingsGroup("company", "representativeTitle", v)} /><Field label="Đại diện HR (phụ lục/cam kết)" value={settings.company?.hrRepresentativeName} onChange={(v) => updateSettingsGroup("company", "hrRepresentativeName", v)} /><Field label="Chức vụ đại diện HR" value={settings.company?.hrRepresentativeTitle} onChange={(v) => updateSettingsGroup("company", "hrRepresentativeTitle", v)} /></div><div className="mt-4 flex gap-5 text-sm"><label className="flex items-center gap-2"><input type="checkbox" checked={settings.includeSalaryAppendix !== false} onChange={(e) => updateSettings("includeSalaryAppendix", e.target.checked)} />Kèm phụ lục lương</label><label className="flex items-center gap-2"><input type="checkbox" checked={settings.includeCommitment !== false} onChange={(e) => updateSettings("includeCommitment", e.target.checked)} />Kèm biên bản cam kết</label></div></section>
-            <section className="rounded-2xl border bg-white p-4"><h4 className="mb-3 font-black text-violet-800">Nội dung điều khoản</h4><div className="grid gap-4 lg:grid-cols-2">{CONTRACT_CONTENT_FIELDS.map(([key, label]) => <ContractRichTextEditor key={key} label={label} value={settings.content?.[key]} onChange={(v) => updateSettingsGroup("content", key, v)} />)}</div></section>
-            <ContractLayoutDesigner value={value.layoutSchema} onChange={(layoutSchema) => update("layoutSchema", layoutSchema)} documentSettings={settings} disabled={!editable} />
+            {!sourceDocxMode && <section className="rounded-2xl border bg-white p-4"><h4 className="mb-3 font-black text-violet-800">Thông tin và định dạng tài liệu</h4><div className="grid gap-3 md:grid-cols-3 lg:grid-cols-4"><Field label="Tiêu đề" value={settings.documentTitle} onChange={(v) => updateSettings("documentTitle", v)} /><SelectField label="Font chữ" value={settings.fontFamily} onChange={(v) => updateSettings("fontFamily", v)} options={[["Times New Roman", "Times New Roman"], ["Arial", "Arial"], ["Calibri", "Calibri"]]} /><Field label="Cỡ chữ" type="number" value={settings.fontSize} onChange={(v) => updateSettings("fontSize", Number(v))} /><Field label="Cỡ tiêu đề" type="number" value={settings.titleSize} onChange={(v) => updateSettings("titleSize", Number(v))} /><Field label="Tên đơn vị (đầu trang, in đậm)" value={settings.company?.shortName} onChange={(v) => updateSettingsGroup("company", "shortName", v)} /><Field label="Tên đơn vị đầy đủ" value={settings.company?.name} onChange={(v) => updateSettingsGroup("company", "name", v)} /><Field label="Địa chỉ đơn vị" value={settings.company?.address} onChange={(v) => updateSettingsGroup("company", "address", v)} /><Field label="Mã số thuế" value={settings.company?.taxCode} onChange={(v) => updateSettingsGroup("company", "taxCode", v)} /><Field label="Điện thoại" value={settings.company?.phone} onChange={(v) => updateSettingsGroup("company", "phone", v)} /><Field label="Nơi ký hợp đồng (VD: Vĩnh Long)" value={settings.company?.signingLocation} onChange={(v) => updateSettingsGroup("company", "signingLocation", v)} /><Field label="Người đại diện pháp luật" value={settings.company?.representativeName} onChange={(v) => updateSettingsGroup("company", "representativeName", v)} /><Field label="Chức vụ người đại diện" value={settings.company?.representativeTitle} onChange={(v) => updateSettingsGroup("company", "representativeTitle", v)} /><Field label="Đại diện HR (phụ lục/cam kết)" value={settings.company?.hrRepresentativeName} onChange={(v) => updateSettingsGroup("company", "hrRepresentativeName", v)} /><Field label="Chức vụ đại diện HR" value={settings.company?.hrRepresentativeTitle} onChange={(v) => updateSettingsGroup("company", "hrRepresentativeTitle", v)} /></div><div className="mt-4 flex gap-5 text-sm"><label className="flex items-center gap-2"><input type="checkbox" checked={settings.includeSalaryAppendix !== false} onChange={(e) => updateSettings("includeSalaryAppendix", e.target.checked)} />Kèm phụ lục lương</label><label className="flex items-center gap-2"><input type="checkbox" checked={settings.includeCommitment !== false} onChange={(e) => updateSettings("includeCommitment", e.target.checked)} />Kèm biên bản cam kết</label></div></section>}
+            {!sourceDocxMode && <section className="rounded-2xl border bg-white p-4"><h4 className="mb-3 font-black text-violet-800">Nội dung điều khoản</h4><div className="grid gap-4 lg:grid-cols-2">{CONTRACT_CONTENT_FIELDS.map(([key, label]) => <ContractRichTextEditor key={key} label={label} value={settings.content?.[key]} onChange={(v) => updateSettingsGroup("content", key, v)} />)}</div></section>}
+            {value._id && value.status === "draft" && value.sourceDocx?.originalName && <section className="rounded-2xl border border-amber-200 bg-amber-50 p-4"><div className="flex flex-wrap items-center gap-3"><div className="mr-auto"><h4 className="font-black text-amber-900">Tự động đặt biến trong Word</h4><p className="mt-1 text-xs text-amber-800">Nhận diện các nhãn như Họ và tên, CCCD, số hợp đồng, ngày ký, mức lương… và giữ nguyên định dạng DOCX.</p></div><button disabled={saving || importing || Boolean(value._sourceFile)} onClick={onAutoPlace} className="flex items-center gap-2 rounded-xl bg-amber-600 px-4 py-2 text-sm font-black text-white hover:bg-amber-700 disabled:opacity-50"><Sparkles size={16} /> Tự động đặt biến</button></div>{value.sourceDocx?.autoPlacedAt && <p className="mt-2 text-xs text-amber-700">Lần gần nhất đã đặt {value.sourceDocx.autoPlacementCount || 0} vị trí biến.</p>}</section>}
+            {!sourceDocxMode && <ContractLayoutDesigner value={value.layoutSchema} onChange={(layoutSchema) => update("layoutSchema", layoutSchema)} documentSettings={settings} disabled={!editable} />}
           </fieldset>
         </div>
-        <div className="flex flex-wrap gap-2 border-t bg-white p-4">{value._id && value.status !== "draft" && <button disabled={saving} onClick={onNewVersion} className="rounded-xl border border-violet-200 bg-violet-50 px-4 py-2 text-sm font-bold text-violet-700">Tạo phiên bản mới</button>}{value._id && <button disabled={saving} onClick={onDelete} className="flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm font-bold text-red-700 hover:bg-red-100 disabled:opacity-50"><Trash2 size={15} /> Xóa mẫu</button>}<div className="ml-auto flex gap-2">{value._id && value.status === "active" && <button disabled={saving} onClick={onArchive} className="rounded-xl border px-4 py-2 text-sm font-bold text-slate-600">Lưu trữ</button>}{value._id && value.status === "draft" && <button disabled={saving} onClick={onActivate} className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white">Kích hoạt</button>}{editable && <button disabled={saving || !value.code || !value.name} onClick={onSave} className="flex items-center gap-2 rounded-xl bg-violet-600 px-5 py-2 text-sm font-black text-white disabled:opacity-50"><Save size={16} />{saving ? "Đang lưu..." : "Lưu bản nháp"}</button>}</div></div>
+        <div className="flex flex-wrap gap-2 border-t bg-white p-4"><button disabled={saving || importing || Boolean(value._sourceFile)} onClick={onPreview} className="flex items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-bold text-blue-700 hover:bg-blue-100 disabled:opacity-50"><Eye size={16} /> Xem mẫu online</button>{!sourceDocxMode && <button disabled={saving || importing || !editable || !value.layoutSchema?.blocks?.length} onClick={onFormat} className="flex items-center gap-2 rounded-xl border border-fuchsia-200 bg-fuchsia-50 px-4 py-2 text-sm font-bold text-fuchsia-700 hover:bg-fuchsia-100 disabled:opacity-50"><Sparkles size={16} /> Chuẩn hóa & AI làm đẹp</button>}{value._id && value.status !== "draft" && <button disabled={saving} onClick={onNewVersion} className="rounded-xl border border-violet-200 bg-violet-50 px-4 py-2 text-sm font-bold text-violet-700">Tạo phiên bản mới</button>}{value._id && <button disabled={saving} onClick={onDelete} className="flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm font-bold text-red-700 hover:bg-red-100 disabled:opacity-50"><Trash2 size={15} /> Xóa mẫu</button>}<div className="ml-auto flex gap-2">{value._id && value.status === "active" && <button disabled={saving} onClick={onArchive} className="rounded-xl border px-4 py-2 text-sm font-bold text-slate-600">Lưu trữ</button>}{value._id && value.status === "draft" && <button disabled={saving} onClick={onActivate} className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white">Kích hoạt</button>}{editable && <button disabled={saving || !value.code || !value.name} onClick={onSave} className="flex items-center gap-2 rounded-xl bg-violet-600 px-5 py-2 text-sm font-black text-white disabled:opacity-50"><Save size={16} />{saving ? "Đang lưu..." : "Lưu bản nháp"}</button>}</div></div>
       </div>
+    </div>
+  </div>;
+}
+
+function ContractTemplateFormattingModal({ template, token, onApply, onClose }) {
+  const [result, setResult] = useState(null);
+  const [beforeHtml, setBeforeHtml] = useState("");
+  const [afterHtml, setAfterHtml] = useState("");
+  const [loadingMode, setLoadingMode] = useState("rules");
+  const [error, setError] = useState("");
+
+  const fetchHtmlPreview = async (value, signal) => {
+    const response = await fetch("/api/employee-profiles/contract-templates/preview?format=html", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ template: value }),
+      signal,
+    });
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(data.message || "Không thể dựng bản xem trước");
+    }
+    return response.text();
+  };
+
+  const formatTemplate = async (mode, signal) => {
+    setLoadingMode(mode);
+    setError("");
+    try {
+      const response = await fetch(`/api/employee-profiles/contract-templates/format?mode=${mode}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ template }),
+        signal,
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.message || "Không thể chuẩn hóa mẫu hợp đồng");
+      const next = data.data;
+      const formattedTemplate = { ...template, documentSettings: next.documentSettings, layoutSchema: next.layoutSchema };
+      const [originalPreview, formattedPreview] = await Promise.all([fetchHtmlPreview(template, signal), fetchHtmlPreview(formattedTemplate, signal)]);
+      setResult(next);
+      setBeforeHtml(originalPreview);
+      setAfterHtml(formattedPreview);
+    } catch (requestError) {
+      if (requestError.name !== "AbortError") setError(requestError.message || "Không thể chuẩn hóa mẫu hợp đồng");
+    } finally {
+      if (!signal?.aborted) setLoadingMode("");
+    }
+  };
+
+  useEffect(() => {
+    const controller = new AbortController();
+    formatTemplate("rules", controller.signal);
+    return () => controller.abort();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const issueTone = (severity) => severity === "error" ? "bg-red-100 text-red-700" : "bg-amber-100 text-amber-700";
+  return <div className="fixed inset-0 z-[205] flex flex-col bg-slate-950/80 p-3 backdrop-blur-sm">
+    <div className="mx-auto flex h-full w-full max-w-[1500px] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+      <div className="flex flex-wrap items-center gap-3 border-b px-4 py-3"><div className="mr-auto"><h3 className="flex items-center gap-2 font-black text-slate-900"><Sparkles size={19} className="text-fuchsia-600" /> Chuẩn hóa mẫu hợp đồng</h3><p className="text-xs text-slate-500">Chỉ thay đổi định dạng và bố cục; nội dung pháp lý cùng biến dữ liệu được giữ nguyên.</p></div><button disabled={Boolean(loadingMode)} onClick={() => formatTemplate("rules")} className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-bold text-emerald-700 disabled:opacity-50">{loadingMode === "rules" ? "Đang chuẩn hóa..." : "Chuẩn hóa an toàn"}</button><button disabled={Boolean(loadingMode)} onClick={() => formatTemplate("ai")} className="flex items-center gap-2 rounded-xl bg-fuchsia-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-50"><Sparkles size={15} />{loadingMode === "ai" ? "AI đang phân tích..." : "AI làm đẹp"}</button><button onClick={onClose} className="rounded-xl p-2 text-slate-500 hover:bg-slate-100"><X size={20} /></button></div>
+      {error && <div className="border-b border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
+      <div className="grid min-h-0 flex-1 grid-cols-[280px_minmax(0,1fr)]"><aside className="overflow-y-auto border-r bg-slate-50 p-4"><div className="rounded-xl border bg-white p-3"><div className="text-xs font-black uppercase text-slate-500">Kết quả phân tích</div><div className="mt-2 grid grid-cols-2 gap-2"><div className="rounded-lg bg-blue-50 p-2 text-center"><b className="block text-xl text-blue-700">{result?.changes?.length || 0}</b><span className="text-[10px] text-blue-600">Điều chỉnh</span></div><div className="rounded-lg bg-amber-50 p-2 text-center"><b className="block text-xl text-amber-700">{result?.issues?.length || 0}</b><span className="text-[10px] text-amber-600">Vấn đề gốc</span></div></div>{result?.ai?.summary && <p className="mt-3 text-xs leading-5 text-slate-600">{result.ai.summary}</p>}{result?.model && <div className="mt-2 text-[10px] text-slate-400">Model: {result.model}</div>}</div><div className="mt-4 text-[10px] font-black uppercase text-slate-500">Thay đổi đề xuất</div><div className="mt-2 space-y-2">{(result?.changes || []).map((change, index) => <div key={`${change.blockId}-${index}`} className="rounded-lg border bg-white p-2 text-xs leading-4 text-slate-600"><span className="mb-1 inline-block rounded bg-fuchsia-50 px-1.5 py-0.5 text-[9px] font-bold uppercase text-fuchsia-700">{change.kind}</span><div>{change.message}</div></div>)}</div>{result?.issues?.length > 0 && <><div className="mt-4 text-[10px] font-black uppercase text-slate-500">Lỗi phát hiện</div><div className="mt-2 space-y-2">{result.issues.map((issue, index) => <div key={`${issue.code}-${index}`} className="rounded-lg border bg-white p-2 text-xs text-slate-600"><span className={`mb-1 inline-block rounded px-1.5 py-0.5 text-[9px] font-bold uppercase ${issueTone(issue.severity)}`}>{issue.severity}</span><div>{issue.message}</div></div>)}</div></>}</aside><div className="grid min-h-0 grid-cols-2 gap-px bg-slate-300"><div className="flex min-h-0 flex-col bg-slate-200"><div className="shrink-0 bg-white px-4 py-2 text-center text-xs font-black uppercase text-slate-500">Trước</div><div className="min-h-0 flex-1 overflow-auto p-4">{beforeHtml && <iframe title="Mẫu trước chuẩn hóa" sandbox="" srcDoc={beforeHtml} className="mx-auto min-h-[1123px] w-full max-w-[794px] border-0 bg-white shadow-lg" />}</div></div><div className="flex min-h-0 flex-col bg-slate-200"><div className="shrink-0 bg-white px-4 py-2 text-center text-xs font-black uppercase text-emerald-600">Sau</div><div className="relative min-h-0 flex-1 overflow-auto p-4">{loadingMode && <div className="absolute inset-0 z-10 grid place-items-center bg-slate-200/75"><div className="flex items-center gap-2 rounded-xl bg-white px-4 py-3 text-sm font-bold text-slate-600 shadow"><RefreshCcw size={16} className="animate-spin text-fuchsia-600" /> Đang xử lý...</div></div>}{afterHtml && <iframe title="Mẫu sau chuẩn hóa" sandbox="" srcDoc={afterHtml} className="mx-auto min-h-[1123px] w-full max-w-[794px] border-0 bg-white shadow-lg" />}</div></div></div></div>
+      <div className="flex items-center gap-3 border-t bg-white px-4 py-3"><p className="mr-auto text-xs text-slate-500">Nhấn áp dụng để đưa kết quả vào bản nháp. Bạn vẫn cần bấm “Lưu bản nháp” trong thư viện.</p><button onClick={onClose} className="rounded-xl border px-4 py-2 text-sm font-semibold text-slate-600">Hủy</button><button disabled={!result || Boolean(loadingMode)} onClick={() => onApply(result)} className="flex items-center gap-2 rounded-xl bg-emerald-600 px-5 py-2 text-sm font-black text-white disabled:opacity-50"><BadgeCheck size={16} /> Áp dụng định dạng</button></div>
+    </div>
+  </div>;
+}
+
+function ContractTemplatePreviewModal({ template, token, onClose }) {
+  const sourceDocxMode = Boolean(template.sourceDocx?.originalName || template.engine === "source_docx");
+  const [format, setFormat] = useState(sourceDocxMode ? "docx" : "html");
+  const [html, setHtml] = useState("");
+  const [pdfUrl, setPdfUrl] = useState("");
+  const docxContainerRef = useRef(null);
+  const [loading, setLoading] = useState(true);
+  const [downloading, setDownloading] = useState("");
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    const controller = new AbortController();
+    let nextPdfUrl = "";
+    const timer = window.setTimeout(async () => {
+      setLoading(true);
+      setError("");
+      try {
+        const response = await fetch(`/api/employee-profiles/contract-templates/preview?format=${format}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ template }),
+          signal: controller.signal,
+        });
+        if (!response.ok) {
+          const data = await response.json().catch(() => ({}));
+          throw new Error(data.message || "Không thể tải bản xem trước");
+        }
+        if (format === "html") setHtml(await response.text());
+        else if (format === "docx") {
+          const container = docxContainerRef.current;
+          if (!container) throw new Error("Không thể khởi tạo vùng xem Word");
+          container.replaceChildren();
+          const { renderAsync } = await import("docx-preview");
+          await renderAsync(await response.arrayBuffer(), container, container, {
+            inWrapper: true,
+            breakPages: true,
+            ignoreWidth: false,
+            ignoreHeight: false,
+            ignoreFonts: false,
+            renderHeaders: true,
+            renderFooters: true,
+            renderFootnotes: true,
+            renderEndnotes: true,
+            useBase64URL: true,
+          });
+        } else {
+          nextPdfUrl = URL.createObjectURL(await response.blob());
+          setPdfUrl((current) => { if (current) URL.revokeObjectURL(current); return nextPdfUrl; });
+        }
+      } catch (requestError) {
+        if (requestError.name !== "AbortError") setError(requestError.message || "Không thể tải bản xem trước");
+      } finally {
+        if (!controller.signal.aborted) setLoading(false);
+      }
+    }, 200);
+    return () => { window.clearTimeout(timer); controller.abort(); };
+  }, [format, template, token]);
+
+  useEffect(() => () => { if (pdfUrl) URL.revokeObjectURL(pdfUrl); }, [pdfUrl]);
+
+  const downloadPreview = async (downloadFormat) => {
+    try {
+      setDownloading(downloadFormat);
+      setError("");
+      const response = await fetch(`/api/employee-profiles/contract-templates/preview?format=${downloadFormat}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ template }),
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.message || "Không thể tải file xem trước");
+      }
+      saveAs(await response.blob(), `${template.code || "MAU_HOP_DONG"}.${downloadFormat}`);
+    } catch (requestError) {
+      setError(requestError.message || "Không thể tải file xem trước");
+    } finally {
+      setDownloading("");
+    }
+  };
+
+  return <div className="fixed inset-0 z-[190] flex flex-col bg-slate-950/80 p-3 backdrop-blur-sm">
+    <div className="mx-auto flex h-full w-full max-w-7xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+      <div className="flex flex-wrap items-center gap-3 border-b px-4 py-3"><div className="mr-auto"><h3 className="font-black text-slate-900">Xem trước: {template.name || "Mẫu hợp đồng"}</h3><p className="text-xs text-slate-500">{sourceDocxMode ? "Render trực tiếp từ DOCX gốc trong trình duyệt · không cần LibreOffice" : "Dữ liệu nhân viên minh họa · thay đổi hiện tại được hiển thị ngay cả khi chưa lưu"}</p></div><div className="flex rounded-xl bg-slate-100 p-1"><button onClick={() => setFormat(sourceDocxMode ? "docx" : "html")} className={`rounded-lg px-4 py-2 text-sm font-bold ${["docx", "html"].includes(format) ? "bg-white text-blue-700 shadow-sm" : "text-slate-500"}`}>Dạng Word</button>{!sourceDocxMode && <button onClick={() => setFormat("pdf")} className={`rounded-lg px-4 py-2 text-sm font-bold ${format === "pdf" ? "bg-white text-red-700 shadow-sm" : "text-slate-500"}`}>Dạng PDF</button>}</div><button disabled={Boolean(downloading)} onClick={() => downloadPreview("docx")} className="flex items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-bold text-blue-700 disabled:opacity-50"><Download size={15} />{downloading === "docx" ? "Đang tải..." : "Tải Word"}</button>{!sourceDocxMode && <button disabled={Boolean(downloading)} onClick={() => downloadPreview("pdf")} className="flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm font-bold text-red-700 disabled:opacity-50"><Download size={15} />{downloading === "pdf" ? "Đang tải..." : "Tải PDF"}</button>}<button onClick={onClose} className="rounded-xl p-2 text-slate-500 hover:bg-slate-100"><X size={20} /></button></div>
+      <div className="relative min-h-0 flex-1 overflow-auto bg-slate-200 p-4">{loading && <div className="absolute inset-0 z-10 grid place-items-center bg-slate-200/80"><div className="flex items-center gap-2 rounded-xl bg-white px-4 py-3 text-sm font-bold text-slate-600 shadow"><RefreshCcw size={17} className="animate-spin text-blue-600" /> Đang dựng bản xem trước...</div></div>}{error ? <div className="mx-auto mt-10 max-w-xl rounded-2xl border border-red-200 bg-red-50 p-5 text-center text-sm text-red-700">{error}</div> : format === "html" ? <iframe title="Bản xem trước Word" sandbox="" srcDoc={html} className="mx-auto block min-h-[1123px] w-full max-w-[794px] border-0 bg-white shadow-xl" /> : format === "docx" ? <div ref={docxContainerRef} className="docx-online-preview mx-auto min-h-full [&_.docx-wrapper]:!bg-slate-200 [&_.docx-wrapper]:!p-0 [&_.docx-wrapper>section.docx]:!mb-5 [&_.docx-wrapper>section.docx]:!shadow-xl" /> : pdfUrl ? <iframe title="Bản xem trước PDF" src={pdfUrl} className="h-full min-h-[760px] w-full rounded-xl border-0 bg-white shadow-xl" /> : null}</div>
     </div>
   </div>;
 }
@@ -353,6 +528,12 @@ export default function EmployeeProfileManager({ users, onClose, standalone = fa
   const [showTemplateManager, setShowTemplateManager] = useState(false);
   const [templateEditor, setTemplateEditor] = useState(null);
   const [savingTemplate, setSavingTemplate] = useState(false);
+  const [importingTemplate, setImportingTemplate] = useState(false);
+  const [analyzingTemplate, setAnalyzingTemplate] = useState(false);
+  const [templateAnalysis, setTemplateAnalysis] = useState(null);
+  const [templateSampleProfileId, setTemplateSampleProfileId] = useState("");
+  const [previewTemplate, setPreviewTemplate] = useState(null);
+  const [formattingTemplate, setFormattingTemplate] = useState(null);
   const [showDocumentPicker, setShowDocumentPicker] = useState(false);
   const [documentPickerSearch, setDocumentPickerSearch] = useState("");
   const [importRows, setImportRows] = useState([]);
@@ -468,6 +649,7 @@ export default function EmployeeProfileManager({ users, onClose, standalone = fa
       return { ...item, _score: Number(item.priority || 0) + (departmentMatch ? 100 : 0) + (jobTitleMatch ? 120 : 0) + (item.isDefault ? 5 : 0), _suggested: Boolean(departmentMatch || jobTitleMatch) };
     }).sort((a, b) => b._score - a._score || a.name.localeCompare(b.name, "vi"));
   }, [contractTemplates, editor?.employment?.department, editor?.employment?.jobTitle]);
+  const selectedContractTemplate = useMemo(() => contractTemplates.find((item) => item._id === contractEditor?.templateId) || null, [contractTemplates, contractEditor?.templateId]);
   const setNested = (section, key, value) => setEditor((old) => ({ ...old, [section]: { ...old[section], [key]: value } }));
   const openNew = () => {
     const fresh = clone(emptyProfile);
@@ -541,17 +723,98 @@ export default function EmployeeProfileManager({ users, onClose, standalone = fa
   const openTemplateManager = () => {
     const first = contractTemplates.find((item) => item.status === "active") || contractTemplates[0];
     setTemplateEditor(normalizeTemplateEditor(first));
+    setTemplateAnalysis(null);
+    setTemplateSampleProfileId("");
     setShowTemplateManager(true);
   };
+  const analyzeTemplateWithProfile = async (profileId = templateSampleProfileId, templateId = templateEditor?._id) => {
+    if (!profileId || !templateId) return;
+    try {
+      setAnalyzingTemplate(true);
+      setTemplateSampleProfileId(profileId);
+      const result = await request(`/api/employee-profiles/contract-templates/${templateId}/analyze-profile`, { method: "POST", body: JSON.stringify({ profileId }) });
+      setTemplateAnalysis(result.data || null);
+    } catch (error) {
+      setTemplateAnalysis(null);
+      notify(error.message || "Không thể điền thử mẫu Word với nhân viên", "error");
+    } finally {
+      setAnalyzingTemplate(false);
+    }
+  };
+  const updateTemplateMissingValue = (key, nextValue) => {
+    setTemplateEditor((current) => {
+      const definition = templateAnalysis?.missingDefinitions?.find((item) => item.key === key) || { key, label: key, type: "text", required: true };
+      const definitions = mergeTemplateFieldDefinitions(current.fieldDefinitions || [], [{ ...definition, defaultValue: nextValue }]);
+      return { ...current, fieldDefinitions: definitions };
+    });
+  };
+  const importWordContractTemplate = async (file) => {
+    try {
+      setImportingTemplate(true);
+      if (!/\.docx$/i.test(file?.name || "")) throw new Error("Chỉ hỗ trợ file Word .docx");
+      const baseName = String(file.name || "mau-hop-dong").replace(/\.docx$/i, "").trim();
+      const code = norm(baseName).replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").toUpperCase().slice(0, 60) || `MAU_HD_${Date.now()}`;
+      const nextTemplate = normalizeTemplateEditor({
+        ...clone(emptyContractTemplate),
+        code,
+        name: baseName || "Mẫu hợp đồng Word",
+        description: `Nhập từ file Word ${file.name}`,
+        engine: "source_docx",
+        layoutSchema: null,
+      });
+      setTemplateEditor({ ...nextTemplate, _sourceFile: file });
+      setTemplateAnalysis(null);
+      setTemplateSampleProfileId(profiles[0]?._id || "");
+      notify("Đã chọn DOCX gốc. Hệ thống sẽ lưu nguyên file và quét biến khi lưu bản nháp.");
+    } catch (error) {
+      notify(error.message || "Không thể nhập mẫu hợp đồng từ Word", "error");
+    } finally {
+      setImportingTemplate(false);
+    }
+  };
   const saveTemplate = async () => {
+    let savedTemplate = null;
     try {
       setSavingTemplate(true);
       const isNew = !templateEditor._id;
-      const result = await request(isNew ? "/api/employee-profiles/contract-templates" : `/api/employee-profiles/contract-templates/${templateEditor._id}`, { method: isNew ? "POST" : "PUT", body: JSON.stringify(templateEditor) });
+      const { _sourceFile: sourceFile, ...templatePayload } = templateEditor;
+      let result = await request(isNew ? "/api/employee-profiles/contract-templates" : `/api/employee-profiles/contract-templates/${templateEditor._id}`, { method: isNew ? "POST" : "PUT", body: JSON.stringify(templatePayload) });
+      savedTemplate = result.data;
+      if (sourceFile) {
+        const formData = new FormData();
+        formData.append("file", sourceFile, sourceFile.name);
+        const uploadResponse = await fetch(`/api/employee-profiles/contract-templates/${result.data._id}/source-docx`, { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: formData });
+        const uploadResult = await uploadResponse.json().catch(() => ({}));
+        if (!uploadResponse.ok) throw new Error(uploadResult.message || "Không thể lưu file Word gốc");
+        result = uploadResult;
+      }
       await loadContractTemplates();
       setTemplateEditor(normalizeTemplateEditor(result.data));
-      notify("Đã lưu bản nháp mẫu hợp đồng");
-    } catch (error) { notify(error.message, "error"); } finally { setSavingTemplate(false); }
+      if (sourceFile && profiles[0]?._id && result.data?._id) await analyzeTemplateWithProfile(profiles[0]._id, result.data._id);
+      const variableCount = result.data?.sourceDocx?.placeholders?.length || 0;
+      notify(sourceFile ? `Đã lưu bản nháp, DOCX gốc và nhận diện ${variableCount} biến dữ liệu` : "Đã lưu bản nháp mẫu hợp đồng", sourceFile && !variableCount ? "warning" : "success");
+    } catch (error) {
+      if (savedTemplate?._id) setTemplateEditor((current) => ({ ...normalizeTemplateEditor(savedTemplate), _sourceFile: current?._sourceFile }));
+      notify(error.message, "error");
+    } finally { setSavingTemplate(false); }
+  };
+  const autoPlaceTemplateVariables = async () => {
+    if (!templateEditor?._id || !templateEditor.sourceDocx?.originalName) return;
+    const accepted = await confirmAction("Tự động thay các giá trị được nhận diện chắc chắn bằng biến {{...}} trong file Word gốc?\n\nChỉ áp dụng cho mẫu nháp. Bạn có thể tải Word sau khi xử lý để kiểm tra lại trước khi kích hoạt.");
+    if (!accepted) return;
+    try {
+      setSavingTemplate(true);
+      const result = await request(`/api/employee-profiles/contract-templates/${templateEditor._id}/source-docx/auto-placeholders`, { method: "POST" });
+      await loadContractTemplates();
+      setTemplateEditor(normalizeTemplateEditor(result.data));
+      const changes = result.changes || [];
+      const sample = [...new Set(changes.map((item) => `{{${item.key}}}`))].slice(0, 4).join(", ");
+      notify(changes.length ? `Đã đặt ${changes.length} vị trí biến${sample ? `: ${sample}${changes.length > 4 ? "…" : ""}` : ""}. Hãy xem mẫu online hoặc tải Word để kiểm tra.` : result.message, changes.length ? "success" : "warning");
+    } catch (error) {
+      notify(error.message || "Không thể tự động đặt biến trong file Word", "error");
+    } finally {
+      setSavingTemplate(false);
+    }
   };
   const bootstrapContractTemplates = async () => {
     try { setSavingTemplate(true); await request("/api/employee-profiles/contract-templates-bootstrap", { method: "POST" }); const data = await request("/api/employee-profiles/contract-templates"); const items = data.data || []; setContractTemplates(items); setTemplateEditor(normalizeTemplateEditor(items.find((item) => item.status === "active") || items[0])); }
@@ -605,26 +868,42 @@ export default function EmployeeProfileManager({ users, onClose, standalone = fa
       templateVersion: template.version,
       documentSettings: mergeDocumentSettings(documentDefaults, template.documentSettings),
       layoutSchema: clone(template.layoutSchema || null),
+      templateFieldDefinitions: clone(template.fieldDefinitions || []),
+      templateFieldValues: Object.fromEntries((template.fieldDefinitions || []).map((definition) => [
+        definition.key,
+        current.templateFieldValues?.[definition.key] ?? definition.defaultValue ?? "",
+      ])),
       reapplyTemplate: Boolean(current._id),
     }));
   };
-  const openContractEditor = (contract) => setContractEditor({
-    ...clone(emptyContract),
-    ...contract,
-    signedDate: dateInput(contract.signedDate),
-    effectiveDate: dateInput(contract.effectiveDate),
-    expiryDate: dateInput(contract.expiryDate),
-    renewalDueDate: dateInput(contract.renewalDueDate),
-    companyRepresentative: { ...emptyContract.companyRepresentative, ...contract.companyRepresentative },
-    appendices: (contract.appendices || []).map((appendix) => ({
-      ...appendix,
-      signedDate: dateInput(appendix.signedDate),
-      effectiveDate: dateInput(appendix.effectiveDate),
-      expiryDate: dateInput(appendix.expiryDate),
-    })),
-  });
+  const openContractEditor = (contract) => {
+    const template = contractTemplates.find((item) => item._id === contract.templateId);
+    const fieldDefinitions = mergeTemplateFieldDefinitions(template?.fieldDefinitions || [], contract.templateFieldDefinitions || []);
+    setContractEditor({
+      ...clone(emptyContract),
+      ...contract,
+      signedDate: dateInput(contract.signedDate),
+      effectiveDate: dateInput(contract.effectiveDate),
+      expiryDate: dateInput(contract.expiryDate),
+      renewalDueDate: dateInput(contract.renewalDueDate),
+      companyRepresentative: { ...emptyContract.companyRepresentative, ...contract.companyRepresentative },
+      templateFieldValues: { ...(contract.templateFieldValues || {}) },
+      templateFieldDefinitions: clone(fieldDefinitions),
+      appendices: (contract.appendices || []).map((appendix) => ({
+        ...appendix,
+        signedDate: dateInput(appendix.signedDate),
+        effectiveDate: dateInput(appendix.effectiveDate),
+        expiryDate: dateInput(appendix.expiryDate),
+      })),
+    });
+  };
   const openDocumentSettings = (contract) => {
     if (!contract) return;
+    const template = contractTemplates.find((item) => item._id === contract.templateId);
+    if (template?.sourceDocx?.originalName || template?.engine === "source_docx") {
+      notify("Hợp đồng này dùng file Word gốc; nội dung và định dạng được chỉnh trực tiếp trong DOCX của thư viện mẫu.", "warning");
+      return;
+    }
     setDocumentEditor({
       contractId: contract._id,
       contractNumber: contract.contractNumber,
@@ -860,7 +1139,7 @@ export default function EmployeeProfileManager({ users, onClose, standalone = fa
           <div className="mb-4 flex flex-wrap items-center gap-3"><div className="mr-auto"><h3 className="font-black text-cyan-800">Hợp đồng và phụ lục</h3><p className="text-xs text-slate-500">Chọn mẫu phù hợp theo bộ phận/chức danh; hợp đồng giữ snapshot của phiên bản đã dùng · {editor.contracts?.length || 0} hợp đồng</p></div>{canProfileAction("edit") && <button onClick={() => setContractEditor(clone(emptyContract))} className="flex items-center gap-2 rounded-xl bg-cyan-600 px-3 py-2 text-sm font-bold text-white"><Plus size={15} /> Thêm hợp đồng</button>}</div>
           {editor.contracts?.length ? <div className="grid gap-3 lg:grid-cols-2">{editor.contracts.map((contract) => <article key={contract._id} className="overflow-hidden rounded-xl border border-cyan-100 bg-white shadow-sm">
             <div className="flex items-start gap-3 p-3"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-cyan-50 text-cyan-700"><FileText size={18} /></span><div className="mr-auto min-w-0"><div className="flex flex-wrap items-center gap-2"><b className="truncate text-slate-800">{contract.contractNumber}</b><span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${contractStatusTone(contract.status)}`}>{CONTRACT_STATUS_LABELS[contract.status] || contract.status}</span>{contract.templateName && <span className="rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-bold text-violet-700">{contract.templateName} · v{contract.templateVersion}</span>}</div><div className="mt-1 text-xs text-slate-500">{exportContractType[contract.contractType] || contract.contractType} · {dateInput(contract.effectiveDate) || "Chưa có ngày hiệu lực"} → {contract.contractType === "indefinite" ? "Không thời hạn" : dateInput(contract.expiryDate) || "Chưa có ngày hết hạn"}</div></div><span className="shrink-0 rounded-lg bg-cyan-50 px-2 py-1 text-xs font-bold text-cyan-700">{contract.appendices?.length || 0} phụ lục</span></div>
-            <div className="flex flex-wrap items-center gap-2 border-t border-cyan-50 bg-slate-50/70 p-2.5">{canProfileAction("edit") && <><button onClick={() => openContractEditor(contract)} className="rounded-lg border border-cyan-200 bg-white px-2.5 py-1.5 text-xs font-bold text-cyan-700 hover:bg-cyan-50">Sửa HĐ & phụ lục</button><button onClick={() => openDocumentSettings(contract)} className="flex items-center gap-1 rounded-lg border border-violet-200 bg-white px-2.5 py-1.5 text-xs font-bold text-violet-700 hover:bg-violet-50"><FileText size={13} /> Nội dung & định dạng</button><button disabled={deletingContractId === contract._id} onClick={() => deleteContract(contract)} className="ml-auto flex items-center gap-1 rounded-lg border border-red-200 bg-white px-2.5 py-1.5 text-xs font-bold text-red-700 hover:bg-red-50 disabled:opacity-50"><Trash2 size={13} /> {deletingContractId === contract._id ? "Đang xóa..." : "Xóa HĐ"}</button></>}{canProfileAction("export") && <><button onClick={() => exportContract(contract, "docx")} className="rounded-lg bg-blue-50 px-2.5 py-1.5 text-xs font-bold text-blue-700 hover:bg-blue-100">Word</button><button onClick={() => exportContract(contract, "pdf")} className="rounded-lg bg-red-50 px-2.5 py-1.5 text-xs font-bold text-red-700 hover:bg-red-100">PDF</button></>}</div>
+            <div className="flex flex-wrap items-center gap-2 border-t border-cyan-50 bg-slate-50/70 p-2.5">{canProfileAction("edit") && <><button onClick={() => openContractEditor(contract)} className="rounded-lg border border-cyan-200 bg-white px-2.5 py-1.5 text-xs font-bold text-cyan-700 hover:bg-cyan-50">Sửa HĐ & phụ lục</button>{!contractTemplates.some((item) => item._id === contract.templateId && (item.sourceDocx?.originalName || item.engine === "source_docx")) && <button onClick={() => openDocumentSettings(contract)} className="flex items-center gap-1 rounded-lg border border-violet-200 bg-white px-2.5 py-1.5 text-xs font-bold text-violet-700 hover:bg-violet-50"><FileText size={13} /> Nội dung & định dạng</button>}<button disabled={deletingContractId === contract._id} onClick={() => deleteContract(contract)} className="ml-auto flex items-center gap-1 rounded-lg border border-red-200 bg-white px-2.5 py-1.5 text-xs font-bold text-red-700 hover:bg-red-50 disabled:opacity-50"><Trash2 size={13} /> {deletingContractId === contract._id ? "Đang xóa..." : "Xóa HĐ"}</button></>}{canProfileAction("export") && <><button onClick={() => exportContract(contract, "docx")} className="rounded-lg bg-blue-50 px-2.5 py-1.5 text-xs font-bold text-blue-700 hover:bg-blue-100">{contractTemplates.some((item) => item._id === contract.templateId && item.sourceDocx?.originalName) ? "Word gốc đã điền" : "Word"}</button><button onClick={() => exportContract(contract, "pdf")} className="rounded-lg bg-red-50 px-2.5 py-1.5 text-xs font-bold text-red-700 hover:bg-red-100">PDF</button></>}</div>
           </article>)}</div> : <div className="rounded-xl bg-slate-50 p-6 text-center text-sm text-slate-500">Nhân viên chưa có hợp đồng. Chọn “Thêm hợp đồng” để tạo hợp đồng và phụ lục.</div>}
         </section>}
         <section className={`rounded-2xl border bg-white p-4 ${editor.payrollBankAccount?.isVerified ? "border-emerald-200" : "border-amber-200"}`}>
@@ -895,8 +1174,37 @@ export default function EmployeeProfileManager({ users, onClose, standalone = fa
       </div>
     </div>}
     {documentEditor && <ContractDocumentEditorModal contracts={editor?.contracts || []} value={documentEditor} defaults={documentDefaults} saving={savingDocument} onChange={setDocumentEditor} onSelect={selectDocumentContract} onClose={() => setDocumentEditor(null)} onSave={saveDocumentSettings} />}
-    {showTemplateManager && templateEditor && <ContractTemplateManagerModal templates={contractTemplates} value={templateEditor} defaults={documentDefaults} saving={savingTemplate} onChange={setTemplateEditor} onSelect={(item) => setTemplateEditor(normalizeTemplateEditor(item))} onNew={() => setTemplateEditor(normalizeTemplateEditor())} onBootstrap={bootstrapContractTemplates} onSave={saveTemplate} onNewVersion={createTemplateVersion} onActivate={() => changeTemplateStatus("activate")} onArchive={() => changeTemplateStatus("archive")} onDelete={deleteTemplate} onClose={() => setShowTemplateManager(false)} />}
-    {contractEditor && <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/50 p-4"><div className="max-h-[94vh] w-full max-w-4xl overflow-y-auto rounded-2xl bg-white p-5 shadow-2xl"><div className="mb-4 flex items-center"><h3 className="mr-auto text-lg font-black">{contractEditor._id ? "Sửa hợp đồng" : "Thêm hợp đồng"}</h3><button onClick={() => setContractEditor(null)}><X /></button></div><div className="mb-5 rounded-2xl border border-violet-200 bg-violet-50 p-4"><label><span className={labelClass}>Mẫu hợp đồng theo vị trí</span><select value={contractEditor.templateId || ""} disabled={Boolean(contractEditor._id && contractEditor.status !== "draft")} onChange={(e) => applyContractTemplate(e.target.value)} className={`${inputClass} disabled:bg-slate-100`}><option value="">Không dùng mẫu / nhập thủ công</option>{contractEditor.templateId && !activeContractTemplates.some((item) => item._id === contractEditor.templateId) && <option value={contractEditor.templateId}>{contractEditor.templateName || contractEditor.templateCode} · v{contractEditor.templateVersion}</option>}{activeContractTemplates.map((item) => <option key={item._id} value={item._id}>{item._suggested ? "★ Gợi ý · " : ""}{item.name} · v{item.version}</option>)}</select></label><p className="mt-2 text-xs text-violet-700">Mẫu được gợi ý từ bộ phận “{editor.employment?.department || "chưa xác định"}” và chức danh “{editor.employment?.jobTitle || "chưa xác định"}”. Chỉ hợp đồng nháp mới được đổi hoặc áp dụng lại mẫu.</p></div><div className="grid gap-3 md:grid-cols-3"><Field label="Số hợp đồng" value={contractEditor.contractNumber} onChange={(v) => setContractEditor({ ...contractEditor, contractNumber: v })} /><SelectField label="Loại hợp đồng" value={contractEditor.contractType} onChange={(v) => setContractEditor({ ...contractEditor, contractType: v })} options={[["probation", "Thử việc"], ["fixed_term", "Xác định thời hạn"], ["indefinite", "Không xác định thời hạn"], ["seasonal", "Mùa vụ"], ["other", "Khác"]]} /><SelectField label="Trạng thái hợp đồng" value={contractEditor.status} onChange={(v) => setContractEditor({ ...contractEditor, status: v })} options={[["draft", "Bản nháp"], ["active", "Đang hiệu lực"], ["expired", "Hết hạn"], ["terminated", "Đã chấm dứt"], ["cancelled", "Đã hủy"]]} /><Field label="Thời hạn (tháng)" type="number" value={contractEditor.durationMonths ?? ""} onChange={(v) => setContractEditor({ ...contractEditor, durationMonths: v ? Number(v) : null })} /><Field label="Ngày ký" type="date" value={contractEditor.signedDate} onChange={(v) => setContractEditor({ ...contractEditor, signedDate: v })} /><Field label="Ngày hiệu lực" type="date" value={contractEditor.effectiveDate} onChange={(v) => setContractEditor({ ...contractEditor, effectiveDate: v })} /><Field label="Ngày hết hạn" type="date" value={contractEditor.expiryDate} onChange={(v) => setContractEditor({ ...contractEditor, expiryDate: v })} /><Field label="Ngày nhắc gia hạn" type="date" value={contractEditor.renewalDueDate} onChange={(v) => setContractEditor({ ...contractEditor, renewalDueDate: v })} /><Field label="Lương cơ bản" type="number" value={contractEditor.baseSalary} onChange={(v) => setContractEditor({ ...contractEditor, baseSalary: Number(v) })} /><Field label="Nơi làm việc" value={contractEditor.workplace} onChange={(v) => setContractEditor({ ...contractEditor, workplace: v })} /><Field label="Người đại diện" value={contractEditor.companyRepresentative.fullName} onChange={(v) => setContractEditor({ ...contractEditor, companyRepresentative: { ...contractEditor.companyRepresentative, fullName: v } })} /><Field label="Chức vụ đại diện" value={contractEditor.companyRepresentative.title} onChange={(v) => setContractEditor({ ...contractEditor, companyRepresentative: { ...contractEditor.companyRepresentative, title: v } })} /><Field label="Phụ cấp" value={contractEditor.allowances} onChange={(v) => setContractEditor({ ...contractEditor, allowances: v })} /></div><div className="mt-5 rounded-xl border border-cyan-100 bg-cyan-50/50 p-3"><div className="mb-3 flex items-center"><b className="mr-auto text-sm text-cyan-800">Phụ lục hợp đồng</b><button onClick={() => setContractEditor({ ...contractEditor, appendices: [...(contractEditor.appendices || []), { appendixNumber: "", signedDate: "", effectiveDate: "", expiryDate: "", summary: "", status: "draft" }] })} className="rounded-lg bg-cyan-600 px-2.5 py-1.5 text-xs font-bold text-white">+ Thêm phụ lục</button></div>{(contractEditor.appendices || []).map((appendix, index) => { const update = (key, value) => setContractEditor({ ...contractEditor, appendices: contractEditor.appendices.map((item, i) => i === index ? { ...item, [key]: value } : item) }); return <div key={appendix._id || index} className="mb-3 grid gap-2 rounded-xl bg-white p-3 md:grid-cols-4"><Field label="Số phụ lục" value={appendix.appendixNumber} onChange={(v) => update("appendixNumber", v)} /><SelectField label="Trạng thái phụ lục" value={appendix.status} onChange={(v) => update("status", v)} options={[["draft", "Bản nháp"], ["active", "Đang hiệu lực"], ["expired", "Hết hạn"], ["cancelled", "Đã hủy"]]} /><Field label="Ngày ký" type="date" value={appendix.signedDate} onChange={(v) => update("signedDate", v)} /><Field label="Ngày hiệu lực" type="date" value={appendix.effectiveDate} onChange={(v) => update("effectiveDate", v)} /><Field label="Ngày hết hạn" type="date" value={appendix.expiryDate} onChange={(v) => update("expiryDate", v)} /><div className="md:col-span-3"><Field label="Nội dung tóm tắt" value={appendix.summary} onChange={(v) => update("summary", v)} /></div><button disabled={deletingAppendixId === appendix._id} onClick={() => deleteAppendix(appendix, index)} className="self-end flex items-center justify-center gap-2 rounded-xl border border-red-200 px-3 py-2 text-sm text-red-600 hover:bg-red-50 disabled:opacity-50"><Trash2 size={14} />{deletingAppendixId === appendix._id ? "Đang xóa..." : "Xóa phụ lục"}</button></div>; })}</div><div className="mt-5 flex justify-end gap-2"><button onClick={() => setContractEditor(null)} className="rounded-xl border px-4 py-2">Hủy</button><button onClick={saveContract} className="rounded-xl bg-cyan-600 px-5 py-2 font-bold text-white">Lưu hợp đồng</button></div></div></div>}
+    {showTemplateManager && templateEditor && <ContractTemplateManagerModal
+      templates={contractTemplates}
+      profiles={profiles}
+      value={templateEditor}
+      defaults={documentDefaults}
+      saving={savingTemplate}
+      importing={importingTemplate}
+      analyzing={analyzingTemplate}
+      analysis={templateAnalysis}
+      sampleProfileId={templateSampleProfileId}
+      onChange={setTemplateEditor}
+      onSelect={(item) => { setTemplateEditor(normalizeTemplateEditor(item)); setTemplateAnalysis(null); setTemplateSampleProfileId(""); }}
+      onNew={() => { setTemplateEditor(normalizeTemplateEditor()); setTemplateAnalysis(null); setTemplateSampleProfileId(""); }}
+      onImportWord={importWordContractTemplate}
+      onPreview={() => setPreviewTemplate(clone(templateEditor))}
+      onFormat={() => setFormattingTemplate(clone(templateEditor))}
+      onAutoPlace={autoPlaceTemplateVariables}
+      onAnalyzeProfile={() => analyzeTemplateWithProfile()}
+      onSampleProfileChange={(profileId) => { setTemplateSampleProfileId(profileId); setTemplateAnalysis(null); }}
+      onMissingValueChange={updateTemplateMissingValue}
+      onBootstrap={bootstrapContractTemplates}
+      onSave={saveTemplate}
+      onNewVersion={createTemplateVersion}
+      onActivate={() => changeTemplateStatus("activate")}
+      onArchive={() => changeTemplateStatus("archive")}
+      onDelete={deleteTemplate}
+      onClose={() => setShowTemplateManager(false)}
+    />}
+    {previewTemplate && <ContractTemplatePreviewModal template={previewTemplate} token={token} onClose={() => setPreviewTemplate(null)} />}
+    {formattingTemplate && <ContractTemplateFormattingModal template={formattingTemplate} token={token} onClose={() => setFormattingTemplate(null)} onApply={(result) => { setTemplateEditor((current) => ({ ...current, documentSettings: result.documentSettings, layoutSchema: result.layoutSchema })); setFormattingTemplate(null); notify(`Đã áp dụng ${result.changes?.length || 0} điều chỉnh định dạng. Hãy kiểm tra và lưu bản nháp.`, "success"); }} />}
+    {contractEditor && <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/50 p-4"><div className="max-h-[94vh] w-full max-w-4xl overflow-y-auto rounded-2xl bg-white p-5 shadow-2xl"><div className="mb-4 flex items-center"><h3 className="mr-auto text-lg font-black">{contractEditor._id ? "Sửa hợp đồng" : "Thêm hợp đồng"}</h3><button onClick={() => setContractEditor(null)}><X /></button></div><div className="mb-5 rounded-2xl border border-violet-200 bg-violet-50 p-4"><label><span className={labelClass}>Mẫu hợp đồng theo vị trí</span><select value={contractEditor.templateId || ""} disabled={Boolean(contractEditor._id && contractEditor.status !== "draft")} onChange={(e) => applyContractTemplate(e.target.value)} className={`${inputClass} disabled:bg-slate-100`}><option value="">Không dùng mẫu / nhập thủ công</option>{contractEditor.templateId && !activeContractTemplates.some((item) => item._id === contractEditor.templateId) && <option value={contractEditor.templateId}>{contractEditor.templateName || contractEditor.templateCode} · v{contractEditor.templateVersion}</option>}{activeContractTemplates.map((item) => <option key={item._id} value={item._id}>{item._suggested ? "★ Gợi ý · " : ""}{item.name} · v{item.version}{item.sourceDocx?.originalName ? " · Word gốc" : ""}</option>)}</select></label><p className="mt-2 text-xs text-violet-700">Mẫu được gợi ý từ bộ phận “{editor.employment?.department || "chưa xác định"}” và chức danh “{editor.employment?.jobTitle || "chưa xác định"}”. Chỉ hợp đồng nháp mới được đổi hoặc áp dụng lại mẫu.</p>{contractEditor.templateId && <div className={`mt-3 rounded-xl border p-3 text-xs ${selectedContractTemplate?.sourceDocx?.originalName ? selectedContractTemplate.sourceDocx.placeholders?.length ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-amber-200 bg-amber-50 text-amber-800" : "border-slate-200 bg-white text-slate-600"}`}>{selectedContractTemplate?.sourceDocx?.originalName ? selectedContractTemplate.sourceDocx.placeholders?.length ? `Word dùng file gốc “${selectedContractTemplate.sourceDocx.originalName}” với ${selectedContractTemplate.sourceDocx.placeholders.length} biến: dữ liệu hồ sơ được điền tự động, các thông tin còn lại cần nhập bên dưới.` : "Mẫu có file Word gốc nhưng chưa chứa biến {{...}}; file tải về sẽ không có dữ liệu tự điền." : "Mẫu này chưa có file Word gốc; nút Word sẽ dùng bộ dựng hợp đồng hiện tại."}</div>}</div><div className="grid gap-3 md:grid-cols-3"><Field label="Số hợp đồng" value={contractEditor.contractNumber} onChange={(v) => setContractEditor({ ...contractEditor, contractNumber: v })} /><SelectField label="Loại hợp đồng" value={contractEditor.contractType} onChange={(v) => setContractEditor({ ...contractEditor, contractType: v })} options={[["probation", "Thử việc"], ["fixed_term", "Xác định thời hạn"], ["indefinite", "Không xác định thời hạn"], ["seasonal", "Mùa vụ"], ["other", "Khác"]]} /><SelectField label="Trạng thái hợp đồng" value={contractEditor.status} onChange={(v) => setContractEditor({ ...contractEditor, status: v })} options={[["draft", "Bản nháp"], ["active", "Đang hiệu lực"], ["expired", "Hết hạn"], ["terminated", "Đã chấm dứt"], ["cancelled", "Đã hủy"]]} /><Field label="Thời hạn (tháng)" type="number" value={contractEditor.durationMonths ?? ""} onChange={(v) => setContractEditor({ ...contractEditor, durationMonths: v ? Number(v) : null })} /><Field label="Ngày ký" type="date" value={contractEditor.signedDate} onChange={(v) => setContractEditor({ ...contractEditor, signedDate: v })} /><Field label="Ngày hiệu lực" type="date" value={contractEditor.effectiveDate} onChange={(v) => setContractEditor({ ...contractEditor, effectiveDate: v })} /><Field label="Ngày hết hạn" type="date" value={contractEditor.expiryDate} onChange={(v) => setContractEditor({ ...contractEditor, expiryDate: v })} /><Field label="Ngày nhắc gia hạn" type="date" value={contractEditor.renewalDueDate} onChange={(v) => setContractEditor({ ...contractEditor, renewalDueDate: v })} /><Field label="Lương cơ bản" type="number" value={contractEditor.baseSalary} onChange={(v) => setContractEditor({ ...contractEditor, baseSalary: Number(v) })} /><Field label="Nơi làm việc" value={contractEditor.workplace} onChange={(v) => setContractEditor({ ...contractEditor, workplace: v })} /><Field label="Người đại diện" value={contractEditor.companyRepresentative.fullName} onChange={(v) => setContractEditor({ ...contractEditor, companyRepresentative: { ...contractEditor.companyRepresentative, fullName: v } })} /><Field label="Chức vụ đại diện" value={contractEditor.companyRepresentative.title} onChange={(v) => setContractEditor({ ...contractEditor, companyRepresentative: { ...contractEditor.companyRepresentative, title: v } })} /><Field label="Phụ cấp" value={contractEditor.allowances} onChange={(v) => setContractEditor({ ...contractEditor, allowances: v })} /></div><ContractTemplateDynamicFields definitions={contractEditor.templateFieldDefinitions || []} values={contractEditor.templateFieldValues || {}} onChange={(key, value) => setContractEditor((current) => ({ ...current, templateFieldValues: { ...(current.templateFieldValues || {}), [key]: value } }))} /><div className="mt-5 rounded-xl border border-cyan-100 bg-cyan-50/50 p-3"><div className="mb-3 flex items-center"><b className="mr-auto text-sm text-cyan-800">Phụ lục hợp đồng</b><button onClick={() => setContractEditor({ ...contractEditor, appendices: [...(contractEditor.appendices || []), { appendixNumber: "", signedDate: "", effectiveDate: "", expiryDate: "", summary: "", status: "draft" }] })} className="rounded-lg bg-cyan-600 px-2.5 py-1.5 text-xs font-bold text-white">+ Thêm phụ lục</button></div>{(contractEditor.appendices || []).map((appendix, index) => { const update = (key, value) => setContractEditor({ ...contractEditor, appendices: contractEditor.appendices.map((item, i) => i === index ? { ...item, [key]: value } : item) }); return <div key={appendix._id || index} className="mb-3 grid gap-2 rounded-xl bg-white p-3 md:grid-cols-4"><Field label="Số phụ lục" value={appendix.appendixNumber} onChange={(v) => update("appendixNumber", v)} /><SelectField label="Trạng thái phụ lục" value={appendix.status} onChange={(v) => update("status", v)} options={[["draft", "Bản nháp"], ["active", "Đang hiệu lực"], ["expired", "Hết hạn"], ["cancelled", "Đã hủy"]]} /><Field label="Ngày ký" type="date" value={appendix.signedDate} onChange={(v) => update("signedDate", v)} /><Field label="Ngày hiệu lực" type="date" value={appendix.effectiveDate} onChange={(v) => update("effectiveDate", v)} /><Field label="Ngày hết hạn" type="date" value={appendix.expiryDate} onChange={(v) => update("expiryDate", v)} /><div className="md:col-span-3"><Field label="Nội dung tóm tắt" value={appendix.summary} onChange={(v) => update("summary", v)} /></div><button disabled={deletingAppendixId === appendix._id} onClick={() => deleteAppendix(appendix, index)} className="self-end flex items-center justify-center gap-2 rounded-xl border border-red-200 px-3 py-2 text-sm text-red-600 hover:bg-red-50 disabled:opacity-50"><Trash2 size={14} />{deletingAppendixId === appendix._id ? "Đang xóa..." : "Xóa phụ lục"}</button></div>; })}</div><div className="mt-5 flex justify-end gap-2"><button onClick={() => setContractEditor(null)} className="rounded-xl border px-4 py-2">Hủy</button><button onClick={saveContract} className="rounded-xl bg-cyan-600 px-5 py-2 font-bold text-white">Lưu hợp đồng</button></div></div></div>}
   </div>;
   return <>
     {standalone ? content : createPortal(content, document.body)}
