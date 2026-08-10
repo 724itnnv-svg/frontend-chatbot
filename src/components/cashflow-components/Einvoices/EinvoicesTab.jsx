@@ -554,9 +554,13 @@ const buildCustomerAddressUpdatePayload = async (
   return {
     Id: row?.CustomerId ?? row?.CustomerId ?? "",
     CustomerId: row?.CustomerId ?? row?.customerId ?? "",
+    Address: streetAddress || null,
     AddressEInvoice:
+      streetAddress ||
       [streetAddress, districtName, provinceName].filter(Boolean).join(", ") ||
       "Bán cho người tiêu dùng",
+    LocationIdEInvoice: wardId?.[0]?.Id ?? null,
+    AdministrativeAreaIdEInvoice: wardId?.[0]?.Id ?? null,
     LocationIdEInvoiceLevel_1: provinceIds?.[0]?.Id ?? null,
     LocationNameEInvoiceLevel_1: provinceName,
     LocationIdEInvoiceLevel_2: wardId?.[0]?.Id ?? null,
@@ -1500,8 +1504,7 @@ export default function EinvoicesTab({
     invoiceLogPagination.page * invoiceLogPagination.limit,
     invoiceLogPagination.total,
   );
-  const isPageLoading =
-    loading || operationProgress.visible || exportingExcel;
+  const isPageLoading = loading || operationProgress.visible || exportingExcel;
   const pageLoadingLabel = operationProgress.visible
     ? operationProgress.label || "Đang xử lý hóa đơn điện tử..."
     : exportingExcel
@@ -2100,75 +2103,77 @@ export default function EinvoicesTab({
                   <div className="overflow-hidden rounded-[20px] border border-slate-200">
                     <div className="max-h-[55vh] overflow-auto">
                       <table className="w-full min-w-[760px] border-separate border-spacing-0 text-left text-sm">
-                      <thead>
-                        <tr className="bg-slate-50 text-[11px] uppercase tracking-[0.12em] text-slate-500">
-                          <th className="sticky top-0 z-10 bg-slate-50 px-4 py-3 font-black">
-                            Thời gian
-                          </th>
-                          <th className="sticky top-0 z-10 bg-slate-50 px-4 py-3 font-black">
-                            Nhân viên
-                          </th>
-                          <th className="sticky top-0 z-10 bg-slate-50 px-4 py-3 font-black">
-                            Thao tác
-                          </th>
-                          <th className="sticky top-0 z-10 bg-slate-50 px-4 py-3 font-black">
-                            Mã hóa đơn
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {invoiceLogs.map((log, index) => {
-                          const name = normalizeText(
-                            log?.name ?? log?.Name ?? log?.employeeName,
-                          );
-                          const employeeCode = normalizeText(
-                            log?.employeeCode ?? log?.EmployeeCode ?? log?.code,
-                          );
-                          const text = normalizeText(
-                            log?.text ?? log?.Text ?? log?.message,
-                          );
-                          const invoiceCode = normalizeText(
-                            log?.invoiceCode ??
-                              log?.InvoiceCode ??
-                              log?.invoice,
-                          );
-                          const createdAt =
-                            log?.time ??
-                            log?.createdAt ??
-                            log?.CreatedAt ??
-                            log?.created_at ??
-                            log?.date;
+                        <thead>
+                          <tr className="bg-slate-50 text-[11px] uppercase tracking-[0.12em] text-slate-500">
+                            <th className="sticky top-0 z-10 bg-slate-50 px-4 py-3 font-black">
+                              Thời gian
+                            </th>
+                            <th className="sticky top-0 z-10 bg-slate-50 px-4 py-3 font-black">
+                              Nhân viên
+                            </th>
+                            <th className="sticky top-0 z-10 bg-slate-50 px-4 py-3 font-black">
+                              Thao tác
+                            </th>
+                            <th className="sticky top-0 z-10 bg-slate-50 px-4 py-3 font-black">
+                              Mã hóa đơn
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {invoiceLogs.map((log, index) => {
+                            const name = normalizeText(
+                              log?.name ?? log?.Name ?? log?.employeeName,
+                            );
+                            const employeeCode = normalizeText(
+                              log?.employeeCode ??
+                                log?.EmployeeCode ??
+                                log?.code,
+                            );
+                            const text = normalizeText(
+                              log?.text ?? log?.Text ?? log?.message,
+                            );
+                            const invoiceCode = normalizeText(
+                              log?.invoiceCode ??
+                                log?.InvoiceCode ??
+                                log?.invoice,
+                            );
+                            const createdAt =
+                              log?.time ??
+                              log?.createdAt ??
+                              log?.CreatedAt ??
+                              log?.created_at ??
+                              log?.date;
 
-                          return (
-                            <tr
-                              key={
-                                log?._id ??
-                                log?.id ??
-                                `${invoiceCode}-${createdAt}-${index}`
-                              }
-                              className="border-t border-slate-100 even:bg-slate-50/45"
-                            >
-                              <td className="whitespace-nowrap px-4 py-3 text-xs font-semibold text-slate-500">
-                                {formatLogDate(createdAt)}
-                              </td>
-                              <td className="px-4 py-3">
-                                <div className="font-bold text-slate-900">
-                                  {name || "-"}
-                                </div>
-                                <div className="mt-0.5 text-xs font-semibold text-slate-500">
-                                  {employeeCode || "-"}
-                                </div>
-                              </td>
-                              <td className="px-4 py-3 font-semibold text-slate-700">
-                                {text || "-"}
-                              </td>
-                              <td className="px-4 py-3 font-mono text-xs font-bold text-sky-700">
-                                {invoiceCode || "-"}
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
+                            return (
+                              <tr
+                                key={
+                                  log?._id ??
+                                  log?.id ??
+                                  `${invoiceCode}-${createdAt}-${index}`
+                                }
+                                className="border-t border-slate-100 even:bg-slate-50/45"
+                              >
+                                <td className="whitespace-nowrap px-4 py-3 text-xs font-semibold text-slate-500">
+                                  {formatLogDate(createdAt)}
+                                </td>
+                                <td className="px-4 py-3">
+                                  <div className="font-bold text-slate-900">
+                                    {name || "-"}
+                                  </div>
+                                  <div className="mt-0.5 text-xs font-semibold text-slate-500">
+                                    {employeeCode || "-"}
+                                  </div>
+                                </td>
+                                <td className="px-4 py-3 font-semibold text-slate-700">
+                                  {text || "-"}
+                                </td>
+                                <td className="px-4 py-3 font-mono text-xs font-bold text-sky-700">
+                                  {invoiceCode || "-"}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
                       </table>
                     </div>
                   </div>
