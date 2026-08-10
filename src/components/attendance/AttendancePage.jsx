@@ -89,7 +89,7 @@ const LEAVE_SESSION_LABELS = {
 
 function createLeaveForm() {
   const today = dateKey(new Date());
-  return { leaveType: "emergency", startDate: today, endDate: today, startTime: "07:30", endTime: "17:00", session: "full_day", reason: "", evidence: null };
+  return { leaveType: "emergency", startDate: today, endDate: today, startTime: "07:30", endTime: "17:00", session: "full_day", reason: "", evidences: [] };
 }
 
 function createAdvanceForm() {
@@ -349,6 +349,34 @@ function fmtShortDate(str) {
 function fmtTime(iso) {
   if (!iso) return "-";
   return new Date(iso).toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" });
+}
+
+function requestEvidenceList(request) {
+  if (Array.isArray(request?.evidences) && request.evidences.length > 0) return request.evidences;
+  return request?.evidence?.url ? [request.evidence] : [];
+}
+
+function leaveIntervals(request) {
+  if (request.leaveType === "emergency") {
+    return [[request.startTime, request.endTime]];
+  }
+  if (request.leaveType === "annual" || request.session === "full_day") {
+    return [["07:30", "11:30"], ["13:00", "17:00"]];
+  }
+  if (request.session === "morning") return [["07:30", "11:30"]];
+  if (request.session === "afternoon") return [["13:00", "17:00"]];
+  return [];
+}
+
+function leaveRequestsOverlap(firstRequest, secondRequest) {
+  const overlapStart = firstRequest.startDate > secondRequest.startDate ? firstRequest.startDate : secondRequest.startDate;
+  const overlapEnd = firstRequest.endDate < secondRequest.endDate ? firstRequest.endDate : secondRequest.endDate;
+  if (countedLeaveDateKeys(overlapStart, overlapEnd).length === 0) return false;
+  return leaveIntervals(firstRequest).some(([firstStart, firstEnd]) =>
+    leaveIntervals(secondRequest).some(([secondStart, secondEnd]) =>
+      firstStart < secondEnd && secondStart < firstEnd,
+    ),
+  );
 }
 
 function hasPendingEmergencyLeaveStarted(request, now = Date.now()) {
@@ -1093,7 +1121,7 @@ export default function AttendancePage() {
     () => leaveRequests.filter((request) => (
       request.leaveType === "emergency"
       && request.status === "pending"
-      && (request.needsEvidence === true || !request.evidence?.url)
+      && (request.needsEvidence === true || requestEvidenceList(request).length === 0)
     )).length,
     [leaveRequests],
   );
@@ -1812,6 +1840,14 @@ export default function AttendancePage() {
     }
     if (!leaveForm.reason.trim()) return showMsg(false, "Vui lòng nhập lý do xin nghỉ.");
 
+    const overlappingRequest = leaveRequests.find((request) =>
+      ["pending", "approved", "cancel_pending"].includes(request.status)
+      && leaveRequestsOverlap(request, leaveForm),
+    );
+    if (overlappingRequest) {
+      return showMsg(false, `Bạn đã có đơn xin nghỉ trùng thời gian từ ${fmtShortDate(overlappingRequest.startDate)} đến ${fmtShortDate(overlappingRequest.endDate)}.`);
+    }
+
     const sendRequest = async (convertAnnualToRegular = false) => {
       const body = new FormData();
       body.append("leaveType", leaveForm.leaveType);
@@ -1822,7 +1858,7 @@ export default function AttendancePage() {
       body.append("session", leaveForm.session);
       body.append("reason", leaveForm.reason.trim());
       if (convertAnnualToRegular) body.append("convertAnnualToRegular", "true");
-      if (leaveForm.evidence) body.append("evidence", leaveForm.evidence);
+      leaveForm.evidences.forEach((file) => body.append("evidence", file));
       return api.post("/attendance-leave-requests", body);
     };
 
@@ -1846,6 +1882,15 @@ export default function AttendancePage() {
     } finally {
       setLeaveSaving(false);
     }
+  }
+
+  function selectLeaveEvidences(fileList) {
+    const files = Array.from(fileList || []);
+    if (files.length > 3) return showMsg(false, "Chỉ được chọn tối đa 3 ảnh minh chứng.");
+    if (files.some((file) => file.size > 8 * 1024 * 1024)) {
+      return showMsg(false, "Mỗi ảnh minh chứng không được vượt quá 8 MB.");
+    }
+    setLeaveForm((current) => ({ ...current, evidences: files }));
   }
 
   async function submitAdvanceRequest(event) {
@@ -1909,12 +1954,17 @@ export default function AttendancePage() {
     }
   }
 
-  async function uploadLeaveEvidence(requestId, file) {
-    if (!file) return;
+  async function uploadLeaveEvidence(requestId, files, maxFiles = 3) {
+    const selectedFiles = Array.from(files || []);
+    if (selectedFiles.length === 0) return;
+    if (selectedFiles.length > maxFiles) return showMsg(false, `Bạn chỉ có thể bổ sung thêm ${maxFiles} ảnh minh chứng.`);
+    if (selectedFiles.some((file) => file.size > 8 * 1024 * 1024)) {
+      return showMsg(false, "Mỗi ảnh minh chứng không được vượt quá 8 MB.");
+    }
     setUploadingLeaveId(requestId);
     try {
       const body = new FormData();
-      body.append("evidence", file);
+      selectedFiles.forEach((file) => body.append("evidence", file));
       const res = await api.post(`/attendance-leave-requests/${requestId}/evidence`, body);
       showMsg(true, res.data?.message || "Đã bổ sung ảnh minh chứng.");
       await loadLeaveRequests();
@@ -1925,11 +1975,12 @@ export default function AttendancePage() {
     }
   }
 
-  function openLeaveEvidence(request) {
-    if (!request?.evidence?.url) return;
+  function openLeaveEvidence(request, evidenceIndex = 0) {
+    const evidence = requestEvidenceList(request)[evidenceIndex];
+    if (!evidence?.url) return;
     setEvidencePreview({
-      url: apiUrl(request.evidence.url),
-      title: `Ảnh minh chứng · ${LEAVE_TYPE_LABELS[request.leaveType] || "Nghỉ phép"}`,
+      url: apiUrl(evidence.url),
+      title: `Ảnh minh chứng ${evidenceIndex + 1} · ${LEAVE_TYPE_LABELS[request.leaveType] || "Nghỉ phép"}`,
       date: `${fmtShortDate(request.startDate)}${request.endDate !== request.startDate ? ` – ${fmtShortDate(request.endDate)}` : ""}`,
     });
     setEvidencePreviewLoading(true);
@@ -2842,12 +2893,13 @@ export default function AttendancePage() {
                   </label>
 
                   <label className="block cursor-pointer rounded-xl border border-dashed border-slate-300 bg-slate-50 p-3 transition hover:border-violet-300 hover:bg-violet-50/40">
-                    <input type="file" accept="image/jpeg,image/png,image/webp,image/gif" className="hidden" onChange={(event) => setLeaveForm((current) => ({ ...current, evidence: event.target.files?.[0] || null }))} />
-                    <span className="flex items-center gap-2 text-sm font-semibold text-slate-600"><ImagePlus size={17} className="text-violet-500" /> {leaveForm.evidence ? leaveForm.evidence.name : "Chọn ảnh minh chứng"}</span>
-                    <span className="mt-1 block text-xs text-slate-400">Tối đa 8 MB. Bắt buộc với off đột xuất; có thể bổ sung sau khi gửi đơn.</span>
+                    <input type="file" multiple accept="image/jpeg,image/png,image/webp,image/gif" className="hidden" onChange={(event) => selectLeaveEvidences(event.target.files)} />
+                    <span className="flex items-center gap-2 text-sm font-semibold text-slate-600"><ImagePlus size={17} className="text-violet-500" /> {leaveForm.evidences.length > 0 ? `Đã chọn ${leaveForm.evidences.length} ảnh` : "Chọn ảnh minh chứng"}</span>
+                    {leaveForm.evidences.length > 0 && <span className="mt-1 block truncate text-xs text-slate-500">{leaveForm.evidences.map((file) => file.name).join(", ")}</span>}
+                    <span className="mt-1 block text-xs text-slate-400">Tối đa 3 ảnh, mỗi ảnh 8 MB. Bắt buộc với off đột xuất; có thể bổ sung sau khi gửi đơn.</span>
                   </label>
 
-                  {leaveForm.leaveType === "emergency" && !leaveForm.evidence && (
+                  {leaveForm.leaveType === "emergency" && leaveForm.evidences.length === 0 && (
                     <div className={`flex gap-2 rounded-xl border p-3 text-xs ${TONE.amber}`}>
                       <AlertCircle size={15} className="mt-0.5 shrink-0" />
                       Bạn vẫn có thể gửi đơn trước, nhưng quản trị chỉ duyệt sau khi đã có ảnh minh chứng.
@@ -2878,6 +2930,7 @@ export default function AttendancePage() {
                   <div className="divide-y divide-slate-100">
                     {leaveRequests.map((request) => {
                       const status = leaveStatusMeta(request.status, request.needsEvidence);
+                      const evidences = requestEvidenceList(request);
                       const pendingEmergencyOffStarted = hasPendingEmergencyLeaveStarted(request, clockNow);
                       return (
                         <div key={request._id} className="p-4 sm:px-5">
@@ -2896,12 +2949,13 @@ export default function AttendancePage() {
                           {request.cancellationReviewNote && <p className="mt-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600"><strong>Phản hồi hủy đơn:</strong> {request.cancellationReviewNote}</p>}
                           {request.reviewNote && <p className={`mt-2 rounded-lg border px-3 py-2 text-xs ${request.status === "rejected" ? TONE.rose : TONE.slate}`}><strong>Phản hồi quản trị:</strong> {request.reviewNote}</p>}
                           <div className="mt-3 flex flex-wrap items-center gap-2">
-                            {request.evidence?.url ? (
-                              <button type="button" onClick={() => openLeaveEvidence(request)} className="inline-flex items-center gap-1.5 rounded-lg border border-sky-200 bg-sky-50 px-2.5 py-1.5 text-xs font-semibold text-sky-700 hover:bg-sky-100"><ImagePlus size={13} /> Xem minh chứng</button>
-                            ) : request.status === "pending" ? (
+                            {evidences.map((evidence, index) => (
+                              <button key={evidence.url || index} type="button" onClick={() => openLeaveEvidence(request, index)} className="inline-flex items-center gap-1.5 rounded-lg border border-sky-200 bg-sky-50 px-2.5 py-1.5 text-xs font-semibold text-sky-700 hover:bg-sky-100"><ImagePlus size={13} /> Ảnh {index + 1}</button>
+                            ))}
+                            {request.status === "pending" && evidences.length < 3 ? (
                               <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs font-semibold text-amber-700 hover:bg-amber-100">
-                                <input type="file" accept="image/jpeg,image/png,image/webp,image/gif" className="hidden" disabled={uploadingLeaveId === request._id} onChange={(event) => { uploadLeaveEvidence(request._id, event.target.files?.[0]); event.target.value = ""; }} />
-                                {uploadingLeaveId === request._id ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />} Bổ sung ảnh
+                                <input type="file" multiple accept="image/jpeg,image/png,image/webp,image/gif" className="hidden" disabled={uploadingLeaveId === request._id} onChange={(event) => { uploadLeaveEvidence(request._id, event.target.files, 3 - evidences.length); event.target.value = ""; }} />
+                                {uploadingLeaveId === request._id ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />} Thêm ảnh ({evidences.length}/3)
                               </label>
                             ) : null}
                             {((request.status === "pending" && !pendingEmergencyOffStarted) || request.status === "rejected" || (request.status === "approved" && request.startDate > dateKey(new Date()))) && (

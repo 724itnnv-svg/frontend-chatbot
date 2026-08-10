@@ -13,7 +13,6 @@ import {
   Copy,
   Download,
   Eye,
-  EyeOff,
   FileSpreadsheet,
   HandCoins,
   ListChecks,
@@ -36,6 +35,7 @@ import { getDefaultPayrollViewPeriod } from "../utils/payrollPeriod";
 
 const STORAGE_HIDDEN_COLUMNS = "payroll_hidden_columns_v1";
 const STORAGE_COLUMN_ORDER = "payroll_column_order_v1";
+const STORAGE_COLUMN_TEMPLATES = "payroll_column_templates_v1";
 const STORAGE_PAYROLL_FORMULAS = "payroll_formula_settings_v1";
 const STORAGE_PAYROLL_PERIOD = "payroll_manager_period_v1";
 const STATUS_OPTIONS = ["DRAFT", "APPROVED", "PAID"];
@@ -143,6 +143,36 @@ const PAYROLL_COLUMNS = [
   ...column,
   readOnly: Boolean(column.readOnly || COMPUTED_PAYROLL_KEYS.has(column.key)),
 }));
+
+const PAYROLL_COLUMN_KEYS = PAYROLL_COLUMNS.map((column) => column.key);
+const PAYROLL_COLUMN_KEY_SET = new Set(PAYROLL_COLUMN_KEYS);
+const DEFAULT_COLUMN_TEMPLATES = [
+  {
+    id: "transfer",
+    name: "Chuyển khoản",
+    description: "Thông tin nhân viên, tài khoản ngân hàng và lương thực lĩnh",
+    builtIn: true,
+    visibleColumns: [
+      "period",
+      "maNhanVien",
+      "tenNhanVien",
+      "khoiPhongBan",
+      "chucVu",
+      "payrollBankAccount.bankName",
+      "payrollBankAccount.accountHolder",
+      "payrollBankAccount.accountNumber",
+      "luongThucLinh",
+    ],
+  },
+  {
+    id: "main",
+    name: "Cột chính",
+    description: "Chỉ hiển thị các cột bắt buộc và cố định",
+    builtIn: true,
+    visibleColumns: PAYROLL_COLUMNS.filter((column) => column.frozen || column.required).map((column) => column.key),
+  },
+];
+const DEFAULT_COLUMN_TEMPLATE_IDS = new Set(DEFAULT_COLUMN_TEMPLATES.map((template) => template.id));
 
 const TEMPLATE_COLUMNS = PAYROLL_COLUMNS.filter((column) => !column.profileField).map((column) => column.key);
 
@@ -1272,6 +1302,28 @@ export default function PayrollManager() {
   const [showImport, setShowImport] = useState(false);
   const [showCommissionImport, setShowCommissionImport] = useState(false);
   const [showColumns, setShowColumns] = useState(false);
+  const [columnTemplateName, setColumnTemplateName] = useState("");
+  const [columnTemplateError, setColumnTemplateError] = useState("");
+  const [editingColumnTemplateId, setEditingColumnTemplateId] = useState(null);
+  const [customColumnTemplates, setCustomColumnTemplates] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(STORAGE_COLUMN_TEMPLATES) || "[]");
+      if (!Array.isArray(saved)) return [];
+      return saved
+        .filter((template) => template && typeof template.name === "string" && Array.isArray(template.visibleColumns))
+        .map((template) => ({
+          id: String(template.id || `custom-${Date.now()}-${Math.random()}`),
+          name: template.name.trim(),
+          visibleColumns: template.visibleColumns.filter((key) => PAYROLL_COLUMN_KEY_SET.has(key)),
+          columnOrder: Array.isArray(template.columnOrder)
+            ? template.columnOrder.filter((key) => PAYROLL_COLUMN_KEY_SET.has(key))
+            : [],
+        }))
+        .filter((template) => template.name);
+    } catch {
+      return [];
+    }
+  });
   const [showFormulaSettings, setShowFormulaSettings] = useState(false);
   const [showBulkEdit, setShowBulkEdit] = useState(false);
   const [bulkScope, setBulkScope] = useState("selected");
@@ -1347,6 +1399,19 @@ export default function PayrollManager() {
     });
   }, [hiddenColumns, columnOrder]);
 
+  const columnTemplates = useMemo(() => {
+    const builtInTemplates = DEFAULT_COLUMN_TEMPLATES.map((defaultTemplate) => {
+      const savedTemplate = customColumnTemplates.find((template) => template.id === defaultTemplate.id);
+      return savedTemplate
+        ? { ...defaultTemplate, ...savedTemplate, builtIn: true }
+        : defaultTemplate;
+    });
+    return [
+      ...builtInTemplates,
+      ...customColumnTemplates.filter((template) => !DEFAULT_COLUMN_TEMPLATE_IDS.has(template.id)),
+    ];
+  }, [customColumnTemplates]);
+
   const handleColDragStart = (e, key) => {
     setDragColKey(key);
     e.dataTransfer.effectAllowed = "move";
@@ -1379,6 +1444,91 @@ export default function PayrollManager() {
   const handleColDragEnd = () => { setDragColKey(null); setDragOverColKey(null); };
 
   const resetColumnOrder = () => setColumnOrder(PAYROLL_COLUMNS.map((c) => c.key));
+
+  const applyColumnTemplate = (template) => {
+    const visibleKeys = new Set(
+      template.visibleColumns.filter((key) => PAYROLL_COLUMN_KEY_SET.has(key))
+    );
+    PAYROLL_COLUMNS.forEach((column) => {
+      if (column.frozen) visibleKeys.add(column.key);
+    });
+    setHiddenColumns(new Set(PAYROLL_COLUMN_KEYS.filter((key) => !visibleKeys.has(key))));
+
+    const preferredOrder = (template.columnOrder?.length ? template.columnOrder : template.visibleColumns)
+      .filter((key, index, values) => PAYROLL_COLUMN_KEY_SET.has(key) && values.indexOf(key) === index);
+    setColumnOrder([
+      ...preferredOrder,
+      ...PAYROLL_COLUMN_KEYS.filter((key) => !preferredOrder.includes(key)),
+    ]);
+    setEditingColumnTemplateId(template.id);
+    setColumnTemplateName(template.name);
+    setColumnTemplateError("");
+  };
+
+  const cancelColumnTemplateEdit = () => {
+    setEditingColumnTemplateId(null);
+    setColumnTemplateName("");
+    setColumnTemplateError("");
+  };
+
+  const saveColumnTemplate = () => {
+    const name = columnTemplateName.trim();
+    if (!name) {
+      setColumnTemplateError("Vui lòng nhập tên template.");
+      return;
+    }
+    if (columnTemplates.some((template) =>
+      template.id !== editingColumnTemplateId
+      && template.name.toLocaleLowerCase("vi") === name.toLocaleLowerCase("vi")
+    )) {
+      setColumnTemplateError("Tên template đã tồn tại.");
+      return;
+    }
+
+    const visibleColumnKeys = columnOrder.filter((key) => {
+      const column = PAYROLL_COLUMNS.find((item) => item.key === key);
+      return column && (column.frozen || !hiddenColumns.has(key));
+    });
+    if (editingColumnTemplateId) {
+      setCustomColumnTemplates((current) => {
+        const updatedTemplate = {
+          id: editingColumnTemplateId,
+          name,
+          visibleColumns: visibleColumnKeys,
+          columnOrder: [...columnOrder],
+        };
+        return current.some((template) => template.id === editingColumnTemplateId)
+          ? current.map((template) => template.id === editingColumnTemplateId ? { ...template, ...updatedTemplate } : template)
+          : [...current, updatedTemplate];
+      });
+    } else {
+      setCustomColumnTemplates((current) => [
+        ...current,
+        {
+          id: `custom-${Date.now()}`,
+          name,
+          visibleColumns: visibleColumnKeys,
+          columnOrder: [...columnOrder],
+        },
+      ]);
+      setColumnTemplateName("");
+    }
+    setColumnTemplateError("");
+  };
+
+  const deleteColumnTemplate = (template) => {
+    if (!window.confirm(`Xóa template "${template.name}"?`)) return;
+    setCustomColumnTemplates((current) => current.filter((item) => item.id !== template.id));
+    if (editingColumnTemplateId === template.id) cancelColumnTemplateEdit();
+  };
+
+  const isColumnTemplateActive = (template) => {
+    const templateVisible = new Set(template.visibleColumns);
+    return PAYROLL_COLUMNS.every((column) => {
+      if (column.frozen) return true;
+      return templateVisible.has(column.key) ? !hiddenColumns.has(column.key) : hiddenColumns.has(column.key);
+    });
+  };
 
   const filtered = useMemo(() => {
     const query = q.trim().toLowerCase();
@@ -1589,6 +1739,10 @@ export default function PayrollManager() {
   useEffect(() => {
     localStorage.setItem(STORAGE_COLUMN_ORDER, JSON.stringify(columnOrder));
   }, [columnOrder]);
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_COLUMN_TEMPLATES, JSON.stringify(customColumnTemplates));
+  }, [customColumnTemplates]);
 
   const markSaving = (id, saving) => {
     setSavingIds((current) => {
@@ -3301,14 +3455,101 @@ export default function PayrollManager() {
       </Modal>
 
       <Modal open={showColumns} onClose={() => setShowColumns(false)} title="Ẩn/hiện cột bảng lương">
+        <div className="mb-4 rounded-2xl border bg-slate-50 p-3">
+          <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <div className="text-sm font-semibold text-slate-800">Template hiển thị cột</div>
+              <div className="text-xs text-slate-500">Áp dụng nhanh một cấu hình hoặc lưu cách hiển thị hiện tại để dùng lại.</div>
+            </div>
+            <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-slate-500">
+              {visibleColumns.length}/{PAYROLL_COLUMNS.length} cột đang hiện
+            </span>
+          </div>
+
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {columnTemplates.map((template) => {
+              const active = isColumnTemplateActive(template);
+              const editing = editingColumnTemplateId === template.id;
+              return (
+                <div
+                  key={template.id}
+                  className={`flex min-w-0 items-center gap-2 rounded-xl border p-2 ${active ? "border-sky-300 bg-sky-50" : "bg-white"} ${editing ? "ring-2 ring-amber-300" : ""}`}
+                >
+                  <button
+                    type="button"
+                    onClick={() => applyColumnTemplate(template)}
+                    className="min-w-0 flex-1 rounded-lg px-2 py-1 text-left hover:bg-slate-50"
+                    title={template.description || `Hiển thị ${template.visibleColumns.length} cột`}
+                  >
+                    <span className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+                      {active && <BadgeCheck className="h-4 w-4 shrink-0 text-sky-600" />}
+                      <span className="truncate">{template.name}</span>
+                    </span>
+                    <span className="mt-0.5 block truncate text-[11px] text-slate-500">
+                      {editing ? "Đang chọn để cập nhật" : template.description || `${template.visibleColumns.length} cột`}
+                    </span>
+                  </button>
+                  {!template.builtIn && (
+                    <button
+                      type="button"
+                      onClick={() => deleteColumnTemplate(template)}
+                      className="rounded-lg p-2 text-slate-400 hover:bg-rose-50 hover:text-rose-600"
+                      title={`Xóa template ${template.name}`}
+                      aria-label={`Xóa template ${template.name}`}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {editingColumnTemplateId && (
+            <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              Bạn đang chỉnh sửa template <span className="font-semibold">{columnTemplateName}</span>. Thay đổi lựa chọn hoặc thứ tự cột, sau đó bấm cập nhật để lưu lại.
+            </div>
+          )}
+
+          <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+            <input
+              value={columnTemplateName}
+              onChange={(event) => {
+                setColumnTemplateName(event.target.value);
+                setColumnTemplateError("");
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") saveColumnTemplate();
+              }}
+              placeholder="Tên template mới, ví dụ: Đối soát lương"
+              className="min-w-0 flex-1 rounded-xl border bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-sky-100"
+            />
+            <button
+              type="button"
+              onClick={saveColumnTemplate}
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-sky-600 px-3 py-2 text-sm font-semibold text-white hover:bg-sky-700"
+            >
+              <Save className="h-4 w-4" />
+              {editingColumnTemplateId ? "Cập nhật template" : "Lưu cấu hình hiện tại"}
+            </button>
+            {editingColumnTemplateId && (
+              <button
+                type="button"
+                onClick={cancelColumnTemplateEdit}
+                className="inline-flex items-center justify-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-50"
+              >
+                <X className="h-4 w-4" />
+                Hủy chỉnh sửa
+              </button>
+            )}
+          </div>
+          {columnTemplateError && <p className="mt-2 text-xs font-medium text-rose-600">{columnTemplateError}</p>}
+        </div>
+
         <div className="mb-3 flex flex-wrap gap-2">
           <button onClick={() => setHiddenColumns(new Set())} className="inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-sm font-semibold hover:bg-slate-50">
             <Eye className="h-4 w-4" />
             Hiện tất cả
-          </button>
-          <button onClick={() => setHiddenColumns(new Set(PAYROLL_COLUMNS.filter((column) => !column.frozen && !column.required).map((column) => column.key)))} className="inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-sm font-semibold hover:bg-slate-50">
-            <EyeOff className="h-4 w-4" />
-            Chỉ cột chính
           </button>
           <button onClick={resetColumnOrder} className="inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-sm font-semibold hover:bg-slate-50" title="Khôi phục thứ tự cột về mặc định">
             <RefreshCw className="h-4 w-4" />

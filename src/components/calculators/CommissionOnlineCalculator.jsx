@@ -25,6 +25,7 @@ import {
   makeShouldProcess,
   makeGetEmployeeType,
   AD_COST_HEADERS,
+  ensureAdCostHeaders,
   calculateAdCostDeduction,
   VN_LOCALE,
   formatMoney,
@@ -1070,7 +1071,7 @@ export default function CommissionOnlineCalculator() {
         if (sheetMissing) {
           newErrors.push(`${def.label}: Không tìm thấy sheet "${sheetName}".`);
         } else {
-          const { headerMap, missing } = ensureHeaders(headers, def.headers);
+          const { headerMap, missing } = ensureAdCostHeaders(headers);
           if (missing.length) {
             newErrors.push(`${def.label}: Thiếu cột ${missing.join(", ")}.`);
           } else {
