@@ -4760,10 +4760,10 @@ export default function TaoDonHang() {
                                               return (
                                                 <label
                                                   key={productId}
-                                                  className="flex items-center gap-3 rounded-xl border border-emerald-100 bg-white px-3 py-2"
+                                                  className="flex items-start gap-2 rounded-xl border border-emerald-100 bg-white px-2.5 py-2"
                                                 >
                                                   <div className="min-w-0 flex-1">
-                                                    <div className="truncate text-xs font-semibold text-slate-800">
+                                                    <div className="break-words text-xs font-semibold leading-4 text-slate-800">
                                                       {receivedProduct
                                                         ? getProductDisplayName(
                                                             receivedProduct,
@@ -4792,7 +4792,7 @@ export default function TaoDonHang() {
                                                         event.target.value,
                                                       )
                                                     }
-                                                    className="w-20 rounded-lg border border-slate-200 px-2 py-1.5 text-center text-sm outline-none focus:border-emerald-300"
+                                                    className="w-12 shrink-0 rounded-lg border border-slate-200 px-1 py-1.5 text-center text-sm outline-none focus:border-emerald-300"
                                                   />
                                                 </label>
                                               );
