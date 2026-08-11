@@ -4,6 +4,7 @@ import {
   Banknote,
   BadgeCheck,
   Building2,
+  CheckSquare2,
   CheckCircle2,
   Download,
   HandCoins,
@@ -165,6 +166,10 @@ export default function SalaryAdvanceManager() {
   const [pendingTotal, setPendingTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [actionId, setActionId] = useState("");
+  const [selectedIds, setSelectedIds] = useState([]);
+  const [bulkDialogOpen, setBulkDialogOpen] = useState(false);
+  const [bulkApproving, setBulkApproving] = useState(false);
+  const [bulkForm, setBulkForm] = useState({ payrollPeriod: "", reviewNote: "" });
   const [exporting, setExporting] = useState(false);
   const [paymentDialog, setPaymentDialog] = useState(null);
   const [paymentForm, setPaymentForm] = useState({ payrollPeriod: "", paymentMethod: "bank_transfer", paymentNote: "" });
@@ -215,6 +220,91 @@ export default function SalaryAdvanceManager() {
     const timer = window.setInterval(loadPendingTotal, 30000);
     return () => window.clearInterval(timer);
   }, [loadPendingTotal]);
+
+  const selectableRows = useMemo(
+    () => rows.filter((request) => request.status === "pending"),
+    [rows],
+  );
+  const selectedRows = useMemo(() => {
+    const selected = new Set(selectedIds);
+    return selectableRows.filter((request) => selected.has(request._id));
+  }, [selectableRows, selectedIds]);
+  const allSelectableSelected = selectableRows.length > 0 && selectedRows.length === selectableRows.length;
+
+  useEffect(() => {
+    const availableIds = new Set(selectableRows.map((request) => request._id));
+    setSelectedIds((current) => current.filter((id) => availableIds.has(id)));
+  }, [selectableRows]);
+
+  function toggleRequestSelection(requestId) {
+    setSelectedIds((current) => (
+      current.includes(requestId)
+        ? current.filter((id) => id !== requestId)
+        : [...current, requestId]
+    ));
+  }
+
+  function toggleSelectAll() {
+    setSelectedIds(allSelectableSelected ? [] : selectableRows.map((request) => request._id));
+  }
+
+  function openBulkApproveDialog() {
+    if (!selectedRows.length || actionId || bulkApproving) return;
+    setMessage(null);
+    setBulkForm({ payrollPeriod: period, reviewNote: "" });
+    setBulkDialogOpen(true);
+  }
+
+  async function confirmBulkApprove() {
+    if (!selectedRows.length || bulkApproving) return;
+    const payrollPeriod = String(bulkForm.payrollPeriod || "").trim();
+    const reviewNote = String(bulkForm.reviewNote || "").trim();
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(payrollPeriod)) {
+      setMessage({ ok: false, text: "Kỳ khấu trừ phải có định dạng YYYY-MM." });
+      return;
+    }
+    if (reviewNote.length > 1000) {
+      setMessage({ ok: false, text: "Ghi chú duyệt không được vượt quá 1000 ký tự." });
+      return;
+    }
+
+    setBulkApproving(true);
+    setMessage(null);
+    const succeededIds = [];
+    const failures = [];
+    for (const request of selectedRows) {
+      try {
+        const response = await fetch(`/api/salary-advance-requests/${request._id}/review`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json", ...authHeader },
+          body: JSON.stringify({
+            action: "approve",
+            approvedAmount: Number(request.requestedAmount),
+            payrollPeriod,
+            reviewNote,
+          }),
+        });
+        const data = await response.json();
+        if (!response.ok || data?.ok === false) throw new Error(data?.message || "Không thể duyệt phiếu");
+        succeededIds.push(request._id);
+      } catch (error) {
+        failures.push(`${request.userName || request.employeeCode || "Phiếu"}: ${error.message || "Không thể duyệt"}`);
+      }
+    }
+
+    setSelectedIds((current) => current.filter((id) => !succeededIds.includes(id)));
+    setBulkDialogOpen(false);
+    setBulkApproving(false);
+    await refresh();
+    if (failures.length) {
+      setMessage({
+        ok: false,
+        text: `Đã duyệt ${succeededIds.length}/${selectedRows.length} phiếu. Lỗi: ${failures.join("; ")}`,
+      });
+    } else {
+      setMessage({ ok: true, text: `Đã duyệt thành công ${succeededIds.length} phiếu ứng lương.` });
+    }
+  }
 
   async function reviewRequest(request, action, actionPayload = {}) {
     if (!canEdit) return;
@@ -360,16 +450,31 @@ export default function SalaryAdvanceManager() {
             <button onClick={refresh} disabled={loading} className="mt-auto inline-flex items-center justify-center gap-2 rounded-xl border px-4 py-2 text-sm font-bold hover:bg-slate-50 disabled:opacity-50">{loading ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />} Tải lại</button>
           </div>
 
+          {canEdit && selectableRows.length > 0 && (
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-emerald-50/60 px-4 py-3">
+              <div className="text-sm font-semibold text-slate-700">
+                Đã chọn <span className="font-bold text-emerald-700">{selectedRows.length}</span> / {selectableRows.length} phiếu chờ duyệt
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                {selectedRows.length > 0 && <button onClick={() => setSelectedIds([])} disabled={bulkApproving} className="rounded-xl border bg-white px-3 py-2 text-sm font-bold hover:bg-slate-50 disabled:opacity-50">Bỏ chọn</button>}
+                <button onClick={openBulkApproveDialog} disabled={!selectedRows.length || bulkApproving || Boolean(actionId)} className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-700 disabled:opacity-50">
+                  <CheckSquare2 size={16} /> Duyệt hàng loạt ({selectedRows.length})
+                </button>
+              </div>
+            </div>
+          )}
+
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[1650px] text-left text-sm">
-              <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500"><tr><th className="px-4 py-3">Nhân viên</th><th className="px-4 py-3">Cty đóng BHXH</th><th className="px-4 py-3">Ngân hàng</th><th className="px-4 py-3">Người thụ hưởng</th><th className="px-4 py-3 text-right">Số tiền</th><th className="px-4 py-3">Ngày nhận / kỳ trừ</th><th className="px-4 py-3">Ghi chú</th><th className="px-4 py-3">Trạng thái</th><th className="px-4 py-3">Thao tác</th></tr></thead>
+            <table className="w-full min-w-[1700px] text-left text-sm">
+              <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500"><tr><th className="w-12 px-4 py-3"><input type="checkbox" checked={allSelectableSelected} onChange={toggleSelectAll} disabled={!canEdit || !selectableRows.length || bulkApproving} aria-label="Chọn tất cả phiếu chờ duyệt" className="h-4 w-4 rounded border-slate-300 accent-emerald-600" /></th><th className="px-4 py-3">Nhân viên</th><th className="px-4 py-3">Cty đóng BHXH</th><th className="px-4 py-3">Ngân hàng</th><th className="px-4 py-3">Người thụ hưởng</th><th className="px-4 py-3 text-right">Số tiền</th><th className="px-4 py-3">Ngày nhận / kỳ trừ</th><th className="px-4 py-3">Ghi chú</th><th className="px-4 py-3">Trạng thái</th><th className="px-4 py-3">Thao tác</th></tr></thead>
               <tbody>
                 {rows.map((request) => {
                   const [label, tone] = STATUS_META[request.status] || [request.status, "bg-slate-100 text-slate-600"];
                   const busy = actionId === request._id;
                   const recipient = request.paymentRecipient || {};
                   return (
-                    <tr key={request._id} className="border-t align-top">
+                    <tr key={request._id} className={`border-t align-top ${selectedIds.includes(request._id) ? "bg-emerald-50/50" : ""}`}>
+                      <td className="px-4 py-3"><input type="checkbox" checked={selectedIds.includes(request._id)} onChange={() => toggleRequestSelection(request._id)} disabled={!canEdit || request.status !== "pending" || bulkApproving} aria-label={`Chọn phiếu của ${recipient.employeeName || request.userName || request.employeeCode || "nhân viên"}`} className="h-4 w-4 rounded border-slate-300 accent-emerald-600 disabled:opacity-30" /></td>
                       <td className="px-4 py-3"><div className="font-bold">{recipient.employeeName || request.userName || "-"}</div><div className="font-mono text-xs text-slate-500">{recipient.employeeCode || request.employeeCode || "-"}</div></td>
                       <td className="px-4 py-3"><span className="inline-flex rounded-lg bg-indigo-50 px-2.5 py-1 font-bold text-indigo-700">{request.congTyDongBHXH || "Chưa cập nhật"}</span></td>
                       <td className="px-4 py-3"><div className="flex items-center gap-1.5 font-semibold"><Building2 size={14} className="text-slate-400" />{recipient.bankName || "Chưa cập nhật"}</div><div className="mt-1 text-xs text-slate-500">{recipient.bankBranch || "Chưa có chi nhánh"}</div></td>
@@ -394,6 +499,41 @@ export default function SalaryAdvanceManager() {
           {!loading && rows.length === 0 && <div className="py-14 text-center text-sm text-slate-500">Không có phiếu ứng lương theo bộ lọc.</div>}
           <div className="border-t px-4 py-3 text-xs text-slate-500">Hiển thị {rows.length} / {total} phiếu</div>
         </section>
+
+        {bulkDialogOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4" role="dialog" aria-modal="true" aria-labelledby="bulk-approve-dialog-title">
+            <div className="w-full max-w-xl rounded-2xl bg-white shadow-2xl">
+              <div className="flex items-start justify-between border-b px-5 py-4">
+                <div>
+                  <h2 id="bulk-approve-dialog-title" className="text-lg font-bold text-slate-900">Duyệt hàng loạt phiếu ứng lương</h2>
+                  <p className="mt-1 text-sm text-slate-500">Xác nhận duyệt {selectedRows.length} phiếu đang chọn.</p>
+                </div>
+                <button onClick={() => !bulkApproving && setBulkDialogOpen(false)} disabled={bulkApproving} className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:opacity-50" aria-label="Đóng"><X size={20} /></button>
+              </div>
+
+              <div className="space-y-4 p-5">
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+                  <div className="font-bold">Tổng tiền duyệt: {money(selectedRows.reduce((sum, request) => sum + Number(request.requestedAmount || 0), 0))}</div>
+                  <div className="mt-1">Mỗi phiếu sẽ được duyệt đúng bằng số tiền nhân viên yêu cầu.</div>
+                </div>
+                <label className="block text-sm font-semibold text-slate-700">Kỳ khấu trừ
+                  <input type="month" value={bulkForm.payrollPeriod} onChange={(event) => setBulkForm((current) => ({ ...current, payrollPeriod: event.target.value }))} disabled={bulkApproving} className="mt-1.5 w-full rounded-xl border px-3 py-2.5 outline-none focus:ring-2 focus:ring-emerald-100 disabled:bg-slate-100" />
+                </label>
+                <label className="block text-sm font-semibold text-slate-700">Ghi chú duyệt (không bắt buộc)
+                  <textarea rows={3} maxLength={1000} value={bulkForm.reviewNote} onChange={(event) => setBulkForm((current) => ({ ...current, reviewNote: event.target.value }))} disabled={bulkApproving} placeholder="Ghi chú áp dụng chung cho các phiếu..." className="mt-1.5 w-full resize-y rounded-xl border px-3 py-2.5 outline-none focus:ring-2 focus:ring-emerald-100 disabled:bg-slate-100" />
+                </label>
+                {bulkApproving && <div className="flex items-center gap-2 text-sm font-semibold text-emerald-700"><Loader2 size={16} className="animate-spin" /> Đang duyệt lần lượt các phiếu, vui lòng chờ...</div>}
+              </div>
+
+              <div className="flex justify-end gap-2 border-t px-5 py-4">
+                <button onClick={() => setBulkDialogOpen(false)} disabled={bulkApproving} className="rounded-xl border px-4 py-2 text-sm font-bold hover:bg-slate-50 disabled:opacity-50">Đóng</button>
+                <button onClick={confirmBulkApprove} disabled={bulkApproving || !selectedRows.length || !bulkForm.payrollPeriod} className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-700 disabled:opacity-50">
+                  {bulkApproving ? <Loader2 size={16} className="animate-spin" /> : <CheckSquare2 size={16} />} Duyệt {selectedRows.length} phiếu
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {paymentDialog && (() => {
           const recipient = paymentDialog.paymentRecipient || {};
