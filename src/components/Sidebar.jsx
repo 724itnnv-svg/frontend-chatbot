@@ -8,6 +8,7 @@ import React, {
   useState,
 } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
+import { io } from "socket.io-client";
 import {
   BookOpen,
   BotMessageSquare,
@@ -45,12 +46,19 @@ import {
   Globe2,
   HandCoins,
   CircleDollarSign,
+  Eye,
   FileCheck2,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { canAccessScreen, hasFullAccess } from "../utils/screenAccess";
+import { getApiOrigin } from "../api/baseUrl";
 
 const ACTIVE_TAB_KEY = "dashboard_active_tab";
+const isViteDevServer =
+  typeof window !== "undefined" && window.location.port === "5173";
+const SOCKET_URL =
+  import.meta.env.VITE_SOCKET_URL ||
+  (isViteDevServer ? "http://localhost:5000" : getApiOrigin() || undefined);
 
 const MENU_CONFIG = [
   {
@@ -413,6 +421,8 @@ const Sidebar = memo(() => {
   const [openGroups, setOpenGroups] = useState({});
   const [attendanceLeavePendingTotal, setAttendanceLeavePendingTotal] = useState(0);
   const [salaryAdvancePendingTotal, setSalaryAdvancePendingTotal] = useState(0);
+  const [onlineUsers, setOnlineUsers] = useState([]);
+  const [isPresenceConnected, setIsPresenceConnected] = useState(false);
   const focusedIndexRef = useRef(-1);
   const menuItemRefs = useRef([]);
   const navRef = useRef(null);
@@ -424,6 +434,47 @@ const Sidebar = memo(() => {
   const isFullAdmin = hasFullAccess(user);
   const canViewAttendance = canAccessScreen(user, "attendance");
   const canViewSalaryAdvances = canAccessScreen(user, "salary_advance_management");
+  const canViewOnlineUsers = canAccessScreen(user, "admin_dashboard");
+
+  useEffect(() => {
+    if (!user) {
+      setOnlineUsers([]);
+      setIsPresenceConnected(false);
+      return undefined;
+    }
+
+    const socket = io(SOCKET_URL, {
+      withCredentials: true,
+      transports: ["polling", "websocket"],
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 800,
+      reconnectionDelayMax: 5000,
+      timeout: 20000,
+    });
+
+    const handlePresenceUpdate = (payload = {}) => {
+      if (!canViewOnlineUsers) return;
+      setOnlineUsers(Array.isArray(payload.users) ? payload.users : []);
+    };
+
+    socket.on("connect", () => {
+      setIsPresenceConnected(true);
+      if (canViewOnlineUsers) socket.emit("presence:request");
+    });
+    socket.on("disconnect", () => setIsPresenceConnected(false));
+    socket.on("connect_error", () => setIsPresenceConnected(false));
+    socket.on("presence:update", handlePresenceUpdate);
+
+    return () => {
+      socket.off("connect");
+      socket.off("disconnect");
+      socket.off("connect_error");
+      socket.off("presence:update", handlePresenceUpdate);
+      socket.disconnect();
+      setIsPresenceConnected(false);
+    };
+  }, [canViewOnlineUsers, user]);
 
   const loadAttendanceLeavePendingTotal = useCallback(async () => {
     if (!canViewAttendance) {
@@ -615,7 +666,7 @@ const Sidebar = memo(() => {
         <div className="p-4 pb-3">
           <div className="mb-3 flex items-center justify-between gap-2">
             <div
-              className={`flex min-w-0 items-center gap-2 ${isCollapsed ? "md:w-full md:justify-center" : ""}`}
+              className={`flex min-w-0 flex-1 items-center gap-2 ${isCollapsed ? "md:w-full md:justify-center" : ""}`}
             >
               <div
                 className={`min-w-0 transition-all duration-300 ${isCollapsed ? "md:w-0 md:overflow-hidden md:opacity-0" : "md:opacity-100"}`}
@@ -627,6 +678,74 @@ const Sidebar = memo(() => {
                   Quản trị hệ thống
                 </div>
               </div>
+              {canViewOnlineUsers && (
+                <div className={`group/presence relative ml-auto flex-shrink-0 ${isCollapsed ? "md:hidden" : ""}`}>
+                  <button
+                    type="button"
+                    aria-label={`${onlineUsers.length} người đang hoạt động`}
+                    className="relative inline-flex h-9 w-9 items-center justify-center rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-700 shadow-sm transition hover:bg-emerald-100 focus:outline-none focus:ring-2 focus:ring-emerald-300"
+                  >
+                    <Eye size={17} />
+                    <span className="absolute -right-1.5 -top-1.5 inline-flex min-h-5 min-w-5 items-center justify-center rounded-full border-2 border-white bg-emerald-500 px-1 text-[10px] font-extrabold leading-none text-white">
+                      {onlineUsers.length > 99 ? "99+" : onlineUsers.length}
+                    </span>
+                  </button>
+
+                  <div className="invisible absolute left-full top-0 z-[80] w-72 translate-x-1 pl-2 opacity-0 transition duration-150 group-hover/presence:visible group-hover/presence:translate-x-0 group-hover/presence:opacity-100 group-focus-within/presence:visible group-focus-within/presence:translate-x-0 group-focus-within/presence:opacity-100">
+                    <div className="overflow-hidden rounded-2xl border border-emerald-100 bg-white shadow-[0_18px_50px_rgba(15,23,42,0.18)]">
+                      <div className="flex items-center justify-between border-b border-slate-100 bg-emerald-50/70 px-4 py-3">
+                        <div>
+                          <div className="text-sm font-bold text-slate-800">Đang hoạt động</div>
+                          <div className="text-[11px] text-slate-500">Cập nhật theo thời gian thực</div>
+                        </div>
+                        <span className={`h-2.5 w-2.5 rounded-full ${isPresenceConnected ? "bg-emerald-500" : "bg-slate-300"}`} />
+                      </div>
+
+                      <div className="max-h-72 overflow-y-auto p-2">
+                        {onlineUsers.length === 0 ? (
+                          <div className="px-3 py-5 text-center text-xs text-slate-500">
+                            {isPresenceConnected
+                              ? "Chưa có người dùng đang hoạt động"
+                              : "Đang kết nối dữ liệu hoạt động..."}
+                          </div>
+                        ) : (
+                          onlineUsers.map((onlineUser) => {
+                            const name = onlineUser.fullName || onlineUser.email || "Người dùng";
+                            const initial = name.trim().charAt(0).toUpperCase() || "?";
+                            return (
+                              <div
+                                key={onlineUser.userId}
+                                className="flex min-w-0 items-center gap-3 rounded-xl px-3 py-2.5 hover:bg-slate-50"
+                              >
+                                <div className="relative flex-shrink-0">
+                                  {onlineUser.avatarUrl ? (
+                                    <img
+                                      src={onlineUser.avatarUrl}
+                                      alt=""
+                                      className="h-9 w-9 rounded-xl border border-slate-100 object-cover"
+                                    />
+                                  ) : (
+                                    <div className="grid h-9 w-9 place-items-center rounded-xl bg-cyan-100 text-xs font-extrabold text-cyan-800">
+                                      {initial}
+                                    </div>
+                                  )}
+                                  <span className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-white bg-emerald-500" />
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <div className="truncate text-sm font-semibold text-slate-800">{name}</div>
+                                  <div className="truncate text-[11px] text-slate-500">
+                                    {[onlineUser.teamId, onlineUser.email].filter(Boolean).join(" · ") || "Đang online"}
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
             <div className="flex items-center gap-2">
               <button
