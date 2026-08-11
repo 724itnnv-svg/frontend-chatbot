@@ -26,6 +26,8 @@ import {
   X,
   XCircle,
   Zap,
+  ZoomIn,
+  ZoomOut,
 } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import { apiUrl, getApiOrigin } from "../../api/baseUrl";
@@ -721,6 +723,12 @@ export default function AttendanceManager() {
   const [evidencePreview, setEvidencePreview] = useState(null);
   const [evidencePreviewLoading, setEvidencePreviewLoading] = useState(false);
   const [evidencePreviewError, setEvidencePreviewError] = useState("");
+  const [evidenceZoom, setEvidenceZoom] = useState(1);
+  const [evidencePan, setEvidencePan] = useState({ x: 0, y: 0 });
+  const [isDraggingEvidence, setIsDraggingEvidence] = useState(false);
+  const evidenceViewportRef = useRef(null);
+  const evidenceImageRef = useRef(null);
+  const evidenceDragRef = useRef(null);
   const [weekMode, setWeekMode] = useState(true);
   const [weekStart, setWeekStart] = useState(() => getWeekStart(todayVN()));
   const [bulkStampOpen, setBulkStampOpen] = useState(false);
@@ -764,6 +772,95 @@ export default function AttendanceManager() {
     });
     setEvidencePreviewLoading(true);
     setEvidencePreviewError("");
+    setEvidenceZoom(1);
+    setEvidencePan({ x: 0, y: 0 });
+    setIsDraggingEvidence(false);
+    evidenceDragRef.current = null;
+  }
+
+  function clampEvidencePan(pan, zoom = evidenceZoom) {
+    const viewport = evidenceViewportRef.current;
+    const image = evidenceImageRef.current;
+    if (!viewport || !image) return pan;
+
+    const maxX = Math.max(0, (image.offsetWidth * zoom - viewport.clientWidth) / 2);
+    const maxY = Math.max(0, (image.offsetHeight * zoom - viewport.clientHeight) / 2);
+    return {
+      x: Math.min(maxX, Math.max(-maxX, pan.x)),
+      y: Math.min(maxY, Math.max(-maxY, pan.y)),
+    };
+  }
+
+  function handleEvidenceWheel(event) {
+    event.preventDefault();
+    const viewport = evidenceViewportRef.current;
+    if (!viewport) return;
+
+    const zoomFactor = Math.exp(-event.deltaY * 0.0015);
+    const nextZoom = Math.min(4, Math.max(0.5, Number((evidenceZoom * zoomFactor).toFixed(3))));
+    if (nextZoom === evidenceZoom) return;
+
+    const viewportRect = viewport.getBoundingClientRect();
+    const cursorX = event.clientX - (viewportRect.left + viewportRect.width / 2);
+    const cursorY = event.clientY - (viewportRect.top + viewportRect.height / 2);
+    const zoomRatio = nextZoom / evidenceZoom;
+    const nextPan = clampEvidencePan({
+      x: cursorX - (cursorX - evidencePan.x) * zoomRatio,
+      y: cursorY - (cursorY - evidencePan.y) * zoomRatio,
+    }, nextZoom);
+
+    setEvidenceZoom(nextZoom);
+    setEvidencePan(nextPan);
+  }
+
+  function handleEvidencePointerDown(event) {
+    if (event.button !== 0 || !evidenceViewportRef.current) return;
+    const viewport = evidenceViewportRef.current;
+    evidenceDragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      panX: evidencePan.x,
+      panY: evidencePan.y,
+    };
+    viewport.setPointerCapture(event.pointerId);
+    setIsDraggingEvidence(true);
+  }
+
+  function handleEvidencePointerMove(event) {
+    const drag = evidenceDragRef.current;
+    const viewport = evidenceViewportRef.current;
+    if (!drag || !viewport || drag.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    setEvidencePan(clampEvidencePan({
+      x: drag.panX + event.clientX - drag.startX,
+      y: drag.panY + event.clientY - drag.startY,
+    }));
+  }
+
+  function stopDraggingEvidence(event) {
+    const drag = evidenceDragRef.current;
+    const viewport = evidenceViewportRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    if (viewport?.hasPointerCapture(event.pointerId)) viewport.releasePointerCapture(event.pointerId);
+    evidenceDragRef.current = null;
+    setIsDraggingEvidence(false);
+  }
+
+  function resetEvidenceView() {
+    setEvidenceZoom(1);
+    setEvidencePan({ x: 0, y: 0 });
+  }
+
+  function changeEvidenceZoom(zoomFactor) {
+    const nextZoom = Math.min(4, Math.max(0.5, Number((evidenceZoom * zoomFactor).toFixed(3))));
+    if (nextZoom === evidenceZoom) return;
+    const zoomRatio = nextZoom / evidenceZoom;
+    setEvidenceZoom(nextZoom);
+    setEvidencePan(clampEvidencePan({
+      x: evidencePan.x * zoomRatio,
+      y: evidencePan.y * zoomRatio,
+    }, nextZoom));
   }
 
   function showFlash(ok, text) {
@@ -1878,17 +1975,58 @@ export default function AttendanceManager() {
       {evidencePreview && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/70 p-3 backdrop-blur-sm sm:p-6">
           <button type="button" aria-label="Đóng ảnh minh chứng" className="absolute inset-0" onClick={() => setEvidencePreview(null)} />
-          <div className="relative flex max-h-[92dvh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-white/20 bg-white shadow-2xl">
+          <div className="relative flex h-[92dvh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-white/20 bg-white shadow-2xl">
             <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-4 py-3 sm:px-5">
               <div className="min-w-0"><h2 className="truncate text-sm font-bold text-slate-900 sm:text-base">{evidencePreview.title}</h2><p className="truncate text-xs text-slate-500">{evidencePreview.subtitle}</p></div>
               <button type="button" onClick={() => setEvidencePreview(null)} className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-slate-500 hover:bg-slate-100" title="Đóng"><XCircle size={22} /></button>
             </div>
-            <div className="relative flex min-h-[280px] flex-1 items-center justify-center overflow-auto bg-slate-100 p-2 sm:min-h-[480px] sm:p-4">
-              {evidencePreviewLoading && <div className="absolute inset-0 z-10 flex items-center justify-center bg-slate-100"><Loader2 size={28} className="animate-spin text-sky-600" /></div>}
+            <div
+              ref={evidenceViewportRef}
+              className={`relative flex min-h-[280px] flex-1 touch-none select-none items-center justify-center overflow-hidden bg-slate-100 sm:min-h-[480px] ${isDraggingEvidence ? "cursor-grabbing" : "cursor-grab"}`}
+              onWheel={handleEvidenceWheel}
+              onPointerDown={handleEvidencePointerDown}
+              onPointerMove={handleEvidencePointerMove}
+              onPointerUp={stopDraggingEvidence}
+              onPointerCancel={stopDraggingEvidence}
+              onLostPointerCapture={stopDraggingEvidence}
+              onDoubleClick={resetEvidenceView}
+            >
+              {evidencePreviewLoading && <div className="absolute inset-0 z-30 flex items-center justify-center bg-slate-100"><Loader2 size={28} className="animate-spin text-sky-600" /></div>}
+              {!evidencePreviewError && (
+                <div className="pointer-events-none absolute left-1/2 top-3 z-20 flex w-fit -translate-x-1/2 items-center gap-2 rounded-full bg-slate-900/75 px-3 py-1.5 text-[11px] font-semibold text-white shadow-sm backdrop-blur-sm">
+                  <span>Cuộn để thu phóng · Kéo để di chuyển · Nhấp đúp để đặt lại</span>
+                  <span className="rounded-full bg-white/20 px-1.5 py-0.5 tabular-nums">{Math.round(evidenceZoom * 100)}%</span>
+                </div>
+              )}
+              {!evidencePreviewError && (
+                <div
+                  className="absolute bottom-3 left-1/2 z-20 flex -translate-x-1/2 items-center gap-1 rounded-xl border border-white/20 bg-slate-900/80 p-1 text-white shadow-lg backdrop-blur-sm"
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onDoubleClick={(event) => event.stopPropagation()}
+                >
+                  <button type="button" disabled={evidenceZoom <= 0.5} onClick={() => changeEvidenceZoom(1 / 1.2)} className="inline-flex h-8 w-8 items-center justify-center rounded-lg hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-35" title="Thu nhỏ"><ZoomOut size={17} /></button>
+                  <button type="button" onClick={resetEvidenceView} className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2 text-xs font-bold tabular-nums hover:bg-white/15" title="Đặt lại ảnh về 100%"><RefreshCcw size={14} /> {Math.round(evidenceZoom * 100)}%</button>
+                  <button type="button" disabled={evidenceZoom >= 4} onClick={() => changeEvidenceZoom(1.2)} className="inline-flex h-8 w-8 items-center justify-center rounded-lg hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-35" title="Phóng to"><ZoomIn size={17} /></button>
+                </div>
+              )}
               {evidencePreviewError ? (
                 <div className="flex max-w-md flex-col items-center gap-2 px-5 py-12 text-center text-sm text-rose-600"><AlertCircle size={28} /><span>{evidencePreviewError}</span></div>
               ) : (
-                <img src={evidencePreview.url} alt={evidencePreview.title} className="max-h-[calc(92dvh-90px)] max-w-full rounded-lg object-contain shadow-sm" onLoad={() => setEvidencePreviewLoading(false)} onError={() => { setEvidencePreviewLoading(false); setEvidencePreviewError("Không thể tải ảnh minh chứng. Vui lòng đóng popup và thử lại."); }} />
+                <img
+                  ref={evidenceImageRef}
+                  src={evidencePreview.url}
+                  alt={evidencePreview.title}
+                  draggable={false}
+                  className="rounded-lg object-contain shadow-sm will-change-transform"
+                  style={{
+                    maxHeight: "calc(100% - 2rem)",
+                    maxWidth: "calc(100% - 2rem)",
+                    transform: `translate3d(${evidencePan.x}px, ${evidencePan.y}px, 0) scale(${evidenceZoom})`,
+                    transformOrigin: "center center",
+                  }}
+                  onLoad={() => { setEvidencePreviewLoading(false); resetEvidenceView(); }}
+                  onError={() => { setEvidencePreviewLoading(false); setEvidencePreviewError("Không thể tải ảnh minh chứng. Vui lòng đóng popup và thử lại."); }}
+                />
               )}
             </div>
           </div>

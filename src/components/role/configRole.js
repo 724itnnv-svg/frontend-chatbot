@@ -22,6 +22,7 @@ const APP_PERMISSIONS = {
       screenIds: [
         "attendance_self",
         "attendance",
+        "approved_leave",
         "attendance_shifts",
         "attendance_locations",
         "payroll",
@@ -91,6 +92,7 @@ const APP_PERMISSIONS = {
     { id: "so_quy", name: "Tính Sổ Quỹ" },
     { id: "attendance_self", name: "Chấm công của tôi" },
     { id: "attendance", name: "Quản lý chấm công" },
+    { id: "approved_leave", name: "Theo dõi đơn nghỉ phép" },
     { id: "attendance_shifts", name: "Ca làm" },
     { id: "attendance_locations", name: "Vị trí chấm công" },
     { id: "payroll", name: "Chấm công tính lương" },
@@ -129,11 +131,12 @@ const APP_PERMISSIONS = {
   ],
   actions: [
     { id: "view", name: "Xem", color: "blue" },
-    { id: "create", name: "Thêm mới", color: "emerald" },
-    { id: "edit", name: "Chỉnh sửa", color: "amber" },
-    { id: "delete", name: "Xóa", color: "red" },
-    { id: "export", name: "Xuất file", color: "slate" },
+    { id: "create", name: "Thêm mới", color: "emerald", excludeScreenIds: ["approved_leave"] },
+    { id: "edit", name: "Chỉnh sửa", color: "amber", excludeScreenIds: ["approved_leave"] },
+    { id: "delete", name: "Xóa", color: "red", excludeScreenIds: ["approved_leave"] },
+    { id: "export", name: "Xuất file", color: "slate", excludeScreenIds: ["approved_leave"] },
     { id: "new_to_old", name: "Mới → Cũ", color: "cyan", screenIds: ["dia_chi_2"] },
+    { id: "view_all", name: "Xem toàn công ty", color: "violet", screenIds: ["approved_leave"] },
   ],
 };
 
