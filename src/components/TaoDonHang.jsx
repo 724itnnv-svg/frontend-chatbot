@@ -579,7 +579,7 @@ function getAgencyCodePrefix(customerName = "") {
 function generateCustomerCodeV2({
   phoneNumber = "",
   customerName = "",
-  oldAddress = "",
+  newAddress = "",
   customerType = "",
 }) {
   const phoneTail = getLastThreeDigits(phoneNumber) || "000";
@@ -590,7 +590,7 @@ function generateCustomerCodeV2({
   }
 
   const tailName = getCustomerTailName(customerName) || "KH";
-  const provinceInitials = getProvinceInitials(oldAddress);
+  const provinceInitials = getProvinceInitials(newAddress);
   return `${tailName}${provinceInitials}${phoneTail}`;
 }
 
@@ -632,7 +632,7 @@ function buildNewCustomerPayload({
       Code: generateCustomerCodeV2({
         phoneNumber,
         customerName,
-        oldAddress: parsed.oldAddress,
+        newAddress: parsed.newAddress || parsed.oldAddress,
         customerType,
       }),
       Name: invoiceName,
@@ -690,7 +690,16 @@ async function buildNewCustomerPayloadV2({
   const customerName = String(parsed.customerName || "").trim();
   const phoneNumber = String(parsed.phoneNumber || "").trim();
   const oldAddress = String(parsed.oldAddress || "").trim();
-  const newAddress = String(parsed.newAddress || "").trim();
+  let newAddress = String(parsed.newAddress || "").trim();
+  if (!newAddress && oldAddress) {
+    const convertedResponse = await autoConvertAddress2(oldAddress);
+    newAddress = extractConvertedAddress(convertedResponse);
+    if (!newAddress) {
+      throw new Error(
+        "Không chuyển đổi được địa chỉ mới để sinh mã khách hàng.",
+      );
+    }
+  }
   const isAgency = String(customerType || "").toLowerCase() === "dai_ly";
   const retailerConfig = getRetailerConfig(retailer);
   const branchId = retailerConfig?.branchId ?? null;
@@ -719,7 +728,7 @@ async function buildNewCustomerPayloadV2({
       Code: generateCustomerCodeV2({
         phoneNumber,
         customerName,
-        oldAddress: customerAddress,
+        newAddress: invoiceAddress,
         customerType,
       }),
       Name: invoiceName,
@@ -3060,8 +3069,7 @@ function CreateOrderProgressPanel({ steps = [], error = "", isCreating }) {
 }
 
 export default function TaoDonHang() {
-  const { user, token } = useAuth() || {};
-  console.log("ádadadadad", user);
+  const { user } = useAuth() || {};
   const hasMappedUserRetailerRef = useRef(false);
   const [selectedRetailerId, setSelectedRetailerId] = useState(() =>
     mapTeamIdToRetailerId(user?.teamId),
@@ -3084,7 +3092,7 @@ export default function TaoDonHang() {
   const [kiotUsersError, setKiotUsersError] = useState("");
   const [matchedKiotUser, setMatchedKiotUser] = useState(null);
   const [partnerDeliveries, setPartnerDeliveries] = useState([]);
-  const [preparedInvoicePayload, setPreparedInvoicePayload] = useState(null);
+  const [, setPreparedInvoicePayload] = useState(null);
   const [isCreatingOrder, setIsCreatingOrder] = useState(false);
   const [createOrderProgress, setCreateOrderProgress] = useState([]);
   const [createOrderError, setCreateOrderError] = useState("");
