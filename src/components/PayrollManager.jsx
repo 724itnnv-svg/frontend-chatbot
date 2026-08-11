@@ -32,6 +32,8 @@ import {
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { getDefaultPayrollViewPeriod } from "../utils/payrollPeriod";
+import { createBankSalaryPaymentWorkbook } from "../utils/salaryAdvanceExcel";
+import { buildPayrollBankTransferRows, calculatePayrollInstallments } from "../utils/payrollBankExcel";
 
 const STORAGE_HIDDEN_COLUMNS = "payroll_hidden_columns_v1";
 const STORAGE_COLUMN_ORDER = "payroll_column_order_v1";
@@ -39,6 +41,12 @@ const STORAGE_COLUMN_TEMPLATES = "payroll_column_templates_v1";
 const STORAGE_PAYROLL_FORMULAS = "payroll_formula_settings_v1";
 const STORAGE_PAYROLL_PERIOD = "payroll_manager_period_v1";
 const STATUS_OPTIONS = ["DRAFT", "APPROVED", "PAID"];
+const PAYROLL_COMPANY_NAMES = {
+  NNV: "CÔNG TY TNHH SX TM DV NÔNG NGHIỆP VIỆT",
+  ABC: "CÔNG TY TNHH SX TM DV ABC VIỆT NAM",
+  VN: "CÔNG TY TNHH PHÂN BÓN HÓA NÔNG VIỆT NHẬT",
+  KF: "CÔNG TY TNHH SX TM DV KING FARM",
+};
 const ATTENDANCE_SYNC_COLUMNS = [
   { key: "ngayCong", label: "Ngày công" },
   { key: "tongGioLam", label: "Tổng giờ làm" },
@@ -421,6 +429,28 @@ function roundPayrollNumber(value) {
 
 function formatPayrollNumber(value) {
   return roundPayrollNumber(value).toLocaleString("vi-VN", { maximumFractionDigits: 2 });
+}
+
+function currentDateInputValue() {
+  const date = new Date();
+  const pad = (value) => String(value).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+function defaultBankExportForm(period = "", companyName = "") {
+  const [year, month] = String(period || "").split("-");
+  const periodText = year && month ? `THANG ${Number(month)} ${year}` : "";
+  const paymentDate = currentDateInputValue();
+  return {
+    companyName,
+    debitAccount: "",
+    firstPaymentDate: paymentDate,
+    firstContent: `CHI LUONG DOT 1 ${periodText}`.trim(),
+    firstNote: "",
+    secondPaymentDate: paymentDate,
+    secondContent: `CHI LUONG DOT 2 ${periodText}`.trim(),
+    secondNote: "",
+  };
 }
 
 function parsePayrollNumberInput(value) {
@@ -859,34 +889,8 @@ function downloadCommissionTemplate(rows = null, fallbackPeriod = "") {
 }
 
 function calcPayrollDots(row) {
-  const dot1ThuNhap =
-    toNumber(getDeep(row, "thuNhapTheoNgayCong.luongTheoNgayCong")) +
-    toNumber(getDeep(row, "thuNhapTheoNgayCong.phuCapComThucTe")) +
-    toNumber(getDeep(row, "thuNhapTheoNgayCong.phuCapChuyenCanThucTe")) +
-    toNumber(getDeep(row, "thuNhapTheoNgayCong.phuCapXangXeThucTe")) +
-    toNumber(getDeep(row, "thuNhapTheoNgayCong.phuCapDienThoaiThucTe")) +
-    toNumber(getDeep(row, "thuNhapTheoNgayCong.phuCapNhiemVuThucTe")) +
-    toNumber(getDeep(row, "thuNhapTheoNgayCong.luongLeTet")) +
-    toNumber(getDeep(row, "thuNhapTheoNgayCong.luongPhepNam")) +
-    toNumber(getDeep(row, "thuNhapTheoNgayCong.luongTangCaThuong")) +
-    toNumber(getDeep(row, "thuNhapTheoNgayCong.luongTangCaChuNhat")) +
-    toNumber(getDeep(row, "thuNhapTheoNgayCong.luongTangCaLeTet")) +
-    toNumber(getDeep(row, "thuNhapTheoNgayCong.comTangCa")) +
-    toNumber(getDeep(row, "thuNhapTheoNgayCong.traGiamLuong")) +
-    toNumber(getDeep(row, "thuNhapTheoNgayCong.congKhac"));
-  const luongDot2 =
-    toNumber(getDeep(row, "thuNhapTheoNgayCong.thuongKPI")) +
-    toNumber(getDeep(row, "thuNhapTheoNgayCong.hoaHong"));
-  const tongKhauTru = toNumber(getDeep(row, "khauTru.tongKhauTru"));
-  const thueTNCN = toNumber(getDeep(row, "tinhThueTNCN.thueTNCNTamTinh"));
-
-  let dot1ChinhThuc = dot1ThuNhap - tongKhauTru;
-  let dot2ChinhThuc = luongDot2 - thueTNCN;
-  if (dot2ChinhThuc < 0) {
-    dot1ChinhThuc += dot2ChinhThuc;
-    dot2ChinhThuc = 0;
-  }
-  return { dot1ChinhThuc, dot2ChinhThuc };
+  const { firstInstallment, secondInstallment } = calculatePayrollInstallments(row);
+  return { dot1ChinhThuc: firstInstallment, dot2ChinhThuc: secondInstallment };
 }
 
 // Hàm phụ trợ: Chuyển đổi số chỉ mục cột thành chữ cái Excel (VD: 0 -> A, 1 -> B, 26 -> AA)
@@ -900,6 +904,7 @@ const getExcelColumnLetter = (index) => {
 };
 
 let excelJsLoadPromise = null;
+let vietinbankTemplateLoadPromise = null;
 
 function loadExcelJS() {
   if (window.ExcelJS) return Promise.resolve(window.ExcelJS);
@@ -931,6 +936,54 @@ function loadExcelJS() {
   }
 
   return excelJsLoadPromise;
+}
+
+function loadVietinbankSalaryTemplate() {
+  if (!vietinbankTemplateLoadPromise) {
+    vietinbankTemplateLoadPromise = fetch("/assets/vietinbank-salary-payment-template.xlsx")
+      .then((response) => {
+        if (!response.ok) throw new Error("Không tải được file mẫu chi lương VietinBank.");
+        return response.arrayBuffer();
+      })
+      .catch((error) => {
+        vietinbankTemplateLoadPromise = null;
+        throw error;
+      });
+  }
+  return vietinbankTemplateLoadPromise;
+}
+
+async function exportPayrollBankFiles(rows, bankAccountsByEmployeeCode, period, form) {
+  const [ExcelJS, templateBuffer] = await Promise.all([loadExcelJS(), loadVietinbankSalaryTemplate()]);
+  const firstRows = buildPayrollBankTransferRows(rows, bankAccountsByEmployeeCode, 1);
+  const secondRows = buildPayrollBankTransferRows(rows, bankAccountsByEmployeeCode, 2);
+  const sharedOptions = {
+    companyName: form.companyName.trim(),
+    debitAccount: form.debitAccount.trim(),
+  };
+  const [firstWorkbook, secondWorkbook] = await Promise.all([
+    createBankSalaryPaymentWorkbook(ExcelJS, templateBuffer.slice(0), firstRows, {
+      ...sharedOptions,
+      paymentDate: form.firstPaymentDate,
+      content: form.firstContent.trim(),
+      note: form.firstNote.trim(),
+    }),
+    createBankSalaryPaymentWorkbook(ExcelJS, templateBuffer.slice(0), secondRows, {
+      ...sharedOptions,
+      paymentDate: form.secondPaymentDate,
+      content: form.secondContent.trim(),
+      note: form.secondNote.trim(),
+    }),
+  ]);
+  const [firstBuffer, secondBuffer] = await Promise.all([
+    firstWorkbook.xlsx.writeBuffer(),
+    secondWorkbook.xlsx.writeBuffer(),
+  ]);
+  const mimeType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+  const suffix = period || currentDateInputValue();
+  saveAs(new Blob([firstBuffer], { type: mimeType }), `Bang_luong_dot_1_VietinBank_${suffix}.xlsx`);
+  saveAs(new Blob([secondBuffer], { type: mimeType }), `Bang_luong_dot_2_VietinBank_${suffix}.xlsx`);
+  return { firstCount: firstRows.length, secondCount: secondRows.length };
 }
 
 async function exportPayrollExcel(rows, columns, bankAccountsByEmployeeCode = new Map()) {
@@ -1292,6 +1345,9 @@ export default function PayrollManager() {
   const [selectedRowIds, setSelectedRowIds] = useState(() => new Set());
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
+  const [showPayrollExport, setShowPayrollExport] = useState(false);
+  const [payrollExportMode, setPayrollExportMode] = useState("standard");
+  const [bankExportForm, setBankExportForm] = useState(() => defaultBankExportForm());
   const [message, setMessage] = useState("");
   const [q, setQ] = useState("");
   const [period, setPeriod] = useState("");
@@ -1677,8 +1733,37 @@ export default function PayrollManager() {
     }
   };
 
+  const openPayrollExport = () => {
+    if (exporting) return;
+    const companyNames = [...new Set(sortedRows
+      .map((row) => {
+        const companyCode = String(row.congTyDongBHXH || "").trim().toUpperCase();
+        return PAYROLL_COMPANY_NAMES[companyCode] || String(row.congTyDongBHXH || "").trim();
+      })
+      .filter(Boolean))];
+    setPayrollExportMode("standard");
+    setBankExportForm(defaultBankExportForm(period, companyNames.length === 1 ? companyNames[0] : ""));
+    setMessage("");
+    setShowPayrollExport(true);
+  };
+
   const handleExportPayroll = async () => {
     if (exporting) return;
+    if (!sortedRows.length) {
+      setMessage("Không có dữ liệu bảng lương để xuất.");
+      return;
+    }
+    if (payrollExportMode === "bank" && (
+      !bankExportForm.companyName.trim()
+      || !bankExportForm.debitAccount.trim()
+      || !bankExportForm.firstPaymentDate
+      || !bankExportForm.firstContent.trim()
+      || !bankExportForm.secondPaymentDate
+      || !bankExportForm.secondContent.trim()
+    )) {
+      setMessage("Vui lòng nhập đủ tên công ty, tài khoản chuyển, ngày chi và nội dung chuyển khoản của cả hai đợt.");
+      return;
+    }
     setExporting(true);
     setMessage("");
     try {
@@ -1695,7 +1780,14 @@ export default function PayrollManager() {
           item,
         ])
       );
-      await exportPayrollExcel(sortedRows, visibleColumns, bankAccountsByEmployeeCode);
+      if (payrollExportMode === "bank") {
+        const result = await exportPayrollBankFiles(sortedRows, bankAccountsByEmployeeCode, period, bankExportForm);
+        setMessage(`Đã xuất 2 file VietinBank: đợt 1 có ${result.firstCount} nhân viên, đợt 2 có ${result.secondCount} nhân viên.`);
+      } else {
+        await exportPayrollExcel(sortedRows, visibleColumns, bankAccountsByEmployeeCode);
+        setMessage("Đã xuất bảng lương thường.");
+      }
+      setShowPayrollExport(false);
     } catch (error) {
       console.error(error);
       setMessage(error.message || "Không xuất được bảng lương");
@@ -2653,7 +2745,7 @@ export default function PayrollManager() {
               </button>
             )}
             <button
-              onClick={handleExportPayroll}
+              onClick={openPayrollExport}
               disabled={exporting}
               className="inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
             >
@@ -3068,6 +3160,89 @@ export default function PayrollManager() {
             >
               <ListChecks className="h-4 w-4" />
               Ap dung
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal open={showPayrollExport} onClose={() => !exporting && setShowPayrollExport(false)} title="Xuất Excel bảng lương">
+        <div className="space-y-5">
+          <div className="grid gap-3 md:grid-cols-2">
+            <button
+              type="button"
+              onClick={() => setPayrollExportMode("standard")}
+              disabled={exporting}
+              className={`rounded-2xl border p-4 text-left transition ${payrollExportMode === "standard" ? "border-sky-500 bg-sky-50 ring-2 ring-sky-100" : "border-slate-200 hover:bg-slate-50"}`}
+            >
+              <span className="flex items-center gap-2 font-bold text-slate-900"><FileSpreadsheet className="h-5 w-5 text-sky-600" /> Bảng lương thường</span>
+              <span className="mt-2 block text-sm text-slate-500">Xuất file Data và Bao_Cao như chức năng hiện tại.</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setPayrollExportMode("bank")}
+              disabled={exporting}
+              className={`rounded-2xl border p-4 text-left transition ${payrollExportMode === "bank" ? "border-emerald-500 bg-emerald-50 ring-2 ring-emerald-100" : "border-slate-200 hover:bg-slate-50"}`}
+            >
+              <span className="flex items-center gap-2 font-bold text-slate-900"><Wallet className="h-5 w-5 text-emerald-600" /> Gửi ngân hàng</span>
+              <span className="mt-2 block text-sm text-slate-500">Xuất hai file VietinBank riêng cho lương đợt 1 và đợt 2.</span>
+            </button>
+          </div>
+
+          {payrollExportMode === "bank" && (
+            <div className="space-y-4">
+              <div className="grid gap-4 md:grid-cols-2">
+                <label className="text-sm font-semibold text-slate-700 md:col-span-2">Tên công ty <span className="text-rose-500">*</span>
+                  <input autoFocus maxLength={200} value={bankExportForm.companyName} onChange={(event) => setBankExportForm((current) => ({ ...current, companyName: event.target.value }))} disabled={exporting} placeholder="Tên công ty hiển thị ở đầu file" className="mt-1.5 w-full rounded-xl border px-3 py-2.5 outline-none focus:ring-2 focus:ring-emerald-100 disabled:bg-slate-100" />
+                </label>
+                <label className="text-sm font-semibold text-slate-700">Tài khoản chuyển <span className="text-rose-500">*</span>
+                  <input maxLength={50} value={bankExportForm.debitAccount} onChange={(event) => setBankExportForm((current) => ({ ...current, debitAccount: event.target.value }))} disabled={exporting} placeholder="Số tài khoản chi lương" className="mt-1.5 w-full rounded-xl border px-3 py-2.5 outline-none focus:ring-2 focus:ring-emerald-100 disabled:bg-slate-100" />
+                </label>
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+                  Chỉ nhân viên có số tiền lớn hơn 0 trong từng đợt mới được đưa vào file tương ứng.
+                </div>
+              </div>
+
+              <div className="grid gap-4 xl:grid-cols-2">
+                <section className="space-y-3 rounded-2xl border border-sky-200 bg-sky-50/40 p-4">
+                  <div>
+                    <h4 className="font-bold text-sky-900">Lương đợt 1</h4>
+                    <p className="text-xs text-sky-700">Lương ngày công và phụ cấp sau tổng khấu trừ.</p>
+                  </div>
+                  <label className="block text-sm font-semibold text-slate-700">Ngày chi lương <span className="text-rose-500">*</span>
+                    <input type="date" value={bankExportForm.firstPaymentDate} onChange={(event) => setBankExportForm((current) => ({ ...current, firstPaymentDate: event.target.value }))} disabled={exporting} className="mt-1.5 w-full rounded-xl border bg-white px-3 py-2.5 outline-none focus:ring-2 focus:ring-sky-100 disabled:bg-slate-100" />
+                  </label>
+                  <label className="block text-sm font-semibold text-slate-700">Nội dung chuyển khoản <span className="text-rose-500">*</span>
+                    <textarea rows={3} maxLength={500} value={bankExportForm.firstContent} onChange={(event) => setBankExportForm((current) => ({ ...current, firstContent: event.target.value }))} disabled={exporting} className="mt-1.5 w-full resize-y rounded-xl border bg-white px-3 py-2.5 outline-none focus:ring-2 focus:ring-sky-100 disabled:bg-slate-100" />
+                  </label>
+                  <label className="block text-sm font-semibold text-slate-700">Ghi chú
+                    <textarea rows={2} maxLength={1000} value={bankExportForm.firstNote} onChange={(event) => setBankExportForm((current) => ({ ...current, firstNote: event.target.value }))} disabled={exporting} placeholder="Không bắt buộc" className="mt-1.5 w-full resize-y rounded-xl border bg-white px-3 py-2.5 outline-none focus:ring-2 focus:ring-sky-100 disabled:bg-slate-100" />
+                  </label>
+                </section>
+
+                <section className="space-y-3 rounded-2xl border border-violet-200 bg-violet-50/40 p-4">
+                  <div>
+                    <h4 className="font-bold text-violet-900">Lương đợt 2</h4>
+                    <p className="text-xs text-violet-700">Thưởng KPI và hoa hồng sau thuế TNCN.</p>
+                  </div>
+                  <label className="block text-sm font-semibold text-slate-700">Ngày chi lương <span className="text-rose-500">*</span>
+                    <input type="date" value={bankExportForm.secondPaymentDate} onChange={(event) => setBankExportForm((current) => ({ ...current, secondPaymentDate: event.target.value }))} disabled={exporting} className="mt-1.5 w-full rounded-xl border bg-white px-3 py-2.5 outline-none focus:ring-2 focus:ring-violet-100 disabled:bg-slate-100" />
+                  </label>
+                  <label className="block text-sm font-semibold text-slate-700">Nội dung chuyển khoản <span className="text-rose-500">*</span>
+                    <textarea rows={3} maxLength={500} value={bankExportForm.secondContent} onChange={(event) => setBankExportForm((current) => ({ ...current, secondContent: event.target.value }))} disabled={exporting} className="mt-1.5 w-full resize-y rounded-xl border bg-white px-3 py-2.5 outline-none focus:ring-2 focus:ring-violet-100 disabled:bg-slate-100" />
+                  </label>
+                  <label className="block text-sm font-semibold text-slate-700">Ghi chú
+                    <textarea rows={2} maxLength={1000} value={bankExportForm.secondNote} onChange={(event) => setBankExportForm((current) => ({ ...current, secondNote: event.target.value }))} disabled={exporting} placeholder="Không bắt buộc" className="mt-1.5 w-full resize-y rounded-xl border bg-white px-3 py-2.5 outline-none focus:ring-2 focus:ring-violet-100 disabled:bg-slate-100" />
+                  </label>
+                </section>
+              </div>
+            </div>
+          )}
+
+          <div className="flex justify-end gap-2 border-t pt-4">
+            <button onClick={() => setShowPayrollExport(false)} disabled={exporting} className="rounded-xl border bg-white px-4 py-2 text-sm font-semibold hover:bg-slate-50 disabled:opacity-50">Đóng</button>
+            <button onClick={handleExportPayroll} disabled={exporting} className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50">
+              {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+              {exporting ? "Đang xuất..." : payrollExportMode === "bank" ? "Xuất 2 file ngân hàng" : "Xuất bảng thường"}
             </button>
           </div>
         </div>
