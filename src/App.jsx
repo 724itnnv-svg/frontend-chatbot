@@ -104,6 +104,9 @@ const WorkLocationManager = lazy(
 const AttendanceManager = lazy(
   () => import("./components/attendance/AttendanceManager"),
 );
+const ApprovedLeaveViewer = lazy(
+  () => import("./components/attendance/ApprovedLeaveViewer"),
+);
 const StandaloneAttendance = lazy(
   () => import("./components/attendance/StandaloneAttendance"),
 );
@@ -223,6 +226,7 @@ const ADMIN_ROUTE_BY_SCREEN = {
   admin_event_simulator: "/admin/event-simulator",
   notifications: "/admin/notifications",
   attendance: "/admin/attendance",
+  approved_leave: "/admin/approved-leaves",
   attendance_shifts: "/admin/attendance-shifts",
   attendance_locations: "/admin/attendance-locations",
   attendance_self: "/admin/my-attendance",
@@ -345,6 +349,11 @@ const adminRoutes = [
     path: "attendance",
     screenId: "attendance",
     element: <AttendanceManager />,
+  },
+  {
+    path: "approved-leaves",
+    screenId: "approved_leave",
+    element: <ApprovedLeaveViewer />,
   },
   {
     path: "attendance-shifts",

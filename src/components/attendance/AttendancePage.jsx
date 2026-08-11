@@ -27,6 +27,8 @@ import {
   Wallet,
   XCircle,
   Zap,
+  ZoomIn,
+  ZoomOut,
 } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import { AndroidLocationSettings } from "../../utils/androidLocationSettings";
@@ -1117,6 +1119,12 @@ export default function AttendancePage() {
   const [evidencePreview, setEvidencePreview] = useState(null);
   const [evidencePreviewLoading, setEvidencePreviewLoading] = useState(false);
   const [evidencePreviewError, setEvidencePreviewError] = useState("");
+  const [evidenceZoom, setEvidenceZoom] = useState(1);
+  const [evidencePan, setEvidencePan] = useState({ x: 0, y: 0 });
+  const [isDraggingEvidence, setIsDraggingEvidence] = useState(false);
+  const evidenceViewportRef = useRef(null);
+  const evidenceImageRef = useRef(null);
+  const evidenceDragRef = useRef(null);
   const pendingEmergencyEvidenceCount = useMemo(
     () => leaveRequests.filter((request) => (
       request.leaveType === "emergency"
@@ -1125,13 +1133,8 @@ export default function AttendancePage() {
     )).length,
     [leaveRequests],
   );
-  const currentPeriodAdvance = useMemo(
-    () => advanceRequests.find((request) => request.payrollPeriod === advanceForm.payrollPeriod),
-    [advanceForm.payrollPeriod, advanceRequests],
-  );
-  const advanceRestrictionMessage = advanceLimit.restrictionMessage
-    || (currentPeriodAdvance ? "Bạn đã tạo phiếu ứng lương trong tháng này. Mỗi tháng chỉ được ứng lương một lần." : "");
-  const advanceFormDisabled = advanceSaving || advanceLimitLoading || advanceLimit.canRequest !== true || Boolean(currentPeriodAdvance);
+  const advanceRestrictionMessage = advanceLimit.restrictionMessage || "";
+  const advanceFormDisabled = advanceSaving || advanceLimitLoading || advanceLimit.canRequest !== true;
   const [myAutoAttendance, setMyAutoAttendance] = useState(null);
   const [showTaskbarRunner, setShowTaskbarRunner] = useState(() => {
     try { return localStorage.getItem("attendance_show_taskbar_runner") === "true"; } catch { return SHOW_ATTENDANCE_TASKBAR_RUNNER_DEFAULT; }
@@ -1538,9 +1541,11 @@ export default function AttendancePage() {
   leaveRealtimeRefreshRef.current = {
     activeTab,
     historyPeriod,
+    advancePayrollPeriod: advanceForm.payrollPeriod,
     loadHistory,
     loadLeaveRequests,
     loadAdvanceRequests,
+    loadAdvanceLimit,
     loadApprovalNotifications,
     loadMyAutoAttendance,
     loadToday,
@@ -1577,6 +1582,7 @@ export default function AttendancePage() {
       }
       if (payload.entity === "salary-advance") {
         refresh?.loadAdvanceRequests();
+        refresh?.loadAdvanceLimit(refresh.advancePayrollPeriod);
         refresh?.loadApprovalNotifications();
         refreshPayroll();
         return;
@@ -1596,6 +1602,7 @@ export default function AttendancePage() {
     const refreshOnConnect = () => {
       leaveRealtimeRefreshRef.current?.loadLeaveRequests();
       leaveRealtimeRefreshRef.current?.loadAdvanceRequests();
+      leaveRealtimeRefreshRef.current?.loadAdvanceLimit(leaveRealtimeRefreshRef.current?.advancePayrollPeriod);
       leaveRealtimeRefreshRef.current?.loadApprovalNotifications();
       leaveRealtimeRefreshRef.current?.loadMyAutoAttendance();
       if (leaveRealtimeRefreshRef.current?.activeTab === "payroll") {
@@ -1898,7 +1905,8 @@ export default function AttendancePage() {
     if (advanceFormDisabled) return showMsg(false, advanceRestrictionMessage || "Hiện chưa thể tạo phiếu ứng lương.");
     const requestedAmount = Number(advanceForm.requestedAmount);
     if (!Number.isFinite(requestedAmount) || requestedAmount < 100000) return showMsg(false, "Số tiền muốn ứng tối thiểu là 100.000 đ.");
-    if (requestedAmount > Number(advanceLimit.maxAmount || 2600000)) return showMsg(false, "Số tiền muốn ứng tối đa là 2.600.000 đ.");
+    const remainingAmount = Number(advanceLimit.remainingAmount ?? advanceLimit.maxAmount ?? 2600000);
+    if (requestedAmount > remainingAmount) return showMsg(false, `Bạn chỉ còn có thể ứng tối đa ${money(remainingAmount)} trong tháng này.`);
     if (!advanceForm.requestedPayDate || !advanceForm.payrollPeriod) return showMsg(false, "Vui lòng chọn ngày nhận và kỳ khấu trừ.");
     setAdvanceSaving(true);
     try {
@@ -1908,9 +1916,9 @@ export default function AttendancePage() {
         reason: advanceForm.reason.trim(),
       });
       showMsg(true, res.data?.message || "Đã gửi phiếu ứng lương.");
-      setAdvanceLimit((current) => ({ ...current, canRequest: false, hasRequestedThisPeriod: true, restrictionMessage: "Bạn đã tạo phiếu ứng lương trong tháng này. Mỗi tháng chỉ được ứng lương một lần." }));
-      setAdvanceForm(createAdvanceForm());
-      await loadAdvanceRequests();
+      const nextForm = createAdvanceForm();
+      setAdvanceForm(nextForm);
+      await Promise.all([loadAdvanceRequests(), loadAdvanceLimit(nextForm.payrollPeriod)]);
     } catch (err) {
       showMsg(false, err.response?.data?.message || "Không thể gửi phiếu ứng lương.");
     } finally {
@@ -1928,7 +1936,7 @@ export default function AttendancePage() {
     try {
       const res = await api.delete(`/salary-advance-requests/${request._id}`, { data: cancellationReason ? { cancellationReason } : undefined });
       showMsg(true, res.data?.message || "Đã cập nhật phiếu ứng lương.");
-      await loadAdvanceRequests();
+      await Promise.all([loadAdvanceRequests(), loadAdvanceLimit(advanceForm.payrollPeriod)]);
     } catch (err) {
       showMsg(false, err.response?.data?.message || "Không thể hủy phiếu ứng lương.");
     } finally {
@@ -1985,6 +1993,95 @@ export default function AttendancePage() {
     });
     setEvidencePreviewLoading(true);
     setEvidencePreviewError("");
+    setEvidenceZoom(1);
+    setEvidencePan({ x: 0, y: 0 });
+    setIsDraggingEvidence(false);
+    evidenceDragRef.current = null;
+  }
+
+  function clampEvidencePan(pan, zoom = evidenceZoom) {
+    const viewport = evidenceViewportRef.current;
+    const image = evidenceImageRef.current;
+    if (!viewport || !image) return pan;
+
+    const maxX = Math.max(0, (image.offsetWidth * zoom - viewport.clientWidth) / 2);
+    const maxY = Math.max(0, (image.offsetHeight * zoom - viewport.clientHeight) / 2);
+    return {
+      x: Math.min(maxX, Math.max(-maxX, pan.x)),
+      y: Math.min(maxY, Math.max(-maxY, pan.y)),
+    };
+  }
+
+  function handleEvidenceWheel(event) {
+    event.preventDefault();
+    const viewport = evidenceViewportRef.current;
+    if (!viewport) return;
+
+    const zoomFactor = Math.exp(-event.deltaY * 0.0015);
+    const nextZoom = Math.min(4, Math.max(0.5, Number((evidenceZoom * zoomFactor).toFixed(3))));
+    if (nextZoom === evidenceZoom) return;
+
+    const viewportRect = viewport.getBoundingClientRect();
+    const cursorX = event.clientX - (viewportRect.left + viewportRect.width / 2);
+    const cursorY = event.clientY - (viewportRect.top + viewportRect.height / 2);
+    const zoomRatio = nextZoom / evidenceZoom;
+    const nextPan = clampEvidencePan({
+      x: cursorX - (cursorX - evidencePan.x) * zoomRatio,
+      y: cursorY - (cursorY - evidencePan.y) * zoomRatio,
+    }, nextZoom);
+
+    setEvidenceZoom(nextZoom);
+    setEvidencePan(nextPan);
+  }
+
+  function handleEvidencePointerDown(event) {
+    if (event.button !== 0 || !evidenceViewportRef.current) return;
+    const viewport = evidenceViewportRef.current;
+    evidenceDragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      panX: evidencePan.x,
+      panY: evidencePan.y,
+    };
+    viewport.setPointerCapture(event.pointerId);
+    setIsDraggingEvidence(true);
+  }
+
+  function handleEvidencePointerMove(event) {
+    const drag = evidenceDragRef.current;
+    const viewport = evidenceViewportRef.current;
+    if (!drag || !viewport || drag.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    setEvidencePan(clampEvidencePan({
+      x: drag.panX + event.clientX - drag.startX,
+      y: drag.panY + event.clientY - drag.startY,
+    }));
+  }
+
+  function stopDraggingEvidence(event) {
+    const drag = evidenceDragRef.current;
+    const viewport = evidenceViewportRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    if (viewport?.hasPointerCapture(event.pointerId)) viewport.releasePointerCapture(event.pointerId);
+    evidenceDragRef.current = null;
+    setIsDraggingEvidence(false);
+  }
+
+  function resetEvidenceView() {
+    setEvidenceZoom(1);
+    setEvidencePan({ x: 0, y: 0 });
+  }
+
+  function changeEvidenceZoom(zoomFactor) {
+    const nextZoom = Math.min(4, Math.max(0.5, Number((evidenceZoom * zoomFactor).toFixed(3))));
+    if (nextZoom === evidenceZoom) return;
+    const zoomRatio = nextZoom / evidenceZoom;
+    setEvidenceZoom(nextZoom);
+    setEvidencePan(clampEvidencePan({
+      x: evidencePan.x * zoomRatio,
+      y: evidencePan.y * zoomRatio,
+    }, nextZoom));
   }
 
   async function deleteLeaveRequest(request) {
@@ -2290,17 +2387,58 @@ export default function AttendancePage() {
           {evidencePreview && (
             <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/70 p-3 backdrop-blur-sm sm:p-6">
               <button type="button" aria-label="Đóng ảnh minh chứng" className="absolute inset-0" onClick={() => setEvidencePreview(null)} />
-              <div className="relative flex max-h-[92dvh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-white/20 bg-white shadow-2xl">
+              <div className="relative flex h-[92dvh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-white/20 bg-white shadow-2xl">
                 <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-4 py-3 sm:px-5">
                   <div className="min-w-0"><h2 className="truncate text-sm font-bold text-slate-900 sm:text-base">{evidencePreview.title}</h2><p className="text-xs text-slate-500">{evidencePreview.date}</p></div>
                   <button type="button" onClick={() => setEvidencePreview(null)} className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-slate-500 hover:bg-slate-100" title="Đóng"><XCircle size={22} /></button>
                 </div>
-                <div className="relative flex min-h-[280px] flex-1 items-center justify-center overflow-auto bg-slate-100 p-2 sm:min-h-[480px] sm:p-4">
-                  {evidencePreviewLoading && <div className="absolute inset-0 z-10 flex items-center justify-center bg-slate-100"><Loader2 size={28} className="animate-spin text-sky-600" /></div>}
+                <div
+                  ref={evidenceViewportRef}
+                  className={`relative flex min-h-[280px] flex-1 touch-none select-none items-center justify-center overflow-hidden bg-slate-100 sm:min-h-[480px] ${isDraggingEvidence ? "cursor-grabbing" : "cursor-grab"}`}
+                  onWheel={handleEvidenceWheel}
+                  onPointerDown={handleEvidencePointerDown}
+                  onPointerMove={handleEvidencePointerMove}
+                  onPointerUp={stopDraggingEvidence}
+                  onPointerCancel={stopDraggingEvidence}
+                  onLostPointerCapture={stopDraggingEvidence}
+                  onDoubleClick={resetEvidenceView}
+                >
+                  {evidencePreviewLoading && <div className="absolute inset-0 z-30 flex items-center justify-center bg-slate-100"><Loader2 size={28} className="animate-spin text-sky-600" /></div>}
+                  {!evidencePreviewError && (
+                    <div className="pointer-events-none absolute left-1/2 top-3 z-20 flex w-fit -translate-x-1/2 items-center gap-2 rounded-full bg-slate-900/75 px-3 py-1.5 text-[11px] font-semibold text-white shadow-sm backdrop-blur-sm">
+                      <span>Cuộn để thu phóng · Kéo để di chuyển · Nhấp đúp để đặt lại</span>
+                      <span className="rounded-full bg-white/20 px-1.5 py-0.5 tabular-nums">{Math.round(evidenceZoom * 100)}%</span>
+                    </div>
+                  )}
+                  {!evidencePreviewError && (
+                    <div
+                      className="absolute bottom-3 left-1/2 z-20 flex -translate-x-1/2 items-center gap-1 rounded-xl border border-white/20 bg-slate-900/80 p-1 text-white shadow-lg backdrop-blur-sm"
+                      onPointerDown={(event) => event.stopPropagation()}
+                      onDoubleClick={(event) => event.stopPropagation()}
+                    >
+                      <button type="button" disabled={evidenceZoom <= 0.5} onClick={() => changeEvidenceZoom(1 / 1.2)} className="inline-flex h-8 w-8 items-center justify-center rounded-lg hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-35" title="Thu nhỏ"><ZoomOut size={17} /></button>
+                      <button type="button" onClick={resetEvidenceView} className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2 text-xs font-bold tabular-nums hover:bg-white/15" title="Đặt lại ảnh về 100%"><RefreshCcw size={14} /> {Math.round(evidenceZoom * 100)}%</button>
+                      <button type="button" disabled={evidenceZoom >= 4} onClick={() => changeEvidenceZoom(1.2)} className="inline-flex h-8 w-8 items-center justify-center rounded-lg hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-35" title="Phóng to"><ZoomIn size={17} /></button>
+                    </div>
+                  )}
                   {evidencePreviewError ? (
                     <div className="flex max-w-md flex-col items-center gap-2 px-5 py-12 text-center text-sm text-rose-600"><AlertCircle size={28} /><span>{evidencePreviewError}</span></div>
                   ) : (
-                    <img src={evidencePreview.url} alt={evidencePreview.title} className="max-h-[calc(92dvh-90px)] max-w-full rounded-lg object-contain shadow-sm" onLoad={() => setEvidencePreviewLoading(false)} onError={() => { setEvidencePreviewLoading(false); setEvidencePreviewError("Không thể tải ảnh minh chứng. Vui lòng đóng popup và thử lại."); }} />
+                    <img
+                      ref={evidenceImageRef}
+                      src={evidencePreview.url}
+                      alt={evidencePreview.title}
+                      draggable={false}
+                      className="rounded-lg object-contain shadow-sm will-change-transform"
+                      style={{
+                        maxHeight: "calc(100% - 2rem)",
+                        maxWidth: "calc(100% - 2rem)",
+                        transform: `translate3d(${evidencePan.x}px, ${evidencePan.y}px, 0) scale(${evidenceZoom})`,
+                        transformOrigin: "center center",
+                      }}
+                      onLoad={() => { setEvidencePreviewLoading(false); resetEvidenceView(); }}
+                      onError={() => { setEvidencePreviewLoading(false); setEvidencePreviewError("Không thể tải ảnh minh chứng. Vui lòng đóng popup và thử lại."); }}
+                    />
                   )}
                 </div>
               </div>
@@ -2988,16 +3126,16 @@ export default function AttendancePage() {
                   <span className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600"><HandCoins size={22} /></span>
                   <div>
                     <h2 className="font-bold text-slate-900">Tạo phiếu ứng lương</h2>
-                    <p className="text-xs text-slate-500">Chỉ gửi từ ngày 01–20 và mỗi nhân viên chỉ được ứng lương một lần trong tháng.</p>
+                    <p className="text-xs text-slate-500">Chỉ gửi từ ngày 01–20; có thể gửi nhiều phiếu nhưng tổng trong tháng không vượt quá 2.600.000 đ.</p>
                   </div>
                 </div>
                 <div className="space-y-3">
                   <label className="block text-xs font-semibold text-slate-600">SỐ TIỀN MUỐN ỨNG
-                    <input type="number" required disabled={advanceFormDisabled} min="100000" max="2600000" step="1000" value={advanceForm.requestedAmount} onChange={(event) => setAdvanceForm((current) => ({ ...current, requestedAmount: event.target.value }))} placeholder="Từ 100.000 đ đến 2.600.000 đ" className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-emerald-400 disabled:cursor-not-allowed disabled:opacity-60" />
+                    <input type="number" required disabled={advanceFormDisabled} min="100000" max={advanceLimit.maxAmount ?? 2600000} step="1000" value={advanceForm.requestedAmount} onChange={(event) => setAdvanceForm((current) => ({ ...current, requestedAmount: event.target.value }))} placeholder={`Từ 100.000 đ đến ${money(advanceLimit.maxAmount ?? 2600000)}`} className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-emerald-400 disabled:cursor-not-allowed disabled:opacity-60" />
                   </label>
                   {Number(advanceForm.requestedAmount) > 0 && <p className="-mt-1 text-sm font-bold text-emerald-700">{money(advanceForm.requestedAmount)}</p>}
                   <div className={`rounded-xl border px-3 py-2 text-xs ${TONE.emerald}`}>
-                    {advanceLimitLoading ? "Đang tải hạn mức ứng lương..." : <>Được ứng từ <strong>{money(advanceLimit.minAmount || 100000)}</strong> đến tối đa <strong>{money(advanceLimit.maxAmount || 2600000)}</strong>.</>}
+                    {advanceLimitLoading ? "Đang tải hạn mức ứng lương..." : <>Đã tính trong tháng: <strong>{money(advanceLimit.usedAmount ?? 0)}</strong> / <strong>{money(advanceLimit.monthlyLimit ?? 2600000)}</strong>. Còn có thể ứng: <strong>{money(advanceLimit.remainingAmount ?? advanceLimit.maxAmount ?? 2600000)}</strong>.</>}
                   </div>
                   {!advanceLimitLoading && advanceRestrictionMessage && <div className={`rounded-xl border px-3 py-2 text-xs font-semibold ${TONE.amber}`}>{advanceRestrictionMessage}</div>}
                   <div className="grid grid-cols-2 gap-3">

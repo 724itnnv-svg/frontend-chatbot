@@ -1,10 +1,8 @@
 import React, { useState, useEffect } from "react";
 import { ShieldCheck, Save, X, Home, ChevronRight, Zap, Check } from "lucide-react";
 import APP_PERMISSIONS from "./configRole";
-import { useAuth } from "../../context/AuthContext";
 
 export default function RoleModal({ isOpen, onClose, onSave, initialData }) {
-  const { token } = useAuth();
   const [roleName, setRoleName] = useState("");
   const [roleCode, setRoleCode] = useState("");
   const [roleDesc, setRoleDesc] = useState("");
@@ -53,13 +51,14 @@ export default function RoleModal({ isOpen, onClose, onSave, initialData }) {
       screens: ungroupedScreens,
     });
   }
-  const allActionIds = APP_PERMISSIONS.actions.map(a => a.id);
   const tableActions = APP_PERMISSIONS.actions.filter(
     (action) => !Array.isArray(action.screenIds),
   );
   const allScreenIds = APP_PERMISSIONS.screens.map(s => s.id);
-  const actionAppliesToScreen = (action, screenId) =>
-    !Array.isArray(action?.screenIds) || action.screenIds.includes(screenId);
+  const actionAppliesToScreen = (action, screenId) => {
+    if (Array.isArray(action?.screenIds)) return action.screenIds.includes(screenId);
+    return !Array.isArray(action?.excludeScreenIds) || !action.excludeScreenIds.includes(screenId);
+  };
   const actionIdsForScreen = (screenId) =>
     APP_PERMISSIONS.actions
       .filter((action) => actionAppliesToScreen(action, screenId))

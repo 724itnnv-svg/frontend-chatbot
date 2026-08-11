@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { AlertTriangle, ArrowLeft, BadgeCheck, Building2, CalendarClock, Download, Eye, FileText, History, PanelLeftClose, PanelLeftOpen, Plus, RefreshCcw, Save, Search, Sparkles, Trash2, Upload, UserRound, X } from "lucide-react";
+import { AlertTriangle, ArrowLeft, BadgeCheck, Building2, CalendarClock, Copy, Download, Eye, FileText, History, PanelLeftClose, PanelLeftOpen, Plus, RefreshCcw, Save, Search, Sparkles, Trash2, Upload, X } from "lucide-react";
 import * as XLSX from "xlsx";
-import JSZip from "jszip";
 import { saveAs } from "file-saver";
 import { useAuth } from "../../context/AuthContext";
 import { EmployeeAssetSection } from "./EmployeeAssetManager";
@@ -351,7 +350,7 @@ function mergeDocumentSettings(defaults, value = {}) {
   };
 }
 
-function ContractTemplateManagerModal({ templates, value, saving, importing, analyzing, analysis, onChange, onSelect, onImportWord, onPreview, onAutoPlace, onMissingValueChange, onSave, onNewVersion, onActivate, onArchive, onDelete, onClose }) {
+function ContractTemplateManagerModal({ templates, value, saving, importing, analyzing, analysis, onChange, onSelect, onImportWord, onPreview, onAutoPlace, onMissingValueChange, onSave, onClone, onNewVersion, onActivate, onArchive, onDelete, onClose }) {
   const [libraryCollapsed, setLibraryCollapsed] = useState(false);
   const editable = !value._id || value.status === "draft";
   const sourceDocxMode = Boolean(value._sourceFile || value.sourceDocx?.originalName || value.engine === "source_docx");
@@ -377,7 +376,7 @@ function ContractTemplateManagerModal({ templates, value, saving, importing, ana
             {value._id && value.status === "draft" && value.sourceDocx?.originalName && <section className="rounded-2xl border border-amber-200 bg-amber-50 p-4"><div className="flex flex-wrap items-center gap-3"><div className="mr-auto"><h4 className="font-black text-amber-900">Tự động đặt biến trong Word</h4><p className="mt-1 text-xs text-amber-800">Nhận diện các nhãn như Họ và tên, CCCD, số hợp đồng, ngày ký, mức lương… rồi đối chiếu với model dữ liệu.</p></div><button disabled={saving || importing || Boolean(value._sourceFile)} onClick={onAutoPlace} className="flex items-center gap-2 rounded-xl bg-amber-600 px-4 py-2 text-sm font-black text-white hover:bg-amber-700 disabled:opacity-50"><Sparkles size={16} /> Tự động đặt biến</button></div>{value.sourceDocx?.autoPlacedAt && <p className="mt-2 text-xs text-amber-700">Lần gần nhất đã đặt {value.sourceDocx.autoPlacementCount || 0} vị trí biến.</p>}</section>}
           </fieldset>
         </div>
-        <div className="flex flex-wrap gap-2 border-t bg-white p-4"><button disabled={saving || importing || Boolean(value._sourceFile)} onClick={onPreview} className="flex items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-bold text-blue-700 hover:bg-blue-100 disabled:opacity-50"><Eye size={16} /> Xem mẫu online</button>{value._id && value.status !== "draft" && <button disabled={saving} onClick={onNewVersion} className="rounded-xl border border-violet-200 bg-violet-50 px-4 py-2 text-sm font-bold text-violet-700">Tạo phiên bản mới</button>}{value._id && <button disabled={saving} onClick={onDelete} className="flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm font-bold text-red-700 hover:bg-red-100 disabled:opacity-50"><Trash2 size={15} /> Xóa mẫu</button>}<div className="ml-auto flex gap-2">{value._id && value.status === "active" && <button disabled={saving} onClick={onArchive} className="rounded-xl border px-4 py-2 text-sm font-bold text-slate-600">Lưu trữ</button>}{value._id && value.status === "draft" && <button disabled={saving} onClick={onActivate} className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white">Kích hoạt</button>}{editable && <button disabled={saving || !value.code || !value.name || (!value._id && !value._sourceFile)} onClick={onSave} className="flex items-center gap-2 rounded-xl bg-violet-600 px-5 py-2 text-sm font-black text-white disabled:opacity-50"><Save size={16} />{saving ? "Đang lưu..." : "Lưu bản nháp"}</button>}</div></div>
+        <div className="flex flex-wrap gap-2 border-t bg-white p-4"><button disabled={saving || importing || Boolean(value._sourceFile)} onClick={onPreview} className="flex items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-bold text-blue-700 hover:bg-blue-100 disabled:opacity-50"><Eye size={16} /> Xem mẫu online</button>{value._id && <button disabled={saving} onClick={onClone} className="flex items-center gap-2 rounded-xl border border-cyan-200 bg-cyan-50 px-4 py-2 text-sm font-bold text-cyan-700 hover:bg-cyan-100 disabled:opacity-50"><Copy size={15} /> Nhân bản mẫu</button>}{value._id && value.status !== "draft" && <button disabled={saving} onClick={onNewVersion} className="rounded-xl border border-violet-200 bg-violet-50 px-4 py-2 text-sm font-bold text-violet-700">Tạo phiên bản mới</button>}{value._id && <button disabled={saving} onClick={onDelete} className="flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm font-bold text-red-700 hover:bg-red-100 disabled:opacity-50"><Trash2 size={15} /> Xóa mẫu</button>}<div className="ml-auto flex gap-2">{value._id && value.status === "active" && <button disabled={saving} onClick={onArchive} className="rounded-xl border px-4 py-2 text-sm font-bold text-slate-600">Lưu trữ</button>}{value._id && value.status === "draft" && <button disabled={saving} onClick={onActivate} className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white">Kích hoạt</button>}{editable && <button disabled={saving || !value.code || !value.name || (!value._id && !value._sourceFile)} onClick={onSave} className="flex items-center gap-2 rounded-xl bg-violet-600 px-5 py-2 text-sm font-black text-white disabled:opacity-50"><Save size={16} />{saving ? "Đang lưu..." : "Lưu bản nháp"}</button>}</div></div>
       </div>
     </div>
   </div>;
@@ -582,9 +581,6 @@ export default function EmployeeProfileManager({ users, onClose, standalone = fa
   const [importResult, setImportResult] = useState(null);
   const [annualLeaveImport, setAnnualLeaveImport] = useState({ fileName: "", rows: [], preview: null, result: null });
   const [annualLeaveImporting, setAnnualLeaveImporting] = useState(false);
-  const [showBulkExport, setShowBulkExport] = useState(false);
-  const [selectedProfileIds, setSelectedProfileIds] = useState([]);
-  const [bulkExporting, setBulkExporting] = useState(false);
   const [exportingProfiles, setExportingProfiles] = useState(false);
   const [alerts, setAlerts] = useState({ summary: { total: 0, overdue: 0, due15: 0, due30: 0, due60: 0 }, items: [] });
   const [alertsLoading, setAlertsLoading] = useState(false);
@@ -869,6 +865,19 @@ export default function EmployeeProfileManager({ users, onClose, standalone = fa
     try { setSavingTemplate(true); const result = await request(`/api/employee-profiles/contract-templates/${templateEditor._id}/versions`, { method: "POST", body: JSON.stringify({}) }); await loadContractTemplates(); setTemplateEditor(normalizeTemplateEditor(result.data)); }
     catch (error) { notify(error.message, "error"); } finally { setSavingTemplate(false); }
   };
+  const cloneTemplate = async () => {
+    if (!(await confirmAction(`Nhân bản mẫu "${templateEditor.name}"?\n\nBản sao sẽ là mẫu nháp độc lập, giữ nguyên toàn bộ cấu hình và file Word gốc.`))) return;
+    try {
+      setSavingTemplate(true);
+      const result = await request(`/api/employee-profiles/contract-templates/${templateEditor._id}/clone`, { method: "POST", body: JSON.stringify({}) });
+      await loadContractTemplates();
+      setTemplateEditor(normalizeTemplateEditor(result.data));
+      setTemplateAnalysis(null);
+      if (result.data?.sourceDocx?.placeholders?.length) await analyzeTemplate(result.data._id);
+      notify(`Đã nhân bản thành "${result.data.name}" (${result.data.code})`);
+    } catch (error) { notify(error.message, "error"); }
+    finally { setSavingTemplate(false); }
+  };
   const changeTemplateStatus = async (action) => {
     try { setSavingTemplate(true); const result = await request(`/api/employee-profiles/contract-templates/${templateEditor._id}/${action}`, { method: "POST" }); await loadContractTemplates(); setTemplateEditor(normalizeTemplateEditor(result.data)); }
     catch (error) { notify(error.message, "error"); } finally { setSavingTemplate(false); }
@@ -1003,54 +1012,6 @@ export default function EmployeeProfileManager({ users, onClose, standalone = fa
       a.href = url; a.download = `HDLD_${editor.employeeCode}_${contract.contractNumber.replace(/[^a-zA-Z0-9_-]/g, "_")}.${format}`; a.click(); URL.revokeObjectURL(url);
     } catch (error) { notify(error.message, "error"); }
   };
-  const toggleProfileSelection = (profileId) => {
-    setSelectedProfileIds((current) => current.includes(profileId)
-      ? current.filter((id) => id !== profileId)
-      : [...current, profileId]);
-  };
-  const handleBulkExport = async (format) => {
-    if (!selectedProfileIds.length) return notify("Vui lòng chọn ít nhất một nhân viên", "warning");
-    try {
-      setBulkExporting(true);
-      const zip = new JSZip();
-      const skipped = [];
-      let exported = 0;
-      for (const profileId of selectedProfileIds) {
-        const profile = profiles.find((item) => item._id === profileId);
-        try {
-          const detail = await request(`/api/employee-profiles/${profileId}`);
-          const contracts = Array.isArray(detail?.data?.contracts) ? detail.data.contracts : [];
-          const now = Date.now();
-          const contract = contracts.find((item) => item.status === "active" && (!item.expiryDate || new Date(item.expiryDate).getTime() >= now))
-            || contracts.find((item) => item.status === "active")
-            || contracts[0];
-          if (!contract) {
-            skipped.push(`${profile?.employeeCode || "--"} - ${profile?.personal?.fullName || "Nhân viên"}: chưa có hợp đồng`);
-            continue;
-          }
-          const response = await fetch(`/api/employee-profiles/${profileId}/contracts/${contract._id}/export?format=${format}`, { headers: { Authorization: `Bearer ${token}` } });
-          if (!response.ok) {
-            const error = await response.json().catch(() => ({}));
-            throw new Error(error.message || "Không thể xuất hợp đồng");
-          }
-          const safeCode = String(profile?.employeeCode || "NV").replace(/[^a-zA-Z0-9_-]/g, "_");
-          const safeNumber = String(contract.contractNumber || "HDLD").replace(/[^a-zA-Z0-9_-]/g, "_");
-          zip.file(`HDLD_${safeCode}_${safeNumber}.${format}`, await response.blob());
-          exported += 1;
-        } catch (error) {
-          skipped.push(`${profile?.employeeCode || "--"} - ${profile?.personal?.fullName || "Nhân viên"}: ${error.message}`);
-        }
-      }
-      if (!exported) throw new Error(skipped.join("\n") || "Không có hợp đồng nào để xuất");
-      saveAs(await zip.generateAsync({ type: "blob" }), `Hop_dong_lao_dong_${format}_${new Date().toISOString().slice(0, 10)}.zip`);
-      setShowBulkExport(false);
-      if (skipped.length) notify(`Đã xuất ${exported} hợp đồng. Bỏ qua ${skipped.length} nhân viên:\n${skipped.join("\n")}`, "warning");
-    } catch (error) {
-      notify(error.message || "Không thể xuất hợp đồng hàng loạt", "error");
-    } finally {
-      setBulkExporting(false);
-    }
-  };
   const readExcel = async (event) => {
     const file = event.target.files?.[0]; event.target.value = ""; if (!file) return;
     try {
@@ -1175,10 +1136,6 @@ export default function EmployeeProfileManager({ users, onClose, standalone = fa
           </div>
           {alertsLoading && !(alerts.items || []).length ? <div className="p-8 text-center text-sm text-slate-500">Đang tải cảnh báo...</div> : !(alerts.items || []).length ? <div className="flex items-center justify-center gap-2 p-7 text-sm font-semibold text-emerald-700"><CalendarClock size={18} /> Không có hợp đồng hoặc phụ lục cần xử lý trong 60 ngày tới.</div> : visibleAlerts.length ? <div className="max-h-72 overflow-auto"><table className="w-full min-w-[850px] text-left text-sm"><thead className="sticky top-0 bg-slate-50 text-xs uppercase text-slate-500"><tr><th className="p-3">Mức độ</th><th>Nhân viên</th><th>Loại cảnh báo</th><th>Số văn bản</th><th>Ngày cần xử lý</th><th>Còn lại</th><th className="pr-3 text-right">Thao tác</th></tr></thead><tbody>{visibleAlerts.map((item) => <tr key={`${item.kind}-${item.contractId}-${item.appendixId || "contract"}`} className="border-t border-slate-100 hover:bg-orange-50/40"><td className="p-3"><span className={`rounded-full px-2 py-1 text-xs font-bold ${item.urgency === "overdue" ? "bg-red-100 text-red-700" : item.urgency === "due15" ? "bg-orange-100 text-orange-700" : item.urgency === "due30" ? "bg-amber-100 text-amber-700" : "bg-sky-100 text-sky-700"}`}>{item.urgency === "overdue" ? "Quá hạn" : ALERT_LEVELS.find((level) => level.key === item.urgency)?.label}</span></td><td><b className="text-slate-800">{item.fullName || "Chưa có tên"}</b><div className="text-xs text-slate-400">{item.employeeCode || "--"} · {item.department || "Chưa có bộ phận"}</div></td><td>{ALERT_KIND_LABELS[item.kind] || item.kind}</td><td>{item.kind === "appendix" ? item.appendixNumber : item.contractNumber}</td><td>{alertDateVN(item.alertDate)}</td><td className={item.daysRemaining < 0 ? "font-bold text-red-600" : "font-semibold text-slate-700"}>{item.daysRemaining < 0 ? `Quá ${Math.abs(item.daysRemaining)} ngày` : item.daysRemaining === 0 ? "Hôm nay" : `${item.daysRemaining} ngày`}</td><td className="pr-3 text-right"><button onClick={() => openProfile({ _id: item.profileId })} className="rounded-lg bg-orange-500 px-3 py-1.5 text-xs font-bold text-white hover:bg-orange-600">Mở hồ sơ</button></td></tr>)}</tbody></table></div> : <div className="flex items-center justify-center gap-2 p-7 text-sm text-slate-500"><AlertTriangle size={17} /> Không có cảnh báo thuộc nhóm đã chọn.</div>}
         </section>
-        <div className="mb-4 flex flex-wrap items-center gap-3 rounded-2xl border border-violet-200 bg-violet-50 p-4">
-          <div className="mr-auto flex items-center gap-3"><span className="flex h-10 w-10 items-center justify-center rounded-xl bg-violet-600 text-white"><FileText size={19} /></span><div><b className="text-violet-900">Xuất hợp đồng lao động</b><p className="text-xs text-violet-700">Chọn nhiều nhân viên và tải Word/PDF dưới dạng ZIP</p></div></div>
-          <button onClick={() => { setSelectedProfileIds([]); setShowBulkExport(true); }} className="rounded-xl bg-violet-600 px-4 py-2 text-sm font-bold text-white hover:bg-violet-700">Chọn nhân viên cần xuất</button>
-        </div>
         {annualLeaveImport.preview && <section className="mb-5 overflow-hidden rounded-2xl border border-emerald-200 bg-white shadow-sm"><div className="flex flex-wrap items-center gap-3 border-b border-emerald-100 bg-emerald-50 p-4"><div className="mr-auto"><b className="text-emerald-900">Import phép năm · {annualLeaveImport.fileName}</b><p className="text-xs text-slate-600">{annualLeaveImport.result ? `Thành công ${annualLeaveImport.result.success}/${annualLeaveImport.result.total}, lỗi ${annualLeaveImport.result.failed}` : `Hợp lệ ${annualLeaveImport.preview.valid}/${annualLeaveImport.preview.total}, lỗi ${annualLeaveImport.preview.invalid}, cảnh báo ${annualLeaveImport.preview.warnings}`}</p></div><button onClick={downloadAnnualLeaveImportResult} className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-white px-3 py-2 text-sm font-bold text-emerald-700"><Download size={15} /> Tải kết quả</button><button disabled={annualLeaveImporting} onClick={() => setAnnualLeaveImport({ fileName: "", rows: [], preview: null, result: null })} className="rounded-xl border bg-white px-3 py-2 text-sm">Đóng</button>{!annualLeaveImport.result && <button disabled={annualLeaveImporting || !annualLeaveImport.preview.valid} onClick={confirmAnnualLeaveImport} className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-50">{annualLeaveImporting ? "Đang cập nhật..." : `Cập nhật ${annualLeaveImport.preview.valid} dòng hợp lệ`}</button>}</div><div className="max-h-80 overflow-auto"><table className="w-full min-w-[1050px] text-left text-xs"><thead className="sticky top-0 bg-slate-100 text-slate-600"><tr><th className="p-2">Dòng</th><th>MSNV</th><th>Họ tên</th><th>Năm</th><th>Số ngày phép hiện tại</th><th>Số ngày phép sau import</th><th>Kết quả</th><th>Ghi chú</th></tr></thead><tbody>{annualLeaveImportItems.map((item) => <tr key={`${item.rowNumber}-${item.employeeCode}`} className={`border-t ${item.valid ? "bg-white" : "bg-red-50"}`}><td className="p-2">{item.rowNumber}</td><td className="font-bold">{item.employeeCode || "-"}</td><td>{item.fullName || "-"}</td><td>{Number.isInteger(Number(item.year)) && Number(item.year) >= 2000 ? item.year : "-"}</td><td>{Number(item.currentRemainingDays || 0)} ngày</td><td><b>{item.remainingDays ?? "-"}</b> ngày</td><td><span className={`font-bold ${item.status === "success" || (item.valid && !item.status) ? "text-emerald-700" : "text-red-600"}`}>{item.status === "success" ? "Thành công" : item.valid && !item.status ? "Hợp lệ" : "Lỗi"}</span><div className="max-w-xs text-[11px] text-red-600">{item.message || (item.errors || []).join("; ")}</div>{item.warning && <div className="max-w-xs text-[11px] text-amber-700">{item.warning}</div>}</td><td>{item.note || "-"}</td></tr>)}</tbody></table></div></section>}
         {importRows.length > 0 && <section className="mb-5 rounded-2xl border border-emerald-200 bg-emerald-50 p-4"><div className="flex flex-wrap items-center gap-3"><div className="mr-auto"><b>Đã đọc {importRows.length} dòng từ {importFileName}</b><p className="text-xs text-slate-600">Kiểm tra nhanh rồi xác nhận ghi dữ liệu.</p></div><button onClick={() => setImportRows([])} className="rounded-xl border bg-white px-3 py-2 text-sm">Hủy</button><button disabled={importing} onClick={confirmImport} className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-60">{importing ? "Đang import..." : "Xác nhận import"}</button></div><div className="mt-3 max-h-44 overflow-auto rounded-xl bg-white"><table className="w-full text-left text-xs"><thead className="sticky top-0 bg-slate-100"><tr><th className="p-2">Dòng</th><th>MSNV</th><th>Họ tên</th><th>Hợp đồng</th></tr></thead><tbody>{importRows.slice(0, 100).map((row) => <tr key={row.rowNumber} className="border-t"><td className="p-2">{row.rowNumber}</td><td>{row.employeeCode || <span className="text-red-500">Thiếu</span>}</td><td>{row.personal.fullName || <span className="text-red-500">Thiếu</span>}</td><td>{row.contract?.contractNumber || "-"}</td></tr>)}</tbody></table></div></section>}
         {importResult && <section className="mb-5 rounded-2xl border border-sky-200 bg-sky-50 p-4 text-sm"><b>Kết quả import:</b> tạo {importResult.profilesCreated} hồ sơ, cập nhật {importResult.profilesUpdated}, tạo {importResult.contractsCreated} hợp đồng, cập nhật {importResult.contractsUpdated}. <span className={importResult.errors?.length ? "text-red-600" : "text-emerald-700"}>Lỗi: {importResult.errors?.length || 0}</span>{importResult.errors?.length > 0 && <div className="mt-2 max-h-28 overflow-auto">{importResult.errors.map((e, i) => <div key={i}>Dòng {e.row} ({e.employeeCode}): {e.message}</div>)}</div>}</section>}
@@ -1189,7 +1146,7 @@ export default function EmployeeProfileManager({ users, onClose, standalone = fa
         <section className="rounded-2xl border border-cyan-100 bg-white p-4"><h3 className="mb-4 font-black text-cyan-800">CCCD, BHXH và công việc</h3><div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4"><Field label="Số CCCD/CMND" value={editor.identityDocument.number} onChange={(v) => setNested("identityDocument", "number", v)} /><Field label="Ngày cấp" type="date" value={editor.identityDocument.issuedDate} onChange={(v) => setNested("identityDocument", "issuedDate", v)} /><Field label="Nơi cấp" value={editor.identityDocument.issuedPlace} onChange={(v) => setNested("identityDocument", "issuedPlace", v)} /><Field label="Mã số BHXH" value={editor.socialInsuranceNumber} onChange={(v) => setEditor({ ...editor, socialInsuranceNumber: v })} /><Field label="Công ty" value={editor.employment.company} onChange={(v) => setNested("employment", "company", v)} /><Field label="Bộ phận" value={editor.employment.department} onChange={(v) => setNested("employment", "department", v)} /><Field label="Chức danh" value={editor.employment.jobTitle} onChange={(v) => setNested("employment", "jobTitle", v)} /><Field label="Ngày vào làm" type="date" value={editor.employment.startDate} onChange={(v) => setNested("employment", "startDate", v)} /><Field label="Ngày chính thức" type="date" value={editor.employment.officialDate} onChange={(v) => setNested("employment", "officialDate", v)} /><SelectField label="Tình trạng" value={editor.employment.employmentStatus} onChange={(v) => setNested("employment", "employmentStatus", v)} options={[["unknown", "Chưa xác định"], ["probation", "Thử việc"], ["official", "Chính thức"], ["leave", "Tạm nghỉ"], ["resigned", "Nghỉ việc"], ["terminated", "Chấm dứt"]]} /><SelectField label="Hiện trạng" value={editor.employment.currentState} onChange={(v) => setNested("employment", "currentState", v)} options={[["active", "Đang hoạt động"], ["inactive", "Ngừng hoạt động"], ["archived", "Lưu trữ"]]} /><Field label="Học vấn" value={editor.education.level} onChange={(v) => setNested("education", "level", v)} /><Field label="Ngành nghề" value={editor.education.major} onChange={(v) => setNested("education", "major", v)} /></div></section>
         <section className="rounded-2xl border border-cyan-100 bg-white p-4"><h3 className="mb-4 font-black text-cyan-800">Nguyên quán và hộ khẩu thường trú</h3><div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4"><Field label="Nguyên quán xã/phường" value={editor.placeOfOrigin.ward} onChange={(v) => setNested("placeOfOrigin", "ward", v)} /><Field label="Nguyên quán tỉnh/TP" value={editor.placeOfOrigin.province} onChange={(v) => setNested("placeOfOrigin", "province", v)} /><Field label="Ấp/đường/khóm" value={editor.permanentAddress.street} onChange={(v) => setNested("permanentAddress", "street", v)} /><Field label="Phường/xã" value={editor.permanentAddress.ward} onChange={(v) => setNested("permanentAddress", "ward", v)} /><Field label="Quận/huyện" value={editor.permanentAddress.district} onChange={(v) => setNested("permanentAddress", "district", v)} /><Field label="Tỉnh/TP" value={editor.permanentAddress.province} onChange={(v) => setNested("permanentAddress", "province", v)} /><div className="md:col-span-2"><Field label="HKTT đầy đủ (tự tính)" disabled value={[editor.permanentAddress.street, editor.permanentAddress.ward, editor.permanentAddress.district, editor.permanentAddress.province].filter(Boolean).join(", ")} onChange={() => { }} /></div></div></section>
         <section className="rounded-2xl border border-emerald-200 bg-emerald-50/40 p-4">
-          <div className="mb-4"><h3 className="font-black text-emerald-800">Quản lý phép năm {editor.annualLeaveBalance.year}</h3><p className="text-xs text-slate-500">Số còn lại tự động giảm khi đơn phép năm được duyệt và được hoàn khi hủy đơn.</p></div>
+          <div className="mb-4"><h3 className="font-black text-emerald-800">Quản lý phép năm {editor.annualLeaveBalance.year}</h3><p className="text-xs text-slate-500">Mỗi tháng dương lịch làm đủ được cộng 1 ngày vào đầu tháng kế tiếp; số còn lại tự động giảm khi duyệt đơn và được hoàn khi hủy đơn.</p></div>
           <div className="max-w-sm"><Field label="Số ngày phép năm" type="number" immediate value={editor.annualLeaveBalance.remainingDays} onChange={(v) => setNested("annualLeaveBalance", "remainingDays", Number(v))} /></div>
         </section>
         {editor._id && <section className="rounded-2xl border border-cyan-100 bg-white p-4">
@@ -1213,15 +1170,6 @@ export default function EmployeeProfileManager({ users, onClose, standalone = fa
       </main>}
     </div>
 
-    {showBulkExport && <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/55 p-4">
-      <div className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-violet-100 bg-white shadow-2xl">
-        <div className="flex items-center gap-3 border-b border-violet-100 p-4"><span className="flex h-10 w-10 items-center justify-center rounded-xl bg-violet-600 text-white"><UserRound size={19} /></span><div className="mr-auto"><h3 className="font-black text-slate-900">Chọn nhân viên xuất hợp đồng</h3><p className="text-xs text-slate-500">Đã chọn {selectedProfileIds.length}/{profiles.length} nhân viên</p></div><button disabled={bulkExporting} onClick={() => setShowBulkExport(false)} className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 disabled:opacity-50"><X size={18} /></button></div>
-        <div className="flex flex-wrap items-center gap-2 border-b bg-violet-50/50 px-4 py-3"><button onClick={() => setSelectedProfileIds(profiles.map((item) => item._id))} className="rounded-lg border border-violet-200 bg-white px-3 py-1.5 text-xs font-bold text-violet-700">Chọn tất cả</button><button onClick={() => setSelectedProfileIds([])} className="rounded-lg border bg-white px-3 py-1.5 text-xs font-semibold text-slate-600">Bỏ chọn</button><span className="ml-auto text-xs text-slate-500">Ưu tiên hợp đồng đang hiệu lực, sau đó đến hợp đồng mới nhất</span></div>
-        <div className="min-h-0 flex-1 overflow-y-auto p-3"><div className="grid gap-2 md:grid-cols-2">{profiles.map((profile) => { const checked = selectedProfileIds.includes(profile._id); return <label key={profile._id} className={`flex cursor-pointer items-center gap-3 rounded-xl border p-3 transition ${checked ? "border-violet-300 bg-violet-50" : "border-slate-100 hover:bg-slate-50"}`}><input type="checkbox" checked={checked} onChange={() => toggleProfileSelection(profile._id)} className="h-4 w-4 accent-violet-600" /><div className="min-w-0"><div className="truncate text-sm font-bold text-slate-800">{profile.personal?.fullName || "Chưa có tên"}</div><div className="truncate text-xs text-slate-500">{profile.employeeCode || "Chưa có MSNV"} · {profile.employment?.department || "Chưa có bộ phận"}</div></div></label>; })}</div></div>
-        <div className="flex flex-wrap justify-end gap-2 border-t p-4"><button disabled={bulkExporting} onClick={() => setShowBulkExport(false)} className="rounded-xl border px-4 py-2 text-sm font-semibold text-slate-600 disabled:opacity-50">Hủy</button><button disabled={bulkExporting || !selectedProfileIds.length} onClick={() => handleBulkExport("docx")} className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-50">{bulkExporting ? "Đang xử lý..." : "Xuất Word (.zip)"}</button><button disabled={bulkExporting || !selectedProfileIds.length} onClick={() => handleBulkExport("pdf")} className="rounded-xl bg-red-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-50">{bulkExporting ? "Đang xử lý..." : "Xuất PDF (.zip)"}</button></div>
-      </div>
-    </div>}
-
     {showTemplateManager && templateEditor && <ContractTemplateManagerModal
       templates={contractTemplates}
       value={templateEditor}
@@ -1236,6 +1184,7 @@ export default function EmployeeProfileManager({ users, onClose, standalone = fa
       onAutoPlace={autoPlaceTemplateVariables}
       onMissingValueChange={updateTemplateMissingValue}
       onSave={saveTemplate}
+      onClone={cloneTemplate}
       onNewVersion={createTemplateVersion}
       onActivate={() => changeTemplateStatus("activate")}
       onArchive={() => changeTemplateStatus("archive")}

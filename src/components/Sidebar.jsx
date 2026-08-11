@@ -45,6 +45,7 @@ import {
   Globe2,
   HandCoins,
   CircleDollarSign,
+  FileCheck2,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { canAccessScreen, hasFullAccess } from "../utils/screenAccess";
@@ -226,6 +227,12 @@ const MENU_CONFIG = [
     icon: UserCheck,
   },
   {
+    id: "approved_leave",
+    path: "/admin/approved-leaves",
+    label: "Đơn xin nghỉ phép",
+    icon: FileCheck2,
+  },
+  {
     id: "attendance_shifts",
     path: "/admin/attendance-shifts",
     label: "Ca làm",
@@ -305,6 +312,7 @@ const MENU_GROUPS = [
     items: [
       "attendance_self",
       "attendance",
+      "approved_leave",
       "attendance_shifts",
       "attendance_locations",
       "payroll",
