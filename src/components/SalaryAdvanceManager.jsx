@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { getDefaultPayrollViewPeriod } from "../utils/payrollPeriod";
+import { createApprovedRequestsWorkbook } from "../utils/salaryAdvanceExcel";
 
 const STATUS_OPTIONS = [
   ["pending", "Chờ xử lý"],
@@ -54,7 +55,14 @@ function displayDateTime(value) {
   return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString("vi-VN");
 }
 
+function currentDateInputValue() {
+  const date = new Date();
+  const pad = (value) => String(value).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
 let excelJsLoadPromise = null;
+let vietinbankTemplateLoadPromise = null;
 
 function loadExcelJS() {
   if (window.ExcelJS) return Promise.resolve(window.ExcelJS);
@@ -79,68 +87,29 @@ function loadExcelJS() {
   return excelJsLoadPromise;
 }
 
-async function saveApprovedRequestsExcel(rows, period) {
-  const ExcelJS = await loadExcelJS();
-  const workbook = new ExcelJS.Workbook();
-  workbook.creator = "NNV";
-  workbook.created = new Date();
-  const sheet = workbook.addWorksheet("Phiếu đã duyệt", { views: [{ state: "frozen", ySplit: 4 }] });
-  const headers = ["STT", "Mã NV", "Tên NV", "Công ty đóng BHXH", "Tên ngân hàng", "Tên người thụ hưởng", "Số tài khoản thụ hưởng", "Chi nhánh ngân hàng", "Số tiền duyệt", "Ngày duyệt", "Kỳ khấu trừ", "Người duyệt", "Lý do / Ghi chú duyệt"];
-  sheet.mergeCells("A1:M1");
-  sheet.getCell("A1").value = "DANH SÁCH PHIẾU ỨNG LƯƠNG ĐÃ DUYỆT";
-  sheet.getCell("A1").font = { bold: true, size: 16, color: { argb: "FFFFFFFF" } };
-  sheet.getCell("A1").alignment = { horizontal: "center", vertical: "middle" };
-  sheet.getCell("A1").fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF047857" } };
-  sheet.getRow(1).height = 28;
-  sheet.mergeCells("A2:M2");
-  sheet.getCell("A2").value = `Kỳ khấu trừ: ${period || "Tất cả"} · Xuất lúc: ${new Date().toLocaleString("vi-VN")}`;
-  sheet.getCell("A2").alignment = { horizontal: "center" };
-  sheet.getCell("A2").font = { italic: true, color: { argb: "FF475569" } };
-  const headerRow = sheet.getRow(4);
-  headerRow.values = headers;
-  headerRow.font = { bold: true, color: { argb: "FFFFFFFF" } };
-  headerRow.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF059669" } };
-  headerRow.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
-  rows.forEach((request, index) => {
-    const recipient = request.paymentRecipient || {};
-    sheet.addRow([
-      index + 1,
-      recipient.employeeCode || request.employeeCode || "",
-      recipient.employeeName || request.userName || "",
-      request.congTyDongBHXH || "",
-      recipient.bankName || "",
-      recipient.accountHolder || "",
-      recipient.accountNumber || "",
-      recipient.bankBranch || "",
-      Number(request.approvedAmount || request.requestedAmount || 0),
-      request.reviewedAt ? new Date(request.reviewedAt) : "",
-      request.payrollPeriod || "",
-      request.reviewedByName || "",
-      [
-        request.reason ? `Lý do: ${request.reason}` : "",
-        request.reviewNote ? `Ghi chú duyệt: ${request.reviewNote}` : "",
-      ].filter(Boolean).join("\n"),
-    ]);
-  });
-  const totalRow = sheet.addRow(["", "", "", "", "", "", "", "TỔNG CỘNG", { formula: `SUM(I5:I${4 + rows.length})` }, "", "", "", ""]);
-  totalRow.font = { bold: true };
-  totalRow.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFD1FAE5" } };
-  sheet.columns = [8, 14, 24, 20, 22, 25, 23, 22, 18, 20, 15, 24, 36].map((width) => ({ width }));
-  sheet.getColumn(7).numFmt = "@";
-  sheet.getColumn(9).numFmt = "#,##0 [$₫-vi-VN]";
-  sheet.getColumn(10).numFmt = "dd/mm/yyyy hh:mm";
-  sheet.autoFilter = { from: "A4", to: `M${Math.max(4, sheet.rowCount - 1)}` };
-  sheet.eachRow({ includeEmpty: true }, (row, rowNumber) => {
-    if (rowNumber >= 4) row.alignment = { vertical: "top", wrapText: true };
-    row.eachCell({ includeEmpty: true }, (cell) => {
-      if (rowNumber >= 4) cell.border = { top: { style: "thin", color: { argb: "FFE2E8F0" } }, left: { style: "thin", color: { argb: "FFE2E8F0" } }, bottom: { style: "thin", color: { argb: "FFE2E8F0" } }, right: { style: "thin", color: { argb: "FFE2E8F0" } } };
-    });
-  });
+function loadVietinbankSalaryTemplate() {
+  if (!vietinbankTemplateLoadPromise) {
+    vietinbankTemplateLoadPromise = fetch("/assets/vietinbank-salary-payment-template.xlsx")
+      .then((response) => {
+        if (!response.ok) throw new Error("Không tải được file mẫu chi lương VietinBank.");
+        return response.arrayBuffer();
+      })
+      .catch((error) => {
+        vietinbankTemplateLoadPromise = null;
+        throw error;
+      });
+  }
+  return vietinbankTemplateLoadPromise;
+}
+
+async function saveApprovedRequestsExcel(rows, period, exportOptions) {
+  const [ExcelJS, templateBuffer] = await Promise.all([loadExcelJS(), loadVietinbankSalaryTemplate()]);
+  const workbook = await createApprovedRequestsWorkbook(ExcelJS, templateBuffer, rows, exportOptions);
   const buffer = await workbook.xlsx.writeBuffer();
   const url = URL.createObjectURL(new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
   const link = document.createElement("a");
   link.href = url;
-  link.download = `Phieu_ung_luong_da_duyet_${period || new Date().toISOString().slice(0, 10)}.xlsx`;
+  link.download = `Danh_sach_chi_luong_VietinBank_${period || currentDateInputValue()}.xlsx`;
   document.body.appendChild(link);
   link.click();
   link.remove();
@@ -171,6 +140,14 @@ export default function SalaryAdvanceManager() {
   const [bulkApproving, setBulkApproving] = useState(false);
   const [bulkForm, setBulkForm] = useState({ payrollPeriod: "", reviewNote: "" });
   const [exporting, setExporting] = useState(false);
+  const [exportDialogOpen, setExportDialogOpen] = useState(false);
+  const [exportForm, setExportForm] = useState({
+    companyName: "",
+    debitAccount: "",
+    paymentDate: currentDateInputValue(),
+    content: "",
+    note: "",
+  });
   const [paymentDialog, setPaymentDialog] = useState(null);
   const [paymentForm, setPaymentForm] = useState({ payrollPeriod: "", paymentMethod: "bank_transfer", paymentNote: "" });
   const [message, setMessage] = useState(null);
@@ -378,6 +355,19 @@ export default function SalaryAdvanceManager() {
     await reviewRequest(paymentDialog, "mark_paid", paymentForm);
   }
 
+  function openExportDialog() {
+    if (exporting) return;
+    setMessage(null);
+    setExportForm({
+      companyName: "",
+      debitAccount: "",
+      paymentDate: currentDateInputValue(),
+      content: "",
+      note: "",
+    });
+    setExportDialogOpen(true);
+  }
+
   async function exportApprovedRequests() {
     if (exporting) return;
     setExporting(true);
@@ -391,7 +381,15 @@ export default function SalaryAdvanceManager() {
       if (!response.ok || data?.ok === false) throw new Error(data?.message || "Không tải được dữ liệu xuất Excel");
       const exportRows = data.data || [];
       if (!exportRows.length) throw new Error("Không có phiếu đã duyệt theo kỳ và bộ lọc hiện tại.");
-      await saveApprovedRequestsExcel(exportRows, period);
+      const companyNames = [...new Set(exportRows.map((request) => String(request.congTyDongBHXH || "").trim()).filter(Boolean))];
+      await saveApprovedRequestsExcel(exportRows, period, {
+        companyName: exportForm.companyName.trim() || (companyNames.length === 1 ? companyNames[0] : ""),
+        debitAccount: exportForm.debitAccount.trim(),
+        paymentDate: exportForm.paymentDate,
+        content: exportForm.content.trim(),
+        note: exportForm.note.trim(),
+      });
+      setExportDialogOpen(false);
       setMessage({ ok: true, text: `Đã xuất ${exportRows.length} phiếu ứng lương đã duyệt.` });
     } catch (error) {
       setMessage({ ok: false, text: error.message || "Không thể xuất Excel" });
@@ -420,7 +418,7 @@ export default function SalaryAdvanceManager() {
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <button onClick={exportApprovedRequests} disabled={exporting} className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-3 py-2 text-sm font-bold text-white hover:bg-emerald-700 disabled:opacity-50">
+              <button onClick={openExportDialog} disabled={exporting} className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-3 py-2 text-sm font-bold text-white hover:bg-emerald-700 disabled:opacity-50">
                 {exporting ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />} {exporting ? "Đang xuất..." : "Xuất phiếu đã duyệt"}
               </button>
               <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-700"><ShieldCheck size={14} /> Phạm vi thủ quỹ</span>
@@ -502,7 +500,7 @@ export default function SalaryAdvanceManager() {
 
         {bulkDialogOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4" role="dialog" aria-modal="true" aria-labelledby="bulk-approve-dialog-title">
-            <div className="w-full max-w-xl rounded-2xl bg-white shadow-2xl">
+            <div className="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white shadow-2xl">
               <div className="flex items-start justify-between border-b px-5 py-4">
                 <div>
                   <h2 id="bulk-approve-dialog-title" className="text-lg font-bold text-slate-900">Duyệt hàng loạt phiếu ứng lương</h2>
@@ -529,6 +527,48 @@ export default function SalaryAdvanceManager() {
                 <button onClick={() => setBulkDialogOpen(false)} disabled={bulkApproving} className="rounded-xl border px-4 py-2 text-sm font-bold hover:bg-slate-50 disabled:opacity-50">Đóng</button>
                 <button onClick={confirmBulkApprove} disabled={bulkApproving || !selectedRows.length || !bulkForm.payrollPeriod} className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-700 disabled:opacity-50">
                   {bulkApproving ? <Loader2 size={16} className="animate-spin" /> : <CheckSquare2 size={16} />} Duyệt {selectedRows.length} phiếu
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {exportDialogOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4" role="dialog" aria-modal="true" aria-labelledby="export-approved-dialog-title">
+            <div className="w-full max-w-xl rounded-2xl bg-white shadow-2xl">
+              <div className="flex items-start justify-between border-b px-5 py-4">
+                <div>
+                  <h2 id="export-approved-dialog-title" className="text-lg font-bold text-slate-900">Xuất ứng lương đã duyệt</h2>
+                  <p className="mt-1 text-sm text-slate-500">Xuất đúng sheet “Danh sach” theo mẫu chi lương VietinBank.</p>
+                </div>
+                <button onClick={() => !exporting && setExportDialogOpen(false)} disabled={exporting} className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:opacity-50" aria-label="Đóng"><X size={20} /></button>
+              </div>
+
+              <div className="space-y-4 p-5">
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <label className="block text-sm font-semibold text-slate-700 sm:col-span-2">Tên công ty
+                    <input autoFocus maxLength={200} value={exportForm.companyName} onChange={(event) => setExportForm((current) => ({ ...current, companyName: event.target.value }))} disabled={exporting} placeholder="Để trống để tự lấy công ty trong hồ sơ nhân viên" className="mt-1.5 w-full rounded-xl border px-3 py-2.5 outline-none focus:ring-2 focus:ring-emerald-100 disabled:bg-slate-100" />
+                  </label>
+                  <label className="block text-sm font-semibold text-slate-700">Tài khoản chuyển
+                    <input maxLength={50} value={exportForm.debitAccount} onChange={(event) => setExportForm((current) => ({ ...current, debitAccount: event.target.value }))} disabled={exporting} placeholder="Số tài khoản chi lương" className="mt-1.5 w-full rounded-xl border px-3 py-2.5 outline-none focus:ring-2 focus:ring-emerald-100 disabled:bg-slate-100" />
+                  </label>
+                  <label className="block text-sm font-semibold text-slate-700">Ngày chi lương
+                    <input type="date" value={exportForm.paymentDate} onChange={(event) => setExportForm((current) => ({ ...current, paymentDate: event.target.value }))} disabled={exporting} className="mt-1.5 w-full rounded-xl border px-3 py-2.5 outline-none focus:ring-2 focus:ring-emerald-100 disabled:bg-slate-100" />
+                  </label>
+                </div>
+                <label className="block text-sm font-semibold text-slate-700">Nội dung chuyển khoản
+                  <textarea rows={3} maxLength={500} value={exportForm.content} onChange={(event) => setExportForm((current) => ({ ...current, content: event.target.value }))} disabled={exporting} placeholder="Ví dụ: CTY VIET NHAT THANH TOAN TIEN UNG LUONG THANG 7 2026" className="mt-1.5 w-full resize-y rounded-xl border px-3 py-2.5 outline-none focus:ring-2 focus:ring-emerald-100 disabled:bg-slate-100" />
+                </label>
+                <label className="block text-sm font-semibold text-slate-700">Ghi chú từng dòng
+                  <textarea rows={3} maxLength={1000} value={exportForm.note} onChange={(event) => setExportForm((current) => ({ ...current, note: event.target.value }))} disabled={exporting} placeholder="Nhập ghi chú cần hiển thị trong file (không bắt buộc)..." className="mt-1.5 w-full resize-y rounded-xl border px-3 py-2.5 outline-none focus:ring-2 focus:ring-emerald-100 disabled:bg-slate-100" />
+                </label>
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">File chỉ có sheet đầu, giữ nguyên tiêu đề, 8 cột và toàn bộ phần “Lưu ý/Notes” phía dưới bảng. Số tài khoản được giữ dạng text để không mất số 0 đầu.</div>
+              </div>
+
+              <div className="flex justify-end gap-2 border-t px-5 py-4">
+                <button onClick={() => setExportDialogOpen(false)} disabled={exporting} className="rounded-xl border px-4 py-2 text-sm font-bold hover:bg-slate-50 disabled:opacity-50">Đóng</button>
+                <button onClick={exportApprovedRequests} disabled={exporting} className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-700 disabled:opacity-50">
+                  {exporting ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />} {exporting ? "Đang xuất..." : "Xuất Excel"}
                 </button>
               </div>
             </div>
