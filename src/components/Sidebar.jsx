@@ -435,9 +435,10 @@ const Sidebar = memo(() => {
   const canViewAttendance = canAccessScreen(user, "attendance");
   const canViewSalaryAdvances = canAccessScreen(user, "salary_advance_management");
   const canViewOnlineUsers = canAccessScreen(user, "admin_dashboard");
+  const presenceUserId = user?._id || user?.id || "";
 
   useEffect(() => {
-    if (!user) {
+    if (!presenceUserId) {
       setOnlineUsers([]);
       setIsPresenceConnected(false);
       return undefined;
@@ -445,7 +446,11 @@ const Sidebar = memo(() => {
 
     const socket = io(SOCKET_URL, {
       withCredentials: true,
-      transports: ["polling", "websocket"],
+      // Kết nối thẳng WebSocket để không tạo phiên polling rồi nâng cấp với
+      // cùng một sid qua proxy production. Nếu WebSocket không khả dụng,
+      // Socket.IO 4.8 sẽ thử transport tiếp theo.
+      transports: ["websocket", "polling"],
+      tryAllTransports: true,
       reconnection: true,
       reconnectionAttempts: Infinity,
       reconnectionDelay: 800,
@@ -474,7 +479,7 @@ const Sidebar = memo(() => {
       socket.disconnect();
       setIsPresenceConnected(false);
     };
-  }, [canViewOnlineUsers, user]);
+  }, [canViewOnlineUsers, presenceUserId]);
 
   const loadAttendanceLeavePendingTotal = useCallback(async () => {
     if (!canViewAttendance) {
