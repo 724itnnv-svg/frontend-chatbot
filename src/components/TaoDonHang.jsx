@@ -28,6 +28,7 @@ import {
   getProductByCode,
   getProductById,
   getUserInKiot,
+  getIdAdministrativearea,
   getIdLocations,
   getIdWards,
   getFullIdProvinceDistrictWard,
@@ -716,6 +717,52 @@ async function buildNewCustomerPayloadV2({
       address: invoiceAddress,
     }));
   const retailerId = retailerConfig?.retailerId ?? null;
+  const provinceName = String(
+    invoiceAddressDetails?.provinceName || invoiceAddressDetails?.wardName,
+  ).trim();
+  const districtName = String(
+    invoiceAddressDetails?.districtName ||
+      invoiceAddressDetails?.wardName ||
+      "",
+  ).trim();
+  const provinceIds = provinceName
+    ? await getIdAdministrativearea(
+        retailer,
+        accessPrivateToken,
+        provinceName,
+        1,
+      )
+    : [];
+  const provinceLookupName = provinceName
+    ? `Tỉnh ${provinceName.replace(/^(Tỉnh|Thành phố|TP\.?|Tp\.?)\s+/iu, "")}`
+    : "";
+  const wardIds =
+    provinceName && districtName
+      ? await getIdAdministrativearea(
+          retailer,
+          accessPrivateToken,
+          districtName,
+          2,
+          provinceLookupName,
+        )
+      : [];
+  const provinceRecord =
+    provinceIds?.[0] || invoiceAddressDetails?.provinceRows?.[0] || null;
+  const wardRecord =
+    wardIds?.[0] || invoiceAddressDetails?.districtRows?.[0] || null;
+  const provinceId = provinceRecord?.Id ?? null;
+  const wardId = wardRecord?.Id ?? null;
+  const locationSuggestName = [districtName, provinceName]
+    .filter(Boolean)
+    .join(" - ");
+  const customerCode = generateCustomerCodeV2({
+    phoneNumber,
+    customerName,
+    newAddress: invoiceAddress,
+    customerType,
+  });
+
+  console.log("check data", { provinceIds, wardIds, invoiceAddressDetails });
 
   return {
     Customer: {
@@ -725,25 +772,33 @@ async function buildNewCustomerPayloadV2({
       GroupChanged: false,
       WarningCustomerDebtNumber: -1,
       isWarningCustomerDebt: -1,
-      Code: generateCustomerCodeV2({
-        phoneNumber,
-        customerName,
-        newAddress: invoiceAddress,
-        customerType,
-      }),
+      Code: customerCode,
+      CompareCode: customerCode,
       Name: invoiceName,
+      CompareName: invoiceName,
       ContactNumber: phoneNumber,
       Address: customerAddressParts.street,
-      LocationName: formatCustomerLocationName(customerAddress),
-      WardName: customerAddressParts.ward || "",
+      LocationName: provinceName,
+      WardName: districtName,
       LastWard: customerAddressParts.ward || "",
-      LocationId: null,
+      LocationId: provinceId,
       LastLocation: formatCustomerLocationName(customerAddress),
-      WardId: null,
+      WardId: wardId,
       NameEInvoice: invoiceName,
-      AddressEInvoice: invoiceAddress || customerAddressParts.street,
+      AddressEInvoice: customerAddressParts.street || invoiceAddress,
       AddressEInvoiceCombine: invoiceAddress,
-      AdministrativeAreaIdEInvoice: invoiceAddressDetails.districtId,
+      LocationIdEInvoice: wardId,
+      AdministrativeAreaIdEInvoice: wardId,
+      LocationIdEInvoiceLevel_1: provinceId,
+      LocationNameEInvoiceLevel_1: provinceName,
+      LocationIdEInvoiceLevel_2: wardId,
+      LocationNameEInvoiceLevel_2: districtName,
+      LocationSuggessName: locationSuggestName,
+      suggestLocationV2: provinceRecord,
+      suggestWardV2: wardRecord,
+      templocEInvoiceLevel_1: provinceName,
+      templocEInvoiceLevel_2: districtName,
+      temploc: provinceName,
       AdministrativeAreaId: null,
       RetailerId: retailerId,
       ...(matchedKiotUser && {
@@ -758,8 +813,8 @@ async function buildNewCustomerPayloadV2({
         : [],
       ContactNumberEInvoice: phoneNumber,
       LocationItemsEInvoice: {
-        1: invoiceAddressDetails.provinceRows[0] || null,
-        2: invoiceAddressDetails.districtRows[0] || null,
+        1: provinceRecord,
+        2: wardRecord,
       },
       CustomerGroupDetails: selectedGroupId
         ? [{ GroupId: selectedGroupId }]
