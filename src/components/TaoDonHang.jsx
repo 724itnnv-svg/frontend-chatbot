@@ -602,9 +602,14 @@ function getAgencyCodePrefix(customerName = "") {
 
   if (tokens.length === 0) return "DL";
 
-  const firstInitial = tokens[0]?.[0]?.toUpperCase?.() || "";
   const lastToken = tokens[tokens.length - 1] || "";
-  return `${firstInitial}${lastToken.toUpperCase()}` || "DL";
+  const precedingInitials = tokens
+    .slice(0, -1)
+    .map((token) => token[0] || "")
+    .join("")
+    .toUpperCase();
+
+  return `${precedingInitials}${lastToken.toUpperCase()}` || "DL";
 }
 
 function generateCustomerCodeV2({
@@ -829,7 +834,7 @@ async function buildNewCustomerPayloadV2({
   console.log("check", { invoiceAddressParts, invoiceAddressDetails });
   return {
     Customer: {
-      Type: 0,
+      Type: isAgency ? 1 : 0,
       IsActive: true,
       BranchId: branchId,
       GroupChanged: false,
@@ -868,6 +873,8 @@ async function buildNewCustomerPayloadV2({
       templocEInvoiceLevel_2: districtDisplayName,
       temploc: provinceDisplayName,
       AdministrativeAreaId: null,
+
+      CustomerType: isAgency ? "Công ty" : "Cá nhân",
       RetailerId: retailerId,
       ...(matchedKiotUser && {
         CreatedName:
@@ -4804,8 +4811,7 @@ export default function TaoDonHang() {
                         <FieldCard
                           label="Địa chỉ hiện tại"
                           value={
-                            existingCustomerPreview.address ||
-                            "Chưa có địa chỉ"
+                            existingCustomerPreview.address || "Chưa có địa chỉ"
                           }
                         />
                       </div>
