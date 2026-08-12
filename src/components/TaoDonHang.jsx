@@ -315,6 +315,53 @@ function normalizeDisplayText(value = "") {
     .trim();
 }
 
+function getAdministrativeAreaDisplayName(
+  value = "",
+  record = null,
+  level = 1,
+) {
+  const originalName = normalizeDisplayText(value);
+  const recordName = normalizeDisplayText(
+    record?.Name || record?.CompareName || record?.name || "",
+  );
+  const hasAdministrativePrefix = (name) =>
+    /^(Tỉnh|Thành phố|TP\.?|Quận|Huyện|Thị xã|Phường|Xã|Thị trấn)\s+/iu.test(
+      name,
+    );
+  const prefixedName = [originalName, recordName].find(hasAdministrativePrefix);
+
+  if (Number(level) !== 1) {
+    return prefixedName || originalName || recordName;
+  }
+
+  const displayName = prefixedName || originalName || recordName;
+  if (!displayName) return "";
+
+  if (/^(Thành phố|TP\.?)\s+/iu.test(displayName)) {
+    return `Thành phố ${displayName
+      .replace(/^(Thành phố|TP\.?)\s+/iu, "")
+      .trim()}`;
+  }
+  if (/^Tỉnh\s+/iu.test(displayName)) {
+    return `Tỉnh ${displayName.replace(/^Tỉnh\s+/iu, "").trim()}`;
+  }
+
+  const normalizedName = normalizeLookupText(displayName);
+  const centrallyGovernedCities = new Set([
+    "can tho",
+    "da nang",
+    "ha noi",
+    "hai phong",
+    "ho chi minh",
+    "hue",
+  ]);
+  if (centrallyGovernedCities.has(normalizedName)) {
+    return `Thành phố ${displayName}`;
+  }
+
+  return `Tỉnh ${displayName}`;
+}
+
 function normalizeNameForCompare(value = "") {
   return normalizeDisplayText(value)
     .toLowerCase()
@@ -409,12 +456,6 @@ function mapTeamIdToRetailerId(teamId = "") {
   return "kingfarm";
 }
 
-function stripProvincePrefixDisplay(value = "") {
-  return normalizeDisplayText(value)
-    .replace(/^(Tỉnh|Thành phố|TP\.?|Tp\.?)\s+/iu, "")
-    .trim();
-}
-
 function parseVietnamAddressParts(value = "") {
   const text = normalizeDisplayText(value);
   if (!text) {
@@ -437,17 +478,6 @@ function parseVietnamAddressParts(value = "") {
     district: parts.length >= 4 ? parts[parts.length - 2] : "",
     province: parts[parts.length - 1] || "",
   };
-}
-
-function formatCustomerLocationName(address = "") {
-  const parts = parseVietnamAddressParts(address);
-  const province = stripProvincePrefixDisplay(parts.province || "");
-  const district = String(parts.district || parts.ward || "").trim();
-
-  if (!province && !district) return "";
-  if (!province) return district;
-  if (!district) return province;
-  return `${province} - ${district}`;
 }
 
 async function resolveAdministrativeAreaDetails({
@@ -717,11 +747,19 @@ async function buildNewCustomerPayloadV2({
       address: invoiceAddress,
     }));
   const retailerId = retailerConfig?.retailerId ?? null;
+  const invoiceAddressParts = parseVietnamAddressParts(invoiceAddress);
   const provinceName = String(
-    invoiceAddressDetails?.provinceName || invoiceAddressDetails?.wardName,
+    invoiceAddressParts.province ||
+      invoiceAddressDetails?.parts?.province ||
+      invoiceAddressDetails?.provinceName ||
+      "",
   ).trim();
   const districtName = String(
-    invoiceAddressDetails?.districtName ||
+    invoiceAddressParts.district ||
+      invoiceAddressParts.ward ||
+      invoiceAddressDetails?.parts?.district ||
+      invoiceAddressDetails?.parts?.ward ||
+      invoiceAddressDetails?.districtName ||
       invoiceAddressDetails?.wardName ||
       "",
   ).trim();
@@ -733,37 +771,62 @@ async function buildNewCustomerPayloadV2({
         1,
       )
     : [];
-  const provinceLookupName = provinceName
-    ? `Tỉnh ${provinceName.replace(/^(Tỉnh|Thành phố|TP\.?|Tp\.?)\s+/iu, "")}`
-    : "";
+  const provinceRecord =
+    provinceIds?.[0] || invoiceAddressDetails?.provinceRows?.[0] || null;
+  const provinceDisplayName = getAdministrativeAreaDisplayName(
+    provinceName,
+    provinceRecord,
+  );
   const wardIds =
-    provinceName && districtName
+    provinceDisplayName && districtName
       ? await getIdAdministrativearea(
           retailer,
           accessPrivateToken,
           districtName,
           2,
-          provinceLookupName,
+          provinceDisplayName,
         )
       : [];
-  const provinceRecord =
-    provinceIds?.[0] || invoiceAddressDetails?.provinceRows?.[0] || null;
   const wardRecord =
     wardIds?.[0] || invoiceAddressDetails?.districtRows?.[0] || null;
+  const districtDisplayName = getAdministrativeAreaDisplayName(
+    districtName,
+    wardRecord,
+    2,
+  );
+  const provinceSuggestion = provinceRecord
+    ? {
+        ...provinceRecord,
+        Name: provinceDisplayName,
+        CompareName: provinceDisplayName,
+      }
+    : null;
+  const wardSuggestion = wardRecord
+    ? {
+        ...wardRecord,
+        Name: districtDisplayName,
+        CompareName: districtDisplayName,
+      }
+    : null;
   const provinceId = provinceRecord?.Id ?? null;
   const wardId = wardRecord?.Id ?? null;
-  const locationSuggestName = [districtName, provinceName]
+  const locationSuggestName = [districtDisplayName, provinceDisplayName]
     .filter(Boolean)
     .join(" - ");
+  const invoiceAddressCombine = [
+    invoiceAddressParts.street,
+    districtDisplayName,
+    provinceDisplayName,
+  ]
+    .filter(Boolean)
+    .join(", ");
   const customerCode = generateCustomerCodeV2({
     phoneNumber,
     customerName,
     newAddress: invoiceAddress,
     customerType,
   });
-
-  console.log("check data", { provinceIds, wardIds, invoiceAddressDetails });
-
+  console.log("check", { invoiceAddressParts, invoiceAddressDetails });
   return {
     Customer: {
       Type: 0,
@@ -778,27 +841,32 @@ async function buildNewCustomerPayloadV2({
       CompareName: invoiceName,
       ContactNumber: phoneNumber,
       Address: customerAddressParts.street,
-      LocationName: provinceName,
-      WardName: districtName,
+      LocationName: provinceDisplayName,
+      WardName: districtDisplayName,
       LastWard: customerAddressParts.ward || "",
       LocationId: provinceId,
-      LastLocation: formatCustomerLocationName(customerAddress),
+      LastLocation: [
+        customerAddressParts.district || customerAddressParts.ward,
+        customerAddressParts.province,
+      ]
+        .filter(Boolean)
+        .join(" - "),
       WardId: wardId,
       NameEInvoice: invoiceName,
       AddressEInvoice: customerAddressParts.street || invoiceAddress,
-      AddressEInvoiceCombine: invoiceAddress,
+      AddressEInvoiceCombine: invoiceAddressCombine || invoiceAddress,
       LocationIdEInvoice: wardId,
       AdministrativeAreaIdEInvoice: wardId,
       LocationIdEInvoiceLevel_1: provinceId,
-      LocationNameEInvoiceLevel_1: provinceName,
+      LocationNameEInvoiceLevel_1: provinceDisplayName,
       LocationIdEInvoiceLevel_2: wardId,
-      LocationNameEInvoiceLevel_2: districtName,
+      LocationNameEInvoiceLevel_2: districtDisplayName,
       LocationSuggessName: locationSuggestName,
-      suggestLocationV2: provinceRecord,
-      suggestWardV2: wardRecord,
-      templocEInvoiceLevel_1: provinceName,
-      templocEInvoiceLevel_2: districtName,
-      temploc: provinceName,
+      suggestLocationV2: provinceSuggestion,
+      suggestWardV2: wardSuggestion,
+      templocEInvoiceLevel_1: provinceDisplayName,
+      templocEInvoiceLevel_2: districtDisplayName,
+      temploc: provinceDisplayName,
       AdministrativeAreaId: null,
       RetailerId: retailerId,
       ...(matchedKiotUser && {
@@ -813,8 +881,8 @@ async function buildNewCustomerPayloadV2({
         : [],
       ContactNumberEInvoice: phoneNumber,
       LocationItemsEInvoice: {
-        1: provinceRecord,
-        2: wardRecord,
+        1: provinceSuggestion,
+        2: wardSuggestion,
       },
       CustomerGroupDetails: selectedGroupId
         ? [{ GroupId: selectedGroupId }]
@@ -853,6 +921,69 @@ function extractCustomerRecord(response, fallback = null) {
   );
 
   return candidate || fallback;
+}
+
+function joinUniqueAddressParts(parts = []) {
+  const seen = new Set();
+  return parts
+    .map((part) => normalizeDisplayText(part))
+    .filter((part) => {
+      if (!part) return false;
+      const normalizedPart = normalizeLookupText(part);
+      if (seen.has(normalizedPart)) return false;
+      seen.add(normalizedPart);
+      return true;
+    })
+    .join(", ");
+}
+
+function getCustomerCurrentAddress(customer = {}) {
+  const combinedAddress = normalizeDisplayText(
+    customer?.AddressEInvoiceCombine || customer?.addressEInvoiceCombine || "",
+  );
+  if (combinedAddress) return combinedAddress;
+
+  const address = normalizeDisplayText(customer?.Address || customer?.address);
+  if (address.includes(",")) return address;
+
+  return joinUniqueAddressParts([
+    address,
+    customer?.LastWard || customer?.lastWard,
+    customer?.WardName || customer?.wardName,
+    customer?.LocationName || customer?.locationName,
+  ]);
+}
+
+function buildEstimatedCustomerPreview(parsed = {}, customerType = "") {
+  const customerName = normalizeDisplayText(parsed?.customerName);
+  const phoneNumber = normalizeDisplayText(parsed?.phoneNumber);
+  const sourceAddress = normalizeDisplayText(
+    parsed?.newAddress || parsed?.oldAddress,
+  );
+  const addressParts = parseVietnamAddressParts(sourceAddress);
+  const provinceName = getAdministrativeAreaDisplayName(
+    addressParts.province,
+    null,
+    1,
+  );
+
+  return {
+    code: generateCustomerCodeV2({
+      phoneNumber,
+      customerName,
+      newAddress: sourceAddress,
+      customerType,
+    }),
+    name: customerName || phoneNumber || "Khách lẻ",
+    phoneNumber,
+    address:
+      joinUniqueAddressParts([
+        addressParts.street,
+        addressParts.ward,
+        addressParts.district,
+        provinceName,
+      ]) || sourceAddress,
+  };
 }
 
 const roundMoney = (value) => Math.round(Number(value || 0) * 100) / 100;
@@ -3232,6 +3363,37 @@ export default function TaoDonHang() {
     if (enteredNewAddress || !convertedNewAddress) return parsed;
     return { ...parsed, newAddress: convertedNewAddress };
   }, [orderPreparation, orderPreparationKey, parsed]);
+  const estimatedCustomerPreview = useMemo(
+    () => buildEstimatedCustomerPreview(effectiveParsed, customerType),
+    [customerType, effectiveParsed],
+  );
+  const existingCustomerPreview = useMemo(() => {
+    const customer = orderPreparation.customerRecord;
+    if (!customer) return null;
+
+    return {
+      code: normalizeDisplayText(
+        customer?.Code || customer?.CompareCode || customer?.CustomerCode,
+      ),
+      name: normalizeDisplayText(
+        customer?.Name || customer?.CompareName || customer?.CustomerName,
+      ),
+      phoneNumber: normalizeDisplayText(
+        customer?.ContactNumber || customer?.CustomerContactNumber,
+      ),
+      address: getCustomerCurrentAddress(customer),
+    };
+  }, [orderPreparation.customerRecord]);
+  const enteredNewAddress = normalizeDisplayText(parsed.newAddress);
+  const predictedNewAddress =
+    orderPreparation.key === orderPreparationKey
+      ? normalizeDisplayText(orderPreparation.convertedNewAddress)
+      : "";
+  const newAddressPreview = enteredNewAddress || predictedNewAddress;
+  const newAddressPreviewLabel =
+    !enteredNewAddress && predictedNewAddress
+      ? "Địa chỉ mới dự đoán"
+      : "Địa chỉ mới";
 
   useEffect(() => {
     let active = true;
@@ -4583,8 +4745,103 @@ export default function TaoDonHang() {
                 <FieldCard label="Khách hàng" value={parsed.customerName} />
                 <FieldCard label="SĐT" value={parsed.phoneNumber} />
                 <FieldCard label="Địa chỉ cũ" value={parsed.oldAddress} />
-                <FieldCard label="Địa chỉ mới" value={parsed.newAddress} />
+                <FieldCard
+                  label={newAddressPreviewLabel}
+                  value={newAddressPreview}
+                />
                 <FieldCard label="NVC" value={parsed.nvc} />
+              </div>
+
+              <div
+                className={`mt-4 rounded-2xl border px-4 py-3 ${
+                  isOrderPreparationReady && existingCustomerPreview
+                    ? "border-emerald-200 bg-emerald-50/80"
+                    : isOrderPreparationReady
+                      ? "border-sky-200 bg-sky-50/80"
+                      : orderPreparation.status === "error"
+                        ? "border-rose-200 bg-rose-50/80"
+                        : "border-slate-200 bg-slate-50/80"
+                }`}
+                aria-live="polite"
+              >
+                <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">
+                  Kiểm tra thông tin khách hàng
+                </div>
+
+                {!String(parsed.phoneNumber || "").trim() ? (
+                  <div className="mt-2 text-sm text-slate-600">
+                    Nhập số điện thoại để kiểm tra khách hàng trên KiotViet.
+                  </div>
+                ) : !isOrderPreparationReady ? (
+                  <div className="mt-2 flex items-center gap-2 text-sm text-slate-600">
+                    {orderPreparation.status !== "error" ? (
+                      <LoaderCircle className="h-4 w-4 animate-spin text-cyan-600" />
+                    ) : (
+                      <XCircle className="h-4 w-4 text-rose-600" />
+                    )}
+                    <span>
+                      {orderPreparation.status === "error"
+                        ? `Không kiểm tra được khách hàng: ${orderPreparation.error}`
+                        : "Đang kiểm tra khách hàng..."}
+                    </span>
+                  </div>
+                ) : existingCustomerPreview ? (
+                  <div className="mt-2">
+                    <div className="flex items-center gap-2 text-sm font-bold text-emerald-800">
+                      <CheckCircle2 className="h-4 w-4" />
+                      Khách hàng đã tồn tại
+                    </div>
+                    <div className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
+                      <FieldCard
+                        label="Mã khách hàng hiện tại"
+                        value={existingCustomerPreview.code || "Chưa có mã"}
+                      />
+                      <FieldCard
+                        label="Tên khách hàng hiện tại"
+                        value={existingCustomerPreview.name || "Chưa có tên"}
+                      />
+                      <div className="sm:col-span-2">
+                        <FieldCard
+                          label="Địa chỉ hiện tại"
+                          value={
+                            existingCustomerPreview.address ||
+                            "Chưa có địa chỉ"
+                          }
+                        />
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="mt-2">
+                    <div className="flex items-center gap-2 text-sm font-bold text-sky-800">
+                      <Sparkles className="h-4 w-4" />
+                      Khách hàng chưa tồn tại, có thể tạo mới khách hàng này
+                    </div>
+                    <div className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
+                      <FieldCard
+                        label="Mã khách hàng dự kiến"
+                        value={estimatedCustomerPreview.code}
+                      />
+                      <FieldCard
+                        label="Tên khách hàng dự kiến"
+                        value={estimatedCustomerPreview.name}
+                      />
+                      <FieldCard
+                        label="SĐT dự kiến"
+                        value={estimatedCustomerPreview.phoneNumber}
+                      />
+                      <div className="sm:col-span-2">
+                        <FieldCard
+                          label="Địa chỉ dự kiến"
+                          value={
+                            estimatedCustomerPreview.address ||
+                            "Chưa có địa chỉ"
+                          }
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* <div className="mt-4 rounded-2xl border border-cyan-100 bg-cyan-50/60 px-4 py-3">
