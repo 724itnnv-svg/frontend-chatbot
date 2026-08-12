@@ -362,6 +362,11 @@ export default function ApprovedLeaveViewer() {
                       </span>
                     </div>
 
+                    <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-700">
+                      <span className="font-bold text-slate-600">Lý do xin nghỉ:</span>{" "}
+                      <span className="whitespace-pre-wrap break-words">{row.reason || "Không có lý do"}</span>
+                    </div>
+
                     <div className="mt-3 flex flex-wrap gap-2">
                       {evidences.map((evidence, index) => (
                         <button key={`${row._id}-${index}`} type="button" onClick={() => openEvidence(evidence, row.userName)} className="inline-flex items-center gap-1.5 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs font-bold text-sky-700 hover:bg-sky-100">

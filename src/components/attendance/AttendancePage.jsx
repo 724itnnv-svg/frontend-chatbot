@@ -1931,7 +1931,7 @@ export default function AttendancePage() {
     if (request.status === "approved") {
       cancellationReason = window.prompt("Nhập lý do yêu cầu hủy phiếu đã duyệt:", "")?.trim();
       if (!cancellationReason) return;
-    } else if (!window.confirm("Bạn có chắc muốn hủy phiếu ứng lương này? Lượt ứng lương của tháng vẫn được ghi nhận.")) return;
+    } else if (!window.confirm("Bạn có chắc muốn hủy phiếu ứng lương này? Số tiền của phiếu sẽ được hoàn lại hạn mức ứng trong tháng.")) return;
     setDeletingAdvanceId(request._id);
     try {
       const res = await api.delete(`/salary-advance-requests/${request._id}`, { data: cancellationReason ? { cancellationReason } : undefined });
