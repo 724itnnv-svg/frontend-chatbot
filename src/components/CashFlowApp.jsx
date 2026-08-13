@@ -49,6 +49,9 @@ const getRetailerFromTeamId = (teamId) =>
 
 const PRIVATE_TOKEN_COOKIE_PREFIX = "kiot_private_token_";
 const SEND_REQUEST_DELAY_MS = 350;
+const FAILED_REQUEST_RETRY_DELAY_MS = 1000;
+const FAILED_REQUEST_MAX_ATTEMPTS = 5;
+const RETRYABLE_REQUEST_STATUS_CODES = new Set([401, 500, 504, 520]);
 const ORDER_DELIVERY_BATCH_SIZE = 10;
 const ORDER_DELIVERY_ROW_DELAY_MS = 350;
 const ORDER_DELIVERY_BATCH_PAUSE_MS = 1400;
@@ -92,7 +95,10 @@ const filterRowsByRetailer = (rows) => {
 const filterSelectableRows = (rows) => rows.filter((row) => !row.__sentToKiot);
 
 const parseMoneyValue = (value) => {
-  const text = normalizeText(value).replace(/,/g, "");
+  const rawText = normalizeText(value).replace(/\s+/g, "");
+  const text = /^-?\d{1,3}(?:[.,]\d{3})+$/.test(rawText)
+    ? rawText.replace(/[.,]/g, "")
+    : rawText.replace(/,/g, "");
   if (!text) return 0;
 
   const number = Number(text);
@@ -121,12 +127,16 @@ const getOrderDeliveryMoneyMismatch = (row = {}, orderDelivery = {}) => {
   const excelMoneyValue = getExcelMoneyValue(row);
   const orderDeliveryMoneyValue =
     getOrderDeliveryInvoiceTotalValue(orderDelivery);
-  const isGhnRow = row.__sourceFormat === "ghn";
+  const sourceFormat = normalizeText(row.__sourceFormat).toLowerCase();
+  const isGhnRow = sourceFormat === "ghn";
+  const shouldCheckCod = sourceFormat === "ghn" || sourceFormat === "viettel";
   const excelDeliveryFeeValue = getExcelDeliveryFeeValue(row);
   const orderDeliveryFeeValue = getOrderDeliveryFeeValue(orderDelivery);
 
   const isCodMismatch =
-    excelMoneyValue > 0 && excelMoneyValue > orderDeliveryMoneyValue;
+    shouldCheckCod &&
+    excelMoneyValue > 0 &&
+    excelMoneyValue > orderDeliveryMoneyValue;
   const isGhnDeliveryFeeMismatch =
     isGhnRow &&
     normalizeText(orderDelivery.totalPrice) !== "" &&
@@ -146,17 +156,47 @@ const extractKiotResponseStatus = (error) =>
   error?.response?.data?.ResponseStatus ||
   {};
 
+const extractKiotHttpStatus = (error) =>
+  Number(error?.status || error?.response?.status || 0);
+
+const shortenPaidKiotMessage = (message) => {
+  const normalizedMessage = normalizeText(message);
+  const invoiceMatch = normalizedMessage.match(/Hóa đơn\s+(\S+)/iu);
+  const invoiceCode = invoiceMatch?.[1] || "";
+
+  if (
+    invoiceCode &&
+    /đã được thanh toán hoặc không phải thanh toán tiền thu hộ/iu.test(
+      normalizedMessage,
+    )
+  ) {
+    return `Hóa đơn ${invoiceCode} đã được thu rồi`;
+  }
+
+  if (
+    invoiceCode &&
+    /đã được thanh toán hoặc không phải thanh toán phí giao hàng/iu.test(
+      normalizedMessage,
+    )
+  ) {
+    return `Hóa đơn ${invoiceCode} đã được chi rồi`;
+  }
+
+  return normalizedMessage;
+};
+
 const formatKiotErrorMessage = (error) => {
   const responseStatus = extractKiotResponseStatus(error);
-  return (
+  const message =
     normalizeText(
       responseStatus.Message ||
         error?.response?.data?.error?.ResponseStatus?.Message ||
         error?.response?.data?.error?.message ||
         error?.response?.data?.message ||
         error?.message,
-    ) || "Không gửi được payload"
-  );
+    ) || "Không gửi được payload";
+
+  return shortenPaidKiotMessage(message);
 };
 
 const buildPayloadErrorSummary = (detailRows = []) => {
@@ -312,6 +352,7 @@ export default function CashFlowApp() {
   const [excelError, setExcelError] = useState("");
   const [fileName, setFileName] = useState("");
   const [payloadError, setPayloadError] = useState("");
+  const [failedPayloadEntries, setFailedPayloadEntries] = useState([]);
   const [currentAccessToken, setCurrentAccessToken] = useState("");
   const [currentAccessPrivateToken, setCurrentAccessPrivateToken] =
     useState("");
@@ -649,8 +690,7 @@ export default function CashFlowApp() {
     () =>
       payloadSourceRows.filter(
         (row) =>
-          hasCashflowInvoiceId(row) &&
-          !row.__orderDeliveryMissingInvoice,
+          hasCashflowInvoiceId(row) && !row.__orderDeliveryMissingInvoice,
       ),
     [payloadSourceRows],
   );
@@ -718,6 +758,8 @@ export default function CashFlowApp() {
     cancelSendPayloadProgress();
     setRetailer(nextRetailer);
     setSelectedIds(new Set());
+    setFailedPayloadEntries([]);
+    setPayloadError("");
     setCurrentAccessToken("");
     setCurrentAccessPrivateToken("");
     setSourceWorkbook(null);
@@ -813,7 +855,16 @@ export default function CashFlowApp() {
     void loadOrderDeliveryRowsInBatches(rowsToLoad);
   };
 
-  const handleSendPayloads = async () => {
+  const handleSendPayloads = async (retryFailedOnly = false) => {
+    if (orderDeliveryLoadProgress.active || isInitializingRetailerData) {
+      addToast({
+        type: "warning",
+        title: "Dữ liệu đang được tải",
+        message: "Vui lòng đợi tải xong dữ liệu vận đơn rồi mới gửi lên Kiot.",
+      });
+      return;
+    }
+
     let payloadEntries = [];
     let payloads = [];
     let runId = 0;
@@ -828,21 +879,33 @@ export default function CashFlowApp() {
       setSendingPayloads(true);
       setPayloadError("");
 
-      const preSendErrorSummary = buildOrderDeliveryValidationErrorSummary(
-        orderDeliveryErrorRows,
-      );
+      const preSendErrorSummary = retryFailedOnly
+        ? ""
+        : buildOrderDeliveryValidationErrorSummary(orderDeliveryErrorRows);
       if (preSendErrorSummary) {
         setPayloadError(preSendErrorSummary);
       }
 
-      payloadEntries = buildCashflowPayloadEntries(
-        payloadReadyRows,
-        [],
-        partnerDeliveries,
-        bankAccounts,
-        retailer,
-        cashflowTransDate,
-      );
+      if (retryFailedOnly) {
+        payloadEntries = failedPayloadEntries;
+      } else {
+        const generatedEntries = buildCashflowPayloadEntries(
+          payloadReadyRows,
+          [],
+          partnerDeliveries,
+          bankAccounts,
+          retailer,
+          cashflowTransDate,
+        );
+        const failedRowIds = new Set(
+          failedPayloadEntries.map((entry) => entry.rowId),
+        );
+
+        payloadEntries = [
+          ...failedPayloadEntries,
+          ...generatedEntries.filter((entry) => !failedRowIds.has(entry.rowId)),
+        ];
+      }
       payloads = payloadEntries.map((entry) => entry.payload);
       runId = startSendPayloadProgress(payloads.length);
 
@@ -876,25 +939,58 @@ export default function CashFlowApp() {
         accessToken = await getAccessToken(retailer);
         setCurrentAccessToken(accessToken);
       }
+      let accessPrivateToken = currentAccessPrivateToken;
 
       const results = [];
-      const rowById = new Map(
-        payloadSourceRows.map((row) => [row.__rowId, row]),
-      );
+      const rowById = new Map(allRows.map((row) => [row.__rowId, row]));
 
       for (let index = 0; index < payloadEntries.length; index += 1) {
         const entry = payloadEntries[index];
 
-        try {
-          const value = await createCashFlow(
-            retailer,
-            accessToken,
-            entry.payload,
-            currentAccessPrivateToken,
-          );
-          results.push({ status: "fulfilled", value });
-        } catch (error) {
-          results.push({ status: "rejected", reason: error });
+        let lastError = null;
+
+        for (
+          let attempt = 1;
+          attempt <= FAILED_REQUEST_MAX_ATTEMPTS;
+          attempt += 1
+        ) {
+          try {
+            const value = await createCashFlow(
+              retailer,
+              accessToken,
+              entry.payload,
+              accessPrivateToken,
+            );
+            results.push({ status: "fulfilled", value });
+            lastError = null;
+            break;
+          } catch (error) {
+            lastError = error;
+            const status = extractKiotHttpStatus(error);
+            const canRetry =
+              RETRYABLE_REQUEST_STATUS_CODES.has(status) &&
+              attempt < FAILED_REQUEST_MAX_ATTEMPTS;
+
+            if (!canRetry) break;
+
+            await sleep(FAILED_REQUEST_RETRY_DELAY_MS);
+            try {
+              accessToken = await getAccessToken(retailer);
+              accessPrivateToken = await getAccessPrivateToken(retailer);
+              setCurrentAccessToken(accessToken);
+              setCurrentAccessPrivateToken(accessPrivateToken || "");
+              setCookie(
+                getPrivateTokenCookieName(retailer),
+                accessPrivateToken || "",
+              );
+            } catch (refreshError) {
+              lastError = refreshError;
+            }
+          }
+        }
+
+        if (lastError) {
+          results.push({ status: "rejected", reason: lastError });
         }
 
         setSendPayloadProgress((current) =>
@@ -960,6 +1056,10 @@ export default function CashFlowApp() {
       });
 
       const successRowIds = new Set();
+      const nextFailedPayloadEntries = payloadEntries.filter(
+        (_entry, index) => results[index]?.status === "rejected",
+      );
+      setFailedPayloadEntries(nextFailedPayloadEntries);
 
       rowResults.forEach((rowData) => {
         const isRowSuccess = rowData.failed === 0;
@@ -1085,6 +1185,8 @@ export default function CashFlowApp() {
     cancelSendPayloadProgress();
     setExcelError("");
     setSelectedIds(new Set());
+    setFailedPayloadEntries([]);
+    setPayloadError("");
     setFileName(file.name);
     const fileBuffer = await file.arrayBuffer();
     setSourceFile(file);
@@ -1226,9 +1328,9 @@ export default function CashFlowApp() {
               Đang tải dữ liệu KiotViet
             </strong>
             <p className="mt-2 text-xs font-semibold leading-5 text-slate-500">
-              Đang khởi tạo token, đối tác giao hàng và tài khoản ngân hàng cho {" "}
-              <span className="font-black text-slate-700">{retailer}</span>.
-              Vui lòng đợi tải xong trước khi thao tác.
+              Đang khởi tạo token, đối tác giao hàng và tài khoản ngân hàng cho{" "}
+              <span className="font-black text-slate-700">{retailer}</span>. Vui
+              lòng đợi tải xong trước khi thao tác.
             </p>
           </div>
         </div>
@@ -1346,11 +1448,17 @@ export default function CashFlowApp() {
               generatedPayloads={generatedPayloads}
               getPayloadEntriesForRow={getPayloadEntriesForRow}
               onSendPayloads={handleSendPayloads}
+              onRetryFailedPayloads={() => handleSendPayloads(true)}
               onExportExcel={handleExportExcel}
               isSendingPayloads={sendingPayloads}
+              isLoadingOrderDeliveries={
+                orderDeliveryLoadProgress.active ||
+                isInitializingRetailerData
+              }
               sendPayloadProgress={sendPayloadProgress}
               isExportingExcel={exportingExcel}
               payloadSourceCount={payloadSourceRows.length}
+              failedPayloadCount={failedPayloadEntries.length}
               missingInvoiceRows={missingInvoiceRows}
             />
           </section>

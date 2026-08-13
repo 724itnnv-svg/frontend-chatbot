@@ -273,14 +273,15 @@ function DetailModal({
 
 export default function SelectedRowsPanel({
   selectedRows,
-  generatedPayloads,
   getPayloadEntriesForRow,
   onSendPayloads,
+  onRetryFailedPayloads,
   onExportExcel,
   isSendingPayloads,
+  isLoadingOrderDeliveries,
   sendPayloadProgress,
   isExportingExcel,
-  payloadSourceCount,
+  failedPayloadCount,
   missingInvoiceRows,
 }) {
   const [activeRowId, setActiveRowId] = useState("");
@@ -451,11 +452,27 @@ export default function SelectedRowsPanel({
             <button
               type="button"
               className={buttonClass}
-              onClick={onSendPayloads}
-              disabled={isSendingPayloads}
+              onClick={() => onSendPayloads(false)}
+              disabled={isSendingPayloads || isLoadingOrderDeliveries}
             >
-              {isSendingPayloads ? "Đang gửi..." : "Gửi dữ liệu lên kiot"}
+              {isLoadingOrderDeliveries
+                ? "Đang tải dữ liệu..."
+                : isSendingPayloads
+                  ? "Đang gửi..."
+                  : "Gửi dữ liệu lên kiot"}
             </button>
+            {failedPayloadCount > 0 ? (
+              <button
+                type="button"
+                className={buttonClass}
+                onClick={onRetryFailedPayloads}
+                disabled={isSendingPayloads || isLoadingOrderDeliveries}
+              >
+                {isSendingPayloads
+                  ? "Đang chạy lại..."
+                  : `Chạy lại ${failedPayloadCount} phiếu lỗi`}
+              </button>
+            ) : null}
             <button
               type="button"
               className={buttonClass}

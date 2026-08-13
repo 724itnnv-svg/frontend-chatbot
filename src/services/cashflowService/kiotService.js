@@ -12,8 +12,8 @@ const cashflowApi = axios.create({
 const kiotDirectApi = axios.create();
 
 const KIOT_RETRY_DELAY_MS = 1000;
-const KIOT_RETRY_LIMIT = 1;
-const KIOT_RETRY_STATUS_CODES = new Set([401, 500, 504]);
+const KIOT_RETRY_LIMIT = 4;
+const KIOT_RETRY_STATUS_CODES = new Set([401, 500, 504, 520]);
 const SAFE_RETRY_POST_PATHS = new Set(["/token", "/login"]);
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -25,8 +25,10 @@ const canSafelyRetryRequest = (config = {}) => {
   return method === "post" && SAFE_RETRY_POST_PATHS.has(config.url);
 };
 
-const getFriendlyKiotErrorMessage = (status, retried) => {
-  const retryText = retried ? " Hệ thống đã tự thử lại 1 lần." : "";
+const getFriendlyKiotErrorMessage = (status, retryCount) => {
+  const retryText = retryCount
+    ? ` Hệ thống đã tự thử lại ${retryCount} lần.`
+    : "";
 
   if (status === 401) {
     return `Phiên đăng nhập không còn hợp lệ hoặc chưa được máy chủ xác nhận.${retryText} Vui lòng đăng nhập lại nếu lỗi tiếp tục.`;
@@ -36,6 +38,9 @@ const getFriendlyKiotErrorMessage = (status, retried) => {
   }
   if (status === 504) {
     return `Kiot phản hồi quá chậm và đã hết thời gian chờ.${retryText} Vui lòng thử lại.`;
+  }
+  if (status === 520) {
+    return `Kiot đang gặp lỗi phản hồi tạm thời.${retryText} Vui lòng thử lại sau ít phút.`;
   }
 
   return "Không thể kết nối đến Kiot lúc này. Vui lòng thử lại.";
@@ -63,7 +68,7 @@ const attachKiotRetryInterceptor = (client) => {
       if (KIOT_RETRY_STATUS_CODES.has(status)) {
         const friendlyMessage = getFriendlyKiotErrorMessage(
           status,
-          retryCount > 0,
+          retryCount,
         );
         error.userMessage = friendlyMessage;
         error.message = friendlyMessage;

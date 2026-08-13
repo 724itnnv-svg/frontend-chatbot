@@ -7,6 +7,7 @@ import {
   publishEInvoice,
   createEInVoicesLog,
   getEInVoicesLog,
+  getCustomerByPhoneNumber,
 } from "../../../services/cashflowService/kiotService";
 import * as XLSX from "xlsx";
 import { useRef } from "react";
@@ -14,6 +15,92 @@ import { autoConvertAddress2 } from "../../../address2/address2Api";
 const currency = new Intl.NumberFormat("vi-VN");
 
 const normalizeText = (value) => String(value ?? "").trim();
+
+const normalizePhoneNumber = (value) =>
+  normalizeText(value).replace(/[^\d]/g, "");
+
+const maskPhoneNumber = (value) => {
+  const phoneNumber = normalizePhoneNumber(value);
+  if (!phoneNumber) return "";
+  if (phoneNumber.length <= 6) return "*".repeat(phoneNumber.length);
+
+  return `${phoneNumber.slice(0, 3)}${"*".repeat(
+    phoneNumber.length - 6,
+  )}${phoneNumber.slice(-3)}`;
+};
+
+const getRowCustomerPhone = (row) =>
+  normalizeText(
+    row?.CustomerContactNumber ??
+      row?.customerContactNumber ??
+      row?.["Số điện thoại"] ??
+      row?.phone ??
+      "",
+  );
+
+const extractCustomerFromPhoneResponse = (response, phoneNumber = "") => {
+  const candidates = [
+    ...(Array.isArray(response) ? response : []),
+    ...(Array.isArray(response?.Data) ? response.Data : []),
+    ...(Array.isArray(response?.data?.Data) ? response.data.Data : []),
+    response?.Customer,
+    response?.customer,
+    response?.data?.Customer,
+    response?.data?.customer,
+    response,
+  ].filter(
+    (item) => item && typeof item === "object" && !Array.isArray(item),
+  );
+  const normalizedPhone = normalizePhoneNumber(phoneNumber);
+
+  return (
+    candidates.find(
+      (customer) =>
+        normalizePhoneNumber(
+          customer?.ContactNumber ?? customer?.CustomerContactNumber,
+        ) === normalizedPhone,
+    ) || candidates[0] || null
+  );
+};
+
+const joinUniqueAddressParts = (parts = []) => {
+  const seen = new Set();
+  return parts
+    .map(normalizeText)
+    .filter((part) => {
+      if (!part) return false;
+      const key = part.toLocaleLowerCase("vi-VN");
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .join(", ");
+};
+
+const getCustomerEInvoiceAddress = (customer = {}, row = {}) => {
+  const combinedAddress = normalizeText(
+    customer?.AddressEInvoiceCombine ??
+      customer?.addressEInvoiceCombine ??
+      row?.AddressEInvoiceCombine ??
+      "",
+  );
+  if (combinedAddress) return combinedAddress;
+
+  const locationItems =
+    customer?.LocationItemsEInvoice ?? customer?.locationItemsEInvoice ?? {};
+
+  return joinUniqueAddressParts([
+    customer?.AddressEInvoice ??
+      customer?.addressEInvoice ??
+      row?.AddressEInvoice,
+    locationItems?.[2]?.Name ??
+      locationItems?.["2"]?.Name ??
+      customer?.LocationNameEInvoiceLevel_2,
+    locationItems?.[1]?.Name ??
+      locationItems?.["1"]?.Name ??
+      customer?.LocationNameEInvoiceLevel_1,
+  ]);
+};
 
 const getInvoiceCode = (row) =>
   normalizeText(
@@ -638,6 +725,7 @@ const INVOICE_COLUMNS = [
     defaultVisible: false,
     getValue: (row) =>
       coalesceValue(row, ["CustomerContactNumber", "Số điện thoại", "phone"]),
+    render: (value) => maskPhoneNumber(value),
   },
   {
     id: "address",
@@ -647,6 +735,15 @@ const INVOICE_COLUMNS = [
       [row.CustomerAddress, row.CustomerWardName, row.CustomerLocationName]
         .filter(Boolean)
         .join(", "),
+  },
+  {
+    id: "eInvoiceAddress",
+    label: "Địa chỉ xuất hóa đơn",
+    defaultVisible: true,
+    getValue: (row) =>
+      normalizeText(
+        row?.__addressEInvoiceCombine ?? row?.AddressEInvoiceCombine,
+      ),
   },
   {
     id: "amount",
@@ -780,12 +877,49 @@ export default function EinvoicesTab({
         );
 
         const nextRows = mapOrderRows(response);
+        const uniquePhoneNumbers = [
+          ...new Set(nextRows.map(getRowCustomerPhone).filter(Boolean)),
+        ];
+        const customerEntries = await Promise.all(
+          uniquePhoneNumbers.map(async (phoneNumber) => {
+            try {
+              const customerResponse = await getCustomerByPhoneNumber(
+                retailer,
+                accessPrivateToken,
+                phoneNumber,
+              );
+              const customer = extractCustomerFromPhoneResponse(
+                customerResponse,
+                phoneNumber,
+              );
+              return [normalizePhoneNumber(phoneNumber), customer];
+            } catch (customerError) {
+              console.error(
+                "getCustomerByPhoneNumber for e-invoice error:",
+                phoneNumber,
+                customerError,
+              );
+              return [normalizePhoneNumber(phoneNumber), null];
+            }
+          }),
+        );
+        const customerByPhone = new Map(customerEntries);
+        const enrichedRows = nextRows.map((row) => {
+          const customer = customerByPhone.get(
+            normalizePhoneNumber(getRowCustomerPhone(row)),
+          );
+
+          return {
+            ...row,
+            __addressEInvoiceCombine: getCustomerEInvoiceAddress(customer, row),
+          };
+        });
         setHasMore(nextRows.length >= rowsPerPage);
 
         setApiRows((current) => {
-          if (!append) return nextRows;
+          if (!append) return enrichedRows;
 
-          const merged = [...current, ...nextRows];
+          const merged = [...current, ...enrichedRows];
           const unique = [];
           const seen = new Set();
 
@@ -1823,7 +1957,11 @@ export default function EinvoicesTab({
                             return (
                               <td
                                 key={column.id}
-                                className="px-4 py-4 text-slate-700"
+                                className={`px-4 py-4 text-slate-700 ${
+                                  column.id === "eInvoiceAddress"
+                                    ? "whitespace-nowrap"
+                                    : ""
+                                }`}
                               >
                                 {column.id === "customer" ? (
                                   <div>
@@ -1831,11 +1969,13 @@ export default function EinvoicesTab({
                                       {renderedValue || "-"}
                                     </div>
                                     <div className="text-xs text-slate-500">
-                                      {coalesceValue(row, [
-                                        "CustomerContactNumber",
-                                        "Số điện thoại",
-                                        "phone",
-                                      ]) || "-"}
+                                      {maskPhoneNumber(
+                                        coalesceValue(row, [
+                                          "CustomerContactNumber",
+                                          "Số điện thoại",
+                                          "phone",
+                                        ]),
+                                      ) || "-"}
                                     </div>
                                   </div>
                                 ) : column.id === "InvoiceDeliveryCode" ? (
