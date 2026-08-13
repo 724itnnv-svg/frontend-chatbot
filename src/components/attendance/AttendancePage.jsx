@@ -1108,7 +1108,7 @@ export default function AttendancePage() {
   const [advanceLoading, setAdvanceLoading] = useState(false);
   const [advanceSaving, setAdvanceSaving] = useState(false);
   const [deletingAdvanceId, setDeletingAdvanceId] = useState("");
-  const [advanceLimit, setAdvanceLimit] = useState({ minAmount: 100000, maxAmount: 2600000, canRequest: false, restrictionMessage: "Đang kiểm tra điều kiện ứng lương..." });
+  const [advanceLimit, setAdvanceLimit] = useState({ limitMode: "salary_ratio", minAmount: 100000, maxAmount: 0, monthlyLimit: 0, estimatedNetSalary: 0, canRequest: false, restrictionMessage: "Đang kiểm tra điều kiện ứng lương..." });
   const [advanceLimitLoading, setAdvanceLimitLoading] = useState(false);
   const [approvalNotifications, setApprovalNotifications] = useState([]);
   const [notificationHistory, setNotificationHistory] = useState([]);
@@ -1134,6 +1134,7 @@ export default function AttendancePage() {
     [leaveRequests],
   );
   const advanceRestrictionMessage = advanceLimit.restrictionMessage || "";
+  const usesSalaryRatioLimit = advanceLimit.limitMode !== "fixed_cap";
   const advanceFormDisabled = advanceSaving || advanceLimitLoading || advanceLimit.canRequest !== true;
   const [myAutoAttendance, setMyAutoAttendance] = useState(null);
   const [showTaskbarRunner, setShowTaskbarRunner] = useState(() => {
@@ -1478,9 +1479,9 @@ export default function AttendancePage() {
     setAdvanceLimitLoading(true);
     try {
       const res = await api.get(`/salary-advance-requests/my-limit?period=${encodeURIComponent(period)}`);
-      setAdvanceLimit(res.data?.data || { minAmount: 100000, maxAmount: 2600000, canRequest: false, restrictionMessage: "Không xác định được điều kiện ứng lương." });
-    } catch {
-      setAdvanceLimit({ minAmount: 100000, maxAmount: 2600000, canRequest: false, restrictionMessage: "Không thể kiểm tra điều kiện ứng lương. Vui lòng thử lại." });
+      setAdvanceLimit(res.data?.data || { limitMode: "salary_ratio", minAmount: 100000, maxAmount: 0, monthlyLimit: 0, estimatedNetSalary: 0, canRequest: false, restrictionMessage: "Không xác định được điều kiện ứng lương." });
+    } catch (err) {
+      setAdvanceLimit({ limitMode: "salary_ratio", minAmount: 100000, maxAmount: 0, monthlyLimit: 0, estimatedNetSalary: 0, canRequest: false, restrictionMessage: err.response?.data?.message || "Không thể kiểm tra điều kiện ứng lương. Vui lòng thử lại." });
     } finally {
       setAdvanceLimitLoading(false);
     }
@@ -1905,7 +1906,7 @@ export default function AttendancePage() {
     if (advanceFormDisabled) return showMsg(false, advanceRestrictionMessage || "Hiện chưa thể tạo phiếu ứng lương.");
     const requestedAmount = Number(advanceForm.requestedAmount);
     if (!Number.isFinite(requestedAmount) || requestedAmount < 100000) return showMsg(false, "Số tiền muốn ứng tối thiểu là 100.000 đ.");
-    const remainingAmount = Number(advanceLimit.remainingAmount ?? advanceLimit.maxAmount ?? 2600000);
+    const remainingAmount = Number(advanceLimit.remainingAmount ?? advanceLimit.maxAmount ?? 0);
     if (requestedAmount > remainingAmount) return showMsg(false, `Bạn chỉ còn có thể ứng tối đa ${money(remainingAmount)} trong tháng này.`);
     if (!advanceForm.requestedPayDate || !advanceForm.payrollPeriod) return showMsg(false, "Vui lòng chọn ngày nhận và kỳ khấu trừ.");
     setAdvanceSaving(true);
@@ -3126,16 +3127,18 @@ export default function AttendancePage() {
                   <span className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600"><HandCoins size={22} /></span>
                   <div>
                     <h2 className="font-bold text-slate-900">Tạo phiếu ứng lương</h2>
-                    <p className="text-xs text-slate-500">Chỉ gửi từ ngày 01–20; có thể gửi nhiều phiếu nhưng tổng trong tháng không vượt quá 2.600.000 đ.</p>
+                    <p className="text-xs text-slate-500">Chỉ gửi từ ngày 01–20; {usesSalaryRatioLimit ? "tổng các phiếu trong tháng không vượt quá 50% lương tạm tính thực lĩnh hiện tại." : "tổng các phiếu trong tháng không vượt quá 2.600.000 đ."}</p>
                   </div>
                 </div>
                 <div className="space-y-3">
                   <label className="block text-xs font-semibold text-slate-600">SỐ TIỀN MUỐN ỨNG
-                    <input type="number" required disabled={advanceFormDisabled} min="100000" max={advanceLimit.maxAmount ?? 2600000} step="1000" value={advanceForm.requestedAmount} onChange={(event) => setAdvanceForm((current) => ({ ...current, requestedAmount: event.target.value }))} placeholder={`Từ 100.000 đ đến ${money(advanceLimit.maxAmount ?? 2600000)}`} className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-emerald-400 disabled:cursor-not-allowed disabled:opacity-60" />
+                    <input type="number" required disabled={advanceFormDisabled} min="100000" max={advanceLimit.maxAmount ?? 0} step="1000" value={advanceForm.requestedAmount} onChange={(event) => setAdvanceForm((current) => ({ ...current, requestedAmount: event.target.value }))} placeholder={`Từ 100.000 đ đến ${money(advanceLimit.maxAmount ?? 0)}`} className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-emerald-400 disabled:cursor-not-allowed disabled:opacity-60" />
                   </label>
                   {Number(advanceForm.requestedAmount) > 0 && <p className="-mt-1 text-sm font-bold text-emerald-700">{money(advanceForm.requestedAmount)}</p>}
                   <div className={`rounded-xl border px-3 py-2 text-xs ${TONE.emerald}`}>
-                    {advanceLimitLoading ? "Đang tải hạn mức ứng lương..." : <>Đã tính trong tháng: <strong>{money(advanceLimit.usedAmount ?? 0)}</strong> / <strong>{money(advanceLimit.monthlyLimit ?? 2600000)}</strong>. Còn có thể ứng: <strong>{money(advanceLimit.remainingAmount ?? advanceLimit.maxAmount ?? 2600000)}</strong>.</>}
+                    {advanceLimitLoading ? "Đang tải hạn mức ứng lương..." : usesSalaryRatioLimit
+                      ? <>Lương tạm tính thực lĩnh: <strong>{money(advanceLimit.estimatedNetSalary ?? 0)}</strong>. Hạn mức 50%: <strong>{money(advanceLimit.monthlyLimit ?? 0)}</strong>. Đã tính trong tháng: <strong>{money(advanceLimit.usedAmount ?? 0)}</strong>. Còn có thể ứng: <strong>{money(advanceLimit.remainingAmount ?? advanceLimit.maxAmount ?? 0)}</strong>.</>
+                      : <>Hạn mức cố định: <strong>{money(advanceLimit.monthlyLimit ?? 2600000)}</strong>. Đã tính trong tháng: <strong>{money(advanceLimit.usedAmount ?? 0)}</strong>. Còn có thể ứng: <strong>{money(advanceLimit.remainingAmount ?? advanceLimit.maxAmount ?? 0)}</strong>.</>}
                   </div>
                   {!advanceLimitLoading && advanceRestrictionMessage && <div className={`rounded-xl border px-3 py-2 text-xs font-semibold ${TONE.amber}`}>{advanceRestrictionMessage}</div>}
                   <div className="grid grid-cols-2 gap-3">

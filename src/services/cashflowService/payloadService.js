@@ -8,7 +8,10 @@ import {
 const normalizeText = (value) => String(value ?? "").trim();
 
 const parseMoney = (value) => {
-  const text = normalizeText(value).replace(/,/g, "");
+  const rawText = normalizeText(value).replace(/\s+/g, "");
+  const text = /^-?\d{1,3}(?:[.,]\d{3})+$/.test(rawText)
+    ? rawText.replace(/[.,]/g, "")
+    : rawText.replace(/,/g, "");
   if (!text) return 0;
 
   const number = Number(text);

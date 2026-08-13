@@ -12,8 +12,8 @@ const cashflowApi = axios.create({
 const kiotDirectApi = axios.create();
 
 const KIOT_RETRY_DELAY_MS = 1000;
-const KIOT_RETRY_LIMIT = 1;
-const KIOT_RETRY_STATUS_CODES = new Set([401, 500, 504]);
+const KIOT_RETRY_LIMIT = 4;
+const KIOT_RETRY_STATUS_CODES = new Set([401, 500, 504, 520]);
 const SAFE_RETRY_POST_PATHS = new Set(["/token", "/login"]);
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -25,8 +25,10 @@ const canSafelyRetryRequest = (config = {}) => {
   return method === "post" && SAFE_RETRY_POST_PATHS.has(config.url);
 };
 
-const getFriendlyKiotErrorMessage = (status, retried) => {
-  const retryText = retried ? " Hệ thống đã tự thử lại 1 lần." : "";
+const getFriendlyKiotErrorMessage = (status, retryCount) => {
+  const retryText = retryCount
+    ? ` Hệ thống đã tự thử lại ${retryCount} lần.`
+    : "";
 
   if (status === 401) {
     return `Phiên đăng nhập không còn hợp lệ hoặc chưa được máy chủ xác nhận.${retryText} Vui lòng đăng nhập lại nếu lỗi tiếp tục.`;
@@ -36,6 +38,9 @@ const getFriendlyKiotErrorMessage = (status, retried) => {
   }
   if (status === 504) {
     return `Kiot phản hồi quá chậm và đã hết thời gian chờ.${retryText} Vui lòng thử lại.`;
+  }
+  if (status === 520) {
+    return `Kiot đang gặp lỗi phản hồi tạm thời.${retryText} Vui lòng thử lại sau ít phút.`;
   }
 
   return "Không thể kết nối đến Kiot lúc này. Vui lòng thử lại.";
@@ -61,10 +66,7 @@ const attachKiotRetryInterceptor = (client) => {
       }
 
       if (KIOT_RETRY_STATUS_CODES.has(status)) {
-        const friendlyMessage = getFriendlyKiotErrorMessage(
-          status,
-          retryCount > 0,
-        );
+        const friendlyMessage = getFriendlyKiotErrorMessage(status, retryCount);
         error.userMessage = friendlyMessage;
         error.message = friendlyMessage;
       }
@@ -146,7 +148,24 @@ export async function getAccessToken(retailer = "kingfarm") {
     const response = await cashflowApi.post("/token", { retailer });
     return response.data.access_token;
   } catch (error) {
-    throw new Error(`Failed to call API with auth: ${error.message}`);
+    const responseStatus =
+      error.response?.data?.error?.responseStatus ||
+      error.response?.data?.error?.ResponseStatus ||
+      error.response?.data?.responseStatus ||
+      error.response?.data?.ResponseStatus ||
+      {};
+    const enhancedError = new Error(
+      responseStatus.message ||
+        responseStatus.Message ||
+        error.response?.data?.message ||
+        error.message,
+    );
+    enhancedError.status = error.response?.status || "";
+    enhancedError.errorCode =
+      responseStatus.errorCode || responseStatus.ErrorCode || "";
+    enhancedError.responseStatus = responseStatus;
+    enhancedError.responseData = error.response?.data;
+    throw enhancedError;
   }
 }
 
@@ -254,7 +273,24 @@ export async function getOrderDelivery(
     });
     return response.data;
   } catch (error) {
-    throw new Error(`Failed to call API with auth: ${error.message}`);
+    const responseStatus =
+      error.response?.data?.error?.responseStatus ||
+      error.response?.data?.error?.ResponseStatus ||
+      error.response?.data?.responseStatus ||
+      error.response?.data?.ResponseStatus ||
+      {};
+    const enhancedError = new Error(
+      responseStatus.message ||
+        responseStatus.Message ||
+        error.response?.data?.message ||
+        error.message,
+    );
+    enhancedError.status = error.response?.status || "";
+    enhancedError.errorCode =
+      responseStatus.errorCode || responseStatus.ErrorCode || "";
+    enhancedError.responseStatus = responseStatus;
+    enhancedError.responseData = error.response?.data;
+    throw enhancedError;
   }
 }
 
@@ -1366,6 +1402,25 @@ export async function getEInVoicesLog({ page = 1, limit = 50 } = {}) {
         limit,
       },
     });
+
+    return response.data;
+  } catch (error) {
+    const message =
+      error.userMessage ||
+      error.response?.data?.error?.ResponseStatus?.Message ||
+      error.response?.data?.ResponseStatus?.Message ||
+      error.response?.data?.message ||
+      error.message;
+
+    throw new Error(`Failed to call administrative area API: ${message}`);
+  }
+}
+
+export async function getTaxCodeCompanyInfo(taxCode) {
+  try {
+    const url = `https://api.vietqr.io/v2/business/${taxCode}`;
+
+    const response = await axios.get(url);
 
     return response.data;
   } catch (error) {
