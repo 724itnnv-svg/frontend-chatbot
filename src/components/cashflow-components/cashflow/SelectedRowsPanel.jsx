@@ -49,6 +49,10 @@ const buildRowSummary = (row) => ({
 });
 
 const getProblemRowLabel = (row) => {
+  if (row.__orderDeliveryNotFound) {
+    return "Vận đơn này không còn trên Kiot";
+  }
+
   if (row.__orderDeliveryMissingInvoice) {
     return "Thiếu mã hóa đơn";
   }

@@ -152,7 +152,9 @@ const getOrderDeliveryMoneyMismatch = (row = {}, orderDelivery = {}) => {
 
 const extractKiotResponseStatus = (error) =>
   error?.responseStatus ||
+  error?.response?.data?.error?.responseStatus ||
   error?.response?.data?.error?.ResponseStatus ||
+  error?.response?.data?.responseStatus ||
   error?.response?.data?.ResponseStatus ||
   {};
 
@@ -190,6 +192,8 @@ const formatKiotErrorMessage = (error) => {
   const message =
     normalizeText(
       responseStatus.Message ||
+        responseStatus.message ||
+        error?.response?.data?.error?.responseStatus?.message ||
         error?.response?.data?.error?.ResponseStatus?.Message ||
         error?.response?.data?.error?.message ||
         error?.response?.data?.message ||
@@ -235,8 +239,14 @@ const buildOrderDeliveryValidationErrorSummary = (rows = []) => {
       const deliveryCode = normalizeText(getOrderDeliveryCode(row));
       const reasons = [];
 
+      if (row.__orderDeliveryNotFound === true) {
+        reasons.push("Vận đơn này không còn trên Kiot");
+      }
+
       if (row.__orderDeliveryMissingInvoice === true) {
-        reasons.push("thiếu mã hóa đơn");
+        if (row.__orderDeliveryNotFound !== true) {
+          reasons.push("thiếu mã hóa đơn");
+        }
       }
 
       if (row.__orderDeliveryFeeMismatch === true) {
@@ -286,6 +296,7 @@ const stripOrderDeliveryData = (row) => {
     __orderDelivery,
     __orderDeliveryLoaded,
     __orderDeliveryMissingInvoice,
+    __orderDeliveryNotFound,
     __orderDeliveryMoneyMismatch,
     __orderDeliveryCodMismatch,
     __orderDeliveryFeeMismatch,
@@ -503,14 +514,45 @@ export default function CashFlowApp() {
         ),
       );
     } catch (error) {
-      setPayloadError(
-        error.message || `Không lấy được dữ liệu mã vận đơn ${deliveryCode}`,
+      const responseStatus = extractKiotResponseStatus(error);
+      const errorMessage = normalizeText(
+        responseStatus.message || responseStatus.Message || error.message,
+      );
+      const isMissingOrderDelivery =
+        extractKiotHttpStatus(error) === 420 &&
+        (/không còn tồn tại trên hệ thống/iu.test(errorMessage) ||
+          normalizeText(
+            responseStatus.errorCode || responseStatus.ErrorCode,
+          ) === "KvException");
+      const displayMessage = isMissingOrderDelivery
+        ? `Mã vận đơn ${deliveryCode}: Vận đơn này không còn trên Kiot`
+        : errorMessage || `Không lấy được dữ liệu mã vận đơn ${deliveryCode}`;
+
+      if (isMissingOrderDelivery) {
+        setAllRows((currentRows) =>
+          currentRows.map((item) =>
+            getOrderDeliveryCode(item) === deliveryCode
+              ? {
+                  ...item,
+                  __orderDelivery: null,
+                  __orderDeliveryLoaded: true,
+                  __orderDeliveryMissingInvoice: true,
+                  __orderDeliveryNotFound: true,
+                }
+              : item,
+          ),
+        );
+      }
+
+      setPayloadError((currentMessage) =>
+        currentMessage
+          ? `${currentMessage}\n${displayMessage}`
+          : displayMessage,
       );
       addToast({
         type: "error",
         title: "Lỗi tải mã vận đơn",
-        message:
-          error.message || `Không lấy được dữ liệu mã vận đơn ${deliveryCode}`,
+        message: displayMessage,
       });
     } finally {
       orderDeliveryInFlightRef.current.delete(deliveryCode);

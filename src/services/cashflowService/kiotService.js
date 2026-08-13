@@ -151,7 +151,24 @@ export async function getAccessToken(retailer = "kingfarm") {
     const response = await cashflowApi.post("/token", { retailer });
     return response.data.access_token;
   } catch (error) {
-    throw new Error(`Failed to call API with auth: ${error.message}`);
+    const responseStatus =
+      error.response?.data?.error?.responseStatus ||
+      error.response?.data?.error?.ResponseStatus ||
+      error.response?.data?.responseStatus ||
+      error.response?.data?.ResponseStatus ||
+      {};
+    const enhancedError = new Error(
+      responseStatus.message ||
+        responseStatus.Message ||
+        error.response?.data?.message ||
+        error.message,
+    );
+    enhancedError.status = error.response?.status || "";
+    enhancedError.errorCode =
+      responseStatus.errorCode || responseStatus.ErrorCode || "";
+    enhancedError.responseStatus = responseStatus;
+    enhancedError.responseData = error.response?.data;
+    throw enhancedError;
   }
 }
 
@@ -259,7 +276,24 @@ export async function getOrderDelivery(
     });
     return response.data;
   } catch (error) {
-    throw new Error(`Failed to call API with auth: ${error.message}`);
+    const responseStatus =
+      error.response?.data?.error?.responseStatus ||
+      error.response?.data?.error?.ResponseStatus ||
+      error.response?.data?.responseStatus ||
+      error.response?.data?.ResponseStatus ||
+      {};
+    const enhancedError = new Error(
+      responseStatus.message ||
+        responseStatus.Message ||
+        error.response?.data?.message ||
+        error.message,
+    );
+    enhancedError.status = error.response?.status || "";
+    enhancedError.errorCode =
+      responseStatus.errorCode || responseStatus.ErrorCode || "";
+    enhancedError.responseStatus = responseStatus;
+    enhancedError.responseData = error.response?.data;
+    throw enhancedError;
   }
 }
 
