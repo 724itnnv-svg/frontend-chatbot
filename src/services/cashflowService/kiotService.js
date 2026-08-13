@@ -353,7 +353,8 @@ export async function updateCustomerAddress(
   Organization = "",
 ) {
   try {
-    const customerCode = payload.Code ?? payload.CompareCode;
+    const customerCode =
+      payload.LookupCode ?? payload.Code ?? payload.CompareCode;
     const responseGetCustomer = await kiotDirectApi.get(
       `https://api-man1.kiotviet.vn/api/customers?format=json&Code=${customerCode}`,
 
@@ -366,32 +367,57 @@ export async function updateCustomerAddress(
       },
     );
 
+    const { LookupCode: _lookupCode, ...customerPayload } = payload;
+    void _lookupCode;
+    const currentCustomer = responseGetCustomer.data.Data[0];
+    const hasIncomingGroups = Array.isArray(
+      customerPayload.CustomerGroupDetails,
+    );
+    const incomingGroupIds = hasIncomingGroups
+      ? customerPayload.CustomerGroupDetails.map((item) => item?.GroupId).filter(
+          (groupId) => groupId != null,
+        )
+      : currentCustomer.CustomerGroupIds;
+    const hasIncomingTaxCode = Object.prototype.hasOwnProperty.call(
+      customerPayload,
+      "TaxCode",
+    );
     let payloadData = {
-      ...payload,
-      CustomerGroupNames: responseGetCustomer.data.Data[0].CustomerGroupNames,
-      CustomerGroupIds: responseGetCustomer.data.Data[0].CustomerGroupIds,
+      ...customerPayload,
+      CustomerGroupNames: hasIncomingGroups
+        ? customerPayload.CustomerGroupNames || []
+        : currentCustomer.CustomerGroupNames,
+      CustomerGroupIds: incomingGroupIds,
       EmployeeInChargeNames:
-        responseGetCustomer.data.Data[0].EmployeeInChargeNames,
-      EmployeeInChargeIds: responseGetCustomer.data.Data[0].EmployeeInChargeIds,
-      EmployeeInCharges: responseGetCustomer.data.Data[0].EmployeeInCharges,
-      Groups: responseGetCustomer.data.Data[0].Groups,
-      CustomerGroupDetails: (
-        responseGetCustomer.data.Data[0].CustomerGroupIds || []
-      ).map((groupId) => ({
-        GroupId: groupId,
-        CustomerId: responseGetCustomer.data.Data[0].Id,
-      })),
+        currentCustomer.EmployeeInChargeNames,
+      EmployeeInChargeIds: currentCustomer.EmployeeInChargeIds,
+      EmployeeInCharges: currentCustomer.EmployeeInCharges,
+      Groups: hasIncomingGroups
+        ? customerPayload.Groups || customerPayload.CustomerGroupNames?.join(", ") || ""
+        : currentCustomer.Groups,
+      CustomerGroupDetails: hasIncomingGroups
+        ? customerPayload.CustomerGroupDetails.map((item) => ({
+            ...item,
+            CustomerId: currentCustomer.Id,
+          }))
+        : (currentCustomer.CustomerGroupIds || []).map((groupId) => ({
+            GroupId: groupId,
+            CustomerId: currentCustomer.Id,
+          })),
       CustomerType: customerType,
       Organization,
-      Name: responseGetCustomer.data.Data[0].Name,
-      ...(responseGetCustomer.data.Data[0]?.TaxCode
+      Name: currentCustomer.Name,
+      ...(hasIncomingTaxCode
+        ? { TaxCode: customerPayload.TaxCode }
+        : currentCustomer?.TaxCode
         ? {
-            TaxCode: responseGetCustomer.data.Data[0].TaxCode,
+            TaxCode: currentCustomer.TaxCode,
           }
         : {}),
       NameEInvoice:
-        responseGetCustomer.data.Data[0].NameEInvoice ||
-        responseGetCustomer.data.Data[0].Name,
+        customerPayload.NameEInvoice ||
+        currentCustomer.NameEInvoice ||
+        currentCustomer.Name,
     };
 
     if (
