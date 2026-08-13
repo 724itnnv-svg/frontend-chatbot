@@ -34,6 +34,7 @@ import { useAuth } from "../context/AuthContext";
 import { getDefaultPayrollViewPeriod } from "../utils/payrollPeriod";
 import { createBankSalaryPaymentWorkbook } from "../utils/salaryAdvanceExcel";
 import { buildPayrollBankTransferRows, calculatePayrollInstallments } from "../utils/payrollBankExcel";
+import { createPayrollBhxhWorkbook, PAYROLL_BHXH_COMPANY_OPTIONS } from "../utils/payrollBhxhExcel";
 
 const STORAGE_HIDDEN_COLUMNS = "payroll_hidden_columns_v1";
 const STORAGE_COLUMN_ORDER = "payroll_column_order_v1";
@@ -124,6 +125,7 @@ const PAYROLL_COLUMNS = [
   { key: "thuNhapTheoNgayCong.traGiamLuong", label: "Trả giam lương", width: 150, type: "number" },
   { key: "thuNhapTheoNgayCong.diemKPI", label: "Điểm KPI", width: 120, type: "number" },
   { key: "thuNhapTheoNgayCong.thuongKPI", label: "Thưởng KPI", width: 140, type: "number" },
+  { key: "thuNhapTheoNgayCong.thuongDotXuat", label: "Thưởng đột xuất (đã chi)", width: 190, type: "number" },
   { key: "thuNhapTheoNgayCong.doanhSo", label: "Doanh số", width: 140, type: "number" },
   { key: "thuNhapTheoNgayCong.hoaHong", label: "Hoa hồng", width: 140, type: "number" },
   { key: "thuNhapTheoNgayCong.congKhac", label: "Cộng khác", width: 130, type: "number" },
@@ -134,8 +136,6 @@ const PAYROLL_COLUMNS = [
   { key: "khauTru.congDoan", label: "Công đoàn", width: 130, type: "number" },
   { key: "khauTru.giamLuong", label: "Giam lương", width: 140, type: "number" },
   { key: "khauTru.giamLuongKhongTru", label: "Giam lương (chưa trừ)", width: 180, type: "number" },
-  { key: "khauTru.tamUngTuPhieu", label: "Ứng từ phiếu", width: 145, type: "number", readOnly: true },
-  { key: "khauTru.tamUngDieuChinh", label: "Ứng điều chỉnh", width: 150, type: "number" },
   { key: "khauTru.tamUng", label: "Tổng tạm ứng", width: 140, type: "number", readOnly: true },
   { key: "khauTru.phiDienThoai", label: "Phí điện thoại", width: 150, type: "number" },
   { key: "khauTru.truKhac", label: "Trừ khác", width: 130, type: "number" },
@@ -221,6 +221,8 @@ const IMPORT_COLUMN_ALIAS_MAP = new Map(
     ["chuc vu", "chucVu"],
     ["cong ty dong bhxh", "congTyDongBHXH"],
     ["cty dong bhxh", "congTyDongBHXH"],
+    ["thuong dot xuat", "thuNhapTheoNgayCong.thuongDotXuat"],
+    ["thuong dot xuat da chi", "thuNhapTheoNgayCong.thuongDotXuat"],
   ].map(([label, key]) => [normalizeImportHeader(label), key])
 );
 
@@ -244,6 +246,8 @@ const OLD_BHXH_EXPRESSION = "dataTinhLuong.mucDongBHXH * settings.tyLeBHXH";
 const BHXH_EXPRESSION = "iff(khauTru.apDungBHXH, dataTinhLuong.mucDongBHXH * settings.tyLeBHXH, 0)";
 const OLD_UNION_EXPRESSION = "iff(eqText(congTyDongBHXH, \"NNV\"), dataTinhLuong.luongCoBan * settings.tyLeCongDoanNNV, 0)";
 const UNION_EXPRESSION = "iff(khauTru.apDungCongDoan, iff(eqText(congTyDongBHXH, \"NNV\"), dataTinhLuong.luongCoBan * settings.tyLeCongDoanNNV, 0), 0)";
+const OLD_TAXABLE_INCOME_EXPRESSION = "thuNhapTheoNgayCong.tongThuNhap - khauTru.tongKhauTru";
+const TAXABLE_INCOME_EXPRESSION = "thuNhapTheoNgayCong.tongThuNhap + thuNhapTheoNgayCong.thuongDotXuat - khauTru.tongKhauTru";
 
 const DEFAULT_PAYROLL_FORMULA_SETTINGS = {
   settings: {
@@ -374,8 +378,8 @@ const DEFAULT_PAYROLL_FORMULA_SETTINGS = {
     {
       target: "tinhThueTNCN.tongThuNhapChiuThue",
       enabled: true,
-      expression: "thuNhapTheoNgayCong.tongThuNhap - khauTru.tongKhauTru",
-      note: "TN chiu thue = Tong thu nhap - Tong khau tru",
+      expression: TAXABLE_INCOME_EXPRESSION,
+      note: "Thuong dot xuat da chi chi cong vao can cu tinh thue",
     },
     {
       target: "tinhThueTNCN.thuNhapTinhThue",
@@ -499,7 +503,9 @@ function mergeFormulaSettings(value) {
             ? { ...savedFormula, expression: BHXH_EXPRESSION }
             : formula.target === "khauTru.congDoan" && savedFormula.expression === OLD_UNION_EXPRESSION
               ? { ...savedFormula, expression: UNION_EXPRESSION }
-              : savedFormula;
+              : formula.target === "tinhThueTNCN.tongThuNhapChiuThue" && savedFormula.expression === OLD_TAXABLE_INCOME_EXPRESSION
+                ? { ...savedFormula, expression: TAXABLE_INCOME_EXPRESSION }
+                : savedFormula;
       return {
         ...formula,
         ...migratedFormula,
@@ -726,6 +732,7 @@ function normalizePayrollRow(row = {}, fallbackPeriod = "", formulaSettings = DE
   normalized.thuNhapTheoNgayCong.ngayCong ??= row.workDays ?? 0;
   normalized.thuNhapTheoNgayCong.tangCaThuong ??= row.overtimeHours ?? 0;
   normalized.thuNhapTheoNgayCong.thuongKPI ??= row.bonus ?? 0;
+  normalized.thuNhapTheoNgayCong.thuongDotXuat ??= 0;
   normalized.khauTru.giamLuong ??= row.deductions ?? 0;
   normalized.khauTru.tamUngTuPhieu ??= 0;
   normalized.khauTru.tamUngDieuChinh ??= Math.max(0, toNumber(normalized.khauTru.tamUng ?? row.advance ?? 0) - toNumber(normalized.khauTru.tamUngTuPhieu));
@@ -984,6 +991,20 @@ async function exportPayrollBankFiles(rows, bankAccountsByEmployeeCode, period, 
   saveAs(new Blob([firstBuffer], { type: mimeType }), `Bang_luong_dot_1_VietinBank_${suffix}.xlsx`);
   saveAs(new Blob([secondBuffer], { type: mimeType }), `Bang_luong_dot_2_VietinBank_${suffix}.xlsx`);
   return { firstCount: firstRows.length, secondCount: secondRows.length };
+}
+
+async function exportPayrollBhxh(rows, profilesByEmployeeCode, period, options) {
+  const companyCode = String(options.companyCode || "").trim().toUpperCase();
+  const companyRows = rows.filter((row) => String(row.congTyDongBHXH || "").trim().toUpperCase() === companyCode);
+  if (!companyRows.length) throw new Error(`Không có dữ liệu bảng lương của công ty ${companyCode} trong kỳ ${period}.`);
+  const ExcelJS = await loadExcelJS();
+  const workbook = createPayrollBhxhWorkbook(ExcelJS, companyRows, period, profilesByEmployeeCode, options);
+  const buffer = await workbook.xlsx.writeBuffer();
+  saveAs(
+    new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }),
+    `Bang_luong_${companyCode}_${period || currentDateInputValue()}_chuan_BHXH.xlsx`,
+  );
+  return companyRows.length;
 }
 
 async function exportPayrollExcel(rows, columns, bankAccountsByEmployeeCode = new Map()) {
@@ -1347,6 +1368,7 @@ export default function PayrollManager() {
   const [exporting, setExporting] = useState(false);
   const [showPayrollExport, setShowPayrollExport] = useState(false);
   const [payrollExportMode, setPayrollExportMode] = useState("standard");
+  const [bhxhExportCompany, setBhxhExportCompany] = useState("ABC");
   const [bankExportForm, setBankExportForm] = useState(() => defaultBankExportForm());
   const [message, setMessage] = useState("");
   const [q, setQ] = useState("");
@@ -1411,8 +1433,6 @@ export default function PayrollManager() {
   const [salaryAdvanceRows, setSalaryAdvanceRows] = useState([]);
   const [salaryAdvanceLoading, setSalaryAdvanceLoading] = useState(false);
   const [salaryAdvanceActionId, setSalaryAdvanceActionId] = useState("");
-  const [salaryAdvanceSyncResult, setSalaryAdvanceSyncResult] = useState(null);
-  const [salaryAdvanceSyncApplying, setSalaryAdvanceSyncApplying] = useState(false);
   const [salaryAdvancePendingTotal, setSalaryAdvancePendingTotal] = useState(0);
   const [selectedAttendanceSyncFields, setSelectedAttendanceSyncFields] = useState(
     () => new Set(ATTENDANCE_SYNC_COLUMNS.map((column) => column.key))
@@ -1670,10 +1690,6 @@ export default function PayrollManager() {
     () => (attendanceSyncResult?.rows || []).filter((row) => row.statusText === "Khớp"),
     [attendanceSyncResult]
   );
-  const validSalaryAdvanceSyncRows = useMemo(
-    () => (salaryAdvanceSyncResult?.rows || []).filter((row) => row.statusText === "Khớp"),
-    [salaryAdvanceSyncResult]
-  );
   const payrollReadOnly = periodLocked || lockLoading;
 
   const fetchPeriodLock = async () => {
@@ -1745,6 +1761,14 @@ export default function PayrollManager() {
       })
       .filter(Boolean))];
     setPayrollExportMode("standard");
+    const availableCompanyCodes = [...new Set(rows
+      .map((row) => String(row.congTyDongBHXH || "").trim().toUpperCase())
+      .filter((code) => PAYROLL_COMPANY_NAMES[code]))];
+    setBhxhExportCompany(
+      insuranceCompany !== "ALL" && PAYROLL_COMPANY_NAMES[insuranceCompany]
+        ? insuranceCompany
+        : availableCompanyCodes[0] || "ABC",
+    );
     setBankExportForm(defaultBankExportForm(period, companyNames.length === 1 ? companyNames[0] : ""));
     setMessage("");
     setShowPayrollExport(true);
@@ -1752,7 +1776,8 @@ export default function PayrollManager() {
 
   const handleExportPayroll = async () => {
     if (exporting) return;
-    if (!sortedRows.length) {
+    const exportSourceRows = payrollExportMode === "bhxh" ? rows : sortedRows;
+    if (!exportSourceRows.length) {
       setMessage("Không có dữ liệu bảng lương để xuất.");
       return;
     }
@@ -1786,6 +1811,14 @@ export default function PayrollManager() {
       if (payrollExportMode === "bank") {
         const result = await exportPayrollBankFiles(sortedRows, bankAccountsByEmployeeCode, period, bankExportForm);
         setMessage(`Đã xuất 2 file VietinBank: đợt 1 có ${result.firstCount} nhân viên, đợt 2 có ${result.secondCount} nhân viên.`);
+      } else if (payrollExportMode === "bhxh") {
+        const exportedCount = await exportPayrollBhxh(rows, bankAccountsByEmployeeCode, period, {
+          companyCode: bhxhExportCompany,
+          standardWorkDays: formulaSettings.settings?.ngayCongChuan || 26,
+          preparedBy: user?.fullName || user?.name || "",
+          signatureDate: new Date(),
+        });
+        setMessage(`Đã xuất bảng lương BHXH công ty ${bhxhExportCompany} với ${exportedCount} nhân viên.`);
       } else {
         await exportPayrollExcel(sortedRows, visibleColumns, bankAccountsByEmployeeCode);
         setMessage("Đã xuất bảng lương thường.");
@@ -2316,7 +2349,6 @@ export default function PayrollManager() {
 
   const openSalaryAdvances = () => {
     setShowSalaryAdvances(true);
-    setSalaryAdvanceSyncResult(null);
     loadSalaryAdvances();
     loadSalaryAdvancePendingTotal();
   };
@@ -2360,48 +2392,11 @@ export default function PayrollManager() {
       const data = await res.json();
       if (!res.ok || data?.ok === false) throw new Error(data?.message || "Không thể xử lý phiếu ứng lương");
       setMessage(data.message || "Đã cập nhật phiếu ứng lương");
-      await Promise.all([loadSalaryAdvances(), loadSalaryAdvancePendingTotal()]);
+      await Promise.all([fetchPayroll(), loadSalaryAdvances(), loadSalaryAdvancePendingTotal()]);
     } catch (error) {
       setMessage(error.message || "Không thể xử lý phiếu ứng lương");
     } finally {
       setSalaryAdvanceActionId("");
-    }
-  };
-
-  const previewSalaryAdvanceSync = async () => {
-    if (!period) return setMessage("Vui lòng chọn kỳ lương trước khi đồng bộ phiếu ứng.");
-    setSalaryAdvanceLoading(true);
-    setSalaryAdvanceSyncResult(null);
-    try {
-      const res = await fetch("/api/payroll/sync-salary-advances", {
-        method: "POST", headers: { "Content-Type": "application/json", ...authHeader }, body: JSON.stringify({ period, mode: "preview" }),
-      });
-      const data = await res.json();
-      if (!res.ok || data?.success === false) throw new Error(data?.message || "Không lấy được phiếu ứng đã chi");
-      setSalaryAdvanceSyncResult(data);
-    } catch (error) {
-      setMessage(error.message || "Không lấy được phiếu ứng đã chi");
-    } finally {
-      setSalaryAdvanceLoading(false);
-    }
-  };
-
-  const applySalaryAdvanceSync = async () => {
-    if (payrollReadOnly || !validSalaryAdvanceSyncRows.length || !window.confirm(`Cập nhật tạm ứng cho ${validSalaryAdvanceSyncRows.length} nhân viên vào kỳ ${period}?`)) return;
-    setSalaryAdvanceSyncApplying(true);
-    try {
-      const res = await fetch("/api/payroll/sync-salary-advances", {
-        method: "POST", headers: { "Content-Type": "application/json", ...authHeader }, body: JSON.stringify({ period, mode: "apply" }),
-      });
-      const data = await res.json();
-      if (!res.ok || data?.success === false) throw new Error(data?.message || "Đồng bộ phiếu ứng thất bại");
-      setSalaryAdvanceSyncResult(data);
-      setMessage(`Đã cập nhật tạm ứng cho ${data.updated || 0} nhân viên.`);
-      await Promise.all([fetchPayroll(), loadSalaryAdvances(), loadSalaryAdvancePendingTotal()]);
-    } catch (error) {
-      setMessage(error.message || "Đồng bộ phiếu ứng thất bại");
-    } finally {
-      setSalaryAdvanceSyncApplying(false);
     }
   };
 
@@ -3192,7 +3187,7 @@ export default function PayrollManager() {
 
       <Modal open={showPayrollExport} onClose={() => !exporting && setShowPayrollExport(false)} title="Xuất Excel bảng lương">
         <div className="space-y-5">
-          <div className="grid gap-3 md:grid-cols-2">
+          <div className="grid gap-3 md:grid-cols-3">
             <button
               type="button"
               onClick={() => setPayrollExportMode("standard")}
@@ -3204,6 +3199,15 @@ export default function PayrollManager() {
             </button>
             <button
               type="button"
+              onClick={() => setPayrollExportMode("bhxh")}
+              disabled={exporting}
+              className={`rounded-2xl border p-4 text-left transition ${payrollExportMode === "bhxh" ? "border-amber-500 bg-amber-50 ring-2 ring-amber-100" : "border-slate-200 hover:bg-slate-50"}`}
+            >
+              <span className="flex items-center gap-2 font-bold text-slate-900"><ShieldAlert className="h-5 w-5 text-amber-600" /> Bảng lương BHXH</span>
+              <span className="mt-2 block text-sm text-slate-500">Xuất bảng chuẩn hóa đối chiếu BHXH theo file mẫu.</span>
+            </button>
+            <button
+              type="button"
               onClick={() => setPayrollExportMode("bank")}
               disabled={exporting}
               className={`rounded-2xl border p-4 text-left transition ${payrollExportMode === "bank" ? "border-emerald-500 bg-emerald-50 ring-2 ring-emerald-100" : "border-slate-200 hover:bg-slate-50"}`}
@@ -3212,6 +3216,19 @@ export default function PayrollManager() {
               <span className="mt-2 block text-sm text-slate-500">Xuất hai file VietinBank riêng cho lương đợt 1 và đợt 2.</span>
             </button>
           </div>
+
+          {payrollExportMode === "bhxh" && (
+            <div className="space-y-4 rounded-2xl border border-amber-200 bg-amber-50/50 p-4">
+              <label className="block text-sm font-semibold text-slate-700">Công ty xuất bảng BHXH
+                <select value={bhxhExportCompany} onChange={(event) => setBhxhExportCompany(event.target.value)} disabled={exporting} className="mt-1.5 w-full rounded-xl border bg-white px-3 py-2.5 outline-none focus:ring-2 focus:ring-amber-100 disabled:bg-slate-100">
+                  {PAYROLL_BHXH_COMPANY_OPTIONS.map((company) => <option key={company.code} value={company.code}>{company.code} · {company.name}</option>)}
+                </select>
+              </label>
+              <div className="rounded-xl border border-amber-200 bg-white px-4 py-3 text-sm text-amber-900">
+                File gồm 30 cột theo mẫu, tự lấy mã số BHXH từ hồ sơ nhân viên, trạng thái áp dụng BHXH và các số liệu thu nhập/khấu trừ của kỳ {period}. Các ô cần kiểm tra thủ công được tô vàng.
+              </div>
+            </div>
+          )}
 
           {payrollExportMode === "bank" && (
             <div className="space-y-4">
@@ -3267,7 +3284,7 @@ export default function PayrollManager() {
             <button onClick={() => setShowPayrollExport(false)} disabled={exporting} className="rounded-xl border bg-white px-4 py-2 text-sm font-semibold hover:bg-slate-50 disabled:opacity-50">Đóng</button>
             <button onClick={handleExportPayroll} disabled={exporting} className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50">
               {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-              {exporting ? "Đang xuất..." : payrollExportMode === "bank" ? "Xuất 2 file ngân hàng" : "Xuất bảng thường"}
+              {exporting ? "Đang xuất..." : payrollExportMode === "bank" ? "Xuất 2 file ngân hàng" : payrollExportMode === "bhxh" ? "Xuất bảng BHXH" : "Xuất bảng thường"}
             </button>
           </div>
         </div>
@@ -3377,7 +3394,6 @@ export default function PayrollManager() {
             </label>
             <div className="flex gap-2">
               <button onClick={() => Promise.all([loadSalaryAdvances(), loadSalaryAdvancePendingTotal()])} disabled={salaryAdvanceLoading} className="inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-sm font-semibold hover:bg-slate-50 disabled:opacity-50"><RefreshCw className={`h-4 w-4 ${salaryAdvanceLoading ? "animate-spin" : ""}`} /> Tải lại</button>
-              <button onClick={previewSalaryAdvanceSync} disabled={payrollReadOnly || salaryAdvanceLoading || !rows.length} className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"><HandCoins className="h-4 w-4" /> Lấy phiếu đã chi</button>
             </div>
           </div>
 
@@ -3409,10 +3425,6 @@ export default function PayrollManager() {
             {!salaryAdvanceLoading && !salaryAdvanceRows.length && <div className="py-10 text-center text-sm text-slate-500">Không có phiếu theo bộ lọc.</div>}
           </div>
 
-          {salaryAdvanceSyncResult && <div className="space-y-3 rounded-xl border border-emerald-200 bg-emerald-50/40 p-3">
-            <div className="flex flex-wrap items-center justify-between gap-2"><div className="text-sm text-slate-700">Preview: {salaryAdvanceSyncResult.totalRequests || 0} phiếu đã chi, khớp {salaryAdvanceSyncResult.matched || 0} nhân viên.</div><button onClick={applySalaryAdvanceSync} disabled={payrollReadOnly || !validSalaryAdvanceSyncRows.length || salaryAdvanceSyncApplying} className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">{salaryAdvanceSyncApplying ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Cập nhật vào lương</button></div>
-            <div className="max-h-64 overflow-auto rounded-lg border bg-white"><table className="w-full text-left text-xs"><thead className="sticky top-0 bg-slate-100"><tr><th className="px-3 py-2">Mã NV</th><th className="px-3 py-2">Nhân viên</th><th className="px-3 py-2 text-right">Điều chỉnh tay</th><th className="px-3 py-2 text-right">Từ phiếu</th><th className="px-3 py-2 text-right">Tổng tạm ứng</th><th className="px-3 py-2">Kết quả</th></tr></thead><tbody>{salaryAdvanceSyncResult.rows?.map((row, index) => <tr key={`${row._id || row.maNhanVien}-${index}`} className="border-t"><td className="px-3 py-2 font-mono">{row.maNhanVien}</td><td className="px-3 py-2">{row.tenNhanVien}</td><td className="px-3 py-2 text-right">{formatPayrollNumber(row.manualAmount)}</td><td className="px-3 py-2 text-right font-semibold text-emerald-700">{formatPayrollNumber(row.requestAmount)}</td><td className="px-3 py-2 text-right font-semibold">{formatPayrollNumber(row.totalAdvance)}</td><td className="px-3 py-2">{row.statusText}</td></tr>)}</tbody></table></div>
-          </div>}
         </div>
       </Modal>
 

@@ -39,6 +39,14 @@ const STATUS_META = {
   cancelled: ["Đã hủy", "bg-slate-100 text-slate-600"],
 };
 
+const COMPANY_OPTIONS = [
+  ["ALL", "Tất cả công ty"],
+  ["NNV", "NNV"],
+  ["ABC", "ABC"],
+  ["VN", "VN"],
+  ["KF", "KF"],
+];
+
 function money(value) {
   return `${Number(value || 0).toLocaleString("vi-VN")} đ`;
 }
@@ -128,6 +136,7 @@ export default function SalaryAdvanceManager() {
   );
 
   const [period, setPeriod] = useState(() => getDefaultPayrollViewPeriod());
+  const [company, setCompany] = useState("ALL");
   const [status, setStatus] = useState("pending");
   const [search, setSearch] = useState("");
   const [rows, setRows] = useState([]);
@@ -139,6 +148,9 @@ export default function SalaryAdvanceManager() {
   const [bulkDialogOpen, setBulkDialogOpen] = useState(false);
   const [bulkApproving, setBulkApproving] = useState(false);
   const [bulkForm, setBulkForm] = useState({ payrollPeriod: "", reviewNote: "" });
+  const [bulkPaymentDialogOpen, setBulkPaymentDialogOpen] = useState(false);
+  const [bulkPaying, setBulkPaying] = useState(false);
+  const [bulkPaymentForm, setBulkPaymentForm] = useState({ payrollPeriod: "", paymentMethod: "bank_transfer", paymentNote: "" });
   const [exporting, setExporting] = useState(false);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [exportForm, setExportForm] = useState({
@@ -151,6 +163,9 @@ export default function SalaryAdvanceManager() {
   const [paymentDialog, setPaymentDialog] = useState(null);
   const [paymentForm, setPaymentForm] = useState({ payrollPeriod: "", paymentMethod: "bank_transfer", paymentNote: "" });
   const [message, setMessage] = useState(null);
+  const [limitPolicy, setLimitPolicy] = useState({ limitMode: "salary_ratio", salaryRatio: 0.5, fixedMaxAmount: 2600000 });
+  const [policyLoading, setPolicyLoading] = useState(false);
+  const [policySaving, setPolicySaving] = useState(false);
 
   const loadRows = useCallback(async () => {
     if (!canView) return;
@@ -159,6 +174,7 @@ export default function SalaryAdvanceManager() {
       const params = new URLSearchParams({ limit: "200" });
       if (status !== "ALL") params.set("status", status);
       if (period) params.set("period", period);
+      if (company !== "ALL") params.set("company", company);
       if (search.trim()) params.set("search", search.trim());
       const response = await fetch(`/api/salary-advance-requests?${params}`, { headers: authHeader });
       const data = await response.json();
@@ -170,24 +186,61 @@ export default function SalaryAdvanceManager() {
     } finally {
       setLoading(false);
     }
-  }, [authHeader, canView, period, search, status]);
+  }, [authHeader, canView, company, period, search, status]);
 
   const loadPendingTotal = useCallback(async () => {
     if (!canView) return;
     try {
       const params = new URLSearchParams();
       if (period) params.set("period", period);
+      if (company !== "ALL") params.set("company", company);
       const response = await fetch(`/api/salary-advance-requests/pending-count?${params}`, { headers: authHeader });
       const data = await response.json();
       if (response.ok && data?.ok !== false) setPendingTotal(Number(data.total) || 0);
     } catch {
       // Bộ đếm nền không làm gián đoạn màn hình chính.
     }
-  }, [authHeader, canView, period]);
+  }, [authHeader, canView, company, period]);
+
+  const loadLimitPolicy = useCallback(async () => {
+    if (!canView) return;
+    setPolicyLoading(true);
+    try {
+      const response = await fetch("/api/salary-advance-requests/policy", { headers: authHeader });
+      const data = await response.json();
+      if (!response.ok || data?.ok === false) throw new Error(data?.message || "Không tải được cấu hình hạn mức ứng lương");
+      setLimitPolicy(data.data || { limitMode: "salary_ratio", salaryRatio: 0.5, fixedMaxAmount: 2600000 });
+    } catch (error) {
+      setMessage({ ok: false, text: error.message || "Không tải được cấu hình hạn mức ứng lương" });
+    } finally {
+      setPolicyLoading(false);
+    }
+  }, [authHeader, canView]);
+
+  async function changeLimitMode() {
+    if (!canEdit || policyLoading || policySaving) return;
+    const limitMode = limitPolicy.limitMode === "salary_ratio" ? "fixed_cap" : "salary_ratio";
+    setPolicySaving(true);
+    try {
+      const response = await fetch("/api/salary-advance-requests/policy", {
+        method: "PUT",
+        headers: { ...authHeader, "Content-Type": "application/json" },
+        body: JSON.stringify({ limitMode }),
+      });
+      const data = await response.json();
+      if (!response.ok || data?.ok === false) throw new Error(data?.message || "Không lưu được cấu hình hạn mức ứng lương");
+      setLimitPolicy(data.data);
+      setMessage({ ok: true, text: data.message || "Đã cập nhật cấu hình hạn mức ứng lương." });
+    } catch (error) {
+      setMessage({ ok: false, text: error.message || "Không lưu được cấu hình hạn mức ứng lương" });
+    } finally {
+      setPolicySaving(false);
+    }
+  }
 
   const refresh = useCallback(async () => {
-    await Promise.all([loadRows(), loadPendingTotal()]);
-  }, [loadPendingTotal, loadRows]);
+    await Promise.all([loadRows(), loadPendingTotal(), loadLimitPolicy()]);
+  }, [loadLimitPolicy, loadPendingTotal, loadRows]);
 
   useEffect(() => {
     refresh();
@@ -199,13 +252,21 @@ export default function SalaryAdvanceManager() {
   }, [loadPendingTotal]);
 
   const selectableRows = useMemo(
-    () => rows.filter((request) => request.status === "pending"),
+    () => rows.filter((request) => ["pending", "approved"].includes(request.status)),
     [rows],
   );
   const selectedRows = useMemo(() => {
     const selected = new Set(selectedIds);
     return selectableRows.filter((request) => selected.has(request._id));
   }, [selectableRows, selectedIds]);
+  const selectedPendingRows = useMemo(
+    () => selectedRows.filter((request) => request.status === "pending"),
+    [selectedRows],
+  );
+  const selectedApprovedRows = useMemo(
+    () => selectedRows.filter((request) => request.status === "approved"),
+    [selectedRows],
+  );
   const allSelectableSelected = selectableRows.length > 0 && selectedRows.length === selectableRows.length;
 
   useEffect(() => {
@@ -226,14 +287,14 @@ export default function SalaryAdvanceManager() {
   }
 
   function openBulkApproveDialog() {
-    if (!selectedRows.length || actionId || bulkApproving) return;
+    if (!selectedPendingRows.length || actionId || bulkApproving || bulkPaying) return;
     setMessage(null);
     setBulkForm({ payrollPeriod: period, reviewNote: "" });
     setBulkDialogOpen(true);
   }
 
   async function confirmBulkApprove() {
-    if (!selectedRows.length || bulkApproving) return;
+    if (!selectedPendingRows.length || bulkApproving) return;
     const payrollPeriod = String(bulkForm.payrollPeriod || "").trim();
     const reviewNote = String(bulkForm.reviewNote || "").trim();
     if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(payrollPeriod)) {
@@ -249,7 +310,7 @@ export default function SalaryAdvanceManager() {
     setMessage(null);
     const succeededIds = [];
     const failures = [];
-    for (const request of selectedRows) {
+    for (const request of selectedPendingRows) {
       try {
         const response = await fetch(`/api/salary-advance-requests/${request._id}/review`, {
           method: "PATCH",
@@ -276,10 +337,81 @@ export default function SalaryAdvanceManager() {
     if (failures.length) {
       setMessage({
         ok: false,
-        text: `Đã duyệt ${succeededIds.length}/${selectedRows.length} phiếu. Lỗi: ${failures.join("; ")}`,
+        text: `Đã duyệt ${succeededIds.length}/${selectedPendingRows.length} phiếu. Lỗi: ${failures.join("; ")}`,
       });
     } else {
       setMessage({ ok: true, text: `Đã duyệt thành công ${succeededIds.length} phiếu ứng lương.` });
+    }
+  }
+
+  function openBulkPaymentDialog() {
+    if (!selectedApprovedRows.length || actionId || bulkApproving || bulkPaying) return;
+    setMessage(null);
+    setBulkPaymentForm({ payrollPeriod: period, paymentMethod: "bank_transfer", paymentNote: "" });
+    setBulkPaymentDialogOpen(true);
+  }
+
+  async function confirmBulkPayment() {
+    if (!selectedApprovedRows.length || bulkPaying) return;
+    const payrollPeriod = String(bulkPaymentForm.payrollPeriod || "").trim();
+    const paymentNote = String(bulkPaymentForm.paymentNote || "").trim();
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(payrollPeriod)) {
+      setMessage({ ok: false, text: "Kỳ khấu trừ phải có định dạng YYYY-MM." });
+      return;
+    }
+    if (paymentNote.length > 1000) {
+      setMessage({ ok: false, text: "Ghi chú chi tiền không được vượt quá 1000 ký tự." });
+      return;
+    }
+    if (bulkPaymentForm.paymentMethod === "bank_transfer") {
+      const missingBankRows = selectedApprovedRows.filter((request) => {
+        const recipient = request.paymentRecipient || {};
+        return !recipient.bankName || !recipient.accountHolder || !recipient.accountNumber;
+      });
+      if (missingBankRows.length) {
+        setMessage({
+          ok: false,
+          text: `${missingBankRows.length} nhân viên chưa đủ thông tin ngân hàng: ${missingBankRows.map((request) => request.userName || request.employeeCode).join(", ")}`,
+        });
+        return;
+      }
+    }
+
+    setBulkPaying(true);
+    setMessage(null);
+    const succeededIds = [];
+    const failures = [];
+    for (const request of selectedApprovedRows) {
+      try {
+        const response = await fetch(`/api/salary-advance-requests/${request._id}/review`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json", ...authHeader },
+          body: JSON.stringify({
+            action: "mark_paid",
+            payrollPeriod,
+            paymentMethod: bulkPaymentForm.paymentMethod,
+            paymentNote,
+          }),
+        });
+        const data = await response.json();
+        if (!response.ok || data?.ok === false) throw new Error(data?.message || "Không thể xác nhận chi");
+        succeededIds.push(request._id);
+      } catch (error) {
+        failures.push(`${request.userName || request.employeeCode || "Phiếu"}: ${error.message || "Không thể xác nhận chi"}`);
+      }
+    }
+
+    setSelectedIds((current) => current.filter((id) => !succeededIds.includes(id)));
+    setBulkPaymentDialogOpen(false);
+    setBulkPaying(false);
+    await refresh();
+    if (failures.length) {
+      setMessage({
+        ok: false,
+        text: `Đã xác nhận chi ${succeededIds.length}/${selectedApprovedRows.length} phiếu. Lỗi: ${failures.join("; ")}`,
+      });
+    } else {
+      setMessage({ ok: true, text: `Đã xác nhận chi và cập nhật bảng lương cho ${succeededIds.length} phiếu.` });
     }
   }
 
@@ -359,7 +491,7 @@ export default function SalaryAdvanceManager() {
     if (exporting) return;
     setMessage(null);
     setExportForm({
-      companyName: "",
+      companyName: company === "ALL" ? "" : company,
       debitAccount: "",
       paymentDate: currentDateInputValue(),
       content: "",
@@ -375,6 +507,7 @@ export default function SalaryAdvanceManager() {
     try {
       const params = new URLSearchParams();
       if (period) params.set("period", period);
+      if (company !== "ALL") params.set("company", company);
       if (search.trim()) params.set("search", search.trim());
       const response = await fetch(`/api/salary-advance-requests/approved-export?${params}`, { headers: authHeader });
       const data = await response.json();
@@ -414,7 +547,7 @@ export default function SalaryAdvanceManager() {
                   <h1 className="text-xl font-bold">Quản lý phiếu ứng lương</h1>
                   {pendingTotal > 0 && <span className="rounded-full bg-rose-600 px-2 py-0.5 text-xs font-bold text-white">{pendingTotal > 99 ? "99+" : pendingTotal} chờ xử lý</span>}
                 </div>
-                <p className="mt-1 text-sm text-slate-500">Duyệt và xác nhận chi ứng lương. Màn hình này không truy cập dữ liệu bảng lương nhân viên.</p>
+                <p className="mt-1 text-sm text-slate-500">Duyệt và xác nhận chi ứng lương. Khi thủ quỹ xác nhận chi, tiền ứng được tự động cộng vào bảng lương của kỳ khấu trừ.</p>
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-2">
@@ -426,6 +559,40 @@ export default function SalaryAdvanceManager() {
           </div>
         </header>
 
+        <section className="rounded-2xl border border-emerald-200 bg-gradient-to-r from-emerald-50 via-white to-sky-50 p-4 shadow-sm">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <div className="flex items-center gap-2 text-sm font-black text-slate-900">
+                <ShieldCheck size={18} className="text-emerald-600" /> Chính sách hạn mức ứng lương
+              </div>
+              <p className="mt-1 text-sm text-slate-600">Áp dụng chung khi nhân viên tạo phiếu và khi quản trị viên duyệt.</p>
+            </div>
+            <div className="flex flex-col gap-3 rounded-2xl border bg-white p-3 sm:flex-row sm:items-center">
+              <div className={`min-w-44 rounded-xl px-3 py-2 text-sm transition ${limitPolicy.limitMode === "fixed_cap" ? "bg-sky-50 font-bold text-sky-700" : "text-slate-500"}`}>
+                <div>Tối đa 2.600.000 đ</div>
+                <div className="mt-0.5 text-xs font-normal">Hạn mức cố định mỗi tháng</div>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={limitPolicy.limitMode === "salary_ratio"}
+                aria-label="Đổi chính sách hạn mức ứng lương"
+                onClick={changeLimitMode}
+                disabled={!canEdit || policyLoading || policySaving}
+                className={`relative h-8 w-14 shrink-0 rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${limitPolicy.limitMode === "salary_ratio" ? "bg-emerald-600" : "bg-sky-500"}`}
+              >
+                <span className={`absolute left-1 top-1 h-6 w-6 rounded-full bg-white shadow transition-transform ${limitPolicy.limitMode === "salary_ratio" ? "translate-x-6" : "translate-x-0"}`} />
+              </button>
+              <div className={`min-w-52 rounded-xl px-3 py-2 text-sm transition ${limitPolicy.limitMode === "salary_ratio" ? "bg-emerald-50 font-bold text-emerald-700" : "text-slate-500"}`}>
+                <div>50% lương thực lĩnh hiện tại</div>
+                <div className="mt-0.5 text-xs font-normal">Tự thay đổi theo lương tạm tính</div>
+              </div>
+              {(policyLoading || policySaving) && <Loader2 size={18} className="animate-spin text-emerald-600" />}
+            </div>
+          </div>
+          {!canEdit && <p className="mt-3 text-xs font-semibold text-slate-500">Bạn chỉ có quyền xem chính sách hiện tại.</p>}
+        </section>
+
         {message && (
           <div className={`flex items-start gap-2 rounded-xl border px-4 py-3 text-sm font-semibold ${message.ok ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-rose-200 bg-rose-50 text-rose-700"}`}>
             {message.ok ? <CheckCircle2 size={17} /> : <XCircle size={17} />}{message.text}
@@ -433,9 +600,14 @@ export default function SalaryAdvanceManager() {
         )}
 
         <section className="rounded-2xl border bg-white shadow-sm">
-          <div className="grid gap-3 border-b p-4 md:grid-cols-[170px_210px_1fr_auto]">
+          <div className="grid gap-3 border-b p-4 md:grid-cols-[160px_130px_190px_1fr_auto]">
             <label className="text-xs font-bold text-slate-500">KỲ KHẤU TRỪ
               <input type="month" value={period} onChange={(event) => setPeriod(event.target.value)} className="mt-1.5 w-full rounded-xl border px-3 py-2 text-sm font-semibold outline-none focus:ring-2 focus:ring-emerald-100" />
+            </label>
+            <label className="text-xs font-bold text-slate-500">CÔNG TY
+              <select value={company} onChange={(event) => setCompany(event.target.value)} className="mt-1.5 w-full rounded-xl border px-3 py-2 text-sm font-semibold outline-none focus:ring-2 focus:ring-emerald-100">
+                {COMPANY_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+              </select>
             </label>
             <label className="text-xs font-bold text-slate-500">TRẠNG THÁI
               <select value={status} onChange={(event) => setStatus(event.target.value)} className="mt-1.5 w-full rounded-xl border px-3 py-2 text-sm font-semibold outline-none focus:ring-2 focus:ring-emerald-100">
@@ -451,20 +623,23 @@ export default function SalaryAdvanceManager() {
           {canEdit && selectableRows.length > 0 && (
             <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-emerald-50/60 px-4 py-3">
               <div className="text-sm font-semibold text-slate-700">
-                Đã chọn <span className="font-bold text-emerald-700">{selectedRows.length}</span> / {selectableRows.length} phiếu chờ duyệt
+                Đã chọn <span className="font-bold text-emerald-700">{selectedRows.length}</span> / {selectableRows.length} phiếu có thể xử lý
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                {selectedRows.length > 0 && <button onClick={() => setSelectedIds([])} disabled={bulkApproving} className="rounded-xl border bg-white px-3 py-2 text-sm font-bold hover:bg-slate-50 disabled:opacity-50">Bỏ chọn</button>}
-                <button onClick={openBulkApproveDialog} disabled={!selectedRows.length || bulkApproving || Boolean(actionId)} className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-700 disabled:opacity-50">
-                  <CheckSquare2 size={16} /> Duyệt hàng loạt ({selectedRows.length})
-                </button>
+                {selectedRows.length > 0 && <button onClick={() => setSelectedIds([])} disabled={bulkApproving || bulkPaying} className="rounded-xl border bg-white px-3 py-2 text-sm font-bold hover:bg-slate-50 disabled:opacity-50">Bỏ chọn</button>}
+                {selectedPendingRows.length > 0 && <button onClick={openBulkApproveDialog} disabled={bulkApproving || bulkPaying || Boolean(actionId)} className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-700 disabled:opacity-50">
+                  <CheckSquare2 size={16} /> Duyệt hàng loạt ({selectedPendingRows.length})
+                </button>}
+                {selectedApprovedRows.length > 0 && <button onClick={openBulkPaymentDialog} disabled={bulkApproving || bulkPaying || Boolean(actionId)} className="inline-flex items-center gap-2 rounded-xl bg-sky-600 px-4 py-2 text-sm font-bold text-white hover:bg-sky-700 disabled:opacity-50">
+                  <Banknote size={16} /> Xác nhận đã chi ({selectedApprovedRows.length})
+                </button>}
               </div>
             </div>
           )}
 
           <div className="overflow-x-auto">
             <table className="w-full min-w-[1700px] text-left text-sm">
-              <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500"><tr><th className="w-12 px-4 py-3"><input type="checkbox" checked={allSelectableSelected} onChange={toggleSelectAll} disabled={!canEdit || !selectableRows.length || bulkApproving} aria-label="Chọn tất cả phiếu chờ duyệt" className="h-4 w-4 rounded border-slate-300 accent-emerald-600" /></th><th className="px-4 py-3">Nhân viên</th><th className="px-4 py-3">Cty đóng BHXH</th><th className="px-4 py-3">Ngân hàng</th><th className="px-4 py-3">Người thụ hưởng</th><th className="px-4 py-3 text-right">Số tiền</th><th className="px-4 py-3">Ngày nhận / kỳ trừ</th><th className="px-4 py-3">Ghi chú</th><th className="px-4 py-3">Trạng thái</th><th className="px-4 py-3">Thao tác</th></tr></thead>
+              <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500"><tr><th className="w-12 px-4 py-3"><input type="checkbox" checked={allSelectableSelected} onChange={toggleSelectAll} disabled={!canEdit || !selectableRows.length || bulkApproving || bulkPaying} aria-label="Chọn tất cả phiếu có thể xử lý" className="h-4 w-4 rounded border-slate-300 accent-emerald-600" /></th><th className="px-4 py-3">Nhân viên</th><th className="px-4 py-3">Cty đóng BHXH</th><th className="px-4 py-3">Ngân hàng</th><th className="px-4 py-3">Người thụ hưởng</th><th className="px-4 py-3 text-right">Số tiền</th><th className="px-4 py-3">Ngày nhận / kỳ trừ</th><th className="px-4 py-3">Ghi chú</th><th className="px-4 py-3">Trạng thái</th><th className="px-4 py-3">Thao tác</th></tr></thead>
               <tbody>
                 {rows.map((request) => {
                   const [label, tone] = STATUS_META[request.status] || [request.status, "bg-slate-100 text-slate-600"];
@@ -472,7 +647,7 @@ export default function SalaryAdvanceManager() {
                   const recipient = request.paymentRecipient || {};
                   return (
                     <tr key={request._id} className={`border-t align-top ${selectedIds.includes(request._id) ? "bg-emerald-50/50" : ""}`}>
-                      <td className="px-4 py-3"><input type="checkbox" checked={selectedIds.includes(request._id)} onChange={() => toggleRequestSelection(request._id)} disabled={!canEdit || request.status !== "pending" || bulkApproving} aria-label={`Chọn phiếu của ${recipient.employeeName || request.userName || request.employeeCode || "nhân viên"}`} className="h-4 w-4 rounded border-slate-300 accent-emerald-600 disabled:opacity-30" /></td>
+                      <td className="px-4 py-3"><input type="checkbox" checked={selectedIds.includes(request._id)} onChange={() => toggleRequestSelection(request._id)} disabled={!canEdit || !["pending", "approved"].includes(request.status) || bulkApproving || bulkPaying} aria-label={`Chọn phiếu của ${recipient.employeeName || request.userName || request.employeeCode || "nhân viên"}`} className="h-4 w-4 rounded border-slate-300 accent-emerald-600 disabled:opacity-30" /></td>
                       <td className="px-4 py-3"><div className="font-bold">{recipient.employeeName || request.userName || "-"}</div><div className="font-mono text-xs text-slate-500">{recipient.employeeCode || request.employeeCode || "-"}</div></td>
                       <td className="px-4 py-3"><span className="inline-flex rounded-lg bg-indigo-50 px-2.5 py-1 font-bold text-indigo-700">{request.congTyDongBHXH || "Chưa cập nhật"}</span></td>
                       <td className="px-4 py-3"><div className="flex items-center gap-1.5 font-semibold"><Building2 size={14} className="text-slate-400" />{recipient.bankName || "Chưa cập nhật"}</div><div className="mt-1 text-xs text-slate-500">{recipient.bankBranch || "Chưa có chi nhánh"}</div></td>
@@ -504,14 +679,14 @@ export default function SalaryAdvanceManager() {
               <div className="flex items-start justify-between border-b px-5 py-4">
                 <div>
                   <h2 id="bulk-approve-dialog-title" className="text-lg font-bold text-slate-900">Duyệt hàng loạt phiếu ứng lương</h2>
-                  <p className="mt-1 text-sm text-slate-500">Xác nhận duyệt {selectedRows.length} phiếu đang chọn.</p>
+                  <p className="mt-1 text-sm text-slate-500">Xác nhận duyệt {selectedPendingRows.length} phiếu đang chọn.</p>
                 </div>
                 <button onClick={() => !bulkApproving && setBulkDialogOpen(false)} disabled={bulkApproving} className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:opacity-50" aria-label="Đóng"><X size={20} /></button>
               </div>
 
               <div className="space-y-4 p-5">
                 <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
-                  <div className="font-bold">Tổng tiền duyệt: {money(selectedRows.reduce((sum, request) => sum + Number(request.requestedAmount || 0), 0))}</div>
+                  <div className="font-bold">Tổng tiền duyệt: {money(selectedPendingRows.reduce((sum, request) => sum + Number(request.requestedAmount || 0), 0))}</div>
                   <div className="mt-1">Mỗi phiếu sẽ được duyệt đúng bằng số tiền nhân viên yêu cầu.</div>
                 </div>
                 <label className="block text-sm font-semibold text-slate-700">Kỳ khấu trừ
@@ -525,8 +700,49 @@ export default function SalaryAdvanceManager() {
 
               <div className="flex justify-end gap-2 border-t px-5 py-4">
                 <button onClick={() => setBulkDialogOpen(false)} disabled={bulkApproving} className="rounded-xl border px-4 py-2 text-sm font-bold hover:bg-slate-50 disabled:opacity-50">Đóng</button>
-                <button onClick={confirmBulkApprove} disabled={bulkApproving || !selectedRows.length || !bulkForm.payrollPeriod} className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-700 disabled:opacity-50">
-                  {bulkApproving ? <Loader2 size={16} className="animate-spin" /> : <CheckSquare2 size={16} />} Duyệt {selectedRows.length} phiếu
+                <button onClick={confirmBulkApprove} disabled={bulkApproving || !selectedPendingRows.length || !bulkForm.payrollPeriod} className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-700 disabled:opacity-50">
+                  {bulkApproving ? <Loader2 size={16} className="animate-spin" /> : <CheckSquare2 size={16} />} Duyệt {selectedPendingRows.length} phiếu
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {bulkPaymentDialogOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4" role="dialog" aria-modal="true" aria-labelledby="bulk-payment-dialog-title">
+            <div className="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white shadow-2xl">
+              <div className="flex items-start justify-between border-b px-5 py-4">
+                <div>
+                  <h2 id="bulk-payment-dialog-title" className="text-lg font-bold text-slate-900">Xác nhận đã chi hàng loạt</h2>
+                  <p className="mt-1 text-sm text-slate-500">Xác nhận chi {selectedApprovedRows.length} phiếu và tự động cập nhật vào bảng lương.</p>
+                </div>
+                <button onClick={() => !bulkPaying && setBulkPaymentDialogOpen(false)} disabled={bulkPaying} className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:opacity-50" aria-label="Đóng"><X size={20} /></button>
+              </div>
+
+              <div className="space-y-4 p-5">
+                <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-800">
+                  <div className="font-bold">Tổng tiền chi: {money(selectedApprovedRows.reduce((sum, request) => sum + Number(request.approvedAmount || request.requestedAmount || 0), 0))}</div>
+                  <div className="mt-1">Các phiếu thành công sẽ được chuyển sang trạng thái đã trừ lương.</div>
+                </div>
+                <label className="block text-sm font-semibold text-slate-700">Kỳ khấu trừ
+                  <input type="month" value={bulkPaymentForm.payrollPeriod} onChange={(event) => setBulkPaymentForm((current) => ({ ...current, payrollPeriod: event.target.value }))} disabled={bulkPaying} className="mt-1.5 w-full rounded-xl border px-3 py-2.5 outline-none focus:ring-2 focus:ring-sky-100 disabled:bg-slate-100" />
+                </label>
+                <label className="block text-sm font-semibold text-slate-700">Phương thức chi
+                  <select value={bulkPaymentForm.paymentMethod} onChange={(event) => setBulkPaymentForm((current) => ({ ...current, paymentMethod: event.target.value }))} disabled={bulkPaying} className="mt-1.5 w-full rounded-xl border px-3 py-2.5 outline-none focus:ring-2 focus:ring-sky-100 disabled:bg-slate-100">
+                    <option value="bank_transfer">Chuyển khoản</option>
+                    <option value="cash">Tiền mặt</option>
+                  </select>
+                </label>
+                <label className="block text-sm font-semibold text-slate-700">Ghi chú chi tiền (không bắt buộc)
+                  <textarea rows={3} maxLength={1000} value={bulkPaymentForm.paymentNote} onChange={(event) => setBulkPaymentForm((current) => ({ ...current, paymentNote: event.target.value }))} disabled={bulkPaying} placeholder="Ghi chú áp dụng chung cho các phiếu..." className="mt-1.5 w-full resize-y rounded-xl border px-3 py-2.5 outline-none focus:ring-2 focus:ring-sky-100 disabled:bg-slate-100" />
+                </label>
+                {bulkPaying && <div className="flex items-center gap-2 text-sm font-semibold text-sky-700"><Loader2 size={16} className="animate-spin" /> Đang xác nhận và cập nhật lần lượt vào bảng lương...</div>}
+              </div>
+
+              <div className="flex justify-end gap-2 border-t px-5 py-4">
+                <button onClick={() => setBulkPaymentDialogOpen(false)} disabled={bulkPaying} className="rounded-xl border px-4 py-2 text-sm font-bold hover:bg-slate-50 disabled:opacity-50">Đóng</button>
+                <button onClick={confirmBulkPayment} disabled={bulkPaying || !selectedApprovedRows.length || !bulkPaymentForm.payrollPeriod} className="inline-flex items-center gap-2 rounded-xl bg-sky-600 px-4 py-2 text-sm font-bold text-white hover:bg-sky-700 disabled:opacity-50">
+                  {bulkPaying ? <Loader2 size={16} className="animate-spin" /> : <Banknote size={16} />} Xác nhận chi {selectedApprovedRows.length} phiếu
                 </button>
               </div>
             </div>

@@ -12,7 +12,7 @@ const HEADERS = [
   "SỐ CMND/CCCD", "NGÀY CẤP CMND/CCCD", "NƠI CẤP CMND/CCCD", "LOẠI HỢP ĐỒNG", "THỜI HẠN HỢP ĐỒNG",
   "NGÀY KÝ HĐ", "NGÀY HẾT HĐ", "BỘ PHẬN", "CHỨC DANH", "HỌC VẤN", "NGÀNH NGHỀ", "SĐT CÁ NHÂN", "DÂN TỘC",
   "NGÀY VÀO LÀM", "NGÀY CHÍNH THỨC", "SỐ HỢP ĐỒNG LAO ĐỘNG", "NGÀY ĐẾN HẠN HỢP ĐỒNG LAO ĐỘNG",
-  "TÌNH TRẠNG", "HIỆN TRẠNG", "CTY", "SỐ PHỤ LỤC HỢP ĐỒNG", "TỪ NGÀY KÝ PL", "NGÀY HẾT HẠN PL",
+  "TÌNH TRẠNG", "CTY", "LƯƠNG CĂN BẢN", "PHỤ CẤP", "SỐ PHỤ LỤC HỢP ĐỒNG", "TỪ NGÀY KÝ PL", "NGÀY HẾT HẠN PL",
   "SỐ NGÀY LÀM VIỆC", "SỐ THÁNG LÀM VIỆC", "NĂM LÀM VIỆC", "NGUYÊN QUÁN XÃ/PHƯỜNG", "NGUYÊN QUÁN TỈNH, TP",
   "NƠI ĐĂNG KÝ HỘ KHẨU THƯỜNG TRÚ ẤP/ĐƯỜNG/KHÓM", "NƠI ĐĂNG KÝ HỘ KHẨU THƯỜNG TRÚ PHƯỜNG",
   "NƠI ĐĂNG KÝ HỘ KHẨU THƯỜNG TRÚ XÃ", "NƠI ĐĂNG KÝ HỘ KHẨU THƯỜNG TRÚ TỈNH, TP", "MÃ SỐ BHXH", "TÌNH TRẠNG HÔN NHÂN",
@@ -23,12 +23,15 @@ const emptyProfile = {
   userId: "", employeeCode: "",
   personal: { fullName: "", gender: "unknown", dateOfBirth: "", personalPhone: "", ethnicity: "", nationality: "", maritalStatus: "unknown" },
   identityDocument: { type: "CCCD", number: "", issuedDate: "", issuedPlace: "" },
-  employment: { company: "", department: "", jobTitle: "", startDate: "", officialDate: "", endDate: "", employmentStatus: "unknown", currentState: "active" },
+  employment: { company: "NNV", department: "", jobTitle: "", startDate: "", officialDate: "", endDate: "", employmentStatus: "unknown" },
+  compensation: { baseSalary: 0, allowances: "" },
   education: { level: "", major: "" }, placeOfOrigin: { ward: "", province: "" },
   permanentAddress: { street: "", ward: "", district: "", province: "" }, socialInsuranceNumber: "",
   payrollBankAccount: { bankCode: "", bankName: "", accountNumber: "", accountHolder: "", branch: "", isVerified: false, verifiedAt: null, verifiedBy: null, note: "" },
   annualLeaveBalance: { year: new Date().getFullYear(), remainingDays: 0, note: "" }, notes: "",
 };
+
+const COMPANY_OPTIONS = [["NNV", "NNV"], ["ABC", "ABC"], ["VN", "VN"], ["KF", "KF"]];
 
 const emptyContract = {
   contractNumber: "", generatedContractNumber: "", manualContractNumber: false, contractType: "fixed_term", durationMonths: 12, signedDate: "", effectiveDate: "", expiryDate: "", renewalDueDate: "",
@@ -113,8 +116,8 @@ const employmentStatusValue = (v) => {
   if (text.includes("tam nghi") || text.includes("nghi phep")) return "leave";
   return "unknown";
 };
-const stateValue = (v) => norm(v).includes("nghi") || norm(v).includes("khong") ? "inactive" : "active";
 const durationMonths = (v) => Number(String(v || "").match(/\d+/)?.[0] || 0) || null;
+const salaryNumber = (v) => Number(String(v ?? "").replace(/[^\d-]/g, "")) || 0;
 
 function parseEmployeeRow(row, index) {
   const employeeCode = String(cell(row, "MSNV") || "").trim().toUpperCase();
@@ -134,7 +137,8 @@ function parseEmployeeRow(row, index) {
     rowNumber: index + 2, employeeCode,
     personal: { fullName, gender: genderValue(cell(row, "GIỚI TÍNH")), dateOfBirth: isoDate(cell(row, "NGÀY THÁNG NĂM SINH")), personalPhone: String(cell(row, "SĐT CÁ NHÂN") || ""), ethnicity: String(cell(row, "DÂN TỘC") || ""), maritalStatus: maritalValue(cell(row, "TÌNH TRẠNG HÔN NHÂN")) },
     identityDocument: { type: "CCCD", number: String(cell(row, "SỐ CMND/CCCD") || ""), issuedDate: isoDate(cell(row, "NGÀY CẤP CMND/CCCD")), issuedPlace: String(cell(row, "NƠI CẤP CMND/CCCD") || "") },
-    employment: { company: String(cell(row, "CTY") || ""), department: String(cell(row, "BỘ PHẬN") || ""), jobTitle: String(cell(row, "CHỨC DANH") || ""), startDate: isoDate(cell(row, "NGÀY VÀO LÀM")), officialDate: isoDate(cell(row, "NGÀY CHÍNH THỨC")), employmentStatus: employmentStatusValue(cell(row, "TÌNH TRẠNG")), currentState: stateValue(cell(row, "HIỆN TRẠNG")) },
+    employment: { company: String(cell(row, "CTY") || ""), department: String(cell(row, "BỘ PHẬN") || ""), jobTitle: String(cell(row, "CHỨC DANH") || ""), startDate: isoDate(cell(row, "NGÀY VÀO LÀM")), officialDate: isoDate(cell(row, "NGÀY CHÍNH THỨC")), employmentStatus: employmentStatusValue(cell(row, "TÌNH TRẠNG")) },
+    compensation: { baseSalary: salaryNumber(cell(row, "LƯƠNG CĂN BẢN")), allowances: String(cell(row, "PHỤ CẤP") || "") },
     education: { level: String(cell(row, "HỌC VẤN") || ""), major: String(cell(row, "NGÀNH NGHỀ") || "") },
     placeOfOrigin: { ward: String(cell(row, "NGUYÊN QUÁN XÃ/PHƯỜNG") || ""), province: String(cell(row, "NGUYÊN QUÁN TỈNH, TP") || "") },
     permanentAddress: { street: String(cell(row, "NƠI ĐĂNG KÝ HỘ KHẨU THƯỜNG TRÚ ẤP/ĐƯỜNG/KHÓM") || ""), ward: String(ward || ""), district: "", province: String(cell(row, "NƠI ĐĂNG KÝ HỘ KHẨU THƯỜNG TRÚ TỈNH, TP") || "") },
@@ -162,7 +166,6 @@ const excelDate = (value) => {
 const exportGender = { male: "Nam", female: "Nữ", other: "Khác", unknown: "" };
 const exportMarital = { single: "Độc thân", married: "Đã kết hôn", divorced: "Ly hôn", widowed: "Góa", unknown: "" };
 const exportEmploymentStatus = { probation: "Thử việc", official: "Chính thức", leave: "Tạm nghỉ", resigned: "Nghỉ việc", terminated: "Chấm dứt", unknown: "" };
-const exportCurrentState = { active: "Đang làm", inactive: "Ngừng làm", archived: "Lưu trữ" };
 const ACTIVE_EMPLOYMENT_STATUSES = ["probation", "official"];
 const exportContractType = { probation: "Thử việc", fixed_term: "Xác định thời hạn", indefinite: "Không xác định thời hạn", seasonal: "Mùa vụ", other: "Khác" };
 const CONTRACT_STATUS_LABELS = { draft: "Bản nháp", active: "Đang hiệu lực", expired: "Hết hạn", terminated: "Đã chấm dứt", cancelled: "Đã hủy" };
@@ -214,8 +217,9 @@ function profileToExcelRow(profile) {
     "SỐ HỢP ĐỒNG LAO ĐỘNG": contract.contractNumber || "",
     "NGÀY ĐẾN HẠN HỢP ĐỒNG LAO ĐỘNG": excelDate(contract.renewalDueDate || contract.expiryDate),
     "TÌNH TRẠNG": exportEmploymentStatus[profile.employment?.employmentStatus] || profile.employment?.employmentStatus || "",
-    "HIỆN TRẠNG": exportCurrentState[profile.employment?.currentState] || profile.employment?.currentState || "",
     "CTY": profile.employment?.company || "",
+    "LƯƠNG CĂN BẢN": Number(profile.compensation?.baseSalary || 0) || "",
+    "PHỤ CẤP": profile.compensation?.allowances || "",
     "SỐ PHỤ LỤC HỢP ĐỒNG": appendix.appendixNumber || "",
     "TỪ NGÀY KÝ PL": excelDate(appendix.signedDate || appendix.effectiveDate),
     "NGÀY HẾT HẠN PL": excelDate(appendix.expiryDate),
@@ -555,6 +559,8 @@ export default function EmployeeProfileManager({ users, onClose, standalone = fa
   const [search, setSearch] = useState("");
   const [employmentStatusFilter, setEmploymentStatusFilter] = useState("working");
   const [editor, setEditor] = useState(null);
+  const [generatingEmployeeCode, setGeneratingEmployeeCode] = useState(false);
+  const employeeCodeRequestRef = useRef(0);
   const [contractEditor, setContractEditorState] = useState(null);
   const contractEditorRef = useRef(null);
   const setContractEditor = (update) => setContractEditorState((current) => {
@@ -685,11 +691,49 @@ export default function EmployeeProfileManager({ users, onClose, standalone = fa
     }).sort((a, b) => b._score - a._score || a.name.localeCompare(b.name, "vi"));
   }, [contractTemplates, editor?.employment?.department, editor?.employment?.jobTitle]);
   const selectedContractTemplate = useMemo(() => contractTemplates.find((item) => item._id === contractEditor?.templateId) || null, [contractTemplates, contractEditor?.templateId]);
-  const setNested = (section, key, value) => setEditor((old) => ({ ...old, [section]: { ...old[section], [key]: value } }));
-  const openNew = () => {
-    const fresh = clone(emptyProfile);
-    setEditor(fresh);
-    setEditorSnapshot(JSON.stringify(fresh));
+  const setNested = (section, key, value) => {
+    if (section === "employment" && key === "company" && editor && !editor._id) {
+      void changeProfileCompany(value);
+      return;
+    }
+    setEditor((old) => ({ ...old, [section]: { ...old[section], [key]: value } }));
+  };
+  const openNew = async () => {
+    const requestId = ++employeeCodeRequestRef.current;
+    try {
+      setGeneratingEmployeeCode(true);
+      const result = await request("/api/employee-profiles/next-code?company=NNV");
+      if (employeeCodeRequestRef.current !== requestId) return;
+      const fresh = clone(emptyProfile);
+      fresh.employeeCode = result.data?.employeeCode || "";
+      setEditor(fresh);
+      setEditorSnapshot(JSON.stringify(fresh));
+    } catch (error) {
+      if (employeeCodeRequestRef.current === requestId) notify(error.message, "error");
+    } finally {
+      if (employeeCodeRequestRef.current === requestId) setGeneratingEmployeeCode(false);
+    }
+  };
+  const changeProfileCompany = async (company) => {
+    if (editor?._id) {
+      setNested("employment", "company", company);
+      return;
+    }
+    const requestId = ++employeeCodeRequestRef.current;
+    try {
+      setGeneratingEmployeeCode(true);
+      const result = await request(`/api/employee-profiles/next-code?company=${encodeURIComponent(company)}`);
+      if (employeeCodeRequestRef.current !== requestId) return;
+      setEditor((current) => ({
+        ...current,
+        employeeCode: result.data?.employeeCode || current.employeeCode,
+        employment: { ...current.employment, company },
+      }));
+    } catch (error) {
+      if (employeeCodeRequestRef.current === requestId) notify(error.message, "error");
+    } finally {
+      if (employeeCodeRequestRef.current === requestId) setGeneratingEmployeeCode(false);
+    }
   };
   const openProfile = async (profile) => {
     try {
@@ -699,7 +743,7 @@ export default function EmployeeProfileManager({ users, onClose, standalone = fa
         request(`/api/employee-profiles/${profile._id}/history?limit=100`).catch(() => ({ data: { items: [], total: 0 } })),
       ]);
       const value = result.data;
-      const normalized = { ...clone(emptyProfile), ...value, userId: value.userId?._id || value.userId || "", personal: { ...emptyProfile.personal, ...value.personal, dateOfBirth: dateInput(value.personal?.dateOfBirth) }, identityDocument: { ...emptyProfile.identityDocument, ...value.identityDocument, issuedDate: dateInput(value.identityDocument?.issuedDate) }, employment: { ...emptyProfile.employment, ...value.employment, startDate: dateInput(value.employment?.startDate), officialDate: dateInput(value.employment?.officialDate), endDate: dateInput(value.employment?.endDate) }, payrollBankAccount: { ...emptyProfile.payrollBankAccount, ...value.payrollBankAccount }, annualLeaveBalance: { ...emptyProfile.annualLeaveBalance, ...value.annualLeaveBalance }, contracts: value.contracts || [] };
+      const normalized = { ...clone(emptyProfile), ...value, userId: value.userId?._id || value.userId || "", personal: { ...emptyProfile.personal, ...value.personal, dateOfBirth: dateInput(value.personal?.dateOfBirth) }, identityDocument: { ...emptyProfile.identityDocument, ...value.identityDocument, issuedDate: dateInput(value.identityDocument?.issuedDate) }, employment: { ...emptyProfile.employment, ...value.employment, startDate: dateInput(value.employment?.startDate), officialDate: dateInput(value.employment?.officialDate), endDate: dateInput(value.employment?.endDate) }, compensation: { ...emptyProfile.compensation, ...value.compensation }, payrollBankAccount: { ...emptyProfile.payrollBankAccount, ...value.payrollBankAccount }, annualLeaveBalance: { ...emptyProfile.annualLeaveBalance, ...value.annualLeaveBalance }, contracts: value.contracts || [] };
       setEditor(normalized);
       setEditorSnapshot(JSON.stringify(normalized));
       setAuditHistory(historyResult.data || { items: [], total: 0 });
@@ -710,7 +754,7 @@ export default function EmployeeProfileManager({ users, onClose, standalone = fa
   const saveProfile = async () => {
     try {
       const isNew = !editor._id;
-      const payload = { ...editor, userId: editor.userId || null };
+      const payload = { ...editor, userId: editor.userId || null, generateEmployeeCode: isNew };
       const result = await request(isNew ? "/api/employee-profiles" : `/api/employee-profiles/${editor._id}`, { method: isNew ? "POST" : "PUT", body: JSON.stringify(payload) });
       await Promise.all([loadProfiles(), loadAlerts()]); if (isNew) await openProfile(result.data); else { await openProfile(editor); notify("Đã lưu hồ sơ nhân sự"); }
     } catch (error) { notify(error.message, "error"); }
@@ -929,6 +973,11 @@ export default function EmployeeProfileManager({ users, onClose, standalone = fa
     void loadNumber();
     return () => { active = false; };
   }, [contractEditor?._id, contractEditor?.templateId, contractEditor?.contractNumber, contractEditor?.companyCode, editor?._id]); // eslint-disable-line react-hooks/exhaustive-deps
+  const openNewContract = () => setContractEditor({
+    ...clone(emptyContract),
+    baseSalary: Number(editor?.compensation?.baseSalary || 0),
+    allowances: editor?.compensation?.allowances || "",
+  });
   const applyContractTemplate = async (templateId) => {
     const template = activeContractTemplates.find((item) => item._id === templateId);
     if (!template) return setContractEditor((current) => ({ ...current, templateId: "", contractNumber: current._id || current.manualContractNumber || (current.generatedContractNumber && current.contractNumber !== current.generatedContractNumber) ? current.contractNumber : "", generatedContractNumber: "", companyCode: "", profileFieldDefinitions: [], profileFieldValues: {} }));
@@ -946,6 +995,7 @@ export default function EmployeeProfileManager({ users, onClose, standalone = fa
       appendices: current.appendices,
       notes: current.notes,
       baseSalary: current.baseSalary || template.defaultValues?.baseSalary || 0,
+      allowances: current.allowances || template.defaultValues?.allowances || "",
       companyRepresentative: {
         ...emptyContract.companyRepresentative,
         ...(template.defaultValues?.companyRepresentative || {}),
@@ -1118,7 +1168,7 @@ export default function EmployeeProfileManager({ users, onClose, standalone = fa
       <header className="sticky top-0 z-10 flex flex-wrap items-center gap-3 rounded-t-3xl border-b border-cyan-100 bg-white/95 px-5 py-4 backdrop-blur">
         {(editor || !standalone) && <button onClick={editor ? requestCloseEditor : onClose} className="rounded-xl border border-cyan-100 p-2 text-cyan-700 hover:bg-cyan-50"><ArrowLeft size={18} /></button>}
         <div className="mr-auto"><h2 className="flex items-center gap-2 text-lg font-black text-slate-900">{editor ? `Hồ sơ ${editor.personal?.fullName || "nhân viên"}` : "Quản lý hồ sơ nhân sự"}{isEditorDirty && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-bold text-amber-700">Chưa lưu</span>}</h2><p className="text-xs text-slate-500">Hồ sơ, hợp đồng, phụ lục và xuất biểu mẫu</p></div>
-        {!editor && <><button onClick={downloadTemplate} className="flex items-center gap-2 rounded-xl border border-cyan-200 bg-white px-3 py-2 text-sm font-semibold text-cyan-700"><Download size={16} /> File mẫu</button>{canProfileAction("edit") && <button disabled={!documentDefaults} onClick={openTemplateManager} className="flex items-center gap-2 rounded-xl bg-violet-600 px-3 py-2 text-sm font-bold text-white disabled:opacity-50"><FileText size={16} /> Thư viện mẫu HĐ</button>}{canProfileAction("create") && <label className="flex cursor-pointer items-center gap-2 rounded-xl bg-emerald-600 px-3 py-2 text-sm font-bold text-white"><Upload size={16} /> Import Excel<input type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={readExcel} /></label>}{canProfileAction("export") && <button disabled={exportingProfiles} onClick={exportEmployeeProfiles} className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-bold text-emerald-700 disabled:opacity-50"><Download size={16} /> {exportingProfiles ? "Đang xuất..." : "Xuất hồ sơ Excel"}</button>}{canProfileAction("create") && <button onClick={openNew} className="flex items-center gap-2 rounded-xl bg-cyan-600 px-3 py-2 text-sm font-bold text-white"><Plus size={16} /> Thêm hồ sơ</button>}</>}
+        {!editor && <><button onClick={downloadTemplate} className="flex items-center gap-2 rounded-xl border border-cyan-200 bg-white px-3 py-2 text-sm font-semibold text-cyan-700"><Download size={16} /> File mẫu</button>{canProfileAction("edit") && <button disabled={!documentDefaults} onClick={openTemplateManager} className="flex items-center gap-2 rounded-xl bg-violet-600 px-3 py-2 text-sm font-bold text-white disabled:opacity-50"><FileText size={16} /> Thư viện mẫu HĐ</button>}{canProfileAction("create") && <label className="flex cursor-pointer items-center gap-2 rounded-xl bg-emerald-600 px-3 py-2 text-sm font-bold text-white"><Upload size={16} /> Import Excel<input type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={readExcel} /></label>}{canProfileAction("export") && <button disabled={exportingProfiles} onClick={exportEmployeeProfiles} className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-bold text-emerald-700 disabled:opacity-50"><Download size={16} /> {exportingProfiles ? "Đang xuất..." : "Xuất hồ sơ Excel"}</button>}{canProfileAction("create") && <button disabled={generatingEmployeeCode} onClick={openNew} className="flex items-center gap-2 rounded-xl bg-cyan-600 px-3 py-2 text-sm font-bold text-white disabled:opacity-60"><Plus size={16} /> {generatingEmployeeCode ? "Đang cấp MSNV..." : "Thêm hồ sơ"}</button>}</>}
         {editor && canProfileAction(editor._id ? "edit" : "create") && <button onClick={saveProfile} className="flex items-center gap-2 rounded-xl bg-cyan-600 px-4 py-2 text-sm font-bold text-white"><Save size={16} /> Lưu hồ sơ</button>}
         {!standalone && <button onClick={requestClose} className="rounded-xl p-2 text-slate-400 hover:bg-slate-100"><X size={18} /></button>}
       </header>
@@ -1140,17 +1190,18 @@ export default function EmployeeProfileManager({ users, onClose, standalone = fa
         {importRows.length > 0 && <section className="mb-5 rounded-2xl border border-emerald-200 bg-emerald-50 p-4"><div className="flex flex-wrap items-center gap-3"><div className="mr-auto"><b>Đã đọc {importRows.length} dòng từ {importFileName}</b><p className="text-xs text-slate-600">Kiểm tra nhanh rồi xác nhận ghi dữ liệu.</p></div><button onClick={() => setImportRows([])} className="rounded-xl border bg-white px-3 py-2 text-sm">Hủy</button><button disabled={importing} onClick={confirmImport} className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-60">{importing ? "Đang import..." : "Xác nhận import"}</button></div><div className="mt-3 max-h-44 overflow-auto rounded-xl bg-white"><table className="w-full text-left text-xs"><thead className="sticky top-0 bg-slate-100"><tr><th className="p-2">Dòng</th><th>MSNV</th><th>Họ tên</th><th>Hợp đồng</th></tr></thead><tbody>{importRows.slice(0, 100).map((row) => <tr key={row.rowNumber} className="border-t"><td className="p-2">{row.rowNumber}</td><td>{row.employeeCode || <span className="text-red-500">Thiếu</span>}</td><td>{row.personal.fullName || <span className="text-red-500">Thiếu</span>}</td><td>{row.contract?.contractNumber || "-"}</td></tr>)}</tbody></table></div></section>}
         {importResult && <section className="mb-5 rounded-2xl border border-sky-200 bg-sky-50 p-4 text-sm"><b>Kết quả import:</b> tạo {importResult.profilesCreated} hồ sơ, cập nhật {importResult.profilesUpdated}, tạo {importResult.contractsCreated} hợp đồng, cập nhật {importResult.contractsUpdated}. <span className={importResult.errors?.length ? "text-red-600" : "text-emerald-700"}>Lỗi: {importResult.errors?.length || 0}</span>{importResult.errors?.length > 0 && <div className="mt-2 max-h-28 overflow-auto">{importResult.errors.map((e, i) => <div key={i}>Dòng {e.row} ({e.employeeCode}): {e.message}</div>)}</div>}</section>}
         <div className="mb-4 grid grid-cols-[minmax(280px,1fr)_220px_42px] items-center gap-3"><div className="relative min-w-0"><Search size={17} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Tìm MSNV, họ tên, bộ phận, công ty..." className={`${inputClass} pl-10`} /></div><select aria-label="Lọc theo tình trạng nhân viên" value={employmentStatusFilter} onChange={(e) => setEmploymentStatusFilter(e.target.value)} className="h-[42px] w-[220px] rounded-xl border border-cyan-100 bg-white px-3 text-sm text-slate-700 outline-none focus:border-cyan-400 focus:ring-4 focus:ring-cyan-100"><option value="working">Thử việc & Chính thức</option><option value="probation">Thử việc</option><option value="official">Chính thức</option><option value="leave">Tạm nghỉ</option><option value="resigned">Nghỉ việc</option><option value="terminated">Chấm dứt</option><option value="unknown">Chưa xác định</option><option value="all">Tất cả tình trạng</option></select><button onClick={() => { loadProfiles(); loadAlerts(); }} title="Tải lại danh sách" aria-label="Tải lại danh sách nhân viên" className="flex h-[42px] w-[42px] items-center justify-center rounded-xl border border-cyan-100 bg-white text-cyan-700 hover:border-cyan-300 hover:bg-cyan-50"><RefreshCcw size={17} /></button></div>
-        <div className="overflow-auto rounded-2xl border border-cyan-100 bg-white"><table className="w-full min-w-[1000px] text-left text-sm"><thead className="bg-cyan-50 text-xs uppercase text-slate-500"><tr><th className="p-3">Nhân viên</th><th>MSNV</th><th>Bộ phận / chức danh</th><th>Công ty</th><th>Tình trạng</th><th>Phép năm</th><th>Thâm niên</th><th className="pr-3 text-right">Thao tác</th></tr></thead><tbody>{loading ? <tr><td colSpan="8" className="p-10 text-center">Đang tải...</td></tr> : filtered.map((p) => <tr key={p._id} className="border-t border-cyan-50 hover:bg-cyan-50/50"><td className="p-3 font-bold text-slate-800">{p.personal?.fullName}</td><td>{p.employeeCode}</td><td>{p.employment?.department || "-"}<div className="text-xs text-slate-400">{p.employment?.jobTitle}</div></td><td>{p.employment?.company || "-"}</td><td><span className={`rounded-full px-2 py-1 text-xs font-semibold ${ACTIVE_EMPLOYMENT_STATUSES.includes(p.employment?.employmentStatus) ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"}`}>{exportEmploymentStatus[p.employment?.employmentStatus] || "Chưa xác định"}</span><div className="mt-1 text-[11px] text-slate-400">{exportCurrentState[p.employment?.currentState] || p.employment?.currentState || "-"}</div></td><td><b className="text-emerald-700">{Number(p.annualLeaveBalance?.remainingDays || 0)} ngày</b></td><td>{p.seniority?.years || 0} năm</td><td className="pr-3 text-right"><button onClick={() => openProfile(p)} className="rounded-lg bg-cyan-600 px-3 py-1.5 text-xs font-bold text-white">Chi tiết</button></td></tr>)}</tbody></table></div>
+        <div className="overflow-auto rounded-2xl border border-cyan-100 bg-white"><table className="w-full min-w-[1000px] text-left text-sm"><thead className="bg-cyan-50 text-xs uppercase text-slate-500"><tr><th className="p-3">Nhân viên</th><th>MSNV</th><th>Bộ phận / chức danh</th><th>Công ty</th><th>Tình trạng</th><th>Phép năm</th><th>Thâm niên</th><th className="pr-3 text-right">Thao tác</th></tr></thead><tbody>{loading ? <tr><td colSpan="8" className="p-10 text-center">Đang tải...</td></tr> : filtered.map((p) => <tr key={p._id} className="border-t border-cyan-50 hover:bg-cyan-50/50"><td className="p-3 font-bold text-slate-800">{p.personal?.fullName}</td><td>{p.employeeCode}</td><td>{p.employment?.department || "-"}<div className="text-xs text-slate-400">{p.employment?.jobTitle}</div></td><td>{p.employment?.company || "-"}</td><td><span className={`rounded-full px-2 py-1 text-xs font-semibold ${ACTIVE_EMPLOYMENT_STATUSES.includes(p.employment?.employmentStatus) ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"}`}>{exportEmploymentStatus[p.employment?.employmentStatus] || "Chưa xác định"}</span></td><td><b className="text-emerald-700">{Number(p.annualLeaveBalance?.remainingDays || 0)} ngày</b></td><td>{p.seniority?.years || 0} năm</td><td className="pr-3 text-right"><button onClick={() => openProfile(p)} className="rounded-lg bg-cyan-600 px-3 py-1.5 text-xs font-bold text-white">Chi tiết</button></td></tr>)}</tbody></table></div>
       </main> : <main className="space-y-5 p-5">
         <section className="rounded-2xl border border-cyan-100 bg-white p-4"><h3 className="mb-4 font-black text-cyan-800">Thông tin tài khoản và cá nhân</h3><div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4"><label><span className={labelClass}>Liên kết tài khoản</span><select value={editor.userId || ""} onChange={(e) => setEditor({ ...editor, userId: e.target.value || null })} className={inputClass}><option value="">Không có tài khoản</option>{profileUsers.map((u) => <option key={u._id} value={u._id}>{u.code || "--"} - {u.fullName}</option>)}</select></label><Field label="MSNV" value={editor.employeeCode} onChange={(v) => setEditor({ ...editor, employeeCode: v })} /><Field label="Họ và tên" value={editor.personal.fullName} onChange={(v) => setNested("personal", "fullName", v)} /><SelectField label="Giới tính" value={editor.personal.gender} onChange={(v) => setNested("personal", "gender", v)} options={[["unknown", "Chưa xác định"], ["male", "Nam"], ["female", "Nữ"], ["other", "Khác"]]} /><Field label="Ngày sinh" type="date" value={editor.personal.dateOfBirth} onChange={(v) => setNested("personal", "dateOfBirth", v)} /><Field label="SĐT cá nhân" value={editor.personal.personalPhone} onChange={(v) => setNested("personal", "personalPhone", v)} /><Field label="Dân tộc" value={editor.personal.ethnicity} onChange={(v) => setNested("personal", "ethnicity", v)} /><SelectField label="Hôn nhân" value={editor.personal.maritalStatus} onChange={(v) => setNested("personal", "maritalStatus", v)} options={[["unknown", "Chưa xác định"], ["single", "Độc thân"], ["married", "Đã kết hôn"], ["divorced", "Ly hôn"], ["widowed", "Góa"]]} /></div></section>
-        <section className="rounded-2xl border border-cyan-100 bg-white p-4"><h3 className="mb-4 font-black text-cyan-800">CCCD, BHXH và công việc</h3><div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4"><Field label="Số CCCD/CMND" value={editor.identityDocument.number} onChange={(v) => setNested("identityDocument", "number", v)} /><Field label="Ngày cấp" type="date" value={editor.identityDocument.issuedDate} onChange={(v) => setNested("identityDocument", "issuedDate", v)} /><Field label="Nơi cấp" value={editor.identityDocument.issuedPlace} onChange={(v) => setNested("identityDocument", "issuedPlace", v)} /><Field label="Mã số BHXH" value={editor.socialInsuranceNumber} onChange={(v) => setEditor({ ...editor, socialInsuranceNumber: v })} /><Field label="Công ty" value={editor.employment.company} onChange={(v) => setNested("employment", "company", v)} /><Field label="Bộ phận" value={editor.employment.department} onChange={(v) => setNested("employment", "department", v)} /><Field label="Chức danh" value={editor.employment.jobTitle} onChange={(v) => setNested("employment", "jobTitle", v)} /><Field label="Ngày vào làm" type="date" value={editor.employment.startDate} onChange={(v) => setNested("employment", "startDate", v)} /><Field label="Ngày chính thức" type="date" value={editor.employment.officialDate} onChange={(v) => setNested("employment", "officialDate", v)} /><SelectField label="Tình trạng" value={editor.employment.employmentStatus} onChange={(v) => setNested("employment", "employmentStatus", v)} options={[["unknown", "Chưa xác định"], ["probation", "Thử việc"], ["official", "Chính thức"], ["leave", "Tạm nghỉ"], ["resigned", "Nghỉ việc"], ["terminated", "Chấm dứt"]]} /><SelectField label="Hiện trạng" value={editor.employment.currentState} onChange={(v) => setNested("employment", "currentState", v)} options={[["active", "Đang hoạt động"], ["inactive", "Ngừng hoạt động"], ["archived", "Lưu trữ"]]} /><Field label="Học vấn" value={editor.education.level} onChange={(v) => setNested("education", "level", v)} /><Field label="Ngành nghề" value={editor.education.major} onChange={(v) => setNested("education", "major", v)} /></div></section>
+        <section className="rounded-2xl border border-cyan-100 bg-white p-4"><h3 className="mb-4 font-black text-cyan-800">CCCD, BHXH và công việc</h3><div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4"><Field label="Số CCCD/CMND" value={editor.identityDocument.number} onChange={(v) => setNested("identityDocument", "number", v)} /><Field label="Ngày cấp" type="date" value={editor.identityDocument.issuedDate} onChange={(v) => setNested("identityDocument", "issuedDate", v)} /><Field label="Nơi cấp" value={editor.identityDocument.issuedPlace} onChange={(v) => setNested("identityDocument", "issuedPlace", v)} /><Field label="Mã số BHXH" value={editor.socialInsuranceNumber} onChange={(v) => setEditor({ ...editor, socialInsuranceNumber: v })} /><SelectField label="Công ty" value={editor.employment.company} onChange={(v) => setNested("employment", "company", v)} options={COMPANY_OPTIONS} /><Field label="Bộ phận" value={editor.employment.department} onChange={(v) => setNested("employment", "department", v)} /><Field label="Chức danh" value={editor.employment.jobTitle} onChange={(v) => setNested("employment", "jobTitle", v)} /><Field label="Ngày vào làm" type="date" value={editor.employment.startDate} onChange={(v) => setNested("employment", "startDate", v)} /><Field label="Ngày chính thức" type="date" value={editor.employment.officialDate} onChange={(v) => setNested("employment", "officialDate", v)} /><SelectField label="Tình trạng" value={editor.employment.employmentStatus} onChange={(v) => setNested("employment", "employmentStatus", v)} options={[["unknown", "Chưa xác định"], ["probation", "Thử việc"], ["official", "Chính thức"], ["leave", "Tạm nghỉ"], ["resigned", "Nghỉ việc"], ["terminated", "Chấm dứt"]]} /><Field label="Học vấn" value={editor.education.level} onChange={(v) => setNested("education", "level", v)} /><Field label="Ngành nghề" value={editor.education.major} onChange={(v) => setNested("education", "major", v)} /></div></section>
+        <section className="rounded-2xl border border-emerald-100 bg-white p-4"><h3 className="mb-1 font-black text-emerald-800">Lương và phụ cấp</h3><p className="mb-4 text-xs text-slate-500">Thông tin này sẽ được tự động điền khi tạo hợp đồng lao động mới.</p><div className="grid gap-3 md:grid-cols-2"><Field label="Lương căn bản" type="number" value={editor.compensation.baseSalary} onChange={(v) => setNested("compensation", "baseSalary", Math.max(0, Number(v) || 0))} /><Field label="Phụ cấp" value={editor.compensation.allowances} onChange={(v) => setNested("compensation", "allowances", v)} /></div></section>
         <section className="rounded-2xl border border-cyan-100 bg-white p-4"><h3 className="mb-4 font-black text-cyan-800">Nguyên quán và hộ khẩu thường trú</h3><div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4"><Field label="Nguyên quán xã/phường" value={editor.placeOfOrigin.ward} onChange={(v) => setNested("placeOfOrigin", "ward", v)} /><Field label="Nguyên quán tỉnh/TP" value={editor.placeOfOrigin.province} onChange={(v) => setNested("placeOfOrigin", "province", v)} /><Field label="Ấp/đường/khóm" value={editor.permanentAddress.street} onChange={(v) => setNested("permanentAddress", "street", v)} /><Field label="Phường/xã" value={editor.permanentAddress.ward} onChange={(v) => setNested("permanentAddress", "ward", v)} /><Field label="Quận/huyện" value={editor.permanentAddress.district} onChange={(v) => setNested("permanentAddress", "district", v)} /><Field label="Tỉnh/TP" value={editor.permanentAddress.province} onChange={(v) => setNested("permanentAddress", "province", v)} /><div className="md:col-span-2"><Field label="HKTT đầy đủ (tự tính)" disabled value={[editor.permanentAddress.street, editor.permanentAddress.ward, editor.permanentAddress.district, editor.permanentAddress.province].filter(Boolean).join(", ")} onChange={() => { }} /></div></div></section>
         <section className="rounded-2xl border border-emerald-200 bg-emerald-50/40 p-4">
           <div className="mb-4"><h3 className="font-black text-emerald-800">Quản lý phép năm {editor.annualLeaveBalance.year}</h3><p className="text-xs text-slate-500">Mỗi tháng dương lịch làm đủ được cộng 1 ngày vào đầu tháng kế tiếp; số còn lại tự động giảm khi duyệt đơn và được hoàn khi hủy đơn.</p></div>
           <div className="max-w-sm"><Field label="Số ngày phép năm" type="number" immediate value={editor.annualLeaveBalance.remainingDays} onChange={(v) => setNested("annualLeaveBalance", "remainingDays", Number(v))} /></div>
         </section>
         {editor._id && <section className="rounded-2xl border border-cyan-100 bg-white p-4">
-          <div className="mb-4 flex flex-wrap items-center gap-3"><div className="mr-auto"><h3 className="font-black text-cyan-800">Hợp đồng và phụ lục</h3><p className="text-xs text-slate-500">Chọn mẫu phù hợp theo bộ phận/chức danh; hợp đồng giữ snapshot của phiên bản đã dùng · {editor.contracts?.length || 0} hợp đồng</p></div>{canProfileAction("edit") && <button onClick={() => setContractEditor(clone(emptyContract))} className="flex items-center gap-2 rounded-xl bg-cyan-600 px-3 py-2 text-sm font-bold text-white"><Plus size={15} /> Thêm hợp đồng</button>}</div>
+          <div className="mb-4 flex flex-wrap items-center gap-3"><div className="mr-auto"><h3 className="font-black text-cyan-800">Hợp đồng và phụ lục</h3><p className="text-xs text-slate-500">Chọn mẫu phù hợp theo bộ phận/chức danh; hợp đồng giữ snapshot của phiên bản đã dùng · {editor.contracts?.length || 0} hợp đồng</p></div>{canProfileAction("edit") && <button onClick={openNewContract} className="flex items-center gap-2 rounded-xl bg-cyan-600 px-3 py-2 text-sm font-bold text-white"><Plus size={15} /> Thêm hợp đồng</button>}</div>
           {editor.contracts?.length ? <div className="grid gap-3 lg:grid-cols-2">{editor.contracts.map((contract) => <article key={contract._id} className="overflow-hidden rounded-xl border border-cyan-100 bg-white shadow-sm">
             <div className="flex items-start gap-3 p-3"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-cyan-50 text-cyan-700"><FileText size={18} /></span><div className="mr-auto min-w-0"><div className="flex flex-wrap items-center gap-2"><b className="truncate text-slate-800">{contract.contractNumber}</b><span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${contractStatusTone(contract.status)}`}>{CONTRACT_STATUS_LABELS[contract.status] || contract.status}</span>{contract.templateName && <span className="rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-bold text-violet-700">{contract.templateName} · v{contract.templateVersion}</span>}</div><div className="mt-1 text-xs text-slate-500">{exportContractType[contract.contractType] || contract.contractType} · {dateInput(contract.effectiveDate) || "Chưa có ngày hiệu lực"} → {contract.contractType === "indefinite" ? "Không thời hạn" : dateInput(contract.expiryDate) || "Chưa có ngày hết hạn"}</div></div><span className="shrink-0 rounded-lg bg-cyan-50 px-2 py-1 text-xs font-bold text-cyan-700">{contract.appendices?.length || 0} phụ lục</span></div>
             <div className="flex flex-wrap items-center gap-2 border-t border-cyan-50 bg-slate-50/70 p-2.5">{canProfileAction("edit") && <><button onClick={() => openContractEditor(contract)} className="rounded-lg border border-cyan-200 bg-white px-2.5 py-1.5 text-xs font-bold text-cyan-700 hover:bg-cyan-50">Sửa HĐ & phụ lục</button><button disabled={deletingContractId === contract._id} onClick={() => deleteContract(contract)} className="ml-auto flex items-center gap-1 rounded-lg border border-red-200 bg-white px-2.5 py-1.5 text-xs font-bold text-red-700 hover:bg-red-50 disabled:opacity-50"><Trash2 size={13} /> {deletingContractId === contract._id ? "Đang xóa..." : "Xóa HĐ"}</button></>}{canProfileAction("export") && <><button onClick={() => exportContract(contract, "docx")} className="rounded-lg bg-blue-50 px-2.5 py-1.5 text-xs font-bold text-blue-700 hover:bg-blue-100">{contractTemplates.some((item) => item._id === contract.templateId && item.sourceDocx?.originalName) ? "Word gốc đã điền" : "Word"}</button><button onClick={() => exportContract(contract, "pdf")} className="rounded-lg bg-red-50 px-2.5 py-1.5 text-xs font-bold text-red-700 hover:bg-red-100">PDF</button></>}</div>
