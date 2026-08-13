@@ -66,10 +66,7 @@ const attachKiotRetryInterceptor = (client) => {
       }
 
       if (KIOT_RETRY_STATUS_CODES.has(status)) {
-        const friendlyMessage = getFriendlyKiotErrorMessage(
-          status,
-          retryCount,
-        );
+        const friendlyMessage = getFriendlyKiotErrorMessage(status, retryCount);
         error.userMessage = friendlyMessage;
         error.message = friendlyMessage;
       }
@@ -1405,6 +1402,25 @@ export async function getEInVoicesLog({ page = 1, limit = 50 } = {}) {
         limit,
       },
     });
+
+    return response.data;
+  } catch (error) {
+    const message =
+      error.userMessage ||
+      error.response?.data?.error?.ResponseStatus?.Message ||
+      error.response?.data?.ResponseStatus?.Message ||
+      error.response?.data?.message ||
+      error.message;
+
+    throw new Error(`Failed to call administrative area API: ${message}`);
+  }
+}
+
+export async function getTaxCodeCompanyInfo(taxCode) {
+  try {
+    const url = `https://api.vietqr.io/v2/business/${taxCode}`;
+
+    const response = await axios.get(url);
 
     return response.data;
   } catch (error) {

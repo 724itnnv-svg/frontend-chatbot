@@ -32,6 +32,7 @@ import {
   getIdLocations,
   getIdWards,
   getFullIdProvinceDistrictWard,
+  getTaxCodeCompanyInfo,
 } from "../services/cashflowService/kiotService";
 import { autoConvertAddress2 } from "../address2/address2Api";
 import { useAuth } from "../context/AuthContext";
@@ -472,10 +473,28 @@ function parseVietnamAddressParts(value = "") {
     .map((part) => part.trim())
     .filter(Boolean);
 
+  const provinceIndex = parts.length - 1;
+  const wardIndex = parts.findIndex((part) =>
+    /^(Phường|Xã|Thị trấn)\s+/iu.test(part),
+  );
+  const districtIndex = parts.findIndex((part) =>
+    /^(Quận|Huyện|Thị xã|Thành phố)\s+/iu.test(part),
+  );
+  const administrativeIndexes = [wardIndex, districtIndex, provinceIndex]
+    .filter((index) => index >= 0)
+    .sort((left, right) => left - right);
+  const firstAdministrativeIndex = administrativeIndexes[0] ?? 1;
+
   return {
-    street: parts[0] || "",
-    ward: parts.length >= 4 ? parts[parts.length - 3] : parts[1] || "",
-    district: parts.length >= 4 ? parts[parts.length - 2] : "",
+    street:
+      parts.slice(0, firstAdministrativeIndex).join(", ") || parts[0] || "",
+    ward:
+      (wardIndex >= 0 ? parts[wardIndex] : "") ||
+      (parts.length >= 4 ? parts[parts.length - 3] : parts[1] || ""),
+    district:
+      (districtIndex >= 0 && districtIndex !== provinceIndex
+        ? parts[districtIndex]
+        : "") || (parts.length >= 4 ? parts[parts.length - 2] : ""),
     province: parts[parts.length - 1] || "",
   };
 }
@@ -717,6 +736,7 @@ async function buildNewCustomerPayloadV2({
   accessPrivateToken,
   matchedKiotUser,
   taxCode = "",
+  taxCompanyInfo = null,
   invoiceAddressDetails: prefetchedInvoiceAddressDetails = null,
 }) {
   void parseAddressParts;
@@ -726,7 +746,12 @@ async function buildNewCustomerPayloadV2({
   const customerName = String(parsed.customerName || "").trim();
   const phoneNumber = String(parsed.phoneNumber || "").trim();
   const oldAddress = String(parsed.oldAddress || "").trim();
-  let newAddress = String(parsed.newAddress || "").trim();
+  const isAgency = String(customerType || "").toLowerCase() === "dai_ly";
+  const taxCompanyName = String(taxCompanyInfo?.name || "").trim();
+  const taxCompanyAddress = String(taxCompanyInfo?.address || "").trim();
+  let newAddress = String(
+    (isAgency && taxCompanyAddress) || parsed.newAddress || "",
+  ).trim();
   if (!newAddress && oldAddress) {
     const convertedResponse = await autoConvertAddress2(oldAddress);
     newAddress = extractConvertedAddress(convertedResponse);
@@ -736,16 +761,17 @@ async function buildNewCustomerPayloadV2({
       );
     }
   }
-  const isAgency = String(customerType || "").toLowerCase() === "dai_ly";
   const retailerConfig = getRetailerConfig(retailer);
   const branchId = retailerConfig?.branchId ?? null;
   const displayName = customerName || phoneNumber;
   const invoiceName = isAgency ? displayName : displayName || "Khách lẻ";
-  const customerAddress = oldAddress || newAddress;
+  const customerAddress = isAgency
+    ? newAddress || oldAddress
+    : oldAddress || newAddress;
   const invoiceAddress = newAddress || oldAddress;
   const customerAddressParts = parseVietnamAddressParts(customerAddress);
   const invoiceAddressDetails =
-    prefetchedInvoiceAddressDetails ??
+    (!taxCompanyAddress ? prefetchedInvoiceAddressDetails : null) ??
     (await resolveAdministrativeAreaDetails({
       retailer,
       accessPrivateToken,
@@ -895,7 +921,7 @@ async function buildNewCustomerPayloadV2({
         ? [{ GroupId: selectedGroupId }]
         : [],
       TaxCode: isAgency ? String(taxCode || "").trim() : "",
-      Organization: isAgency ? customerName : "",
+      Organization: isAgency ? taxCompanyName || customerName : "",
       Uuid:
         globalThis?.crypto?.randomUUID?.() ||
         `tmp-${Date.now()}-${Math.random().toString(16).slice(2)}`,
@@ -3274,6 +3300,12 @@ export default function TaoDonHang() {
   );
   const [customerType, setCustomerType] = useState("khach_le");
   const [agencyTaxCode, setAgencyTaxCode] = useState("");
+  const [agencyTaxInfo, setAgencyTaxInfo] = useState({
+    status: "idle",
+    taxCode: "",
+    data: null,
+    error: "",
+  });
   const [agencyDescription, setAgencyDescription] = useState("");
   const [rawText, setRawText] = useState(SAMPLE_TEXT);
   const [copied, setCopied] = useState(false);
@@ -3354,6 +3386,79 @@ export default function TaoDonHang() {
       setCustomerType(customerTypeOptions[0]?.value || "");
     }
   }, [customerType, customerTypeOptions]);
+
+  useEffect(() => {
+    let active = true;
+    let timerId = null;
+    const taxCode = String(agencyTaxCode || "").trim();
+
+    if (customerType !== "dai_ly" || !taxCode) {
+      setAgencyTaxInfo({
+        status: "idle",
+        taxCode: "",
+        data: null,
+        error: "",
+      });
+      return () => {
+        active = false;
+      };
+    }
+
+    setAgencyTaxInfo({
+      status: "waiting",
+      taxCode,
+      data: null,
+      error: "",
+    });
+
+    timerId = window.setTimeout(async () => {
+      if (!active) return;
+      setAgencyTaxInfo({
+        status: "loading",
+        taxCode,
+        data: null,
+        error: "",
+      });
+
+      try {
+        const response = await getTaxCodeCompanyInfo(taxCode);
+        if (!active) return;
+
+        if (String(response?.code || "") === "00" && response?.data) {
+          setAgencyTaxInfo({
+            status: "success",
+            taxCode,
+            data: response.data,
+            error: "",
+          });
+        } else {
+          setAgencyTaxInfo({
+            status: "error",
+            taxCode,
+            data: null,
+            error:
+              String(response?.desc || "").trim() ||
+              "Không tìm thấy thông tin đại lý theo mã số thuế này.",
+          });
+        }
+      } catch (error) {
+        if (!active) return;
+        setAgencyTaxInfo({
+          status: "error",
+          taxCode,
+          data: null,
+          error:
+            error?.message ||
+            "Không kiểm tra được thông tin đại lý theo mã số thuế.",
+        });
+      }
+    }, 700);
+
+    return () => {
+      active = false;
+      if (timerId !== null) window.clearTimeout(timerId);
+    };
+  }, [agencyTaxCode, customerType]);
 
   const parsed = useMemo(() => parseRawOrder(rawText), [rawText]);
   const orderPreparationKey = useMemo(
@@ -4132,6 +4237,43 @@ export default function TaoDonHang() {
           "loading",
           "Chưa có khách hàng, đang tạo mới...",
         );
+        let taxCompanyInfo = null;
+        if (
+          String(customerType || "").toLowerCase() === "dai_ly" &&
+          String(agencyTaxCode || "").trim()
+        ) {
+          const normalizedTaxCode = String(agencyTaxCode).trim();
+          if (
+            agencyTaxInfo.status === "success" &&
+            agencyTaxInfo.taxCode === normalizedTaxCode &&
+            agencyTaxInfo.data
+          ) {
+            taxCompanyInfo = agencyTaxInfo.data;
+          } else {
+            try {
+              updateCreateOrderProgress(
+                "customer",
+                "loading",
+                "Đang lấy thông tin đại lý theo mã số thuế...",
+              );
+              const taxCompanyResponse =
+                await getTaxCodeCompanyInfo(normalizedTaxCode);
+              if (
+                String(taxCompanyResponse?.code || "") === "00" &&
+                taxCompanyResponse?.data
+              ) {
+                taxCompanyInfo = taxCompanyResponse.data;
+              } else {
+                console.warn(
+                  "Tax company API did not return successful data:",
+                  taxCompanyResponse,
+                );
+              }
+            } catch (taxCompanyError) {
+              console.error("getTaxCodeCompanyInfo error:", taxCompanyError);
+            }
+          }
+        }
         const payload = await buildNewCustomerPayloadV2({
           parsed: effectiveParsed,
           selectedGroupId: targetGroup?.Id || targetGroup?.GroupId || null,
@@ -4140,6 +4282,7 @@ export default function TaoDonHang() {
           accessPrivateToken,
           matchedKiotUser,
           taxCode: agencyTaxCode,
+          taxCompanyInfo,
           invoiceAddressDetails: orderPreparation.addressDetails.get(
             String(
               effectiveParsed.newAddress || effectiveParsed.oldAddress || "",
@@ -4539,22 +4682,80 @@ export default function TaoDonHang() {
               ) : null}
 
               {customerType === "dai_ly" ? (
-                <label className="block space-y-2">
-                  <span className="text-xs font-semibold text-slate-600">
-                    Mã số thuế đại lý
-                  </span>
-                  <input
-                    type="text"
-                    value={agencyTaxCode}
-                    onChange={(event) => setAgencyTaxCode(event.target.value)}
-                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none transition focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100"
-                    placeholder="Nhập TaxCode..."
-                    autoComplete="off"
-                  />
-                  <span className="block text-[11px] text-slate-500">
-                    Mã này sẽ được dùng khi hệ thống cần tạo đại lý mới.
-                  </span>
-                </label>
+                <div className="space-y-3">
+                  <label className="block space-y-2">
+                    <span className="text-xs font-semibold text-slate-600">
+                      Mã số thuế đại lý
+                    </span>
+                    <input
+                      type="text"
+                      value={agencyTaxCode}
+                      onChange={(event) => setAgencyTaxCode(event.target.value)}
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none transition focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100"
+                      placeholder="Nhập TaxCode..."
+                      autoComplete="off"
+                    />
+                    <span className="block text-[11px] text-slate-500">
+                      Nhập MST để kiểm tra thông tin pháp lý của đại lý.
+                    </span>
+                  </label>
+
+                  {String(agencyTaxCode || "").trim() ? (
+                    <div
+                      className={`rounded-2xl border px-4 py-3 ${
+                        agencyTaxInfo.status === "success"
+                          ? "border-emerald-200 bg-emerald-50/80"
+                          : agencyTaxInfo.status === "error"
+                            ? "border-rose-200 bg-rose-50/80"
+                            : "border-cyan-200 bg-cyan-50/70"
+                      }`}
+                      aria-live="polite"
+                    >
+                      <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">
+                        Thông tin đại lý theo MST
+                      </div>
+
+                      {agencyTaxInfo.status === "success" ? (
+                        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                          <FieldCard
+                            label="Mã số thuế"
+                            value={agencyTaxInfo.data?.id || agencyTaxInfo.taxCode}
+                          />
+                          <FieldCard
+                            label="Trạng thái"
+                            value={agencyTaxInfo.data?.status}
+                          />
+                          <div className="sm:col-span-2">
+                            <FieldCard
+                              label="Tên pháp lý"
+                              value={agencyTaxInfo.data?.name}
+                            />
+                          </div>
+                          <div className="sm:col-span-2">
+                            <FieldCard
+                              label="Địa chỉ đăng ký"
+                              value={agencyTaxInfo.data?.address}
+                            />
+                          </div>
+                        </div>
+                      ) : agencyTaxInfo.status === "error" ? (
+                        <div className="mt-2 flex items-start gap-2 text-sm text-rose-700">
+                          <XCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                          <span>{agencyTaxInfo.error}</span>
+                        </div>
+                      ) : (
+                        <div className="mt-2 flex items-center gap-2 text-sm text-cyan-700">
+                          <LoaderCircle className="h-4 w-4 animate-spin" />
+                          <span>
+                            {agencyTaxInfo.status === "waiting"
+                              ? "Đang chờ nhập xong mã số thuế..."
+                              : "Đang kiểm tra thông tin đại lý..."}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  ) : null}
+                </div>
               ) : null}
 
               <label className="block space-y-2">
