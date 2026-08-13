@@ -501,6 +501,10 @@ function getUserName(user) {
   return user?.fullName || user?.name || user?.email || user?._id || "-";
 }
 
+function isApprovedUser(user) {
+  return Number(user?.approveStatus) === 1;
+}
+
 function getRecordUserKey(record) {
   return record?.userId?._id || record?.userId || record?.user?._id || record?.userName || record?._id;
 }
@@ -874,7 +878,8 @@ export default function AttendanceManager() {
         api.get("/attendance/employees"),
         api.get("/work-locations"),
       ]);
-      setUsers(usersRes.data?.data || []);
+      const employeeOptions = Array.isArray(usersRes.data?.data) ? usersRes.data.data : [];
+      setUsers(employeeOptions.filter(isApprovedUser));
       setLocations(locationsRes.data?.data || []);
     } catch {
       showFlash(false, "Không thể tải danh sách nhân viên hoặc vị trí.");
@@ -1890,7 +1895,6 @@ export default function AttendanceManager() {
     const keyword = searchUser.trim().toLowerCase();
     const selectedTeam = normalizeTeam(teamFilter);
     const employees = [];
-    const seen = new Set();
     const matchesAutoFilter = (employee) => {
       if (overviewAutoFilter === "all") return true;
       const autoSetting = autoSettingsByUser.get(String(employee.id)) || autoSettingsByUser.get(employee.name);
@@ -1906,25 +1910,11 @@ export default function AttendanceManager() {
       if (keyword && !`${name} ${teamId}`.toLowerCase().includes(keyword)) return;
       const employee = { id, name, teamId };
       if (!matchesAutoFilter(employee)) return;
-      seen.add(id);
-      employees.push(employee);
-    });
-
-    overviewRecords.forEach((record) => {
-      const id = getRecordUserKey(record);
-      if (!id || seen.has(id)) return;
-      const name = record.userName || "-";
-      const teamId = normalizeTeam(record.teamId);
-      if (selectedTeam && teamId !== selectedTeam) return;
-      if (keyword && !`${name} ${teamId}`.toLowerCase().includes(keyword)) return;
-      const employee = { id, name, teamId };
-      if (!matchesAutoFilter(employee)) return;
-      seen.add(id);
       employees.push(employee);
     });
 
     return employees.sort((a, b) => a.name.localeCompare(b.name, "vi"));
-  }, [autoSettingsByUser, overviewAutoFilter, overviewRecords, searchUser, teamFilter, users]);
+  }, [autoSettingsByUser, overviewAutoFilter, searchUser, teamFilter, users]);
 
   const overviewStats = useMemo(() => {
     let present = 0;
