@@ -22,6 +22,7 @@ import {
   RefreshCcw,
   ReceiptText,
   Send,
+  Target,
   Trash2,
   Upload,
   Wallet,
@@ -35,6 +36,7 @@ import { AndroidLocationSettings } from "../../utils/androidLocationSettings";
 import { canAccessScreen, hasFullAccess } from "../../utils/screenAccess";
 import { apiUrl, getApiOrigin } from "../../api/baseUrl";
 import { getDefaultPayrollViewPeriod } from "../../utils/payrollPeriod";
+import KpiSelfAssessment from "./KpiSelfAssessment";
 
 const TONE = {
   emerald: "border-emerald-200 bg-emerald-50 text-emerald-700",
@@ -55,6 +57,7 @@ const ATTENDANCE_TABS = [
   { id: "history", label: "Lịch sử chấm công", Icon: CalendarDays },
   { id: "leave", label: "Xin nghỉ phép", Icon: FileText },
   { id: "advance", label: "Ứng lương", Icon: HandCoins },
+  { id: "kpi", label: "Chấm điểm KPI", Icon: Target },
   { id: "payroll", label: "Lương của tôi", Icon: Wallet },
 ];
 const DEFAULT_ATTENDANCE_TAB = "attendance";
@@ -68,6 +71,9 @@ const USER_NOTIFICATION_TYPES = [
   "salary-advance-paid",
   "salary-advance-cancelled",
   "salary-advance-cancellation-rejected",
+  "kpi-assigned",
+  "kpi-revision-requested",
+  "kpi-approved",
 ];
 
 const SHIFT_WINDOWS = {
@@ -1827,6 +1833,10 @@ export default function AttendancePage() {
       await loadAdvanceRequests();
       return;
     }
+    if (activeTab === "kpi") {
+      window.dispatchEvent(new Event("kpi:refresh"));
+      return;
+    }
     if (!gps) {
       await getGPS();
     }
@@ -1950,7 +1960,7 @@ export default function AttendancePage() {
     setNotificationHistory((current) => current.map((item) => item._id === notification._id ? { ...item, isRead: true, readAt: new Date().toISOString() } : item));
     api.patch(`/notifications/${notification._id}/read`).catch(() => { });
     setShowNotificationCenter(false);
-    changeTab(notification.type.startsWith("salary-advance-") ? "advance" : "leave");
+    changeTab(notification.type.startsWith("salary-advance-") ? "advance" : notification.type.startsWith("kpi-") ? "kpi" : "leave");
   }
 
   async function markAllUserNotificationsRead() {
@@ -3190,6 +3200,7 @@ export default function AttendancePage() {
               </div>
             </div>
           )}
+          {activeTab === "kpi" && <KpiSelfAssessment />}
           {activeTab === "payroll" && (
             <div className="space-y-4">
               <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
