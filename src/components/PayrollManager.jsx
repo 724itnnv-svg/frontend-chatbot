@@ -1399,6 +1399,7 @@ export default function PayrollManager() {
   const [isCloning, setIsCloning] = useState(false);
   const [isDeletingMonth, setIsDeletingMonth] = useState(false);
   const [periodLocked, setPeriodLocked] = useState(false);
+  const [temporaryUnlockUntil, setTemporaryUnlockUntil] = useState(null);
   const [lockLoading, setLockLoading] = useState(false);
   const [attendanceHoursPerDay, setAttendanceHoursPerDay] = useState(8);
   const [showAttendanceSync, setShowAttendanceSync] = useState(false);
@@ -1683,9 +1684,11 @@ export default function PayrollManager() {
       const data = await res.json();
       if (!res.ok || data?.success === false) throw new Error(data?.message || "Không tải được trạng thái khóa bảng lương");
       setPeriodLocked(data.isLocked === true);
+      setTemporaryUnlockUntil(data.isLocked ? null : data.data?.temporarilyUnlockedUntil || null);
     } catch (error) {
       console.error(error);
       setPeriodLocked(true);
+      setTemporaryUnlockUntil(null);
       setMessage(error.message || "Không tải được trạng thái khóa bảng lương");
     } finally {
       setLockLoading(false);
@@ -1812,6 +1815,18 @@ export default function PayrollManager() {
     setShowCommissionImport(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [period, canViewPayroll]);
+
+  useEffect(() => {
+    if (periodLocked || !temporaryUnlockUntil) return undefined;
+    const delay = new Date(temporaryUnlockUntil).getTime() - Date.now();
+    if (delay <= 0) {
+      fetchPeriodLock();
+      return undefined;
+    }
+    const timer = window.setTimeout(fetchPeriodLock, delay + 1000);
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [periodLocked, temporaryUnlockUntil]);
 
   useEffect(() => {
     setPeriod(getDefaultPayrollPeriod());
@@ -2547,7 +2562,9 @@ export default function PayrollManager() {
     const nextLocked = !periodLocked;
     const prompt = nextLocked && dirtyRows.length
       ? `Khóa bảng lương ${formatPayrollPeriod(period)}? ${dirtyRows.length} dòng chưa lưu sẽ bị hủy.`
-      : `${nextLocked ? "Khóa" : "Mở khóa"} bảng lương ${formatPayrollPeriod(period)}?`;
+      : nextLocked
+        ? `Khóa bảng lương ${formatPayrollPeriod(period)}?`
+        : `Mở khóa tạm thời bảng lương ${formatPayrollPeriod(period)} đến hết hôm nay? Hệ thống sẽ tự khóa lại từ 00:00 ngày mai.`;
     if (!window.confirm(prompt)) return;
 
     setLockLoading(true);
@@ -2560,7 +2577,10 @@ export default function PayrollManager() {
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data?.success === false) throw new Error(data?.message || "Không cập nhật được trạng thái khóa");
       setPeriodLocked(data.isLocked === true);
-      setMessage(`Đã ${data.isLocked ? "khóa" : "mở khóa"} bảng lương ${formatPayrollPeriod(period)}.`);
+      setTemporaryUnlockUntil(data.isLocked ? null : data.data?.temporarilyUnlockedUntil || null);
+      setMessage(data.isLocked
+        ? `Đã khóa bảng lương ${formatPayrollPeriod(period)}.`
+        : `Đã mở khóa bảng lương ${formatPayrollPeriod(period)} đến hết hôm nay; hệ thống sẽ tự khóa lại từ 00:00 ngày mai.`);
       if (data.isLocked) await fetchPayroll();
     } catch (error) {
       console.error(error);
@@ -2741,7 +2761,7 @@ export default function PayrollManager() {
                 className={`inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-sm font-semibold disabled:opacity-50 ${periodLocked ? "border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100" : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"}`}
               >
                 {lockLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : periodLocked ? <Unlock className="h-4 w-4" /> : <Lock className="h-4 w-4" />}
-                {periodLocked ? "Mở khóa bảng lương" : "Khóa bảng lương"}
+                {periodLocked ? "Mở khóa đến hết hôm nay" : "Khóa bảng lương"}
               </button>
             )}
             <button
@@ -2864,6 +2884,11 @@ export default function PayrollManager() {
                 {periodLocked && (
                   <span className="inline-flex items-center gap-1 rounded-full bg-slate-800 px-2 py-0.5 text-[11px] font-bold text-white">
                     <Lock className="h-3.5 w-3.5" /> Đã khóa - chỉ xem
+                  </span>
+                )}
+                {!periodLocked && temporaryUnlockUntil && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-bold text-emerald-800">
+                    <Unlock className="h-3.5 w-3.5" /> Đang mở tạm thời - tự khóa 00:00 ngày mai
                   </span>
                 )}
               </div>
