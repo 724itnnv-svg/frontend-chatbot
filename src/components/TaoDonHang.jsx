@@ -3247,7 +3247,7 @@ function parseRawOrder(rawText = "") {
       .replace(/\s+/g, " ")
       .trim();
     const keyMatch = line.match(
-      /^(Khách hàng|SĐT|Số điện thoại|Địa chỉ cũ|Địa chỉ mới|Địa chỉ|ĐC CŨ|ĐC MỚI|NVC)\s*:\s*(.+)$/iu,
+      /^(Khách hàng|SĐT|Số điện thoại|Địa chỉ cũ|Địa chỉ mới|Địa chỉ|ĐC CŨ|ĐC MỚI|ĐC|DC|NVC)\s*:\s*(.+)$/iu,
     );
 
     if (keyMatch) {
@@ -3256,7 +3256,13 @@ function parseRawOrder(rawText = "") {
 
       if (key === "khách hàng") result.customerName = value;
       if (key === "sđt" || key === "số điện thoại") result.phoneNumber = value;
-      if (key === "địa chỉ cũ" || key === "địa chỉ" || key === "đc cũ") {
+      if (
+        key === "địa chỉ cũ" ||
+        key === "địa chỉ" ||
+        key === "đc cũ" ||
+        key === "đc" ||
+        key === "dc"
+      ) {
         result.oldAddress = value;
       }
       if (key === "địa chỉ mới" || key === "đc mới") {

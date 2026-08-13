@@ -1306,6 +1306,8 @@ export async function getListCustomer(
     params.append("NewCustomerLastTradingDateFilterType", "alltime");
     params.append("CustomerBirthDateFilterType", "alltime");
 
+    params.append("DebtFrom", "1000");
+    params.append("DebtTo", "10000000000");
     params.append("IsActive", "true");
 
     params.append("InvoiceCode", "");
@@ -1318,7 +1320,7 @@ export async function getListCustomer(
       typeof pagination === "number" ? { limit: pagination } : pagination;
     const safeLimit = Math.min(
       Math.max(Number(paginationOptions?.limit) || 50, 1),
-      500,
+      1000,
     );
     const safeSkip = Math.max(Number(paginationOptions?.skip) || 0, 0);
     const debtLevel = String(paginationOptions?.debtLevel || "all");
@@ -1336,16 +1338,22 @@ export async function getListCustomer(
     cutoff60Days.setDate(cutoff60Days.getDate() - 60);
     const cutoff30 = `datetime'${formatODataDate(cutoff30Days)}'`;
     const cutoff60 = `datetime'${formatODataDate(cutoff60Days)}'`;
-    const debtFilters = {
-      green: `Debt gt 0 and LastTradingDateByDebt ge ${cutoff30}`,
-      yellow: `Debt gt 0 and LastTradingDateByDebt ge ${cutoff60} and LastTradingDateByDebt lt ${cutoff30}`,
-      red: `Debt gt 0 and LastTradingDateByDebt lt ${cutoff60}`,
-      unknown: "Debt gt 0 and LastTradingDateByDebt eq null",
+    const debtRangeFilter =
+      "IsActive eq true and (Debt ge 1000 and Debt le 10000000000)";
+    const debtLevelFilters = {
+      green: `LastTradingDateByDebt ge ${cutoff30}`,
+      yellow: `LastTradingDateByDebt ge ${cutoff60} and LastTradingDateByDebt lt ${cutoff30}`,
+      red: `LastTradingDateByDebt lt ${cutoff60}`,
+      unknown: "LastTradingDateByDebt eq null",
     };
 
-    if (debtFilters[debtLevel]) {
-      params.append("$filter", debtFilters[debtLevel]);
-    }
+    const debtLevelFilter = debtLevelFilters[debtLevel];
+    params.append(
+      "$filter",
+      debtLevelFilter
+        ? `(${debtRangeFilter} and (${debtLevelFilter}))`
+        : `(${debtRangeFilter})`,
+    );
     params.append("$top", String(safeLimit));
     params.append("$skip", String(safeSkip));
 
