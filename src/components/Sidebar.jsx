@@ -48,6 +48,7 @@ import {
   CircleDollarSign,
   Eye,
   FileCheck2,
+  Target,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { canAccessScreen, hasFullAccess } from "../utils/screenAccess";
@@ -279,6 +280,12 @@ MENU_CONFIG.push({
   icon: Wallet,
 });
 MENU_CONFIG.push({
+  id: "kpi_management",
+  path: "/admin/kpi",
+  label: "Quản lý KPI",
+  icon: Target,
+});
+MENU_CONFIG.push({
   id: "salary_advance_management",
   path: "/admin/salary-advances",
   label: "Phiếu ứng lương",
@@ -323,6 +330,7 @@ const MENU_GROUPS = [
       "approved_leave",
       "attendance_shifts",
       "attendance_locations",
+      "kpi_management",
       "payroll",
       "salary_advance_management",
       "notifications",
@@ -419,7 +427,8 @@ const Sidebar = memo(() => {
   );
   const [focusedIndex, setFocusedIndex] = useState(-1);
   const [openGroups, setOpenGroups] = useState({});
-  const [attendanceLeavePendingTotal, setAttendanceLeavePendingTotal] = useState(0);
+  const [attendanceLeavePendingTotal, setAttendanceLeavePendingTotal] =
+    useState(0);
   const [salaryAdvancePendingTotal, setSalaryAdvancePendingTotal] = useState(0);
   const [onlineUsers, setOnlineUsers] = useState([]);
   const [isPresenceConnected, setIsPresenceConnected] = useState(false);
@@ -433,7 +442,10 @@ const Sidebar = memo(() => {
 
   const isFullAdmin = hasFullAccess(user);
   const canViewAttendance = canAccessScreen(user, "attendance");
-  const canViewSalaryAdvances = canAccessScreen(user, "salary_advance_management");
+  const canViewSalaryAdvances = canAccessScreen(
+    user,
+    "salary_advance_management",
+  );
   const canViewOnlineUsers = canAccessScreen(user, "admin_dashboard");
   const presenceUserId = user?._id || user?.id || "";
 
@@ -487,7 +499,9 @@ const Sidebar = memo(() => {
       return;
     }
     try {
-      const response = await api.get("/attendance-leave-requests/pending-count");
+      const response = await api.get(
+        "/attendance-leave-requests/pending-count",
+      );
       setAttendanceLeavePendingTotal(Number(response.data?.total) || 0);
     } catch {
       // Bộ đếm nền không làm gián đoạn điều hướng sidebar.
@@ -501,10 +515,14 @@ const Sidebar = memo(() => {
     }
 
     const refreshWhenVisible = () => {
-      if (document.visibilityState === "visible") void loadAttendanceLeavePendingTotal();
+      if (document.visibilityState === "visible")
+        void loadAttendanceLeavePendingTotal();
     };
     void loadAttendanceLeavePendingTotal();
-    const intervalId = window.setInterval(loadAttendanceLeavePendingTotal, 30000);
+    const intervalId = window.setInterval(
+      loadAttendanceLeavePendingTotal,
+      30000,
+    );
     window.addEventListener("focus", loadAttendanceLeavePendingTotal);
     document.addEventListener("visibilitychange", refreshWhenVisible);
     return () => {
@@ -534,7 +552,8 @@ const Sidebar = memo(() => {
     }
 
     const refreshWhenVisible = () => {
-      if (document.visibilityState === "visible") void loadSalaryAdvancePendingTotal();
+      if (document.visibilityState === "visible")
+        void loadSalaryAdvancePendingTotal();
     };
     void loadSalaryAdvancePendingTotal();
     const intervalId = window.setInterval(loadSalaryAdvancePendingTotal, 30000);
@@ -684,7 +703,9 @@ const Sidebar = memo(() => {
                 </div>
               </div>
               {canViewOnlineUsers && (
-                <div className={`group/presence relative ml-auto flex-shrink-0 ${isCollapsed ? "md:hidden" : ""}`}>
+                <div
+                  className={`group/presence relative ml-auto flex-shrink-0 ${isCollapsed ? "md:hidden" : ""}`}
+                >
                   <button
                     type="button"
                     aria-label={`${onlineUsers.length} người đang hoạt động`}
@@ -700,10 +721,16 @@ const Sidebar = memo(() => {
                     <div className="overflow-hidden rounded-2xl border border-emerald-100 bg-white shadow-[0_18px_50px_rgba(15,23,42,0.18)]">
                       <div className="flex items-center justify-between border-b border-slate-100 bg-emerald-50/70 px-4 py-3">
                         <div>
-                          <div className="text-sm font-bold text-slate-800">Đang hoạt động</div>
-                          <div className="text-[11px] text-slate-500">Cập nhật theo thời gian thực</div>
+                          <div className="text-sm font-bold text-slate-800">
+                            Đang hoạt động
+                          </div>
+                          <div className="text-[11px] text-slate-500">
+                            Cập nhật theo thời gian thực
+                          </div>
                         </div>
-                        <span className={`h-2.5 w-2.5 rounded-full ${isPresenceConnected ? "bg-emerald-500" : "bg-slate-300"}`} />
+                        <span
+                          className={`h-2.5 w-2.5 rounded-full ${isPresenceConnected ? "bg-emerald-500" : "bg-slate-300"}`}
+                        />
                       </div>
 
                       <div className="max-h-72 overflow-y-auto p-2">
@@ -715,8 +742,12 @@ const Sidebar = memo(() => {
                           </div>
                         ) : (
                           onlineUsers.map((onlineUser) => {
-                            const name = onlineUser.fullName || onlineUser.email || "Người dùng";
-                            const initial = name.trim().charAt(0).toUpperCase() || "?";
+                            const name =
+                              onlineUser.fullName ||
+                              onlineUser.email ||
+                              "Người dùng";
+                            const initial =
+                              name.trim().charAt(0).toUpperCase() || "?";
                             return (
                               <div
                                 key={onlineUser.userId}
@@ -737,9 +768,13 @@ const Sidebar = memo(() => {
                                   <span className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-white bg-emerald-500" />
                                 </div>
                                 <div className="min-w-0 flex-1">
-                                  <div className="truncate text-sm font-semibold text-slate-800">{name}</div>
+                                  <div className="truncate text-sm font-semibold text-slate-800">
+                                    {name}
+                                  </div>
                                   <div className="truncate text-[11px] text-slate-500">
-                                    {[onlineUser.teamId, onlineUser.email].filter(Boolean).join(" · ") || "Đang online"}
+                                    {[onlineUser.teamId, onlineUser.email]
+                                      .filter(Boolean)
+                                      .join(" · ") || "Đang online"}
                                   </div>
                                 </div>
                               </div>
@@ -779,10 +814,11 @@ const Sidebar = memo(() => {
                 localStorage.setItem(ACTIVE_TAB_KEY, "profile");
                 setIsOpen(false);
               }}
-              className={`flex min-w-0 cursor-pointer items-center gap-3 rounded-2xl border bg-white/90 p-2 transition shadow-[0_12px_28px_rgba(8,145,178,0.10)] hover:border-cyan-200 hover:bg-cyan-50/60 ${isProfileActive
-                ? "border-cyan-200 ring-2 ring-cyan-100"
-                : "border-cyan-100"
-                } ${isCollapsed ? "md:justify-center md:gap-0" : ""}`}
+              className={`flex min-w-0 cursor-pointer items-center gap-3 rounded-2xl border bg-white/90 p-2 transition shadow-[0_12px_28px_rgba(8,145,178,0.10)] hover:border-cyan-200 hover:bg-cyan-50/60 ${
+                isProfileActive
+                  ? "border-cyan-200 ring-2 ring-cyan-100"
+                  : "border-cyan-100"
+              } ${isCollapsed ? "md:justify-center md:gap-0" : ""}`}
             >
               <img
                 alt="avatar"
@@ -838,10 +874,11 @@ const Sidebar = memo(() => {
                         [group.id]: !isGroupOpen,
                       }))
                     }
-                    className={`flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-xs font-bold transition ${groupActive
-                      ? "bg-cyan-50 text-cyan-950"
-                      : "text-slate-500 hover:bg-cyan-50/70 hover:text-cyan-900"
-                      } ${isCollapsed ? "md:justify-center" : ""}`}
+                    className={`flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-xs font-bold transition ${
+                      groupActive
+                        ? "bg-cyan-50 text-cyan-950"
+                        : "text-slate-500 hover:bg-cyan-50/70 hover:text-cyan-900"
+                    } ${isCollapsed ? "md:justify-center" : ""}`}
                     title={group.label}
                   >
                     <GroupIcon
@@ -871,14 +908,16 @@ const Sidebar = memo(() => {
                         );
                         const isFocused = focusedIndex === idx;
                         const Icon = m.icon;
-                        const badgeTotal = m.id === "attendance"
-                          ? attendanceLeavePendingTotal
-                          : m.id === "salary_advance_management"
-                            ? salaryAdvancePendingTotal
-                            : 0;
-                        const badgeLabel = m.id === "salary_advance_management"
-                          ? `${badgeTotal} phiếu ứng lương chờ xử lý`
-                          : `${badgeTotal} đơn nghỉ phép chờ xử lý`;
+                        const badgeTotal =
+                          m.id === "attendance"
+                            ? attendanceLeavePendingTotal
+                            : m.id === "salary_advance_management"
+                              ? salaryAdvancePendingTotal
+                              : 0;
+                        const badgeLabel =
+                          m.id === "salary_advance_management"
+                            ? `${badgeTotal} phiếu ứng lương chờ xử lý`
+                            : `${badgeTotal} đơn nghỉ phép chờ xử lý`;
 
                         return (
                           <NavLink
@@ -924,9 +963,11 @@ const Sidebar = memo(() => {
                                     {badgeTotal > 99 ? "99+" : badgeTotal}
                                   </span>
                                 )}
-                                {!isCollapsed && isActive && badgeTotal === 0 && (
-                                  <span className="ml-auto h-2 w-2 rounded-full bg-cyan-500 shadow-[0_0_12px_rgba(6,182,212,0.65)]" />
-                                )}
+                                {!isCollapsed &&
+                                  isActive &&
+                                  badgeTotal === 0 && (
+                                    <span className="ml-auto h-2 w-2 rounded-full bg-cyan-500 shadow-[0_0_12px_rgba(6,182,212,0.65)]" />
+                                  )}
                                 {!isCollapsed && isFocused && !isActive && (
                                   <span className="ml-auto text-[10px] text-slate-400">
                                     Enter
