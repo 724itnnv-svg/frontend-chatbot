@@ -950,9 +950,7 @@ function getCustomerProvinceName(customer = {}) {
   if (locationName) return locationName.split(" - ")[0].trim();
 
   return parseVietnamAddressParts(
-    customer?.AddressEInvoiceCombine ||
-      customer?.addressEInvoiceCombine ||
-      "",
+    customer?.AddressEInvoiceCombine || customer?.addressEInvoiceCombine || "",
   ).province;
 }
 
@@ -960,6 +958,40 @@ function normalizeProvinceForCompare(value = "") {
   return normalizeLookupText(value)
     .replace(/^(tinh|thanh pho|tp\.?)[\s.]+/iu, "")
     .trim();
+}
+
+function getCustomerTypeKey(customer = {}) {
+  const groupNames = [
+    customer?.Groups,
+    ...(Array.isArray(customer?.CustomerGroupNames)
+      ? customer.CustomerGroupNames
+      : []),
+  ]
+    .map(normalizeLookupText)
+    .join(" ");
+  if (groupNames.includes("dai ly")) return "dai_ly";
+  if (groupNames.includes("khach le")) return "khach_le";
+
+  const customerTypeName = normalizeLookupText(customer?.CustomerType || "");
+  if (customerTypeName.includes("cong ty")) return "dai_ly";
+  if (customerTypeName.includes("ca nhan")) return "khach_le";
+
+  if (Number(customer?.Type) === 1) return "dai_ly";
+  if (customer?.Type != null && Number(customer.Type) === 0) return "khach_le";
+
+  if (
+    normalizeLookupText(customer?.Name || customer?.CustomerName).startsWith(
+      "dl ",
+    )
+  ) {
+    return "dai_ly";
+  }
+
+  return customer?.Organization || customer?.TaxCode ? "dai_ly" : "khach_le";
+}
+
+function getCustomerTypeLabel(customerType = "") {
+  return customerType === "dai_ly" ? "Đại lý" : "Khách lẻ";
 }
 
 async function buildExistingCustomerAddressUpdatePayload({
@@ -1038,7 +1070,8 @@ async function buildExistingCustomerAddressUpdatePayload({
       customer?.ContactNumber ||
       customer?.CustomerContactNumber ||
       parsed?.phoneNumber,
-    customerName: customer?.Name || customer?.CustomerName || parsed?.customerName,
+    customerName:
+      customer?.Name || customer?.CustomerName || parsed?.customerName,
     newAddress,
     customerType,
   });
@@ -3454,8 +3487,10 @@ export default function TaoDonHang() {
     DEFAULT_GHN_REQUIRED_NOTE,
   );
   const [customerType, setCustomerType] = useState("khach_le");
-  const [updateCustomerWhenProvinceChanges, setUpdateCustomerWhenProvinceChanges] =
-    useState(false);
+  const [
+    updateCustomerWhenProvinceChanges,
+    setUpdateCustomerWhenProvinceChanges,
+  ] = useState(false);
   const [agencyTaxCode, setAgencyTaxCode] = useState("");
   const [agencyTaxInfo, setAgencyTaxInfo] = useState({
     status: "idle",
@@ -3653,6 +3688,17 @@ export default function TaoDonHang() {
       address: getCustomerCurrentAddress(customer),
     };
   }, [orderPreparation.customerRecord]);
+  const existingCustomerType = orderPreparation.customerRecord
+    ? getCustomerTypeKey(orderPreparation.customerRecord)
+    : "";
+  const selectedCustomerType = ["dai_ly", "khach_le"].includes(customerType)
+    ? customerType
+    : "";
+  const customerTypeWillChange = Boolean(
+    existingCustomerType &&
+    selectedCustomerType &&
+    existingCustomerType !== selectedCustomerType,
+  );
   const enteredNewAddress = normalizeDisplayText(parsed.newAddress);
   const predictedNewAddress =
     orderPreparation.key === orderPreparationKey
@@ -4348,6 +4394,30 @@ export default function TaoDonHang() {
 
     if (isCreatingOrder) return;
 
+    const foundCustomerType = orderPreparation.customerRecord
+      ? getCustomerTypeKey(orderPreparation.customerRecord)
+      : "";
+    const selectedCustomerType = ["dai_ly", "khach_le"].includes(customerType)
+      ? customerType
+      : "";
+    const willChangeCustomerType = Boolean(
+      foundCustomerType &&
+      selectedCustomerType &&
+      foundCustomerType !== selectedCustomerType,
+    );
+    if (willChangeCustomerType) {
+      const confirmed = window.confirm(
+        `Khách hàng hiện tại là ${getCustomerTypeLabel(
+          foundCustomerType,
+        )}. Bạn đang tạo đơn với loại ${getCustomerTypeLabel(
+          selectedCustomerType,
+        )} và hệ thống sẽ cập nhật thông tin khách hàng trên KiotViet. Bạn có chắc chắn muốn chuyển từ ${getCustomerTypeLabel(
+          foundCustomerType,
+        )} sang ${getCustomerTypeLabel(selectedCustomerType)} không?`,
+      );
+      if (!confirmed) return;
+    }
+
     const isViettelPost = isViettelPostShippingPartner(selectedShippingPartner);
     const stepIds = isViettelPost
       ? ["customer", "products", "address", "price", "invoice", "shipping"]
@@ -4396,20 +4466,128 @@ export default function TaoDonHang() {
           normalizeProvinceForCompare(nextProvince) !==
             normalizeProvinceForCompare(currentProvince);
 
-        if (hasProvinceChanged && updateCustomerWhenProvinceChanges) {
+        if (willChangeCustomerType) {
+          if (!targetGroup?.Id && !targetGroup?.GroupId) {
+            throw new Error(
+              `Không tìm thấy nhóm ${targetGroupName} để chuyển loại khách hàng.`,
+            );
+          }
+          updateCreateOrderProgress(
+            "customer",
+            "loading",
+            `Đang chuyển khách hàng từ ${getCustomerTypeLabel(
+              foundCustomerType,
+            )} sang ${getCustomerTypeLabel(selectedCustomerType)}...`,
+          );
+
+          let conversionTaxInfo = null;
+          if (selectedCustomerType === "dai_ly") {
+            const normalizedTaxCode = String(agencyTaxCode || "").trim();
+            if (
+              agencyTaxInfo.status === "success" &&
+              agencyTaxInfo.taxCode === normalizedTaxCode &&
+              agencyTaxInfo.data
+            ) {
+              conversionTaxInfo = agencyTaxInfo.data;
+            } else if (normalizedTaxCode) {
+              try {
+                const taxResponse =
+                  await getTaxCodeCompanyInfo(normalizedTaxCode);
+                if (
+                  String(taxResponse?.code || "") === "00" &&
+                  taxResponse?.data
+                ) {
+                  conversionTaxInfo = taxResponse.data;
+                }
+              } catch (taxCompanyError) {
+                console.error(
+                  "getTaxCodeCompanyInfo while changing customer type error:",
+                  taxCompanyError,
+                );
+              }
+            }
+          }
+
+          const conversionParsed = conversionTaxInfo?.address
+            ? { ...effectiveParsed, newAddress: conversionTaxInfo.address }
+            : effectiveParsed;
+          const updatePayload = await buildExistingCustomerAddressUpdatePayload(
+            {
+              customer: customerRecord,
+              parsed: conversionParsed,
+              customerType: selectedCustomerType,
+              retailer: selectedRetailerId,
+              accessPrivateToken,
+            },
+          );
+          const targetGroupId = targetGroup?.Id || targetGroup?.GroupId;
+          const organization =
+            selectedCustomerType === "dai_ly"
+              ? normalizeDisplayText(
+                  conversionTaxInfo?.name ||
+                    customerRecord?.Organization ||
+                    customerRecord?.Name ||
+                    effectiveParsed.customerName,
+                )
+              : "";
+          Object.assign(updatePayload, {
+            Type: selectedCustomerType === "dai_ly" ? 1 : 0,
+            CustomerType:
+              selectedCustomerType === "dai_ly" ? "Công ty" : "Cá nhân",
+            Organization: organization,
+            TaxCode:
+              selectedCustomerType === "dai_ly"
+                ? String(agencyTaxCode || "").trim()
+                : "",
+            Groups: targetGroupName,
+            CustomerGroupNames: [targetGroupName],
+            CustomerGroupIds: [targetGroupId],
+            CustomerGroupDetails: [{ GroupId: targetGroupId }],
+          });
+          await updateCustomerAddress(
+            selectedRetailerId,
+            accessPrivateToken,
+            accessToken,
+            updatePayload,
+            updatePayload.CustomerType,
+            organization,
+          );
+          const refreshedCustomerResponse = await getCustomerByPhoneNumber(
+            selectedRetailerId,
+            accessPrivateToken,
+            phoneNumber,
+          );
+          customerRecord = extractCustomerRecord(
+            refreshedCustomerResponse,
+            customerRecord,
+          );
+          setOrderPreparation((current) =>
+            current.key === orderPreparationKey
+              ? { ...current, customerRecord }
+              : current,
+          );
+          updateCreateOrderProgress(
+            "customer",
+            "success",
+            `Đã chuyển khách hàng sang ${getCustomerTypeLabel(
+              selectedCustomerType,
+            )} và cập nhật mã ${updatePayload.Code}.`,
+          );
+        } else if (hasProvinceChanged && updateCustomerWhenProvinceChanges) {
           updateCreateOrderProgress(
             "customer",
             "loading",
             `Khách đã đổi tỉnh/thành từ ${currentProvince} sang ${nextProvince}, đang cập nhật thông tin...`,
           );
-          const updatePayload =
-            await buildExistingCustomerAddressUpdatePayload({
+          const updatePayload = await buildExistingCustomerAddressUpdatePayload(
+            {
               customer: customerRecord,
               parsed: effectiveParsed,
               customerType,
               retailer: selectedRetailerId,
               accessPrivateToken,
-            });
+            },
+          );
           await updateCustomerAddress(
             selectedRetailerId,
             accessPrivateToken,
@@ -4960,7 +5138,9 @@ export default function TaoDonHang() {
                         <div className="mt-3 grid gap-2 sm:grid-cols-2">
                           <FieldCard
                             label="Mã số thuế"
-                            value={agencyTaxInfo.data?.id || agencyTaxInfo.taxCode}
+                            value={
+                              agencyTaxInfo.data?.id || agencyTaxInfo.taxCode
+                            }
                           />
                           <FieldCard
                             label="Trạng thái"
@@ -5258,6 +5438,19 @@ export default function TaoDonHang() {
                         />
                       </div>
                     </div>
+                    {customerTypeWillChange ? (
+                      <div className="mt-3 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-800">
+                        <Circle className="mt-0.5 h-4 w-4 shrink-0 fill-amber-400 text-amber-500" />
+                        <div>
+                          Khách hiện tại là{" "}
+                          <b>{getCustomerTypeLabel(existingCustomerType)}</b>,
+                          nhưng đơn đang chọn{" "}
+                          <b>{getCustomerTypeLabel(selectedCustomerType)}</b>.
+                          Khi tạo đơn, hệ thống sẽ yêu cầu xác nhận trước khi
+                          chuyển loại khách hàng.
+                        </div>
+                      </div>
+                    ) : null}
                   </div>
                 ) : (
                   <div className="mt-2">
