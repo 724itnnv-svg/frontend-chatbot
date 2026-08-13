@@ -353,7 +353,8 @@ export async function updateCustomerAddress(
   Organization = "",
 ) {
   try {
-    const customerCode = payload.Code ?? payload.CompareCode;
+    const customerCode =
+      payload.LookupCode ?? payload.Code ?? payload.CompareCode;
     const responseGetCustomer = await kiotDirectApi.get(
       `https://api-man1.kiotviet.vn/api/customers?format=json&Code=${customerCode}`,
 
@@ -366,8 +367,10 @@ export async function updateCustomerAddress(
       },
     );
 
+    const { LookupCode: _lookupCode, ...customerPayload } = payload;
+    void _lookupCode;
     let payloadData = {
-      ...payload,
+      ...customerPayload,
       CustomerGroupNames: responseGetCustomer.data.Data[0].CustomerGroupNames,
       CustomerGroupIds: responseGetCustomer.data.Data[0].CustomerGroupIds,
       EmployeeInChargeNames:

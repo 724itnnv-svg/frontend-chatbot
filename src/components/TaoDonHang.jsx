@@ -33,6 +33,7 @@ import {
   getIdWards,
   getFullIdProvinceDistrictWard,
   getTaxCodeCompanyInfo,
+  updateCustomerAddress,
 } from "../services/cashflowService/kiotService";
 import { autoConvertAddress2 } from "../address2/address2Api";
 import { useAuth } from "../context/AuthContext";
@@ -928,6 +929,160 @@ async function buildNewCustomerPayloadV2({
     },
     SkipValidateEmail: false,
     UseCustomValidation: true,
+  };
+}
+
+function getCustomerProvinceName(customer = {}) {
+  const locationItems =
+    customer?.LocationItemsEInvoice || customer?.locationItemsEInvoice || {};
+  const explicitProvince = normalizeDisplayText(
+    locationItems?.[1]?.Name ||
+      locationItems?.["1"]?.Name ||
+      customer?.LocationNameEInvoiceLevel_1 ||
+      customer?.locationNameEInvoiceLevel_1 ||
+      "",
+  );
+  if (explicitProvince) return explicitProvince;
+
+  const locationName = normalizeDisplayText(
+    customer?.LocationName || customer?.locationName || "",
+  );
+  if (locationName) return locationName.split(" - ")[0].trim();
+
+  return parseVietnamAddressParts(
+    customer?.AddressEInvoiceCombine ||
+      customer?.addressEInvoiceCombine ||
+      "",
+  ).province;
+}
+
+function normalizeProvinceForCompare(value = "") {
+  return normalizeLookupText(value)
+    .replace(/^(tinh|thanh pho|tp\.?)[\s.]+/iu, "")
+    .trim();
+}
+
+async function buildExistingCustomerAddressUpdatePayload({
+  customer,
+  parsed,
+  customerType,
+  retailer,
+  accessPrivateToken,
+}) {
+  const newAddress = normalizeDisplayText(
+    parsed?.newAddress || parsed?.oldAddress,
+  );
+  const addressParts = parseVietnamAddressParts(newAddress);
+  const provinceIds = addressParts.province
+    ? await getIdAdministrativearea(
+        retailer,
+        accessPrivateToken,
+        addressParts.province,
+        1,
+      )
+    : [];
+  const provinceRecord = provinceIds?.[0] || null;
+  const provinceDisplayName = getAdministrativeAreaDisplayName(
+    addressParts.province,
+    provinceRecord,
+    1,
+  );
+  const districtName = addressParts.district || addressParts.ward;
+  const wardIds =
+    provinceDisplayName && districtName
+      ? await getIdAdministrativearea(
+          retailer,
+          accessPrivateToken,
+          districtName,
+          2,
+          provinceDisplayName,
+        )
+      : [];
+  const wardRecord = wardIds?.[0] || null;
+  if (!provinceRecord || (districtName && !wardRecord)) {
+    throw new Error(
+      `Không lấy đủ ID hành chính cho địa chỉ mới: ${newAddress}.`,
+    );
+  }
+  const districtDisplayName = getAdministrativeAreaDisplayName(
+    districtName,
+    wardRecord,
+    2,
+  );
+  const provinceSuggestion = provinceRecord
+    ? {
+        ...provinceRecord,
+        Name: provinceDisplayName,
+        CompareName: provinceDisplayName,
+      }
+    : null;
+  const wardSuggestion = wardRecord
+    ? {
+        ...wardRecord,
+        Name: districtDisplayName,
+        CompareName: districtDisplayName,
+      }
+    : null;
+  const addressEInvoiceCombine = [
+    addressParts.street,
+    districtDisplayName,
+    provinceDisplayName,
+  ]
+    .filter(Boolean)
+    .join(", ");
+  const oldCode = normalizeDisplayText(
+    customer?.Code || customer?.CompareCode || customer?.CustomerCode,
+  );
+  const newCode = generateCustomerCodeV2({
+    phoneNumber:
+      customer?.ContactNumber ||
+      customer?.CustomerContactNumber ||
+      parsed?.phoneNumber,
+    customerName: customer?.Name || customer?.CustomerName || parsed?.customerName,
+    newAddress,
+    customerType,
+  });
+
+  return {
+    ...customer,
+    LookupCode: oldCode,
+    Id: customer?.Id ?? customer?.CustomerId ?? "",
+    CustomerId: customer?.CustomerId ?? customer?.Id ?? "",
+    Code: newCode || oldCode,
+    CompareCode: newCode || oldCode,
+    Address: addressParts.street || null,
+    LocationId: provinceRecord?.Id ?? null,
+    LocationName: provinceDisplayName,
+    WardId: wardRecord?.Id ?? null,
+    WardName: districtDisplayName,
+    LastWard: addressParts.ward || districtDisplayName,
+    LastLocation: [districtDisplayName, provinceDisplayName]
+      .filter(Boolean)
+      .join(" - "),
+    AddressEInvoice: addressParts.street || newAddress,
+    AddressEInvoiceCombine: addressEInvoiceCombine || newAddress,
+    LocationIdEInvoice: wardRecord?.Id ?? null,
+    AdministrativeAreaIdEInvoice: wardRecord?.Id ?? null,
+    LocationIdEInvoiceLevel_1: provinceRecord?.Id ?? null,
+    LocationNameEInvoiceLevel_1: provinceDisplayName,
+    LocationIdEInvoiceLevel_2: wardRecord?.Id ?? null,
+    LocationNameEInvoiceLevel_2: districtDisplayName,
+    LocationSuggessName: [districtDisplayName, provinceDisplayName]
+      .filter(Boolean)
+      .join(" - "),
+    suggestLocationV2: provinceSuggestion,
+    suggestWardV2: wardSuggestion,
+    templocEInvoiceLevel_1: provinceDisplayName,
+    templocEInvoiceLevel_2: districtDisplayName,
+    temploc: provinceDisplayName,
+    LocationItemsEInvoice: {
+      1: provinceSuggestion,
+      2: wardSuggestion,
+    },
+    ContactNumberEInvoice:
+      customer?.ContactNumberEInvoice ||
+      customer?.ContactNumber ||
+      parsed?.phoneNumber,
   };
 }
 
@@ -3299,6 +3454,8 @@ export default function TaoDonHang() {
     DEFAULT_GHN_REQUIRED_NOTE,
   );
   const [customerType, setCustomerType] = useState("khach_le");
+  const [updateCustomerWhenProvinceChanges, setUpdateCustomerWhenProvinceChanges] =
+    useState(false);
   const [agencyTaxCode, setAgencyTaxCode] = useState("");
   const [agencyTaxInfo, setAgencyTaxInfo] = useState({
     status: "idle",
@@ -4129,6 +4286,7 @@ export default function TaoDonHang() {
     setSelectedShippingPartner("VTPFW");
     setGhnRequiredNote(DEFAULT_GHN_REQUIRED_NOTE);
     setCustomerType("dai_ly");
+    setUpdateCustomerWhenProvinceChanges(false);
     setAgencyTaxCode("");
     setAgencyDescription("");
     setRawText(SAMPLE_TEXT);
@@ -4226,11 +4384,73 @@ export default function TaoDonHang() {
       let customerRecord = foundCustomer;
       if (customerRecord && Object.keys(customerRecord || {}).length > 0) {
         console.log("Customer already exists:", customerRecord);
-        updateCreateOrderProgress(
-          "customer",
-          "success",
-          "Tìm thấy khách hàng trên KiotViet.",
+        const nextAddress = normalizeDisplayText(
+          effectiveParsed.newAddress || effectiveParsed.oldAddress,
         );
+        const nextProvince = parseVietnamAddressParts(nextAddress).province;
+        const currentProvince =
+          getCustomerProvinceName(customerRecord) ||
+          parseVietnamAddressParts(effectiveParsed.oldAddress).province;
+        const hasProvinceChanged =
+          Boolean(nextProvince && currentProvince) &&
+          normalizeProvinceForCompare(nextProvince) !==
+            normalizeProvinceForCompare(currentProvince);
+
+        if (hasProvinceChanged && updateCustomerWhenProvinceChanges) {
+          updateCreateOrderProgress(
+            "customer",
+            "loading",
+            `Khách đã đổi tỉnh/thành từ ${currentProvince} sang ${nextProvince}, đang cập nhật thông tin...`,
+          );
+          const updatePayload =
+            await buildExistingCustomerAddressUpdatePayload({
+              customer: customerRecord,
+              parsed: effectiveParsed,
+              customerType,
+              retailer: selectedRetailerId,
+              accessPrivateToken,
+            });
+          await updateCustomerAddress(
+            selectedRetailerId,
+            accessPrivateToken,
+            accessToken,
+            updatePayload,
+            customerRecord?.CustomerType ||
+              (customerType === "dai_ly" ? "Công ty" : "Cá nhân"),
+            customerRecord?.Organization || "",
+          );
+          const refreshedCustomerResponse = await getCustomerByPhoneNumber(
+            selectedRetailerId,
+            accessPrivateToken,
+            phoneNumber,
+          );
+          customerRecord = extractCustomerRecord(
+            refreshedCustomerResponse,
+            customerRecord,
+          );
+          setOrderPreparation((current) =>
+            current.key === orderPreparationKey
+              ? { ...current, customerRecord }
+              : current,
+          );
+          updateCreateOrderProgress(
+            "customer",
+            "success",
+            `Đã cập nhật địa chỉ, ID hành chính và mã khách hàng sang ${updatePayload.Code}.`,
+          );
+        } else if (hasProvinceChanged) {
+          updateCreateOrderProgress(
+            "customer",
+            "success",
+            `Khách đã đổi tỉnh/thành sang ${nextProvince}; giữ nguyên thông tin KiotViet theo lựa chọn của sale.`,
+          );
+        } else {
+          updateCreateOrderProgress(
+            "customer",
+            "success",
+            "Tìm thấy khách hàng trên KiotViet.",
+          );
+        }
       } else {
         updateCreateOrderProgress(
           "customer",
@@ -4654,6 +4874,27 @@ export default function TaoDonHang() {
                   </span>
                 </label>
               </div>
+
+              <label className="flex cursor-pointer items-start justify-between gap-4 rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-3">
+                <div>
+                  <div className="text-sm font-bold text-slate-800">
+                    Cập nhật khách hàng khi đổi tỉnh/thành
+                  </div>
+                  <div className="mt-1 text-xs leading-5 text-slate-500">
+                    Khi bật, hệ thống sẽ cập nhật địa chỉ E-Invoice, ID hành
+                    chính và mã khách hàng. Khi tắt, thông tin hiện tại trên
+                    KiotViet được giữ nguyên.
+                  </div>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={updateCustomerWhenProvinceChanges}
+                  onChange={(event) =>
+                    setUpdateCustomerWhenProvinceChanges(event.target.checked)
+                  }
+                  className="mt-1 h-5 w-5 shrink-0 cursor-pointer rounded border-slate-300 text-cyan-600 focus:ring-cyan-300"
+                />
+              </label>
 
               {selectedShippingPartner === "GHN" ? (
                 <label className="block space-y-2">
