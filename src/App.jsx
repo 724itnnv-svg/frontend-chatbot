@@ -90,7 +90,10 @@ const NotificationManager = lazy(
   () => import("./components/NotificationManager"),
 );
 const PayrollManager = lazy(() => import("./components/PayrollManager"));
-const SalaryAdvanceManager = lazy(() => import("./components/SalaryAdvanceManager"));
+const KpiManager = lazy(() => import("./components/KpiManager"));
+const SalaryAdvanceManager = lazy(
+  () => import("./components/SalaryAdvanceManager"),
+);
 const RouteManager = lazy(() => import("./components/RouteManager"));
 const AttendancePage = lazy(
   () => import("./components/attendance/AttendancePage"),
@@ -231,6 +234,7 @@ const ADMIN_ROUTE_BY_SCREEN = {
   attendance_locations: "/admin/attendance-locations",
   attendance_self: "/admin/my-attendance",
   payroll: "/admin/payroll",
+  kpi_management: "/admin/kpi",
   salary_advance_management: "/admin/salary-advances",
   dua_sap: "/admin/dua-sap",
   so_quy: "/admin/so-quy",
@@ -366,6 +370,7 @@ const adminRoutes = [
     element: <WorkLocationManager />,
   },
   { path: "payroll", screenId: "payroll", element: <PayrollManager /> },
+  { path: "kpi", screenId: "kpi_management", element: <KpiManager /> },
   {
     path: "salary-advances",
     screenId: "salary_advance_management",

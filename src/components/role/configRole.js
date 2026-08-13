@@ -17,8 +17,7 @@ const APP_PERMISSIONS = {
     {
       id: "attendance",
       name: "Chấm công",
-      description:
-        "Chấm công, ca làm, vị trí, tính lương và thông báo thiết bị",
+      description: "Chấm công, ca làm, KPI, tính lương và thông báo thiết bị",
       screenIds: [
         "attendance_self",
         "attendance",
@@ -26,6 +25,7 @@ const APP_PERMISSIONS = {
         "attendance_shifts",
         "attendance_locations",
         "payroll",
+        "kpi_management",
         "salary_advance_management",
         "notifications",
       ],
@@ -64,10 +64,7 @@ const APP_PERMISSIONS = {
       id: "experimental",
       name: "Phiên bản thử nghiệm",
       description: "FAQ theo Page và khuyến mãi",
-      screenIds: [
-        "admin_event_promo",
-        "admin_faq",
-      ],
+      screenIds: ["admin_event_promo", "admin_faq"],
     },
     {
       id: "agriculture",
@@ -96,6 +93,7 @@ const APP_PERMISSIONS = {
     { id: "attendance_shifts", name: "Ca làm" },
     { id: "attendance_locations", name: "Vị trí chấm công" },
     { id: "payroll", name: "Chấm công tính lương" },
+    { id: "kpi_management", name: "Quản lý KPI" },
     { id: "notifications", name: "Thông Báo Thiết Bị" },
     { id: "employee_profiles", name: "Hồ Sơ Nhân Sự" },
     { id: "employee_assets", name: "Kho Tài Sản & Vật Tư" },
@@ -131,12 +129,42 @@ const APP_PERMISSIONS = {
   ],
   actions: [
     { id: "view", name: "Xem", color: "blue" },
-    { id: "create", name: "Thêm mới", color: "emerald", excludeScreenIds: ["approved_leave"] },
-    { id: "edit", name: "Chỉnh sửa", color: "amber", excludeScreenIds: ["approved_leave"] },
-    { id: "delete", name: "Xóa", color: "red", excludeScreenIds: ["approved_leave"] },
-    { id: "export", name: "Xuất file", color: "slate", excludeScreenIds: ["approved_leave"] },
-    { id: "new_to_old", name: "Mới → Cũ", color: "cyan", screenIds: ["dia_chi_2"] },
-    { id: "view_all", name: "Xem toàn công ty", color: "violet", screenIds: ["approved_leave"] },
+    {
+      id: "create",
+      name: "Thêm mới",
+      color: "emerald",
+      excludeScreenIds: ["approved_leave"],
+    },
+    {
+      id: "edit",
+      name: "Chỉnh sửa",
+      color: "amber",
+      excludeScreenIds: ["approved_leave"],
+    },
+    {
+      id: "delete",
+      name: "Xóa",
+      color: "red",
+      excludeScreenIds: ["approved_leave"],
+    },
+    {
+      id: "export",
+      name: "Xuất file",
+      color: "slate",
+      excludeScreenIds: ["approved_leave", "kpi_management"],
+    },
+    {
+      id: "new_to_old",
+      name: "Mới → Cũ",
+      color: "cyan",
+      screenIds: ["dia_chi_2"],
+    },
+    {
+      id: "view_all",
+      name: "Xem toàn công ty",
+      color: "violet",
+      screenIds: ["approved_leave"],
+    },
   ],
 };
 
