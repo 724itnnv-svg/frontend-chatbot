@@ -38,6 +38,31 @@ const isEditable = (status) =>
   ["ASSIGNED", "DRAFT", "REVISION_REQUESTED"].includes(status);
 
 function scorePreview(item) {
+  if (item.scoringMethod === "standard_points") {
+    const parseNumber = (value) => {
+      const match = String(value ?? "").replace(/,/g, ".").match(/-?\d+(?:\.\d+)?/);
+      return match ? Number(match[0]) : Number.NaN;
+    };
+    const actual = parseNumber(item.employeeActualText);
+    const target = parseNumber(item.standardQuantity);
+    const base = Number(item.standardScore || item.weight || 0);
+    if (!String(item.standardQuantity || "").trim() || !Number.isFinite(target)) {
+      return String(item.employeeActualText ?? "").trim() ? base : 0;
+    }
+    if (!Number.isFinite(actual)) return 0;
+    if (target === 0) return base;
+    const note = String(item.criteriaNote || "");
+    const lowerIsBetter = /(không\s*quá|tối\s*đa|≤|<=|nhỏ\s*hơn)/i.test(item.standardQuantity);
+    const rateRule = note.replace(/,/g, ".").match(/[±+\-]\s*(\d+(?:\.\d+)?)\s*%?\s*(?:tương\s*đương|=)\s*\+?\s*(\d+(?:\.\d+)?)\s*điểm/i);
+    if (rateRule) {
+      const direction = lowerIsBetter ? -1 : 1;
+      return Math.max(0, Math.min(300, base + direction * (actual - target) * Number(rateRule[2]) / Number(rateRule[1])));
+    }
+    const bonusRule = note.replace(/,/g, ".").match(/thêm\s*(\d+(?:\.\d+)?)[^+\d]*\+\s*(\d+(?:\.\d+)?)\s*điểm/i);
+    if (bonusRule) return Math.max(0, Math.min(300, base + (actual - target) * Number(bonusRule[2]) / Number(bonusRule[1])));
+    if (lowerIsBetter) return actual <= target ? base : Math.max(0, base * target / actual);
+    return Math.max(0, Math.min(300, actual / target * base));
+  }
   const max = Number(item.maxAchievementPercent || 150);
   if (
     item.type === "manual" &&
@@ -93,8 +118,9 @@ export default function KpiSelfAssessment() {
   const previewTotal = useMemo(
     () =>
       (evaluation?.items || []).reduce(
-        (sum, item) =>
-          sum + (scorePreview(item) * Number(item.weight || 0)) / 100,
+        (sum, item) => sum + (item.scoringMethod === "standard_points"
+          ? scorePreview(item)
+          : (scorePreview(item) * Number(item.weight || 0)) / 100),
         0,
       ),
     [evaluation],
@@ -121,6 +147,7 @@ export default function KpiSelfAssessment() {
           items: evaluation.items.map((item) => ({
             _id: item._id,
             employeeActual: item.employeeActual,
+            employeeActualText: item.employeeActualText,
             employeeScore: item.employeeScore,
             employeeNote: item.employeeNote,
           })),
@@ -341,37 +368,50 @@ export default function KpiSelfAssessment() {
                           {item.description}
                         </p>
                       )}
+                      {item.criteriaNote && (
+                        <p className="mt-1 text-sm text-slate-500">
+                          Ghi chú: {item.criteriaNote}
+                        </p>
+                      )}
                     </div>
                     <span className="h-fit rounded-lg bg-violet-50 px-2.5 py-1 text-xs font-bold text-violet-700">
-                      Trọng số {item.weight}%
+                      {item.scoringMethod === "standard_points"
+                        ? `Điểm chuẩn ${item.standardScore}`
+                        : `Trọng số ${item.weight}%`}
                     </span>
                   </div>
                   <div className="mt-4 grid gap-3 sm:grid-cols-3">
                     <div className="rounded-xl bg-slate-50 px-3 py-2">
-                      <p className="text-xs text-slate-500">Chỉ tiêu</p>
+                      <p className="text-xs text-slate-500">Khối lượng tiêu chuẩn</p>
                       <p className="font-bold text-slate-800">
-                        {item.type === "boolean"
+                        {item.scoringMethod === "standard_points" ? (item.standardQuantity || "Không áp dụng") : (item.type === "boolean"
                           ? "Đạt / Không đạt"
-                          : `${item.target} ${item.unit || ""}`}
+                          : `${item.target} ${item.unit || ""}`)}
                       </p>
                     </div>
                     <label className="text-sm text-slate-600">
-                      {item.type === "manual"
+                      {item.scoringMethod === "standard_points"
+                        ? "Khối lượng hoàn thành"
+                        : item.type === "manual"
                         ? "Điểm tự chấm (%)"
                         : "Kết quả thực tế"}
                       <input
-                        type="number"
-                        min="0"
+                        type={item.scoringMethod === "standard_points" ? "text" : "number"}
+                        min={item.scoringMethod === "standard_points" ? undefined : "0"}
                         disabled={!canEdit}
                         value={
-                          item.type === "manual"
+                          item.scoringMethod === "standard_points"
+                            ? (item.employeeActualText ?? "")
+                            : item.type === "manual"
                             ? (item.employeeScore ?? "")
                             : (item.employeeActual ?? "")
                         }
                         onChange={(event) =>
                           updateItem(
                             index,
-                            item.type === "manual"
+                            item.scoringMethod === "standard_points"
+                              ? "employeeActualText"
+                              : item.type === "manual"
                               ? "employeeScore"
                               : "employeeActual",
                             event.target.value,
@@ -381,13 +421,15 @@ export default function KpiSelfAssessment() {
                       />
                     </label>
                     <div className="rounded-xl bg-violet-50 px-3 py-2">
-                      <p className="text-xs text-violet-600">Mức hoàn thành</p>
+                      <p className="text-xs text-violet-600">
+                        {item.scoringMethod === "standard_points" ? "Điểm thực tế" : "Mức hoàn thành"}
+                      </p>
                       <p className="font-bold text-violet-800">
-                        {scorePreview(item).toFixed(2)}%
+                        {scorePreview(item).toFixed(2)}{item.scoringMethod === "standard_points" ? " điểm" : "%"}
                       </p>
                       {approved && (
                         <p className="text-xs text-emerald-700">
-                          Duyệt: {Number(item.approvedScore || 0).toFixed(2)}%
+                          Duyệt: {Number(item.approvedScore || 0).toFixed(2)}{item.scoringMethod === "standard_points" ? " điểm" : "%"}
                         </p>
                       )}
                     </div>
