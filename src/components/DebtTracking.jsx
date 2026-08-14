@@ -243,17 +243,34 @@ const formatDateTime = (value) => {
   }).format(date);
 };
 
-function SummaryCard({ title, value, subtitle, icon, tone = "slate" }) {
+function SummaryCard({
+  title,
+  value,
+  subtitle,
+  icon,
+  tone = "slate",
+  active = false,
+  onClick,
+}) {
   const tones = {
     slate: "border-cyan-100 bg-white/90 text-cyan-700",
     green: "border-emerald-200 bg-emerald-50 text-emerald-700",
     yellow: "border-amber-200 bg-amber-50 text-amber-700",
     red: "border-red-200 bg-red-50 text-red-700",
   };
+  const activeTones = {
+    slate: "ring-2 ring-cyan-500 ring-offset-2",
+    green: "ring-2 ring-emerald-500 ring-offset-2",
+    yellow: "ring-2 ring-amber-500 ring-offset-2",
+    red: "ring-2 ring-red-500 ring-offset-2",
+  };
 
   return (
-    <div
-      className={`rounded-2xl border p-4 shadow-[0_10px_26px_rgba(8,145,178,0.08)] ${tones[tone]}`}
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={`w-full rounded-2xl border p-4 text-left shadow-[0_10px_26px_rgba(8,145,178,0.08)] transition duration-200 hover:-translate-y-0.5 hover:shadow-[0_14px_30px_rgba(8,145,178,0.14)] focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 focus-visible:ring-offset-2 ${tones[tone]} ${active ? activeTones[tone] : ""}`}
     >
       <div className="flex items-start justify-between gap-3">
         <div>
@@ -267,7 +284,7 @@ function SummaryCard({ title, value, subtitle, icon, tone = "slate" }) {
           {createElement(icon, { size: 19 })}
         </span>
       </div>
-    </div>
+    </button>
   );
 }
 
@@ -309,6 +326,11 @@ export default function DebtTracking() {
   const loadedCustomerIdsRef = useRef(new Set());
   const searchRequestIdRef = useRef(0);
   const summaryRequestIdRef = useRef(0);
+
+  const selectDebtLevel = (level) => {
+    setLevelFilter(level);
+    if (tableScrollRef.current) tableScrollRef.current.scrollTop = 0;
+  };
 
   const loadSummary = useCallback(async () => {
     const requestId = summaryRequestIdRef.current + 1;
@@ -986,6 +1008,8 @@ export default function DebtTracking() {
                     : `${stats.all} khách hàng đang có nợ · toàn công ty`)
                 }
                 icon={CircleDollarSign}
+                active={levelFilter === "all"}
+                onClick={() => selectDebtLevel("all")}
               />
               <SummaryCard
                 title="Mức xanh"
@@ -995,6 +1019,8 @@ export default function DebtTracking() {
                 subtitle={`${stats.green.length} khách hàng thiếu · 0–30 ngày`}
                 icon={ShieldCheck}
                 tone="green"
+                active={levelFilter === "green"}
+                onClick={() => selectDebtLevel("green")}
               />
               <SummaryCard
                 title="Mức vàng"
@@ -1004,6 +1030,8 @@ export default function DebtTracking() {
                 subtitle={`${stats.yellow.length} khách hàng thiếu · 31–60 ngày`}
                 icon={TriangleAlert}
                 tone="yellow"
+                active={levelFilter === "yellow"}
+                onClick={() => selectDebtLevel("yellow")}
               />
               <SummaryCard
                 title="Mức đỏ"
@@ -1013,6 +1041,8 @@ export default function DebtTracking() {
                 subtitle={`${stats.red.length} khách hàng thiếu · trên 60 ngày`}
                 icon={AlertCircle}
                 tone="red"
+                active={levelFilter === "red"}
+                onClick={() => selectDebtLevel("red")}
               />
             </div>
           </section>
@@ -1130,7 +1160,7 @@ export default function DebtTracking() {
                 </label>
                 <select
                   value={levelFilter}
-                  onChange={(event) => setLevelFilter(event.target.value)}
+                  onChange={(event) => selectDebtLevel(event.target.value)}
                   className="h-10 rounded-xl border border-cyan-100 bg-white px-3 text-xs font-bold text-slate-700 outline-none focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100"
                 >
                   <option value="all">Tất cả mức độ</option>
