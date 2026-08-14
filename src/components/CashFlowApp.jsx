@@ -139,9 +139,9 @@ const getOrderDeliveryMoneyMismatch = (row = {}, orderDelivery = {}) => {
     excelMoneyValue > orderDeliveryMoneyValue;
   const isGhnDeliveryFeeMismatch =
     isGhnRow &&
+    excelDeliveryFeeValue !== 0 &&
     normalizeText(orderDelivery.totalPrice) !== "" &&
-    (normalizeText(getExcelDeliveryFeeRawValue(row)) === "" ||
-      excelDeliveryFeeValue !== orderDeliveryFeeValue);
+    excelDeliveryFeeValue !== orderDeliveryFeeValue;
 
   return {
     isCodMismatch,
