@@ -45,6 +45,16 @@ const LAST_REFRESH_STORAGE_PREFIX = "debt_tracking_last_refresh_";
 const DEBT_SNAPSHOT_STORAGE_PREFIX = "debt_tracking_snapshot_";
 const DEBT_CHANGES_STORAGE_PREFIX = "debt_tracking_changes_";
 
+const filterCustomersByRetailer = (retailer, customers) => {
+  if (retailer !== "nnvtv") return customers;
+
+  return customers.filter(
+    (customer) =>
+      String(customer?.CustomerType ?? customer?.customerType ?? "").trim() !==
+      "Công ty",
+  );
+};
+
 const readStoredJson = (key, fallback) => {
   try {
     const value = JSON.parse(localStorage.getItem(key) || "null");
@@ -326,8 +336,9 @@ export default function DebtTracking() {
         });
         if (summaryRequestIdRef.current !== requestId) return;
 
-        const list = Array.isArray(response) ? response : [];
-        if (list.length === 0) break;
+        const rawList = Array.isArray(response) ? response : [];
+        if (rawList.length === 0) break;
+        const list = filterCustomersByRetailer(retailer, rawList);
 
         const normalizedPage = list.map((customer, index) =>
           normalizeCustomer(customer, skip + index),
@@ -339,13 +350,15 @@ export default function DebtTracking() {
           return true;
         });
 
-        if (newCustomers.length === 0) break;
-        allCustomers.push(...newCustomers);
-        setSummaryCustomers([...allCustomers]);
-        setSummaryLoadedCount(allCustomers.length);
+        if (list.length > 0 && newCustomers.length === 0) break;
+        if (newCustomers.length > 0) {
+          allCustomers.push(...newCustomers);
+          setSummaryCustomers([...allCustomers]);
+          setSummaryLoadedCount(allCustomers.length);
+        }
 
-        skip += list.length;
-        if (list.length < 1000) break;
+        skip += rawList.length;
+        if (rawList.length < 1000) break;
       }
       return allCustomers;
     } catch (summaryLoadError) {
@@ -386,7 +399,8 @@ export default function DebtTracking() {
           skip: requestedOffset,
           debtLevel: levelFilter,
         });
-        const list = Array.isArray(response) ? response : [];
+        const rawList = Array.isArray(response) ? response : [];
+        const list = filterCustomersByRetailer(retailer, rawList);
         const normalizedPage = list.map((customer, index) =>
           normalizeCustomer(customer, requestedOffset + index),
         );
@@ -400,8 +414,8 @@ export default function DebtTracking() {
         setCustomers((currentCustomers) =>
           reset ? newCustomers : [...currentCustomers, ...newCustomers],
         );
-        offsetRef.current = requestedOffset + list.length;
-        setHasMore(list.length > 0 && (reset || newCustomers.length > 0));
+        offsetRef.current = requestedOffset + rawList.length;
+        setHasMore(rawList.length === CUSTOMER_PAGE_SIZE);
       } catch (loadError) {
         if (reset) setCustomers([]);
         setError(
