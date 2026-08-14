@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertCircle,
   CheckCircle2,
-  ImagePlus,
   Loader2,
   RefreshCcw,
   Save,
@@ -10,10 +9,10 @@ import {
   Target,
   Trash2,
   Upload,
-  X,
 } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import { getApiBaseUrl } from "../../api/baseUrl";
+import { EvidenceThumbnail, KpiEvidenceViewer } from "./KpiEvidenceViewer";
 
 function currentPeriod() {
   const now = new Date();
@@ -59,7 +58,7 @@ function scorePreview(item) {
     }
     if (target === 0) return base;
     const lowerIsBetter = /(không\s*quá|tối\s*đa|≤|<=|nhỏ\s*hơn)/i.test(item.standardQuantity);
-    const rateRule = note.replace(/,/g, ".").match(/[±+\-]\s*(\d+(?:\.\d+)?)\s*%?\s*(?:tương\s*đương|=)\s*\+?\s*(\d+(?:\.\d+)?)\s*điểm/i);
+    const rateRule = note.replace(/,/g, ".").match(/[±+-]\s*(\d+(?:\.\d+)?)\s*%?\s*(?:tương\s*đương|=)\s*\+?\s*(\d+(?:\.\d+)?)\s*điểm/i);
     if (rateRule) {
       const direction = lowerIsBetter ? -1 : 1;
       return Math.max(0, Math.min(300, base + direction * (actual - target) * Number(rateRule[2]) / Number(rateRule[1])));
@@ -203,11 +202,16 @@ export default function KpiSelfAssessment() {
   async function uploadEvidences(item, files) {
     const selected = Array.from(files || []);
     if (!selected.length || !evaluation) return;
+    const oversizedFile = selected.find((file) => file.size > 50 * 1024 * 1024);
+    if (oversizedFile) {
+      setMessage({ ok: false, text: `Tệp "${oversizedFile.name}" vượt quá giới hạn 50 MB.` });
+      return;
+    }
     const remaining = 20 - (item.evidences?.length || 0);
     if (selected.length > remaining) {
       setMessage({
         ok: false,
-        text: `Tiêu chí này chỉ có thể tải thêm ${remaining} ảnh.`,
+        text: `Tiêu chí này chỉ có thể tải thêm ${remaining} tệp.`,
       });
       return;
     }
@@ -225,7 +229,7 @@ export default function KpiSelfAssessment() {
     } catch (error) {
       setMessage({
         ok: false,
-        text: error.response?.data?.message || "Không thể tải ảnh minh chứng",
+        text: error.response?.data?.message || "Không thể tải tệp minh chứng",
       });
     } finally {
       setUploadingItemId("");
@@ -233,7 +237,7 @@ export default function KpiSelfAssessment() {
   }
 
   async function deleteEvidence(item, evidence) {
-    if (!evaluation || !window.confirm("Xóa ảnh minh chứng này?")) return;
+    if (!evaluation || !window.confirm("Xóa tệp minh chứng này?")) return;
     setDeletingEvidenceId(evidence._id);
     setMessage(null);
     try {
@@ -245,7 +249,7 @@ export default function KpiSelfAssessment() {
     } catch (error) {
       setMessage({
         ok: false,
-        text: error.response?.data?.message || "Không thể xóa ảnh minh chứng",
+        text: error.response?.data?.message || "Không thể xóa tệp minh chứng",
       });
     } finally {
       setDeletingEvidenceId("");
@@ -457,13 +461,13 @@ export default function KpiSelfAssessment() {
                     <div className="text-sm text-slate-600">
                       <div className="flex items-center justify-between gap-2">
                         <span>
-                          Ảnh minh chứng{" "}
+                          Tệp minh chứng{" "}
                           <span className="text-xs text-slate-400">
                             (không bắt buộc)
                           </span>
                         </span>
                         <span className="text-xs text-slate-400">
-                          {item.evidences?.length || 0}/20 ảnh
+                          {item.evidences?.length || 0}/20 tệp
                         </span>
                       </div>
                       {item.evidences?.length > 0 && (
@@ -473,34 +477,19 @@ export default function KpiSelfAssessment() {
                               key={evidence._id}
                               className="group relative aspect-square overflow-hidden rounded-xl border border-slate-200 bg-slate-100"
                             >
-                              <button
-                                type="button"
-                                onClick={() => setPreviewEvidence({
-                                  url: evidenceFileUrl(item, evidence),
-                                  name: evidence.originalName || evidence.filename || "Ảnh minh chứng KPI",
-                                })}
-                                title={
-                                  evidence.originalName || evidence.filename
-                                }
-                                className="block h-full w-full"
-                              >
-                                <img
-                                  src={evidenceFileUrl(item, evidence)}
-                                  alt={
-                                    evidence.originalName ||
-                                    "Ảnh minh chứng KPI"
-                                  }
-                                  className="h-full w-full object-cover"
-                                  loading="lazy"
-                                />
-                              </button>
+                              <EvidenceThumbnail
+                                evidence={evidence}
+                                url={evidenceFileUrl(item, evidence)}
+                                onOpen={setPreviewEvidence}
+                                className="block h-full w-full border-0"
+                              />
                               {canEdit && (
                                 <button
                                   type="button"
                                   disabled={deletingEvidenceId === evidence._id}
                                   onClick={() => deleteEvidence(item, evidence)}
                                   className="absolute right-1 top-1 inline-flex h-7 w-7 items-center justify-center rounded-lg bg-rose-600 text-white opacity-90 shadow hover:bg-rose-700 disabled:opacity-50 sm:opacity-0 sm:group-hover:opacity-100"
-                                  title="Xóa ảnh"
+                                  title="Xóa tệp"
                                 >
                                   {deletingEvidenceId === evidence._id ? (
                                     <Loader2
@@ -521,7 +510,6 @@ export default function KpiSelfAssessment() {
                           <input
                             type="file"
                             multiple
-                            accept="image/jpeg,image/png,image/webp,image/gif"
                             className="hidden"
                             disabled={uploadingItemId === item._id}
                             onChange={(event) => {
@@ -531,16 +519,12 @@ export default function KpiSelfAssessment() {
                           />
                           {uploadingItemId === item._id ? (
                             <Loader2 size={17} className="animate-spin" />
-                          ) : (item.evidences?.length || 0) > 0 ? (
-                            <Upload size={17} />
-                          ) : (
-                            <ImagePlus size={17} />
-                          )}
+                          ) : <Upload size={17} />}
                           {uploadingItemId === item._id
-                            ? "Đang tải ảnh lên Drive..."
+                            ? "Đang tải tệp lên Drive..."
                             : (item.evidences?.length || 0) > 0
-                              ? "Thêm ảnh"
-                              : "Chọn nhiều ảnh minh chứng"}
+                              ? "Thêm tệp"
+                              : "Chọn tệp minh chứng (tối đa 50 MB/tệp)"}
                         </label>
                       )}
                     </div>
@@ -599,39 +583,7 @@ export default function KpiSelfAssessment() {
           </div>
         </>
       )}
-      {previewEvidence && (
-        <div
-          className="fixed inset-0 z-[140] flex items-center justify-center bg-slate-950/85 p-3 sm:p-6"
-          role="dialog"
-          aria-modal="true"
-          aria-label={previewEvidence.name}
-          onClick={() => setPreviewEvidence(null)}
-        >
-          <div
-            className="relative flex max-h-full max-w-6xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="flex items-center justify-between gap-4 border-b px-4 py-3">
-              <p className="truncate text-sm font-bold text-slate-800">{previewEvidence.name}</p>
-              <button
-                type="button"
-                onClick={() => setPreviewEvidence(null)}
-                className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100"
-                aria-label="Đóng ảnh minh chứng"
-              >
-                <X size={20} />
-              </button>
-            </div>
-            <div className="min-h-0 overflow-auto bg-slate-100 p-2 sm:p-4">
-              <img
-                src={previewEvidence.url}
-                alt={previewEvidence.name}
-                className="mx-auto max-h-[82vh] max-w-full object-contain"
-              />
-            </div>
-          </div>
-        </div>
-      )}
+      <KpiEvidenceViewer evidence={previewEvidence} onClose={() => setPreviewEvidence(null)} />
     </section>
   );
 }

@@ -25,6 +25,7 @@ import {
 import { useAuth } from "../context/AuthContext";
 import { getApiBaseUrl } from "../api/baseUrl";
 import { hasFullAccess } from "../utils/screenAccess";
+import { EvidenceThumbnail, KpiEvidenceViewer } from "./attendance/KpiEvidenceViewer";
 
 const nowPeriod = () => {
   const now = new Date();
@@ -237,7 +238,7 @@ export default function KpiManager() {
     if (
       editingId &&
       !window.confirm(
-        "Lưu thay đổi sẽ đưa phiếu về trạng thái Đã giao và xóa phần tự chấm cùng ảnh minh chứng hiện tại. Tiếp tục?",
+        "Lưu thay đổi sẽ đưa phiếu về trạng thái Đã giao và xóa phần tự chấm cùng tệp minh chứng hiện tại. Tiếp tục?",
       )
     )
       return;
@@ -331,7 +332,7 @@ export default function KpiManager() {
 
   async function deleteEvaluation(row) {
     const confirmed = window.confirm(
-      `Xóa KPI tháng ${row.period} của ${row.employeeName}?\n\nPhiếu KPI và toàn bộ ảnh minh chứng sẽ bị xóa. Thao tác này không thể hoàn tác.`,
+      `Xóa KPI tháng ${row.period} của ${row.employeeName}?\n\nPhiếu KPI và toàn bộ tệp minh chứng sẽ bị xóa. Thao tác này không thể hoàn tác.`,
     );
     if (!confirmed) return;
     setBusy(true);
@@ -1202,31 +1203,19 @@ export default function KpiManager() {
                   {item.evidences?.length > 0 && (
                     <div className="mt-3">
                       <p className="mb-2 text-xs font-semibold text-slate-600">
-                        Ảnh minh chứng ({item.evidences.length})
+                        Tệp minh chứng ({item.evidences.length})
                       </p>
                       <div className="grid grid-cols-4 gap-2 sm:grid-cols-6">
                         {item.evidences.map((evidence) => {
                           const fileUrl = `${getApiBaseUrl()}/kpi-evaluations/${reviewing._id}/items/${item._id}/evidences/${evidence._id}/file`;
                           return (
-                            <button
-                              type="button"
+                            <EvidenceThumbnail
                               key={evidence._id}
-                              onClick={() => setPreviewEvidence({
-                                url: fileUrl,
-                                name: evidence.originalName || evidence.filename || "Ảnh minh chứng KPI",
-                              })}
-                              className="aspect-square overflow-hidden rounded-lg border border-slate-200 bg-slate-100"
-                              title={evidence.originalName || evidence.filename}
-                            >
-                              <img
-                                src={fileUrl}
-                                alt={
-                                  evidence.originalName || "Ảnh minh chứng KPI"
-                                }
-                                className="h-full w-full object-cover"
-                                loading="lazy"
-                              />
-                            </button>
+                              evidence={evidence}
+                              url={fileUrl}
+                              onOpen={setPreviewEvidence}
+                              className="aspect-square"
+                            />
                           );
                         })}
                       </div>
@@ -1335,39 +1324,7 @@ export default function KpiManager() {
           </div>
         </div>
       )}
-      {previewEvidence && (
-        <div
-          className="fixed inset-0 z-[140] flex items-center justify-center bg-slate-950/85 p-3 sm:p-6"
-          role="dialog"
-          aria-modal="true"
-          aria-label={previewEvidence.name}
-          onClick={() => setPreviewEvidence(null)}
-        >
-          <div
-            className="relative flex max-h-full max-w-6xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="flex items-center justify-between gap-4 border-b px-4 py-3">
-              <p className="truncate text-sm font-bold text-slate-800">{previewEvidence.name}</p>
-              <button
-                type="button"
-                onClick={() => setPreviewEvidence(null)}
-                className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100"
-                aria-label="Đóng ảnh minh chứng"
-              >
-                <X size={20} />
-              </button>
-            </div>
-            <div className="min-h-0 overflow-auto bg-slate-100 p-2 sm:p-4">
-              <img
-                src={previewEvidence.url}
-                alt={previewEvidence.name}
-                className="mx-auto max-h-[82vh] max-w-full object-contain"
-              />
-            </div>
-          </div>
-        </div>
-      )}
+      <KpiEvidenceViewer evidence={previewEvidence} onClose={() => setPreviewEvidence(null)} />
     </div>
   );
 }
