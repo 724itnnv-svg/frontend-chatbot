@@ -92,6 +92,7 @@ export default function KpiManager() {
   const [status, setStatus] = useState("ALL");
   const [search, setSearch] = useState("");
   const [rows, setRows] = useState([]);
+  const [selectedIds, setSelectedIds] = useState([]);
   const [employees, setEmployees] = useState([]);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -99,6 +100,7 @@ export default function KpiManager() {
   const [showAssign, setShowAssign] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [reviewing, setReviewing] = useState(null);
+  const [previewEvidence, setPreviewEvidence] = useState(null);
   const [importRows, setImportRows] = useState([]);
   const [importPreview, setImportPreview] = useState([]);
   const [importErrors, setImportErrors] = useState([]);
@@ -117,7 +119,10 @@ export default function KpiManager() {
       const params = new URLSearchParams({ period, status });
       if (search.trim()) params.set("search", search.trim());
       const response = await api.get(`/kpi-evaluations?${params}`);
-      setRows(response.data?.data || []);
+      const loadedRows = response.data?.data || [];
+      setRows(loadedRows);
+      const selectableIds = new Set(loadedRows.filter((row) => row.status === "SUBMITTED").map((row) => row._id));
+      setSelectedIds((current) => current.filter((id) => selectableIds.has(id)));
     } catch (error) {
       setMessage({
         ok: false,
@@ -147,6 +152,44 @@ export default function KpiManager() {
     [assignment.items],
   );
   const pending = rows.filter((row) => row.status === "SUBMITTED").length;
+  const submittedRows = rows.filter((row) => row.status === "SUBMITTED");
+  const allSubmittedSelected = submittedRows.length > 0
+    && submittedRows.every((row) => selectedIds.includes(row._id));
+
+  function toggleSelected(id) {
+    setSelectedIds((current) => current.includes(id)
+      ? current.filter((value) => value !== id)
+      : [...current, id]);
+  }
+
+  function toggleAllSubmitted() {
+    const submittedIds = submittedRows.map((row) => row._id);
+    setSelectedIds((current) => allSubmittedSelected
+      ? current.filter((id) => !submittedIds.includes(id))
+      : [...new Set([...current, ...submittedIds])]);
+  }
+
+  async function approveSelected() {
+    if (!selectedIds.length || !window.confirm(
+      `Duyệt ${selectedIds.length} phiếu KPI và cập nhật điểm vào bảng lương ${payrollPeriodForKpi(period)}?`,
+    )) return;
+    setBusy(true);
+    setMessage(null);
+    try {
+      const response = await api.patch("/kpi-evaluations/bulk-approve", { ids: selectedIds });
+      const summary = response.data?.summary;
+      setMessage({
+        ok: (summary?.failed || 0) === 0,
+        text: response.data?.message || "Đã xử lý duyệt KPI hàng loạt",
+      });
+      setSelectedIds([]);
+      await load();
+    } catch (error) {
+      setMessage({ ok: false, text: error.response?.data?.message || "Không thể duyệt KPI hàng loạt" });
+    } finally {
+      setBusy(false);
+    }
+  }
 
   function changeAssignmentItem(index, field, value) {
     setAssignment((current) => ({
@@ -332,7 +375,7 @@ export default function KpiManager() {
         "Khối lượng tiêu chuẩn",
         "Cho phép để trống với chỉ tiêu định tính, hoặc nhập số/điều kiện như: 100%, Không quá 10%, >= 90%, 2.",
       ],
-      ["Cách tính", "Ghi chú dạng ±1% tương đương 5 điểm hoặc Thêm 1 ... + 10 điểm sẽ được hệ thống áp dụng tự động."],
+      ["Cách tính", "Hệ thống hỗ trợ ghi chú dạng ±1% tương đương 5 điểm; Thêm 1 ... + 10 điểm; hoặc 1 sự cố/lỗi/lần/vi phạm ... bị -10 điểm."],
       ["Lưu ý", "Phiếu đã gửi duyệt/đã duyệt sẽ không bị ghi đè."],
     ]);
     guide.getRow(1).font = {
@@ -628,6 +671,17 @@ export default function KpiManager() {
               <RefreshCcw size={16} className={loading ? "animate-spin" : ""} />
               Tải lại
             </button>
+            {canEdit && selectedIds.length > 0 && (
+              <button
+                type="button"
+                onClick={approveSelected}
+                disabled={busy}
+                className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-700 disabled:opacity-50"
+              >
+                {busy ? <Loader2 size={16} className="animate-spin" /> : <ClipboardCheck size={16} />}
+                Duyệt hàng loạt ({selectedIds.length})
+              </button>
+            )}
           </div>
           {loading ? (
             <div className="flex justify-center py-16">
@@ -642,6 +696,18 @@ export default function KpiManager() {
               <table className="w-full text-left text-sm">
                 <thead className="bg-slate-50 text-xs uppercase text-slate-500">
                   <tr>
+                    {canEdit && (
+                      <th className="w-10 px-4 py-3">
+                        <input
+                          type="checkbox"
+                          checked={allSubmittedSelected}
+                          disabled={submittedRows.length === 0 || busy}
+                          onChange={toggleAllSubmitted}
+                          aria-label="Chọn tất cả phiếu chờ duyệt"
+                          className="h-4 w-4 rounded border-slate-300"
+                        />
+                      </th>
+                    )}
                     <th className="px-4 py-3">Nhân viên</th>
                     <th className="px-4 py-3">Kỳ / hạn nộp</th>
                     <th className="px-4 py-3">Tiêu chí</th>
@@ -653,6 +719,20 @@ export default function KpiManager() {
                 <tbody className="divide-y">
                   {rows.map((row) => (
                     <tr key={row._id} className="hover:bg-slate-50">
+                      {canEdit && (
+                        <td className="px-4 py-3">
+                          {row.status === "SUBMITTED" && (
+                            <input
+                              type="checkbox"
+                              checked={selectedIds.includes(row._id)}
+                              disabled={busy}
+                              onChange={() => toggleSelected(row._id)}
+                              aria-label={`Chọn KPI của ${row.employeeName}`}
+                              className="h-4 w-4 rounded border-slate-300"
+                            />
+                          )}
+                        </td>
+                      )}
                       <td className="px-4 py-3">
                         <p className="font-bold text-slate-800">
                           {row.employeeName}
@@ -1128,11 +1208,13 @@ export default function KpiManager() {
                         {item.evidences.map((evidence) => {
                           const fileUrl = `${getApiBaseUrl()}/kpi-evaluations/${reviewing._id}/items/${item._id}/evidences/${evidence._id}/file`;
                           return (
-                            <a
+                            <button
+                              type="button"
                               key={evidence._id}
-                              href={fileUrl}
-                              target="_blank"
-                              rel="noreferrer"
+                              onClick={() => setPreviewEvidence({
+                                url: fileUrl,
+                                name: evidence.originalName || evidence.filename || "Ảnh minh chứng KPI",
+                              })}
                               className="aspect-square overflow-hidden rounded-lg border border-slate-200 bg-slate-100"
                               title={evidence.originalName || evidence.filename}
                             >
@@ -1144,7 +1226,7 @@ export default function KpiManager() {
                                 className="h-full w-full object-cover"
                                 loading="lazy"
                               />
-                            </a>
+                            </button>
                           );
                         })}
                       </div>
@@ -1249,6 +1331,39 @@ export default function KpiManager() {
                   </button>
                 </>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+      {previewEvidence && (
+        <div
+          className="fixed inset-0 z-[140] flex items-center justify-center bg-slate-950/85 p-3 sm:p-6"
+          role="dialog"
+          aria-modal="true"
+          aria-label={previewEvidence.name}
+          onClick={() => setPreviewEvidence(null)}
+        >
+          <div
+            className="relative flex max-h-full max-w-6xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-4 border-b px-4 py-3">
+              <p className="truncate text-sm font-bold text-slate-800">{previewEvidence.name}</p>
+              <button
+                type="button"
+                onClick={() => setPreviewEvidence(null)}
+                className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100"
+                aria-label="Đóng ảnh minh chứng"
+              >
+                <X size={20} />
+              </button>
+            </div>
+            <div className="min-h-0 overflow-auto bg-slate-100 p-2 sm:p-4">
+              <img
+                src={previewEvidence.url}
+                alt={previewEvidence.name}
+                className="mx-auto max-h-[82vh] max-w-full object-contain"
+              />
             </div>
           </div>
         </div>

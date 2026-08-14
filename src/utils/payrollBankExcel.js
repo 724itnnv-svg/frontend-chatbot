@@ -25,6 +25,7 @@ export function calculatePayrollInstallments(row) {
     "thuNhapTheoNgayCong.comTangCa",
     "thuNhapTheoNgayCong.traGiamLuong",
     "thuNhapTheoNgayCong.congKhac",
+    "thuNhapTheoNgayCong.phucLoi",
   ].reduce((total, path) => total + toNumber(getDeep(row, path)), 0);
   const secondInstallmentIncome =
     toNumber(getDeep(row, "thuNhapTheoNgayCong.thuongKPI"))

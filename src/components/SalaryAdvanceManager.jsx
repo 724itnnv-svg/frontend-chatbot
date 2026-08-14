@@ -584,8 +584,8 @@ export default function SalaryAdvanceManager() {
                 <span className={`absolute left-1 top-1 h-6 w-6 rounded-full bg-white shadow transition-transform ${limitPolicy.limitMode === "salary_ratio" ? "translate-x-6" : "translate-x-0"}`} />
               </button>
               <div className={`min-w-52 rounded-xl px-3 py-2 text-sm transition ${limitPolicy.limitMode === "salary_ratio" ? "bg-emerald-50 font-bold text-emerald-700" : "text-slate-500"}`}>
-                <div>50% lương thực lĩnh hiện tại</div>
-                <div className="mt-0.5 text-xs font-normal">Tự thay đổi theo lương tạm tính</div>
+                <div>50% thu nhập tạm tính ngày 01–20</div>
+                <div className="mt-0.5 text-xs font-normal">Giả định đủ ngày công chuẩn, không tính Chủ nhật</div>
               </div>
               {(policyLoading || policySaving) && <Loader2 size={18} className="animate-spin text-emerald-600" />}
             </div>

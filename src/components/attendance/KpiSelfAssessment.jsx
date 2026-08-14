@@ -10,6 +10,7 @@ import {
   Target,
   Trash2,
   Upload,
+  X,
 } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import { getApiBaseUrl } from "../../api/baseUrl";
@@ -50,8 +51,13 @@ function scorePreview(item) {
       return String(item.employeeActualText ?? "").trim() ? base : 0;
     }
     if (!Number.isFinite(actual)) return 0;
-    if (target === 0) return base;
     const note = String(item.criteriaNote || "");
+    const penaltyRule = note.replace(/,/g, ".").match(/(?:mỗi\s*)?(\d+(?:\.\d+)?)\s*(?:sự\s*cố|lỗi|lần|vi\s*phạm|trường\s*hợp)[\s\S]{0,160}?(?:bị|trừ|=)\s*-?\s*(\d+(?:\.\d+)?)\s*điểm/i);
+    if (penaltyRule) {
+      const excess = Math.max(0, actual - target);
+      return Math.max(0, Math.min(300, base - excess * Number(penaltyRule[2]) / Number(penaltyRule[1])));
+    }
+    if (target === 0) return base;
     const lowerIsBetter = /(không\s*quá|tối\s*đa|≤|<=|nhỏ\s*hơn)/i.test(item.standardQuantity);
     const rateRule = note.replace(/,/g, ".").match(/[±+\-]\s*(\d+(?:\.\d+)?)\s*%?\s*(?:tương\s*đương|=)\s*\+?\s*(\d+(?:\.\d+)?)\s*điểm/i);
     if (rateRule) {
@@ -87,6 +93,7 @@ export default function KpiSelfAssessment() {
   const [uploadingItemId, setUploadingItemId] = useState("");
   const [deletingEvidenceId, setDeletingEvidenceId] = useState("");
   const [message, setMessage] = useState(null);
+  const [previewEvidence, setPreviewEvidence] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -466,13 +473,16 @@ export default function KpiSelfAssessment() {
                               key={evidence._id}
                               className="group relative aspect-square overflow-hidden rounded-xl border border-slate-200 bg-slate-100"
                             >
-                              <a
-                                href={evidenceFileUrl(item, evidence)}
-                                target="_blank"
-                                rel="noreferrer"
+                              <button
+                                type="button"
+                                onClick={() => setPreviewEvidence({
+                                  url: evidenceFileUrl(item, evidence),
+                                  name: evidence.originalName || evidence.filename || "Ảnh minh chứng KPI",
+                                })}
                                 title={
                                   evidence.originalName || evidence.filename
                                 }
+                                className="block h-full w-full"
                               >
                                 <img
                                   src={evidenceFileUrl(item, evidence)}
@@ -483,7 +493,7 @@ export default function KpiSelfAssessment() {
                                   className="h-full w-full object-cover"
                                   loading="lazy"
                                 />
-                              </a>
+                              </button>
                               {canEdit && (
                                 <button
                                   type="button"
@@ -588,6 +598,39 @@ export default function KpiSelfAssessment() {
             )}
           </div>
         </>
+      )}
+      {previewEvidence && (
+        <div
+          className="fixed inset-0 z-[140] flex items-center justify-center bg-slate-950/85 p-3 sm:p-6"
+          role="dialog"
+          aria-modal="true"
+          aria-label={previewEvidence.name}
+          onClick={() => setPreviewEvidence(null)}
+        >
+          <div
+            className="relative flex max-h-full max-w-6xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-4 border-b px-4 py-3">
+              <p className="truncate text-sm font-bold text-slate-800">{previewEvidence.name}</p>
+              <button
+                type="button"
+                onClick={() => setPreviewEvidence(null)}
+                className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100"
+                aria-label="Đóng ảnh minh chứng"
+              >
+                <X size={20} />
+              </button>
+            </div>
+            <div className="min-h-0 overflow-auto bg-slate-100 p-2 sm:p-4">
+              <img
+                src={previewEvidence.url}
+                alt={previewEvidence.name}
+                className="mx-auto max-h-[82vh] max-w-full object-contain"
+              />
+            </div>
+          </div>
+        </div>
       )}
     </section>
   );
