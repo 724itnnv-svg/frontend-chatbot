@@ -19,21 +19,28 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks(id) {
-          if (!id.includes("node_modules")) return undefined;
+          const normalizedId = id.replaceAll("\\", "/");
+          if (!normalizedId.includes("/node_modules/")) return undefined;
 
-          if (id.includes("react") || id.includes("react-dom") || id.includes("scheduler")) {
+          if (
+            normalizedId.includes("/node_modules/react/") ||
+            normalizedId.includes("/node_modules/react-dom/") ||
+            normalizedId.includes("/node_modules/scheduler/")
+          ) {
             return "react";
           }
 
-          if (id.includes("xlsx")) return "xlsx";
-          if (id.includes("exceljs")) return "exceljs";
-          if (id.includes("jszip")) return "jszip";
-          if (id.includes("qrcode")) return "qrcode";
-          if (id.includes("sweetalert2")) return "sweetalert2";
-          if (id.includes("react-calendar")) return "calendar";
-          if (id.includes("socket.io-client") || id.includes("engine.io-client")) return "realtime";
+          if (normalizedId.includes("/node_modules/xlsx/")) return "xlsx";
+          if (normalizedId.includes("/node_modules/sweetalert2/")) return "sweetalert2";
+          if (normalizedId.includes("/node_modules/react-calendar/")) return "calendar";
+          if (
+            normalizedId.includes("/node_modules/socket.io-client/") ||
+            normalizedId.includes("/node_modules/engine.io-client/")
+          ) {
+            return "realtime";
+          }
 
-          return "vendor";
+          return undefined;
         },
       },
     },

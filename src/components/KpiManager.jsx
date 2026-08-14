@@ -30,14 +30,19 @@ const nowPeriod = () => {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
 };
+const dueDateForPeriod = (period) => (period ? `${period}-02` : "");
+const payrollPeriodForKpi = (period) => {
+  const match = String(period || "").match(/^(\d{4})-(\d{2})$/);
+  if (!match) return "";
+  const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 2, 1));
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
+};
 const emptyItem = () => ({
   name: "",
-  description: "",
-  type: "quantity",
-  unit: "",
-  target: "",
-  weight: "",
-  maxAchievementPercent: 150,
+  scoringMethod: "standard_points",
+  standardQuantity: "",
+  standardScore: "",
+  criteriaNote: "",
 });
 const STATUS = {
   ASSIGNED: "Đã giao",
@@ -57,33 +62,22 @@ const DELETABLE_STATUSES = new Set([
 const EDITABLE_STATUSES = new Set(["ASSIGNED", "DRAFT", "REVISION_REQUESTED"]);
 
 const IMPORT_HEADERS = [
-  "Mã nhân viên",
-  "Hạn nộp",
-  "Mã KPI",
-  "Tên KPI",
-  "Mô tả",
-  "Loại KPI",
-  "Đơn vị",
-  "Chỉ tiêu",
-  "Trọng số (%)",
-  "Trần hoàn thành (%)",
+  "MSNV",
+  "CHỈ TIÊU",
+  "KHỐI LƯỢNG TIÊU CHUẨN",
+  "ĐIỂM TIÊU CHUẨN",
+  "KHỐI LƯỢNG HOÀN THÀNH (NHÂN VIÊN TỰ NHẬP)",
+  "ĐIỂM THỰC TẾ (HỆ THỐNG TỰ TÍNH)",
+  "GHI CHÚ",
 ];
-
-function excelDate(value) {
-  if (!value) return "";
-  if (value instanceof Date && !Number.isNaN(value.getTime()))
-    return value.toISOString().slice(0, 10);
-  const text = String(value).trim();
-  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
-  const match = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  return match
-    ? `${match[3]}-${match[2].padStart(2, "0")}-${match[1].padStart(2, "0")}`
-    : text;
-}
 
 function importValue(row, names) {
   for (const name of names)
     if (row[name] !== undefined && row[name] !== null) return row[name];
+  const normalizedNames = new Set(names.map((name) => String(name).replace(/\s+/g, " ").trim().toUpperCase()));
+  for (const [key, value] of Object.entries(row)) {
+    if (normalizedNames.has(String(key).replace(/\s+/g, " ").trim().toUpperCase())) return value;
+  }
   return "";
 }
 
@@ -113,7 +107,7 @@ export default function KpiManager() {
   const importInputRef = useRef(null);
   const [assignment, setAssignment] = useState({
     employeeCode: "",
-    dueDate: "",
+    dueDate: dueDateForPeriod(period),
     items: [emptyItem()],
   });
 
@@ -144,10 +138,10 @@ export default function KpiManager() {
       .catch(() => {});
   }, [api]);
 
-  const totalWeight = useMemo(
+  const totalStandardScore = useMemo(
     () =>
       assignment.items.reduce(
-        (sum, item) => sum + (Number(item.weight) || 0),
+        (sum, item) => sum + (Number(item.standardScore) || 0),
         0,
       ),
     [assignment.items],
@@ -165,7 +159,7 @@ export default function KpiManager() {
 
   function resetAssignment() {
     setEditingId(null);
-    setAssignment({ employeeCode: "", dueDate: "", items: [emptyItem()] });
+    setAssignment({ employeeCode: "", dueDate: dueDateForPeriod(period), items: [emptyItem()] });
   }
 
   function openNewAssignment() {
@@ -177,16 +171,14 @@ export default function KpiManager() {
     setEditingId(row._id);
     setAssignment({
       employeeCode: row.employeeCode,
-      dueDate: row.dueDate || "",
+      dueDate: dueDateForPeriod(row.period || period),
       items: row.items.map((item) => ({
         code: item.code || "",
         name: item.name || "",
-        description: item.description || "",
-        type: item.type || "quantity",
-        unit: item.unit || "",
-        target: item.target ?? "",
-        weight: item.weight ?? "",
-        maxAchievementPercent: item.maxAchievementPercent ?? 150,
+        scoringMethod: "standard_points",
+        standardQuantity: item.standardQuantity || String(item.target ?? ""),
+        standardScore: item.standardScore || item.weight || "",
+        criteriaNote: item.criteriaNote || item.description || "",
       })),
     });
     setShowAssign(true);
@@ -239,6 +231,8 @@ export default function KpiManager() {
       items: row.items.map((item) => ({
         ...item,
         approvedActual: item.approvedActual ?? item.employeeActual ?? "",
+        approvedActualText:
+          item.approvedActualText || item.employeeActualText || "",
         approvedScore: item.approvedScore ?? item.employeeScore ?? "",
         reviewNote: item.reviewNote || "",
       })),
@@ -258,7 +252,7 @@ export default function KpiManager() {
     if (
       action === "approve" &&
       !window.confirm(
-        "Duyệt điểm KPI và cập nhật vào bảng lương nháp của nhân viên?",
+        `Duyệt điểm KPI và cập nhật vào bảng lương ${payrollPeriodForKpi(reviewing.period)} của nhân viên?`,
       )
     )
       return;
@@ -273,6 +267,7 @@ export default function KpiManager() {
           items: reviewing.items.map((item) => ({
             _id: item._id,
             approvedActual: item.approvedActual,
+            approvedActualText: item.approvedActualText,
             approvedScore: item.approvedScore,
             reviewNote: item.reviewNote,
           })),
@@ -328,15 +323,16 @@ export default function KpiManager() {
         "Mỗi dòng là một tiêu chí KPI của một nhân viên.",
       ],
       ["Kỳ KPI", period],
+      ["Hạn nộp", `Ngày 02/${period.slice(5, 7)}/${period.slice(0, 4)}. Điểm được tính vào bảng lương ${payrollPeriodForKpi(period)}.`],
       [
         "Quy tắc",
-        "Các dòng cùng mã nhân viên sẽ được gom thành một phiếu. Tổng trọng số của mỗi nhân viên phải bằng 100%.",
+        "Các dòng cùng MSNV sẽ được gom thành một phiếu. Tổng điểm tiêu chuẩn của mỗi nhân viên phải bằng 100.",
       ],
       [
-        "Loại KPI",
-        "quantity = số lượng; percentage = tỷ lệ; manual = chấm thủ công; boolean = đạt/không đạt.",
+        "Khối lượng tiêu chuẩn",
+        "Cho phép để trống với chỉ tiêu định tính, hoặc nhập số/điều kiện như: 100%, Không quá 10%, >= 90%, 2.",
       ],
-      ["Hạn nộp", "Không bắt buộc. Nhập theo định dạng YYYY-MM-DD."],
+      ["Cách tính", "Ghi chú dạng ±1% tương đương 5 điểm hoặc Thêm 1 ... + 10 điểm sẽ được hệ thống áp dụng tự động."],
       ["Lưu ý", "Phiếu đã gửi duyệt/đã duyệt sẽ không bị ghi đè."],
     ]);
     guide.getRow(1).font = {
@@ -361,44 +357,35 @@ export default function KpiManager() {
     sheet.columns = IMPORT_HEADERS.map((header, index) => ({
       header,
       key: `c${index}`,
-      width: [18, 15, 14, 30, 40, 16, 14, 14, 16, 22][index],
+      width: [16, 42, 24, 20, 28, 25, 45][index],
     }));
     sheet.addRows([
       [
         "NV001",
-        `${period}-25`,
-        "DS01",
-        "Hoàn thành doanh số",
-        "Doanh số cá nhân trong tháng",
-        "quantity",
-        "đồng",
-        100000000,
-        60,
-        150,
+        "Nhật ký, SOP và dữ liệu thí nghiệm đầy đủ",
+        "100%",
+        45,
+        "",
+        "",
+        "",
       ],
       [
         "NV001",
-        `${period}-25`,
-        "CL01",
-        "Chất lượng công việc",
-        "Quản lý đánh giá chất lượng",
-        "manual",
-        "điểm",
-        0,
-        40,
-        100,
+        "Tỷ lệ nhiễm theo từng giai đoạn",
+        "Không quá 10%",
+        30,
+        "",
+        "",
+        "±1% tương đương 5 điểm",
       ],
       [
-        "NV002",
-        `${period}-25`,
-        "PH01",
-        "Phản hồi đúng hạn",
-        "Tỷ lệ phản hồi đúng SLA",
-        "percentage",
-        "%",
-        95,
-        100,
-        120,
+        "NV001",
+        "Thử nghiệm/cải tiến quy trình hoàn thành đúng",
+        "2",
+        25,
+        "",
+        "",
+        "Thêm 1 quy trình + 10 điểm",
       ],
     ]);
     const header = sheet.getRow(1);
@@ -414,29 +401,16 @@ export default function KpiManager() {
       horizontal: "center",
       wrapText: true,
     };
-    sheet.autoFilter = { from: "A1", to: "J1" };
+    sheet.autoFilter = { from: "A1", to: "G1" };
     for (let row = 2; row <= 1001; row += 1) {
-      sheet.getCell(`F${row}`).dataValidation = {
-        type: "list",
-        allowBlank: false,
-        formulae: ['"quantity,percentage,manual,boolean"'],
-      };
-      sheet.getCell(`I${row}`).dataValidation = {
-        type: "whole",
+      sheet.getCell(`D${row}`).dataValidation = {
+        type: "decimal",
         operator: "between",
         allowBlank: false,
         formulae: [1, 100],
       };
-      sheet.getCell(`J${row}`).dataValidation = {
-        type: "whole",
-        operator: "between",
-        allowBlank: true,
-        formulae: [100, 300],
-      };
     }
-    sheet.getColumn(8).numFmt = "#,##0.##";
-    sheet.getColumn(9).numFmt = "0";
-    sheet.getColumn(10).numFmt = "0";
+    sheet.getColumn(4).numFmt = "0.##";
     sheet.eachRow((row, rowNumber) => {
       if (rowNumber > 1) row.alignment = { vertical: "top", wrapText: true };
     });
@@ -464,40 +438,27 @@ export default function KpiManager() {
         workbook.Sheets[workbook.SheetNames[0]];
       const rawRows = XLSX.utils.sheet_to_json(sheet, {
         defval: "",
-        raw: true,
+        raw: false,
       });
+      let previousEmployeeCode = "";
       const rows = rawRows
-        .map((row, index) => ({
+        .map((row, index) => {
+          const employeeCode = String(
+            importValue(row, ["MSNV", "Mã nhân viên", "Ma nhan vien", "employeeCode"]),
+          ).trim() || previousEmployeeCode;
+          if (employeeCode) previousEmployeeCode = employeeCode;
+          return {
           rowNumber: index + 2,
-          employeeCode: String(
-            importValue(row, ["Mã nhân viên", "Ma nhan vien", "employeeCode"]),
+          employeeCode,
+          indicator: String(
+            importValue(row, ["CHỈ TIÊU", "Chỉ tiêu", "CHI TIEU", "indicator"]),
           ).trim(),
-          dueDate: excelDate(
-            importValue(row, ["Hạn nộp", "Han nop", "dueDate"]),
-          ),
-          kpiCode: String(
-            importValue(row, ["Mã KPI", "Ma KPI", "kpiCode"]),
-          ).trim(),
-          kpiName: String(
-            importValue(row, ["Tên KPI", "Ten KPI", "kpiName"]),
-          ).trim(),
-          description: String(
-            importValue(row, ["Mô tả", "Mo ta", "description"]),
-          ).trim(),
-          type: String(importValue(row, ["Loại KPI", "Loai KPI", "type"]))
-            .trim()
-            .toLowerCase(),
-          unit: String(importValue(row, ["Đơn vị", "Don vi", "unit"])).trim(),
-          target: importValue(row, ["Chỉ tiêu", "Chi tieu", "target"]),
-          weight: importValue(row, ["Trọng số (%)", "Trong so (%)", "weight"]),
-          maxAchievementPercent:
-            importValue(row, [
-              "Trần hoàn thành (%)",
-              "Tran hoan thanh (%)",
-              "maxAchievementPercent",
-            ]) || 150,
-        }))
-        .filter((row) => row.employeeCode || row.kpiName);
+          standardQuantity: String(importValue(row, ["KHỐI LƯỢNG TIÊU CHUẨN", "Khối lượng tiêu chuẩn", "standardQuantity"])).trim(),
+          standardScore: importValue(row, ["ĐIỂM TIÊU CHUẨN", "Điểm tiêu chuẩn", "standardScore"]),
+          employeeActualText: String(importValue(row, ["KHỐI LƯỢNG HOÀN THÀNH (NHÂN VIÊN TỰ NHẬP)", "Khối lượng hoàn thành", "employeeActualText"])).trim(),
+          criteriaNote: String(importValue(row, ["GHI CHÚ", "Ghi chú", "criteriaNote"])).trim(),
+        };})
+        .filter((row) => row.employeeCode || row.indicator);
       setImportRows(rows);
       const response = await api.post("/kpi-evaluations/bulk-import", {
         period,
@@ -875,7 +836,7 @@ export default function KpiManager() {
                         <th className="px-3 py-2">Nhân viên</th>
                         <th className="px-3 py-2">Phòng ban</th>
                         <th className="px-3 py-2">Số KPI</th>
-                        <th className="px-3 py-2">Trọng số</th>
+                        <th className="px-3 py-2">Điểm chuẩn</th>
                         <th className="px-3 py-2">Xử lý</th>
                       </tr>
                     </thead>
@@ -891,7 +852,7 @@ export default function KpiManager() {
                           <td className="px-3 py-2">{item.teamId || "-"}</td>
                           <td className="px-3 py-2">{item.itemCount}</td>
                           <td className="px-3 py-2 font-bold text-emerald-700">
-                            {item.totalWeight}%
+                            {item.totalStandardScore}
                           </td>
                           <td className="px-3 py-2">
                             <span
@@ -949,7 +910,7 @@ export default function KpiManager() {
                   {editingId ? "Sửa" : "Giao"} KPI tháng {period}
                 </h2>
                 <p className="text-xs text-slate-500">
-                  Tổng trọng số bắt buộc bằng 100%
+                  Tổng điểm tiêu chuẩn bắt buộc bằng 100
                 </p>
               </div>
               <button type="button" onClick={closeAssignment}>
@@ -987,14 +948,9 @@ export default function KpiManager() {
                   Hạn nộp
                   <input
                     type="date"
-                    value={assignment.dueDate}
-                    onChange={(event) =>
-                      setAssignment((current) => ({
-                        ...current,
-                        dueDate: event.target.value,
-                      }))
-                    }
-                    className="mt-1 w-full rounded-xl border px-3 py-2"
+                    value={dueDateForPeriod(period)}
+                    disabled
+                    className="mt-1 w-full rounded-xl border bg-slate-100 px-3 py-2"
                   />
                 </label>
               </div>
@@ -1027,39 +983,16 @@ export default function KpiManager() {
                       placeholder="Tên tiêu chí"
                       className="rounded-lg border px-3 py-2"
                     />
-                    <select
-                      value={item.type}
-                      onChange={(event) =>
-                        changeAssignmentItem(index, "type", event.target.value)
-                      }
-                      className="rounded-lg border px-3 py-2"
-                    >
-                      <option value="quantity">Số lượng</option>
-                      <option value="percentage">Tỷ lệ</option>
-                      <option value="manual">Chấm thủ công</option>
-                      <option value="boolean">Đạt / Không đạt</option>
-                    </select>
                     <input
-                      type="number"
-                      min="0"
-                      value={item.target}
-                      disabled={["manual", "boolean"].includes(item.type)}
+                      value={item.standardQuantity}
                       onChange={(event) =>
                         changeAssignmentItem(
                           index,
-                          "target",
+                          "standardQuantity",
                           event.target.value,
                         )
                       }
-                      placeholder="Chỉ tiêu"
-                      className="rounded-lg border px-3 py-2 disabled:bg-slate-100"
-                    />
-                    <input
-                      value={item.unit}
-                      onChange={(event) =>
-                        changeAssignmentItem(index, "unit", event.target.value)
-                      }
-                      placeholder="Đơn vị"
+                      placeholder="Khối lượng tiêu chuẩn, ví dụ 100%"
                       className="rounded-lg border px-3 py-2"
                     />
                     <input
@@ -1068,42 +1001,27 @@ export default function KpiManager() {
                       min="1"
                       max="100"
                       step="1"
-                      value={item.weight}
+                      value={item.standardScore}
                       onChange={(event) =>
                         changeAssignmentItem(
                           index,
-                          "weight",
+                          "standardScore",
                           event.target.value,
                         )
                       }
-                      placeholder="Trọng số %"
-                      className="rounded-lg border px-3 py-2"
-                    />
-                    <input
-                      type="number"
-                      min="100"
-                      max="300"
-                      value={item.maxAchievementPercent}
-                      onChange={(event) =>
-                        changeAssignmentItem(
-                          index,
-                          "maxAchievementPercent",
-                          event.target.value,
-                        )
-                      }
-                      placeholder="Trần hoàn thành %"
+                      placeholder="Điểm tiêu chuẩn"
                       className="rounded-lg border px-3 py-2"
                     />
                     <textarea
-                      value={item.description}
+                      value={item.criteriaNote}
                       onChange={(event) =>
                         changeAssignmentItem(
                           index,
-                          "description",
+                          "criteriaNote",
                           event.target.value,
                         )
                       }
-                      placeholder="Mô tả/cách đo"
+                      placeholder="Ghi chú/cách tính, ví dụ ±1% tương đương 5 điểm"
                       rows={2}
                       className="rounded-lg border px-3 py-2 sm:col-span-2"
                     />
@@ -1125,9 +1043,9 @@ export default function KpiManager() {
                   Thêm tiêu chí
                 </button>
                 <span
-                  className={`text-sm font-black ${totalWeight === 100 ? "text-emerald-600" : "text-rose-600"}`}
+                  className={`text-sm font-black ${totalStandardScore === 100 ? "text-emerald-600" : "text-rose-600"}`}
                 >
-                  Tổng: {totalWeight}%
+                  Tổng điểm tiêu chuẩn: {totalStandardScore}
                 </span>
               </div>
             </div>
@@ -1140,7 +1058,7 @@ export default function KpiManager() {
                 Hủy
               </button>
               <button
-                disabled={busy || totalWeight !== 100}
+                disabled={busy || totalStandardScore !== 100}
                 className="inline-flex items-center gap-2 rounded-xl bg-violet-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
               >
                 {busy ? (
@@ -1180,17 +1098,22 @@ export default function KpiManager() {
                       {index + 1}. {item.name}
                     </b>
                     <span className="text-xs font-bold text-violet-700">
-                      Trọng số {item.weight}%
+                      {item.scoringMethod === "standard_points"
+                        ? `Điểm chuẩn ${item.standardScore}`
+                        : `Trọng số ${item.weight}%`}
                     </span>
                   </div>
                   <p className="mt-1 text-sm text-slate-500">
-                    Chỉ tiêu:{" "}
-                    {item.type === "boolean"
+                    Khối lượng chuẩn:{" "}
+                    {item.scoringMethod === "standard_points" ? (item.standardQuantity || "Không áp dụng") : (item.type === "boolean"
                       ? "Đạt / Không đạt"
-                      : `${item.target} ${item.unit || ""}`}{" "}
-                    · Nhân viên khai: {item.employeeActual ?? "-"} · Tự chấm:{" "}
-                    {item.employeeScore ?? 0}%
+                      : `${item.target} ${item.unit || ""}`)}{" "}
+                    · Nhân viên khai: {item.scoringMethod === "standard_points" ? (item.employeeActualText || "-") : (item.employeeActual ?? "-")} · Điểm thực tế:{" "}
+                    {item.employeeScore ?? 0}{item.scoringMethod === "standard_points" ? "" : "%"}
                   </p>
+                  {item.criteriaNote && (
+                    <p className="mt-1 text-sm text-slate-500">Ghi chú: {item.criteriaNote}</p>
+                  )}
                   {item.employeeNote && (
                     <p className="mt-2 rounded-lg bg-slate-50 px-3 py-2 text-sm">
                       {item.employeeNote}
@@ -1232,12 +1155,12 @@ export default function KpiManager() {
                       Kết quả xác nhận
                       <input
                         disabled={!canEdit || reviewing.status !== "SUBMITTED"}
-                        type="number"
-                        value={item.approvedActual ?? ""}
+                        type={item.scoringMethod === "standard_points" ? "text" : "number"}
+                        value={item.scoringMethod === "standard_points" ? item.approvedActualText : (item.approvedActual ?? "")}
                         onChange={(event) =>
                           changeReviewItem(
                             index,
-                            "approvedActual",
+                            item.scoringMethod === "standard_points" ? "approvedActualText" : "approvedActual",
                             event.target.value,
                           )
                         }
@@ -1245,9 +1168,9 @@ export default function KpiManager() {
                       />
                     </label>
                     <label className="text-xs font-semibold text-slate-600">
-                      Mức hoàn thành duyệt (%)
+                      {item.scoringMethod === "standard_points" ? "Điểm hệ thống tính" : "Mức hoàn thành duyệt (%)"}
                       <input
-                        disabled={!canEdit || reviewing.status !== "SUBMITTED"}
+                        disabled={item.scoringMethod === "standard_points" || !canEdit || reviewing.status !== "SUBMITTED"}
                         type="number"
                         min="0"
                         max={item.maxAchievementPercent || 150}
