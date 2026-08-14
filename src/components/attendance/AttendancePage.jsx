@@ -1114,7 +1114,7 @@ export default function AttendancePage() {
   const [advanceLoading, setAdvanceLoading] = useState(false);
   const [advanceSaving, setAdvanceSaving] = useState(false);
   const [deletingAdvanceId, setDeletingAdvanceId] = useState("");
-  const [advanceLimit, setAdvanceLimit] = useState({ limitMode: "salary_ratio", minAmount: 100000, maxAmount: 0, monthlyLimit: 0, estimatedNetSalary: 0, canRequest: false, restrictionMessage: "Đang kiểm tra điều kiện ứng lương..." });
+  const [advanceLimit, setAdvanceLimit] = useState({ limitMode: "salary_ratio", minAmount: 100000, maxAmount: 0, monthlyLimit: 0, estimatedGrossIncome: 0, fullAttendanceDays: 0, canRequest: false, restrictionMessage: "Đang kiểm tra điều kiện ứng lương..." });
   const [advanceLimitLoading, setAdvanceLimitLoading] = useState(false);
   const [approvalNotifications, setApprovalNotifications] = useState([]);
   const [notificationHistory, setNotificationHistory] = useState([]);
@@ -1485,9 +1485,9 @@ export default function AttendancePage() {
     setAdvanceLimitLoading(true);
     try {
       const res = await api.get(`/salary-advance-requests/my-limit?period=${encodeURIComponent(period)}`);
-      setAdvanceLimit(res.data?.data || { limitMode: "salary_ratio", minAmount: 100000, maxAmount: 0, monthlyLimit: 0, estimatedNetSalary: 0, canRequest: false, restrictionMessage: "Không xác định được điều kiện ứng lương." });
+      setAdvanceLimit(res.data?.data || { limitMode: "salary_ratio", minAmount: 100000, maxAmount: 0, monthlyLimit: 0, estimatedGrossIncome: 0, fullAttendanceDays: 0, canRequest: false, restrictionMessage: "Không xác định được điều kiện ứng lương." });
     } catch (err) {
-      setAdvanceLimit({ limitMode: "salary_ratio", minAmount: 100000, maxAmount: 0, monthlyLimit: 0, estimatedNetSalary: 0, canRequest: false, restrictionMessage: err.response?.data?.message || "Không thể kiểm tra điều kiện ứng lương. Vui lòng thử lại." });
+      setAdvanceLimit({ limitMode: "salary_ratio", minAmount: 100000, maxAmount: 0, monthlyLimit: 0, estimatedGrossIncome: 0, fullAttendanceDays: 0, canRequest: false, restrictionMessage: err.response?.data?.message || "Không thể kiểm tra điều kiện ứng lương. Vui lòng thử lại." });
     } finally {
       setAdvanceLimitLoading(false);
     }
@@ -3137,7 +3137,7 @@ export default function AttendancePage() {
                   <span className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600"><HandCoins size={22} /></span>
                   <div>
                     <h2 className="font-bold text-slate-900">Tạo phiếu ứng lương</h2>
-                    <p className="text-xs text-slate-500">Chỉ gửi từ ngày 01–20; {usesSalaryRatioLimit ? "tổng các phiếu trong tháng không vượt quá 50% lương tạm tính thực lĩnh hiện tại." : "tổng các phiếu trong tháng không vượt quá 2.600.000 đ."}</p>
+                    <p className="text-xs text-slate-500">Chỉ gửi từ ngày 01–20; {usesSalaryRatioLimit ? "tổng các phiếu trong tháng không vượt quá 50% tổng thu nhập tạm tính từ ngày 01–20, giả định đủ ngày công chuẩn." : "tổng các phiếu trong tháng không vượt quá 2.600.000 đ."}</p>
                   </div>
                 </div>
                 <div className="space-y-3">
@@ -3147,7 +3147,7 @@ export default function AttendancePage() {
                   {Number(advanceForm.requestedAmount) > 0 && <p className="-mt-1 text-sm font-bold text-emerald-700">{money(advanceForm.requestedAmount)}</p>}
                   <div className={`rounded-xl border px-3 py-2 text-xs ${TONE.emerald}`}>
                     {advanceLimitLoading ? "Đang tải hạn mức ứng lương..." : usesSalaryRatioLimit
-                      ? <>Lương tạm tính thực lĩnh: <strong>{money(advanceLimit.estimatedNetSalary ?? 0)}</strong>. Hạn mức 50%: <strong>{money(advanceLimit.monthlyLimit ?? 0)}</strong>. Đã tính trong tháng: <strong>{money(advanceLimit.usedAmount ?? 0)}</strong>. Còn có thể ứng: <strong>{money(advanceLimit.remainingAmount ?? advanceLimit.maxAmount ?? 0)}</strong>.</>
+                      ? <>Tổng thu nhập tạm tính 01–20 ({toNumber(advanceLimit.fullAttendanceDays)} ngày công chuẩn): <strong>{money(advanceLimit.estimatedGrossIncome ?? 0)}</strong>. Hạn mức 50%: <strong>{money(advanceLimit.monthlyLimit ?? 0)}</strong>. Đã tính trong tháng: <strong>{money(advanceLimit.usedAmount ?? 0)}</strong>. Còn có thể ứng: <strong>{money(advanceLimit.remainingAmount ?? advanceLimit.maxAmount ?? 0)}</strong>.</>
                       : <>Hạn mức cố định: <strong>{money(advanceLimit.monthlyLimit ?? 2600000)}</strong>. Đã tính trong tháng: <strong>{money(advanceLimit.usedAmount ?? 0)}</strong>. Còn có thể ứng: <strong>{money(advanceLimit.remainingAmount ?? advanceLimit.maxAmount ?? 0)}</strong>.</>}
                   </div>
                   {!advanceLimitLoading && advanceRestrictionMessage && <div className={`rounded-xl border px-3 py-2 text-xs font-semibold ${TONE.amber}`}>{advanceRestrictionMessage}</div>}

@@ -27,6 +27,7 @@ function payrollRow(overrides = {}) {
       comTangCa: 50_000,
       traGiamLuong: 75_000,
       congKhac: 25_000,
+      phucLoi: 75_000,
       thuongKPI: 2_000_000,
       hoaHong: 1_000_000,
     },
@@ -38,7 +39,7 @@ function payrollRow(overrides = {}) {
 
 test("calculates payroll installment 1 and installment 2 with the existing payroll formula", () => {
   assert.deepEqual(calculatePayrollInstallments(payrollRow()), {
-    firstInstallment: 11_650_000,
+    firstInstallment: 11_725_000,
     secondInstallment: 2_500_000,
   });
 
@@ -83,7 +84,7 @@ test("builds separate bank rows for each installment and keeps bank metadata", (
 
   assert.equal(firstRows.length, 2);
   assert.equal(secondRows.length, 1);
-  assert.equal(firstRows[0].approvedAmount, 11_650_000);
+  assert.equal(firstRows[0].approvedAmount, 11_725_000);
   assert.equal(firstRows[0].paymentRecipient.accountNumber, "0012345678");
   assert.equal(firstRows[0].paymentRecipient.bankCode, "970436");
   assert.equal(firstRows[0].paymentRecipient.bankBranch, "CN Bình Dương");
@@ -121,7 +122,7 @@ test("creates two VietinBank workbooks with the correct installment amount and c
   assert.equal(firstWorkbook.worksheets.length, 1);
   assert.equal(secondWorkbook.worksheets.length, 1);
   assert.equal(firstWorkbook.worksheets[0].getCell("C4").value, "CHI LUONG DOT 1 THANG 8 2026");
-  assert.equal(firstWorkbook.worksheets[0].getCell("E4").value, 11_650_000);
+  assert.equal(firstWorkbook.worksheets[0].getCell("E4").value, 11_725_000);
   assert.equal(secondWorkbook.worksheets[0].getCell("C4").value, "CHI LUONG DOT 2 THANG 8 2026");
   assert.equal(secondWorkbook.worksheets[0].getCell("E4").value, 2_500_000);
 });

@@ -129,6 +129,7 @@ const PAYROLL_COLUMNS = [
   { key: "thuNhapTheoNgayCong.doanhSo", label: "Doanh số", width: 140, type: "number" },
   { key: "thuNhapTheoNgayCong.hoaHong", label: "Hoa hồng", width: 140, type: "number" },
   { key: "thuNhapTheoNgayCong.congKhac", label: "Cộng khác", width: 130, type: "number" },
+  { key: "thuNhapTheoNgayCong.phucLoi", label: "Phúc lợi", width: 130, type: "number" },
   { key: "thuNhapTheoNgayCong.tongThuNhap", label: "Tổng thu nhập", width: 160, type: "number" },
   { key: "khauTru.apDungBHXH", label: "Trừ BHXH", width: 120, type: "boolean" },
   { key: "khauTru.bhxh", label: "BHXH", width: 120, type: "number" },
@@ -248,6 +249,9 @@ const OLD_UNION_EXPRESSION = "iff(eqText(congTyDongBHXH, \"NNV\"), dataTinhLuong
 const UNION_EXPRESSION = "iff(khauTru.apDungCongDoan, iff(eqText(congTyDongBHXH, \"NNV\"), dataTinhLuong.luongCoBan * settings.tyLeCongDoanNNV, 0), 0)";
 const OLD_TAXABLE_INCOME_EXPRESSION = "thuNhapTheoNgayCong.tongThuNhap - khauTru.tongKhauTru";
 const TAXABLE_INCOME_EXPRESSION = "thuNhapTheoNgayCong.tongThuNhap + thuNhapTheoNgayCong.thuongDotXuat - khauTru.tongKhauTru";
+const OLD_TOTAL_INCOME_EXPRESSION =
+  "thuNhapTheoNgayCong.luongTheoNgayCong + thuNhapTheoNgayCong.phuCapComThucTe + thuNhapTheoNgayCong.phuCapChuyenCanThucTe + thuNhapTheoNgayCong.phuCapXangXeThucTe + thuNhapTheoNgayCong.phuCapDienThoaiThucTe + thuNhapTheoNgayCong.phuCapNhiemVuThucTe + thuNhapTheoNgayCong.luongLeTet + thuNhapTheoNgayCong.luongPhepNam + thuNhapTheoNgayCong.luongTangCaThuong + thuNhapTheoNgayCong.luongTangCaChuNhat + thuNhapTheoNgayCong.luongTangCaLeTet + thuNhapTheoNgayCong.comTangCa + thuNhapTheoNgayCong.traGiamLuong + thuNhapTheoNgayCong.thuongKPI + thuNhapTheoNgayCong.hoaHong + thuNhapTheoNgayCong.congKhac";
+const TOTAL_INCOME_EXPRESSION = `${OLD_TOTAL_INCOME_EXPRESSION} + thuNhapTheoNgayCong.phucLoi`;
 
 const DEFAULT_PAYROLL_FORMULA_SETTINGS = {
   settings: {
@@ -353,8 +357,7 @@ const DEFAULT_PAYROLL_FORMULA_SETTINGS = {
     {
       target: "thuNhapTheoNgayCong.tongThuNhap",
       enabled: true,
-      expression:
-        "thuNhapTheoNgayCong.luongTheoNgayCong + thuNhapTheoNgayCong.phuCapComThucTe + thuNhapTheoNgayCong.phuCapChuyenCanThucTe + thuNhapTheoNgayCong.phuCapXangXeThucTe + thuNhapTheoNgayCong.phuCapDienThoaiThucTe + thuNhapTheoNgayCong.phuCapNhiemVuThucTe + thuNhapTheoNgayCong.luongLeTet + thuNhapTheoNgayCong.luongPhepNam + thuNhapTheoNgayCong.luongTangCaThuong + thuNhapTheoNgayCong.luongTangCaChuNhat + thuNhapTheoNgayCong.luongTangCaLeTet + thuNhapTheoNgayCong.comTangCa + thuNhapTheoNgayCong.traGiamLuong + thuNhapTheoNgayCong.thuongKPI + thuNhapTheoNgayCong.hoaHong + thuNhapTheoNgayCong.congKhac",
+      expression: TOTAL_INCOME_EXPRESSION,
       note: "Tong cac khoan thu nhap",
     },
     {
@@ -499,6 +502,8 @@ function mergeFormulaSettings(value) {
         formula.target === "thuNhapTheoNgayCong.thuongKPI" &&
           savedFormula.expression === OLD_KPI_BONUS_EXPRESSION
           ? { ...savedFormula, expression: KPI_BONUS_EXPRESSION }
+          : formula.target === "thuNhapTheoNgayCong.tongThuNhap" && savedFormula.expression === OLD_TOTAL_INCOME_EXPRESSION
+            ? { ...savedFormula, expression: TOTAL_INCOME_EXPRESSION }
           : formula.target === "khauTru.bhxh" && savedFormula.expression === OLD_BHXH_EXPRESSION
             ? { ...savedFormula, expression: BHXH_EXPRESSION }
             : formula.target === "khauTru.congDoan" && savedFormula.expression === OLD_UNION_EXPRESSION
@@ -733,6 +738,7 @@ function normalizePayrollRow(row = {}, fallbackPeriod = "", formulaSettings = DE
   normalized.thuNhapTheoNgayCong.tangCaThuong ??= row.overtimeHours ?? 0;
   normalized.thuNhapTheoNgayCong.thuongKPI ??= row.bonus ?? 0;
   normalized.thuNhapTheoNgayCong.thuongDotXuat ??= 0;
+  normalized.thuNhapTheoNgayCong.phucLoi ??= 0;
   normalized.khauTru.giamLuong ??= row.deductions ?? 0;
   normalized.khauTru.tamUngTuPhieu ??= 0;
   normalized.khauTru.tamUngDieuChinh ??= Math.max(0, toNumber(normalized.khauTru.tamUng ?? row.advance ?? 0) - toNumber(normalized.khauTru.tamUngTuPhieu));
