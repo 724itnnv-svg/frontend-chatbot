@@ -732,7 +732,9 @@ export default function CashFlowApp() {
     () =>
       payloadSourceRows.filter(
         (row) =>
-          hasCashflowInvoiceId(row) && !row.__orderDeliveryMissingInvoice,
+          hasCashflowInvoiceId(row) &&
+          !row.__orderDeliveryMissingInvoice &&
+          !row.__orderDeliveryFeeMismatch,
       ),
     [payloadSourceRows],
   );

@@ -194,9 +194,13 @@ const buildCashflowPayloadEntriesForRow = ({
     return [];
   }
 
+  const isGhnRow = normalizeText(row.__sourceFormat).toLowerCase() === "ghn";
+  if (isGhnRow && row.__orderDeliveryFeeMismatch === true) {
+    return [];
+  }
+
   const moneyValue = parseMoney(row["Tiền hàng"] || orderDelivery.invoiceTotal);
   const excelShipRawValue = row["Phí ship NVC thu"];
-  const isGhnRow = normalizeText(row.__sourceFormat).toLowerCase() === "ghn";
   const shipValue = parseMoney(
     isGhnRow || normalizeText(excelShipRawValue) !== ""
       ? excelShipRawValue
