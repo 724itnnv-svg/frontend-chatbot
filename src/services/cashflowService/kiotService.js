@@ -11,6 +11,133 @@ const cashflowApi = axios.create({
 });
 const kiotDirectApi = axios.create();
 
+export async function getCustomerByCode(
+  retailer = "kingfarm",
+  accessPrivateToken,
+  customerCode,
+) {
+  try {
+    const normalizedCustomerCode = String(customerCode ?? "").trim();
+    if (!normalizedCustomerCode) {
+      throw new Error("Thiếu mã khách hàng");
+    }
+
+    const response = await kiotDirectApi.get(
+      "https://api-man1.kiotviet.vn/api/customers",
+      {
+        params: {
+          format: "json",
+          Code: normalizedCustomerCode,
+        },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessPrivateToken}`,
+          retailer,
+        },
+      },
+    );
+
+    const customers = Array.isArray(response.data?.Data)
+      ? response.data.Data
+      : [];
+    const normalizedCodeForCompare = normalizedCustomerCode.toLowerCase();
+    const validCustomers = customers.filter(
+      (customer) =>
+        customer &&
+        Number(customer.Id) > 0 &&
+        customer.IsActive !== false &&
+        String(customer.Code ?? "").trim(),
+    );
+
+    return (
+      validCustomers.find(
+        (customer) =>
+          String(customer.Code).trim().toLowerCase() ===
+          normalizedCodeForCompare,
+      ) ??
+      validCustomers[0] ??
+      null
+    );
+  } catch (error) {
+    throw new Error(`Failed to get customer by code: ${error.message}`);
+  }
+}
+
+const E_INVOICE_ADDRESS_FIELDS = [
+  "ContactNumberEInvoice",
+  "NameEInvoice",
+  "AddressEInvoice",
+  "AddressEInvoiceCombine",
+  "LocationIdEInvoice",
+  "AdministrativeAreaIdEInvoice",
+  "LocationIdEInvoiceLevel_1",
+  "LocationNameEInvoiceLevel_1",
+  "LocationIdEInvoiceLevel_2",
+  "LocationNameEInvoiceLevel_2",
+  "LocationSuggessName",
+  "suggestLocationV2",
+  "suggestWardV2",
+  "templocEInvoiceLevel_1",
+  "templocEInvoiceLevel_2",
+  "temploc",
+  "LocationItemsEInvoice",
+];
+
+export async function updateCustomerEInvoiceAddress(
+  retailer = "kingfarm",
+  accessPrivateToken,
+  payload,
+) {
+  try {
+    const customerCode =
+      payload.LookupCode ?? payload.Code ?? payload.CompareCode;
+    const currentCustomer = await getCustomerByCode(
+      retailer,
+      accessPrivateToken,
+      customerCode,
+    );
+    if (!currentCustomer) {
+      throw new Error(`Không tìm thấy khách hàng có mã ${customerCode}`);
+    }
+
+    const eInvoiceAddressPayload = E_INVOICE_ADDRESS_FIELDS.reduce(
+      (result, field) => {
+        if (Object.prototype.hasOwnProperty.call(payload, field)) {
+          result[field] = payload[field];
+        }
+        return result;
+      },
+      {},
+    );
+
+    const response = await axios.post(
+      "https://api-man1.kiotviet.vn/api/customers",
+      {
+        Customer: {
+          ...currentCustomer,
+          ...eInvoiceAddressPayload,
+        },
+      },
+      {
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessPrivateToken}`,
+          retailer,
+        },
+      },
+    );
+
+    return {
+      data: response.data,
+      originalCustomer: currentCustomer,
+    };
+  } catch (error) {
+    throw new Error(
+      `Failed to update customer EInvoice address: ${error.message}`,
+    );
+  }
+}
+
 const KIOT_RETRY_DELAY_MS = 1000;
 const KIOT_RETRY_LIMIT = 4;
 const KIOT_RETRY_STATUS_CODES = new Set([401, 500, 504, 520]);
