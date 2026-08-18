@@ -109,14 +109,63 @@ export async function updateCustomerEInvoiceAddress(
       },
       {},
     );
+    const customerPayload = {
+      ...currentCustomer,
+      ...eInvoiceAddressPayload,
+    };
+    const hasIncomingGroups = Array.isArray(
+      customerPayload.CustomerGroupDetails,
+    );
+    const incomingGroupIds = hasIncomingGroups
+      ? customerPayload.CustomerGroupDetails.map((item) =>
+          item?.GroupId,
+        ).filter((groupId) => groupId != null)
+      : currentCustomer.CustomerGroupIds;
+    const hasIncomingTaxCode = Object.prototype.hasOwnProperty.call(
+      customerPayload,
+      "TaxCode",
+    );
+    const payloadData = {
+      ...customerPayload,
+      CustomerGroupNames: hasIncomingGroups
+        ? customerPayload.CustomerGroupNames || []
+        : currentCustomer.CustomerGroupNames,
+      CustomerGroupIds: incomingGroupIds,
+      EmployeeInChargeNames: currentCustomer.EmployeeInChargeNames,
+      EmployeeInChargeIds: currentCustomer.EmployeeInChargeIds,
+      EmployeeInCharges: currentCustomer.EmployeeInCharges,
+      Groups: hasIncomingGroups
+        ? customerPayload.Groups ||
+          customerPayload.CustomerGroupNames?.join(", ") ||
+          ""
+        : currentCustomer.Groups,
+      CustomerGroupDetails: hasIncomingGroups
+        ? customerPayload.CustomerGroupDetails.map((item) => ({
+            ...item,
+            CustomerId: currentCustomer.Id,
+          }))
+        : (currentCustomer.CustomerGroupIds || []).map((groupId) => ({
+            GroupId: groupId,
+            CustomerId: currentCustomer.Id,
+          })),
+      CustomerType: currentCustomer.CustomerType,
+      Organization: currentCustomer.Organization || "",
+      Name: currentCustomer.Name,
+      ...(hasIncomingTaxCode
+        ? { TaxCode: customerPayload.TaxCode }
+        : currentCustomer?.TaxCode
+          ? { TaxCode: currentCustomer.TaxCode }
+          : {}),
+      NameEInvoice:
+        customerPayload.NameEInvoice ||
+        currentCustomer.NameEInvoice ||
+        currentCustomer.Name,
+    };
 
     const response = await axios.post(
       "https://api-man1.kiotviet.vn/api/customers",
       {
-        Customer: {
-          ...currentCustomer,
-          ...eInvoiceAddressPayload,
-        },
+        Customer: payloadData,
       },
       {
         headers: {

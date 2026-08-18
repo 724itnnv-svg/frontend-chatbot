@@ -1,7 +1,7 @@
 ﻿import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   getListOrder,
-  // getLocationSuggest, // Tạm bỏ: luồng đồng bộ mới lấy trực tiếp địa chỉ khách hàng.
+  getLocationSuggest,
   updateCustomerAddress,
   updateCustomerEInvoiceAddress,
   getIdAdministrativearea,
@@ -12,7 +12,7 @@ import {
 } from "../../../services/cashflowService/kiotService";
 import * as XLSX from "xlsx";
 import { useRef } from "react";
-// import { autoConvertAddress2 } from "../../../address2/address2Api"; // Tạm bỏ: dùng thẳng địa chỉ khách hàng.
+import { autoConvertAddress2 } from "../../../address2/address2Api";
 const currency = new Intl.NumberFormat("vi-VN");
 
 const normalizeText = (value) => String(value ?? "").trim();
@@ -518,9 +518,6 @@ const buildCustomerAddressSourceRow = (customer = {}, row = {}) => {
   };
 };
 
-/*
- * Tạm bỏ helper của autoConvertAddress2. Luồng hiện tại lấy trực tiếp
- * LocationName/WardName trong API khách hàng để tra ID hành chính.
 const buildFallbackLocationSuggestResult = (conversionResult) => {
   const conversionMapping = conversionResult?.conversion?.result || {};
   const provinceBoundary =
@@ -561,7 +558,6 @@ const buildFallbackLocationSuggestResult = (conversionResult) => {
     __conversion: conversionResult,
   };
 };
-*/
 
 const isSelectableEinvoiceRow = (row) =>
   normalizeMoney(
@@ -1499,51 +1495,44 @@ export default function EinvoicesTab({
           );
           */
 
-          /*
-           * Tạm bỏ locationSuggest: không dùng các trường địa chỉ trên đơn
-           * để gợi ý nữa, luồng mới luôn xử lý địa chỉ lấy từ API khách hàng.
           const hasCustomerDistrictName = Boolean(
             normalizeText(customerAddressRow.CustomerDistrictName),
           );
           const hasCustomerWardName = Boolean(
             normalizeText(customerAddressRow.CustomerWardName),
           );
-          const locationSuggestResult =
-            hasCustomerDistrictName && hasCustomerWardName
-              ? await getLocationSuggest(
-                  retailer,
-                  accessPrivateToken,
-                  accessToken,
-                  customerAddressRow.CustomerLocationName,
-                  customerAddressRow.CustomerDistrictName,
-                  customerAddressRow.CustomerWardName,
-                )
-              : null;
+          let locationSuggestResult = null;
+          if (hasCustomerDistrictName && hasCustomerWardName) {
+            try {
+              locationSuggestResult = await getLocationSuggest(
+                retailer,
+                accessPrivateToken,
+                accessToken,
+                customerAddressRow.CustomerLocationName,
+                customerAddressRow.CustomerDistrictName,
+                customerAddressRow.CustomerWardName,
+              );
+            } catch (locationSuggestError) {
+              console.warn(
+                "getLocationSuggest for e-invoice error, fallback to autoConvertAddress2:",
+                locationSuggestError,
+              );
+            }
+          }
 
-          */
-
-          /*
-           * Tạm bỏ autoConvertAddress2: địa chỉ và tên đơn vị hành chính đã
-           * được lấy trực tiếp từ API khách hàng ở customerAddressRow.
-          const addressConvertQuery = buildAddressConvertQuery(
-            customerAddressRow,
-          );
-          const convertedAddress = await autoConvertAddress2(addressConvertQuery);
-          const resolvedLocationSuggestResult =
-            buildFallbackLocationSuggestResult(convertedAddress);
-          */
-
-          const provinceName = normalizeText(
-            customerAddressRow.CustomerLocationName,
-          );
-          const wardName = normalizeText(
-            customerAddressRow.CustomerWardName ||
-              customerAddressRow.CustomerDistrictName,
-          );
-          const resolvedLocationSuggestResult = {
-            LocationV2: provinceName ? { Name: provinceName } : null,
-            WardV2: wardName ? { Name: wardName } : null,
-          };
+          let resolvedLocationSuggestResult = locationSuggestResult;
+          if (
+            !resolvedLocationSuggestResult?.LocationV2 ||
+            !resolvedLocationSuggestResult?.WardV2
+          ) {
+            const addressConvertQuery = buildAddressConvertQuery(
+              customerAddressRow,
+            );
+            const convertedAddress =
+              await autoConvertAddress2(addressConvertQuery);
+            resolvedLocationSuggestResult =
+              buildFallbackLocationSuggestResult(convertedAddress);
+          }
 
           if (
             !resolvedLocationSuggestResult?.LocationV2 ||
@@ -1552,7 +1541,7 @@ export default function EinvoicesTab({
             failedCount += 1;
             failedRows.push({
               label: getRowDisplayLabel(row, index),
-              reason: "Địa chỉ khách hàng thiếu thông tin tỉnh/phường.",
+              reason: "Không tìm được gợi ý tỉnh/phường từ địa chỉ khách hàng.",
             });
             continue;
           }
