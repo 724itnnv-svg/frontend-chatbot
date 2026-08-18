@@ -8,7 +8,6 @@ import {
   publishEInvoice,
   createEInVoicesLog,
   getEInVoicesLog,
-  getCustomerByPhoneNumber,
   getCustomerByCode,
 } from "../../../services/cashflowService/kiotService";
 import * as XLSX from "xlsx";
@@ -29,40 +28,6 @@ const maskPhoneNumber = (value) => {
   return `${phoneNumber.slice(0, 3)}${"*".repeat(
     phoneNumber.length - 6,
   )}${phoneNumber.slice(-3)}`;
-};
-
-const getRowCustomerPhone = (row) =>
-  normalizeText(
-    row?.CustomerContactNumber ??
-      row?.customerContactNumber ??
-      row?.["Số điện thoại"] ??
-      row?.phone ??
-      "",
-  );
-
-const extractCustomerFromPhoneResponse = (response, phoneNumber = "") => {
-  const candidates = [
-    ...(Array.isArray(response) ? response : []),
-    ...(Array.isArray(response?.Data) ? response.Data : []),
-    ...(Array.isArray(response?.data?.Data) ? response.data.Data : []),
-    response?.Customer,
-    response?.customer,
-    response?.data?.Customer,
-    response?.data?.customer,
-    response,
-  ].filter((item) => item && typeof item === "object" && !Array.isArray(item));
-  const normalizedPhone = normalizePhoneNumber(phoneNumber);
-
-  return (
-    candidates.find(
-      (customer) =>
-        normalizePhoneNumber(
-          customer?.ContactNumber ?? customer?.CustomerContactNumber,
-        ) === normalizedPhone,
-    ) ||
-    candidates[0] ||
-    null
-  );
 };
 
 const joinUniqueAddressParts = (parts = []) => {
@@ -767,7 +732,7 @@ const INVOICE_COLUMNS = [
   {
     id: "address",
     label: "Địa chỉ",
-    defaultVisible: true,
+    defaultVisible: false,
     getValue: (row) =>
       [row.CustomerAddress, row.CustomerWardName, row.CustomerLocationName]
         .filter(Boolean)
@@ -920,36 +885,32 @@ export default function EinvoicesTab({
         );
 
         const nextRows = mapOrderRows(response);
-        const uniquePhoneNumbers = [
-          ...new Set(nextRows.map(getRowCustomerPhone).filter(Boolean)),
+        const uniqueCustomerCodes = [
+          ...new Set(nextRows.map(getCustomerCode).filter(Boolean)),
         ];
         const customerEntries = await Promise.all(
-          uniquePhoneNumbers.map(async (phoneNumber) => {
+          uniqueCustomerCodes.map(async (customerCode) => {
             try {
-              const customerResponse = await getCustomerByPhoneNumber(
+              const customer = await getCustomerByCode(
                 retailer,
                 accessPrivateToken,
-                phoneNumber,
+                customerCode,
               );
-              const customer = extractCustomerFromPhoneResponse(
-                customerResponse,
-                phoneNumber,
-              );
-              return [normalizePhoneNumber(phoneNumber), customer];
+              return [normalizeText(customerCode).toLowerCase(), customer];
             } catch (customerError) {
               console.error(
-                "getCustomerByPhoneNumber for e-invoice error:",
-                phoneNumber,
+                "getCustomerByCode for e-invoice error:",
+                customerCode,
                 customerError,
               );
-              return [normalizePhoneNumber(phoneNumber), null];
+              return [normalizeText(customerCode).toLowerCase(), null];
             }
           }),
         );
-        const customerByPhone = new Map(customerEntries);
+        const customerByCode = new Map(customerEntries);
         const enrichedRows = nextRows.map((row) => {
-          const customer = customerByPhone.get(
-            normalizePhoneNumber(getRowCustomerPhone(row)),
+          const customer = customerByCode.get(
+            normalizeText(getCustomerCode(row)).toLowerCase(),
           );
 
           return {
@@ -2079,7 +2040,11 @@ export default function EinvoicesTab({
                     {visibleColumns.map((column) => (
                       <th
                         key={column.id}
-                        className="sticky top-0 z-10 px-4 py-3 font-black backdrop-blur"
+                        className={`sticky top-0 z-10 px-4 py-3 font-black backdrop-blur ${
+                          column.id === "invoiceNumber"
+                            ? "w-[150px] min-w-[150px] whitespace-nowrap"
+                            : ""
+                        }`}
                       >
                         {column.label}
                       </th>
@@ -2136,6 +2101,8 @@ export default function EinvoicesTab({
                                 className={`px-4 py-4 text-slate-700 ${
                                   column.id === "eInvoiceAddress"
                                     ? "whitespace-nowrap"
+                                    : column.id === "invoiceNumber"
+                                      ? "w-[150px] min-w-[150px] whitespace-nowrap"
                                     : ""
                                 }`}
                               >
@@ -2159,7 +2126,7 @@ export default function EinvoicesTab({
                                     {renderedValue || "-"}
                                   </span>
                                 ) : column.id === "invoiceNumber" ? (
-                                  <span className="font-bold text-slate-950">
+                                  <span className="text-xs font-bold text-slate-950">
                                     {renderedValue || "-"}
                                   </span>
                                 ) : (
