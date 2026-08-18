@@ -139,9 +139,9 @@ const getOrderDeliveryMoneyMismatch = (row = {}, orderDelivery = {}) => {
     excelMoneyValue > orderDeliveryMoneyValue;
   const isGhnDeliveryFeeMismatch =
     isGhnRow &&
+    excelDeliveryFeeValue !== 0 &&
     normalizeText(orderDelivery.totalPrice) !== "" &&
-    (normalizeText(getExcelDeliveryFeeRawValue(row)) === "" ||
-      excelDeliveryFeeValue !== orderDeliveryFeeValue);
+    excelDeliveryFeeValue !== orderDeliveryFeeValue;
 
   return {
     isCodMismatch,
@@ -732,7 +732,9 @@ export default function CashFlowApp() {
     () =>
       payloadSourceRows.filter(
         (row) =>
-          hasCashflowInvoiceId(row) && !row.__orderDeliveryMissingInvoice,
+          hasCashflowInvoiceId(row) &&
+          !row.__orderDeliveryMissingInvoice &&
+          !row.__orderDeliveryFeeMismatch,
       ),
     [payloadSourceRows],
   );

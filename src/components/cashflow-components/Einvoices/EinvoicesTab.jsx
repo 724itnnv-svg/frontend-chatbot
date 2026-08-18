@@ -3,11 +3,12 @@ import {
   getListOrder,
   getLocationSuggest,
   updateCustomerAddress,
+  updateCustomerEInvoiceAddress,
   getIdAdministrativearea,
   publishEInvoice,
   createEInVoicesLog,
   getEInVoicesLog,
-  getCustomerByPhoneNumber,
+  getCustomerByCode,
 } from "../../../services/cashflowService/kiotService";
 import * as XLSX from "xlsx";
 import { useRef } from "react";
@@ -15,6 +16,18 @@ import { autoConvertAddress2 } from "../../../address2/address2Api";
 const currency = new Intl.NumberFormat("vi-VN");
 
 const normalizeText = (value) => String(value ?? "").trim();
+
+const normalizeAdministrativeAreaSearchName = (value, level) => {
+  const text = normalizeText(value);
+  if (!text) return "";
+
+  const prefixPattern =
+    Number(level) === 1
+      ? /^(?:tỉnh|thành\s+phố|tp\.?)\s+/iu
+      : /^(?:xã|phường|thị\s+trấn|huyện|quận|thị\s+xã|thành\s+phố|tp\.?)\s+/iu;
+
+  return text.replace(prefixPattern, "").trim();
+};
 
 const normalizePhoneNumber = (value) =>
   normalizeText(value).replace(/[^\d]/g, "");
@@ -27,40 +40,6 @@ const maskPhoneNumber = (value) => {
   return `${phoneNumber.slice(0, 3)}${"*".repeat(
     phoneNumber.length - 6,
   )}${phoneNumber.slice(-3)}`;
-};
-
-const getRowCustomerPhone = (row) =>
-  normalizeText(
-    row?.CustomerContactNumber ??
-      row?.customerContactNumber ??
-      row?.["Số điện thoại"] ??
-      row?.phone ??
-      "",
-  );
-
-const extractCustomerFromPhoneResponse = (response, phoneNumber = "") => {
-  const candidates = [
-    ...(Array.isArray(response) ? response : []),
-    ...(Array.isArray(response?.Data) ? response.Data : []),
-    ...(Array.isArray(response?.data?.Data) ? response.data.Data : []),
-    response?.Customer,
-    response?.customer,
-    response?.data?.Customer,
-    response?.data?.customer,
-    response,
-  ].filter(
-    (item) => item && typeof item === "object" && !Array.isArray(item),
-  );
-  const normalizedPhone = normalizePhoneNumber(phoneNumber);
-
-  return (
-    candidates.find(
-      (customer) =>
-        normalizePhoneNumber(
-          customer?.ContactNumber ?? customer?.CustomerContactNumber,
-        ) === normalizedPhone,
-    ) || candidates[0] || null
-  );
 };
 
 const joinUniqueAddressParts = (parts = []) => {
@@ -509,6 +488,36 @@ const buildAddressConvertQuery = (row) =>
     .filter(Boolean)
     .join(", ");
 
+const hasMissingEInvoiceInformation = (customer = {}) => {
+  return [
+    customer?.ContactNumberEInvoice,
+    customer?.NameEInvoice,
+    customer?.AdministrativeAreaIdEInvoice,
+  ].some((value) => !normalizeText(value));
+};
+
+const buildCustomerAddressSourceRow = (customer = {}, row = {}) => {
+  const locationName = normalizeText(
+    customer?.LocationName ?? customer?.locationName,
+  );
+  const locationParts = splitCustomerLocationName(locationName);
+  const wardName = normalizeText(customer?.WardName ?? customer?.wardName);
+
+  return {
+    ...row,
+    CustomerId: customer?.Id ?? customer?.CustomerId ?? row?.CustomerId,
+    CustomerCode:
+      customer?.Code ?? customer?.CompareCode ?? getCustomerCode(row),
+    CustomerName: customer?.Name ?? row?.CustomerName,
+    CustomerContactNumber:
+      customer?.ContactNumber ?? row?.CustomerContactNumber,
+    CustomerAddress: customer?.Address ?? customer?.address ?? "",
+    CustomerLocationName: locationParts.province || locationName,
+    CustomerDistrictName: locationParts.district || wardName,
+    CustomerWardName: wardName,
+  };
+};
+
 const buildFallbackLocationSuggestResult = (conversionResult) => {
   const conversionMapping = conversionResult?.conversion?.result || {};
   const provinceBoundary =
@@ -623,19 +632,27 @@ const buildCustomerAddressUpdatePayload = async (
       row?.customerDistrictName ??
       "",
   );
+  const provinceSearchName = normalizeAdministrativeAreaSearchName(
+    provinceName,
+    1,
+  );
+  const wardSearchName = normalizeAdministrativeAreaSearchName(districtName, 2);
 
   const provinceIds = await getIdAdministrativearea(
     retailer,
     accessPrivateToken,
-    provinceName,
+    provinceSearchName,
     1,
+  );
+  const resolvedProvinceName = normalizeText(
+    provinceIds?.[0]?.Name ?? provinceIds?.[0]?.FullName ?? provinceSearchName,
   );
   const wardId = await getIdAdministrativearea(
     retailer,
     accessPrivateToken,
-    districtName,
+    wardSearchName,
     2,
-    provinceName,
+    resolvedProvinceName,
   );
 
   return {
@@ -669,6 +686,7 @@ const buildCustomerAddressUpdatePayload = async (
     WardName: districtName,
     LocationName: provinceName,
     ContactNumber: row?.CustomerContactNumber,
+    NameEInvoice: row?.CustomerName,
     templocEInvoiceLevel_1: provinceName,
     templocEInvoiceLevel_2: districtName,
     temploc: provinceName,
@@ -681,19 +699,19 @@ const buildCustomerAddressUpdatePayload = async (
 };
 
 const INVOICE_COLUMNS = [
-  {
-    id: "InvoiceDeliveryCode",
-    label: "Mã vận đơn",
-    defaultVisible: true,
-    getValue: (row) =>
-      coalesceValue(row, [
-        "InvoiceDeliveryCode",
-        "Code",
-        "Mã đơn GHN",
-        "orderCode",
-        "orderNo",
-      ]),
-  },
+  // {
+  //   id: "InvoiceDeliveryCode",
+  //   label: "Mã vận đơn",
+  //   defaultVisible: true,
+  //   getValue: (row) =>
+  //     coalesceValue(row, [
+  //       "InvoiceDeliveryCode",
+  //       "Code",
+  //       "Mã đơn GHN",
+  //       "orderCode",
+  //       "orderNo",
+  //     ]),
+  // },
   {
     id: "invoiceNumber",
     label: "Mã hóa đơn",
@@ -730,7 +748,7 @@ const INVOICE_COLUMNS = [
   {
     id: "address",
     label: "Địa chỉ",
-    defaultVisible: true,
+    defaultVisible: false,
     getValue: (row) =>
       [row.CustomerAddress, row.CustomerWardName, row.CustomerLocationName]
         .filter(Boolean)
@@ -741,9 +759,15 @@ const INVOICE_COLUMNS = [
     label: "Địa chỉ xuất hóa đơn",
     defaultVisible: true,
     getValue: (row) =>
-      normalizeText(
+      [
+        row?.__nameEInvoice ?? row?.NameEInvoice,
+
         row?.__addressEInvoiceCombine ?? row?.AddressEInvoiceCombine,
-      ),
+        row?.__contactNumberEInvoice ?? row?.ContactNumberEInvoice,
+      ]
+        .map(normalizeText)
+        .filter(Boolean)
+        .join(" | "),
   },
   {
     id: "amount",
@@ -877,40 +901,41 @@ export default function EinvoicesTab({
         );
 
         const nextRows = mapOrderRows(response);
-        const uniquePhoneNumbers = [
-          ...new Set(nextRows.map(getRowCustomerPhone).filter(Boolean)),
+        const uniqueCustomerCodes = [
+          ...new Set(nextRows.map(getCustomerCode).filter(Boolean)),
         ];
         const customerEntries = await Promise.all(
-          uniquePhoneNumbers.map(async (phoneNumber) => {
+          uniqueCustomerCodes.map(async (customerCode) => {
             try {
-              const customerResponse = await getCustomerByPhoneNumber(
+              const customer = await getCustomerByCode(
                 retailer,
                 accessPrivateToken,
-                phoneNumber,
+                customerCode,
               );
-              const customer = extractCustomerFromPhoneResponse(
-                customerResponse,
-                phoneNumber,
-              );
-              return [normalizePhoneNumber(phoneNumber), customer];
+              return [normalizeText(customerCode).toLowerCase(), customer];
             } catch (customerError) {
               console.error(
-                "getCustomerByPhoneNumber for e-invoice error:",
-                phoneNumber,
+                "getCustomerByCode for e-invoice error:",
+                customerCode,
                 customerError,
               );
-              return [normalizePhoneNumber(phoneNumber), null];
+              return [normalizeText(customerCode).toLowerCase(), null];
             }
           }),
         );
-        const customerByPhone = new Map(customerEntries);
+        const customerByCode = new Map(customerEntries);
         const enrichedRows = nextRows.map((row) => {
-          const customer = customerByPhone.get(
-            normalizePhoneNumber(getRowCustomerPhone(row)),
+          const customer = customerByCode.get(
+            normalizeText(getCustomerCode(row)).toLowerCase(),
           );
 
           return {
             ...row,
+            __nameEInvoice: customer?.NameEInvoice ?? row?.NameEInvoice ?? "",
+            __contactNumberEInvoice:
+              customer?.ContactNumberEInvoice ??
+              row?.ContactNumberEInvoice ??
+              "",
             __addressEInvoiceCombine: getCustomerEInvoiceAddress(customer, row),
           };
         });
@@ -1348,7 +1373,9 @@ export default function EinvoicesTab({
 
     let successCount = 0;
     let failedCount = 0;
+    let skippedCount = 0;
     const failedRows = [];
+    const skippedRows = [];
     const successfulRows = [];
 
     try {
@@ -1371,6 +1398,47 @@ export default function EinvoicesTab({
             continue;
           }
 
+          const customer = await getCustomerByCode(
+            retailer,
+            accessPrivateToken,
+            customerCode,
+          );
+          if (!customer) {
+            failedCount += 1;
+            failedRows.push({
+              label: getRowDisplayLabel(row, index),
+              reason: `Không tìm thấy khách hàng có mã ${customerCode}.`,
+            });
+            continue;
+          }
+
+          if (!hasMissingEInvoiceInformation(customer)) {
+            skippedCount += 1;
+            skippedRows.push({
+              label: getRowDisplayLabel(row, index),
+              reason:
+                "Thông tin đã đủ, không cần cập nhật thông tin xuất hóa đơn.",
+            });
+            continue;
+          }
+
+          const customerAddressRow = buildCustomerAddressSourceRow(
+            customer,
+            row,
+          );
+          if (!buildAddressConvertQuery(customerAddressRow)) {
+            failedCount += 1;
+            failedRows.push({
+              label: getRowDisplayLabel(row, index),
+              reason: "Khách hàng chưa có địa chỉ để đồng bộ.",
+            });
+            continue;
+          }
+
+          /*
+           * Luồng cũ: lấy địa chỉ trực tiếp từ dòng hóa đơn để tìm gợi ý và
+           * dựng payload cập nhật. Tạm giữ lại để có thể đối chiếu/khôi phục.
+           *
           const hasCustomerDistrictName = Boolean(
             normalizeText(
               row?.CustomerDistrictName ?? row?.customerDistrictName,
@@ -1425,8 +1493,77 @@ export default function EinvoicesTab({
             retailer,
             accessPrivateToken,
           );
+          */
 
-          const agencyName = row?.CustomerName ?? row?.customerName;
+          const hasCustomerDistrictName = Boolean(
+            normalizeText(customerAddressRow.CustomerDistrictName),
+          );
+          const hasCustomerWardName = Boolean(
+            normalizeText(customerAddressRow.CustomerWardName),
+          );
+          let locationSuggestResult = null;
+          if (hasCustomerDistrictName && hasCustomerWardName) {
+            try {
+              locationSuggestResult = await getLocationSuggest(
+                retailer,
+                accessPrivateToken,
+                accessToken,
+                customerAddressRow.CustomerLocationName,
+                customerAddressRow.CustomerDistrictName,
+                customerAddressRow.CustomerWardName,
+              );
+            } catch (locationSuggestError) {
+              console.warn(
+                "getLocationSuggest for e-invoice error, fallback to autoConvertAddress2:",
+                locationSuggestError,
+              );
+            }
+          }
+
+          let resolvedLocationSuggestResult = locationSuggestResult;
+          if (
+            !resolvedLocationSuggestResult?.LocationV2 ||
+            !resolvedLocationSuggestResult?.WardV2
+          ) {
+            const addressConvertQuery = buildAddressConvertQuery(
+              customerAddressRow,
+            );
+            const convertedAddress =
+              await autoConvertAddress2(addressConvertQuery);
+            resolvedLocationSuggestResult =
+              buildFallbackLocationSuggestResult(convertedAddress);
+          }
+
+          if (
+            !resolvedLocationSuggestResult?.LocationV2 ||
+            !resolvedLocationSuggestResult?.WardV2
+          ) {
+            failedCount += 1;
+            failedRows.push({
+              label: getRowDisplayLabel(row, index),
+              reason: "Không tìm được gợi ý tỉnh/phường từ địa chỉ khách hàng.",
+            });
+            continue;
+          }
+
+          // Payload cũ vẫn được dùng, nhưng toàn bộ dữ liệu địa chỉ lấy từ API khách hàng.
+          const updatePayload = await buildCustomerAddressUpdatePayload(
+            customerAddressRow,
+            resolvedLocationSuggestResult,
+            retailer,
+            accessPrivateToken,
+          );
+
+          await updateCustomerEInvoiceAddress(
+            retailer,
+            accessPrivateToken,
+            updatePayload,
+          );
+
+          /*
+           * Luồng cũ dùng updateCustomerAddress nên có thay đổi CustomerType
+           * và cần backup/hoàn nguyên đại lý. Tạm giữ lại để đối chiếu.
+          const agencyName = customer?.Name ?? row?.CustomerName;
           const isAgencyRow = isAgencyCustomerName(agencyName);
 
           const updateResult = await updateCustomerAddress(
@@ -1450,6 +1587,7 @@ export default function EinvoicesTab({
               Organization: originalCustomer?.Organization || "",
             });
           }
+          */
 
           successCount += 1;
           successfulRows.push(row);
@@ -1475,8 +1613,9 @@ export default function EinvoicesTab({
         totalCount: previewPayloadRows.length,
         successCount,
         failedCount,
-        skippedCount: 0,
+        skippedCount,
         failedRows,
+        skippedRows,
         extraNote:
           syncLogResult.failedCount > 0
             ? `Có ${syncLogResult.failedCount} log chưa ghi được.`
@@ -1485,8 +1624,8 @@ export default function EinvoicesTab({
 
       setHddtStatusMessage(
         failedCount > 0
-          ? `Đã đồng bộ ${successCount}/${previewPayloadRows.length} dòng, thất bại ${failedCount} dòng.`
-          : `Đã đồng bộ ${successCount}/${previewPayloadRows.length} dòng.`,
+          ? `Đã đồng bộ ${successCount}/${previewPayloadRows.length} dòng, bỏ qua ${skippedCount} dòng đã đủ thông tin, thất bại ${failedCount} dòng.`
+          : `Đã đồng bộ ${successCount}/${previewPayloadRows.length} dòng, bỏ qua ${skippedCount} dòng đã đủ thông tin.`,
       );
 
       await fetchOrders();
@@ -1499,8 +1638,14 @@ export default function EinvoicesTab({
         successCount,
         failedCount:
           failedCount +
-          Math.max(0, previewPayloadRows.length - successCount - failedCount),
-        skippedCount: 0,
+          Math.max(
+            0,
+            previewPayloadRows.length -
+              successCount -
+              failedCount -
+              skippedCount,
+          ),
+        skippedCount,
         failedRows: failedRows.length
           ? failedRows
           : [
@@ -1509,6 +1654,7 @@ export default function EinvoicesTab({
                 reason: error?.message || "Đồng bộ địa chỉ thất bại.",
               },
             ],
+        skippedRows,
         extraNote: "",
       });
     } finally {
@@ -1903,7 +2049,11 @@ export default function EinvoicesTab({
                     {visibleColumns.map((column) => (
                       <th
                         key={column.id}
-                        className="sticky top-0 z-10 px-4 py-3 font-black backdrop-blur"
+                        className={`sticky top-0 z-10 px-4 py-3 font-black backdrop-blur ${
+                          column.id === "invoiceNumber"
+                            ? "w-[150px] min-w-[150px] whitespace-nowrap"
+                            : ""
+                        }`}
                       >
                         {column.label}
                       </th>
@@ -1960,7 +2110,9 @@ export default function EinvoicesTab({
                                 className={`px-4 py-4 text-slate-700 ${
                                   column.id === "eInvoiceAddress"
                                     ? "whitespace-nowrap"
-                                    : ""
+                                    : column.id === "invoiceNumber"
+                                      ? "w-[150px] min-w-[150px] whitespace-nowrap"
+                                      : ""
                                 }`}
                               >
                                 {column.id === "customer" ? (
@@ -1983,7 +2135,7 @@ export default function EinvoicesTab({
                                     {renderedValue || "-"}
                                   </span>
                                 ) : column.id === "invoiceNumber" ? (
-                                  <span className="font-bold text-slate-950">
+                                  <span className="text-xs font-bold text-slate-950">
                                     {renderedValue || "-"}
                                   </span>
                                 ) : (
@@ -2114,6 +2266,25 @@ export default function EinvoicesTab({
                       >
                         <div className="font-semibold">{item.label}</div>
                         <div className="text-rose-700/90">{item.reason}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
+              {lastOperationResult.skippedRows?.length > 0 ? (
+                <div className="mt-4 rounded-[16px] border border-amber-200/70 bg-white p-3">
+                  <div className="mb-2 text-xs font-extrabold uppercase tracking-[0.16em] text-amber-700">
+                    Dòng bỏ qua
+                  </div>
+                  <div className="max-h-48 space-y-2 overflow-y-auto overflow-x-hidden pr-1">
+                    {lastOperationResult.skippedRows.map((item, index) => (
+                      <div
+                        key={`${item.label}-${index}`}
+                        className="rounded-2xl border border-amber-100 bg-amber-50/70 px-3 py-2 text-xs leading-6 text-amber-800"
+                      >
+                        <div className="font-semibold">{item.label}</div>
+                        <div className="text-amber-700/90">{item.reason}</div>
                       </div>
                     ))}
                   </div>

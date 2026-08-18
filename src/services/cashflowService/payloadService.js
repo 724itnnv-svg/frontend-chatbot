@@ -194,9 +194,17 @@ const buildCashflowPayloadEntriesForRow = ({
     return [];
   }
 
+  const isGhnRow = normalizeText(row.__sourceFormat).toLowerCase() === "ghn";
+  if (isGhnRow && row.__orderDeliveryFeeMismatch === true) {
+    return [];
+  }
+
   const moneyValue = parseMoney(row["Tiền hàng"] || orderDelivery.invoiceTotal);
+  const excelShipRawValue = row["Phí ship NVC thu"];
   const shipValue = parseMoney(
-    row["Phí ship NVC thu"] || orderDelivery.totalPrice,
+    isGhnRow || normalizeText(excelShipRawValue) !== ""
+      ? excelShipRawValue
+      : orderDelivery.totalPrice,
   );
   const checkVanDon = normalizeText(row["Mã Vận Đơn"]);
   const shipCodePrefix = checkVanDon.startsWith("CH") ? "PCCH_" : "PCGH_";

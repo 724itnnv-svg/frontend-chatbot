@@ -23,6 +23,7 @@ import { useAuth } from "../context/AuthContext";
 import {
   getAccessPrivateToken,
   getCustomerByPhoneNumber,
+  getCustomerInvoiceDebtAging,
   getListCustomer,
 } from "../services/cashflowService/kiotService";
 
@@ -44,6 +45,19 @@ const CUSTOMER_PAGE_SIZE = 50;
 const LAST_REFRESH_STORAGE_PREFIX = "debt_tracking_last_refresh_";
 const DEBT_SNAPSHOT_STORAGE_PREFIX = "debt_tracking_snapshot_";
 const DEBT_CHANGES_STORAGE_PREFIX = "debt_tracking_changes_";
+const INVOICE_AGING_CACHE_PREFIX = "debt_tracking_invoice_aging_";
+const INVOICE_AGING_CACHE_TTL_MS = 25 * 60 * 1000;
+const INVOICE_AGING_CACHE_VERSION = 1;
+
+const filterCustomersByRetailer = (retailer, customers) => {
+  if (retailer !== "nnvtv") return customers;
+
+  return customers.filter(
+    (customer) =>
+      String(customer?.CustomerType ?? customer?.customerType ?? "").trim() !==
+      "Công ty",
+  );
+};
 
 const readStoredJson = (key, fallback) => {
   try {
@@ -51,6 +65,51 @@ const readStoredJson = (key, fallback) => {
     return value ?? fallback;
   } catch {
     return fallback;
+  }
+};
+
+const getInvoiceCacheSignature = (customer) =>
+  `${String(customer.id)}|${String(customer.code)}|${Number(customer.debt)}`;
+
+const readInvoiceAgingCache = (retailer) => {
+  try {
+    const cache = JSON.parse(
+      sessionStorage.getItem(`${INVOICE_AGING_CACHE_PREFIX}${retailer}`) ||
+        "null",
+    );
+    if (
+      cache?.version !== INVOICE_AGING_CACHE_VERSION ||
+      !Number.isFinite(cache?.cachedAt) ||
+      Date.now() - cache.cachedAt > INVOICE_AGING_CACHE_TTL_MS ||
+      !cache?.customerSignatures ||
+      !cache?.agingByCustomer
+    ) {
+      return null;
+    }
+    return cache;
+  } catch {
+    return null;
+  }
+};
+
+const writeInvoiceAgingCache = (retailer, customers, agingByCustomer) => {
+  try {
+    sessionStorage.setItem(
+      `${INVOICE_AGING_CACHE_PREFIX}${retailer}`,
+      JSON.stringify({
+        version: INVOICE_AGING_CACHE_VERSION,
+        cachedAt: Date.now(),
+        customerSignatures: Object.fromEntries(
+          customers.map((customer) => [
+            String(customer.id),
+            getInvoiceCacheSignature(customer),
+          ]),
+        ),
+        agingByCustomer,
+      }),
+    );
+  } catch {
+    // Cache chỉ là tối ưu; nếu trình duyệt hết dung lượng vẫn dùng dữ liệu vừa tải.
   }
 };
 
@@ -203,6 +262,27 @@ const normalizeCustomer = (customer, index) => {
   };
 };
 
+const applyInvoiceDebtAging = (customer, agingByCustomer) => {
+  const invoiceAging = agingByCustomer?.[String(customer.id)];
+  const oldestUnpaidDate = parseKiotDate(invoiceAging?.oldestUnpaidDate);
+  if (!oldestUnpaidDate) return customer;
+
+  const debtDays = differenceInDays(oldestUnpaidDate);
+  let level = "green";
+  if (debtDays === null) level = "unknown";
+  else if (debtDays > 60) level = "red";
+  else if (debtDays > 30) level = "yellow";
+
+  return {
+    ...customer,
+    lastTradingDate: oldestUnpaidDate,
+    debtDays,
+    level,
+    agingSource: "invoice",
+    oldestUnpaidInvoiceCode: invoiceAging.invoiceCode || "",
+  };
+};
+
 const formatMoney = (value) =>
   new Intl.NumberFormat("vi-VN", {
     style: "currency",
@@ -233,17 +313,34 @@ const formatDateTime = (value) => {
   }).format(date);
 };
 
-function SummaryCard({ title, value, subtitle, icon, tone = "slate" }) {
+function SummaryCard({
+  title,
+  value,
+  subtitle,
+  icon,
+  tone = "slate",
+  active = false,
+  onClick,
+}) {
   const tones = {
     slate: "border-cyan-100 bg-white/90 text-cyan-700",
     green: "border-emerald-200 bg-emerald-50 text-emerald-700",
     yellow: "border-amber-200 bg-amber-50 text-amber-700",
     red: "border-red-200 bg-red-50 text-red-700",
   };
+  const activeTones = {
+    slate: "ring-2 ring-cyan-500 ring-offset-2",
+    green: "ring-2 ring-emerald-500 ring-offset-2",
+    yellow: "ring-2 ring-amber-500 ring-offset-2",
+    red: "ring-2 ring-red-500 ring-offset-2",
+  };
 
   return (
-    <div
-      className={`rounded-2xl border p-4 shadow-[0_10px_26px_rgba(8,145,178,0.08)] ${tones[tone]}`}
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={`w-full rounded-2xl border p-4 text-left shadow-[0_10px_26px_rgba(8,145,178,0.08)] transition duration-200 hover:-translate-y-0.5 hover:shadow-[0_14px_30px_rgba(8,145,178,0.14)] focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 focus-visible:ring-offset-2 ${tones[tone]} ${active ? activeTones[tone] : ""}`}
     >
       <div className="flex items-start justify-between gap-3">
         <div>
@@ -257,7 +354,7 @@ function SummaryCard({ title, value, subtitle, icon, tone = "slate" }) {
           {createElement(icon, { size: 19 })}
         </span>
       </div>
-    </div>
+    </button>
   );
 }
 
@@ -279,6 +376,12 @@ export default function DebtTracking() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [summaryLoading, setSummaryLoading] = useState(true);
   const [summaryLoadedCount, setSummaryLoadedCount] = useState(0);
+  const [loadProgress, setLoadProgress] = useState({
+    phase: "customers",
+    completed: 0,
+    total: 0,
+    cached: 0,
+  });
   const [summaryError, setSummaryError] = useState("");
   const [lastRefreshedAt, setLastRefreshedAt] = useState(() =>
     localStorage.getItem(`${LAST_REFRESH_STORAGE_PREFIX}${defaultRetailer}`),
@@ -292,6 +395,7 @@ export default function DebtTracking() {
   const [hasMore, setHasMore] = useState(true);
   const [error, setError] = useState("");
   const privateTokenRef = useRef({ retailer: "", token: "" });
+  const invoiceAgingRef = useRef({});
   const offsetRef = useRef(0);
   const loadingRef = useRef(false);
   const loadMoreRef = useRef(null);
@@ -300,64 +404,179 @@ export default function DebtTracking() {
   const searchRequestIdRef = useRef(0);
   const summaryRequestIdRef = useRef(0);
 
-  const loadSummary = useCallback(async () => {
-    const requestId = summaryRequestIdRef.current + 1;
-    summaryRequestIdRef.current = requestId;
-    setSummaryLoading(true);
-    setSummaryError("");
-    setSummaryCustomers([]);
-    setSummaryLoadedCount(0);
-    try {
-      let privateToken = privateTokenRef.current.token;
-      if (!privateToken || privateTokenRef.current.retailer !== retailer) {
-        privateToken = await getAccessPrivateToken(retailer);
-        privateTokenRef.current = { retailer, token: privateToken };
-      }
+  const selectDebtLevel = (level) => {
+    setLevelFilter(level);
+    if (tableScrollRef.current) tableScrollRef.current.scrollTop = 0;
+  };
 
-      const allCustomers = [];
-      const customerIds = new Set();
-      let skip = 0;
+  const loadSummary = useCallback(
+    async ({ forceInvoiceRefresh = false } = {}) => {
+      const requestId = summaryRequestIdRef.current + 1;
+      summaryRequestIdRef.current = requestId;
+      setSummaryLoading(true);
+      setSummaryError("");
+      setSummaryCustomers([]);
+      setSummaryLoadedCount(0);
+      setLoadProgress({
+        phase: "customers",
+        completed: 0,
+        total: 0,
+        cached: 0,
+      });
+      try {
+        let privateToken = privateTokenRef.current.token;
+        if (!privateToken || privateTokenRef.current.retailer !== retailer) {
+          privateToken = await getAccessPrivateToken(retailer);
+          privateTokenRef.current = { retailer, token: privateToken };
+        }
 
-      while (summaryRequestIdRef.current === requestId) {
-        const response = await getListCustomer(retailer, privateToken, {
-          limit: 1000,
-          skip,
-          debtLevel: "all",
-        });
+        const allCustomers = [];
+        const customerIds = new Set();
+        let skip = 0;
+
+        while (summaryRequestIdRef.current === requestId) {
+          const response = await getListCustomer(retailer, privateToken, {
+            limit: 1000,
+            skip,
+            debtLevel: "all",
+          });
+          if (summaryRequestIdRef.current !== requestId) return;
+
+          const rawList = Array.isArray(response) ? response : [];
+          if (rawList.length === 0) break;
+          const list = filterCustomersByRetailer(retailer, rawList);
+
+          const normalizedPage = list.map((customer, index) =>
+            normalizeCustomer(customer, skip + index),
+          );
+          const newCustomers = normalizedPage.filter((customer) => {
+            const customerId = String(customer.id);
+            if (customerIds.has(customerId)) return false;
+            customerIds.add(customerId);
+            return true;
+          });
+
+          if (list.length > 0 && newCustomers.length === 0) break;
+          if (newCustomers.length > 0) {
+            allCustomers.push(...newCustomers);
+            setSummaryCustomers([...allCustomers]);
+            setSummaryLoadedCount(allCustomers.length);
+            setLoadProgress({
+              phase: "customers",
+              completed: allCustomers.length,
+              total: 0,
+              cached: 0,
+            });
+          }
+
+          skip += rawList.length;
+          if (rawList.length < 1000) break;
+        }
+
         if (summaryRequestIdRef.current !== requestId) return;
+        try {
+          const cachedInvoiceAging = forceInvoiceRefresh
+            ? null
+            : readInvoiceAgingCache(retailer);
+          const cachedAgingByCustomer = {};
+          const customersMissingInvoiceCache = [];
 
-        const list = Array.isArray(response) ? response : [];
-        if (list.length === 0) break;
+          allCustomers.forEach((customer) => {
+            const customerId = String(customer.id);
+            const hasFreshCustomerCache =
+              cachedInvoiceAging?.customerSignatures?.[customerId] ===
+              getInvoiceCacheSignature(customer);
+            if (!hasFreshCustomerCache) {
+              customersMissingInvoiceCache.push(customer);
+              return;
+            }
 
-        const normalizedPage = list.map((customer, index) =>
-          normalizeCustomer(customer, skip + index),
+            const cachedCustomerAging =
+              cachedInvoiceAging.agingByCustomer[customerId];
+            if (cachedCustomerAging) {
+              cachedAgingByCustomer[customerId] = cachedCustomerAging;
+            }
+          });
+
+          const cachedCustomerCount =
+            allCustomers.length - customersMissingInvoiceCache.length;
+          setLoadProgress({
+            phase: "invoices",
+            completed: cachedCustomerCount,
+            total: allCustomers.length,
+            cached: cachedCustomerCount,
+          });
+
+          const loadedInvoiceAging = customersMissingInvoiceCache.length
+            ? await getCustomerInvoiceDebtAging(
+                retailer,
+                privateToken,
+                customersMissingInvoiceCache,
+                {
+                  shouldContinue: () =>
+                    summaryRequestIdRef.current === requestId,
+                  onProgress: ({ completed }) => {
+                    if (summaryRequestIdRef.current !== requestId) return;
+                    setLoadProgress({
+                      phase: "invoices",
+                      completed: cachedCustomerCount + completed,
+                      total: allCustomers.length,
+                      cached: cachedCustomerCount,
+                    });
+                  },
+                },
+              )
+            : {};
+          if (summaryRequestIdRef.current !== requestId) return;
+
+          const invoiceAging = {
+            ...cachedAgingByCustomer,
+            ...loadedInvoiceAging,
+          };
+          setLoadProgress({
+            phase: "invoices",
+            completed: allCustomers.length,
+            total: allCustomers.length,
+            cached: cachedCustomerCount,
+          });
+          writeInvoiceAgingCache(retailer, allCustomers, invoiceAging);
+
+          invoiceAgingRef.current = invoiceAging;
+          const agedCustomers = allCustomers.map((customer) =>
+            applyInvoiceDebtAging(customer, invoiceAging),
+          );
+          setSummaryCustomers(agedCustomers);
+          setCustomers((currentCustomers) =>
+            currentCustomers.map((customer) =>
+              applyInvoiceDebtAging(customer, invoiceAging),
+            ),
+          );
+          setSearchResults((currentCustomers) =>
+            currentCustomers.map((customer) =>
+              applyInvoiceDebtAging(customer, invoiceAging),
+            ),
+          );
+          return agedCustomers;
+        } catch (invoiceAgingError) {
+          if (summaryRequestIdRef.current !== requestId) return;
+          invoiceAgingRef.current = {};
+          setSummaryError(
+            `${invoiceAgingError?.message || "Không lấy được hóa đơn còn nợ."} Đang tạm dùng ngày giao dịch công nợ gần nhất.`,
+          );
+          return allCustomers;
+        }
+      } catch (summaryLoadError) {
+        if (summaryRequestIdRef.current !== requestId) return;
+        setSummaryError(
+          summaryLoadError?.message || "Không tổng hợp được toàn bộ công nợ.",
         );
-        const newCustomers = normalizedPage.filter((customer) => {
-          const customerId = String(customer.id);
-          if (customerIds.has(customerId)) return false;
-          customerIds.add(customerId);
-          return true;
-        });
-
-        if (newCustomers.length === 0) break;
-        allCustomers.push(...newCustomers);
-        setSummaryCustomers([...allCustomers]);
-        setSummaryLoadedCount(allCustomers.length);
-
-        skip += list.length;
-        if (list.length < 1000) break;
+        return null;
+      } finally {
+        if (summaryRequestIdRef.current === requestId) setSummaryLoading(false);
       }
-      return allCustomers;
-    } catch (summaryLoadError) {
-      if (summaryRequestIdRef.current !== requestId) return;
-      setSummaryError(
-        summaryLoadError?.message || "Không tổng hợp được toàn bộ công nợ.",
-      );
-      return null;
-    } finally {
-      if (summaryRequestIdRef.current === requestId) setSummaryLoading(false);
-    }
-  }, [retailer]);
+    },
+    [retailer],
+  );
 
   const loadCustomers = useCallback(
     async ({ reset = false } = {}) => {
@@ -384,11 +603,15 @@ export default function DebtTracking() {
         const response = await getListCustomer(retailer, privateToken, {
           limit: CUSTOMER_PAGE_SIZE,
           skip: requestedOffset,
-          debtLevel: levelFilter,
+          debtLevel: "all",
         });
-        const list = Array.isArray(response) ? response : [];
+        const rawList = Array.isArray(response) ? response : [];
+        const list = filterCustomersByRetailer(retailer, rawList);
         const normalizedPage = list.map((customer, index) =>
-          normalizeCustomer(customer, requestedOffset + index),
+          applyInvoiceDebtAging(
+            normalizeCustomer(customer, requestedOffset + index),
+            invoiceAgingRef.current,
+          ),
         );
         const newCustomers = normalizedPage.filter((customer) => {
           const customerId = String(customer.id);
@@ -400,8 +623,8 @@ export default function DebtTracking() {
         setCustomers((currentCustomers) =>
           reset ? newCustomers : [...currentCustomers, ...newCustomers],
         );
-        offsetRef.current = requestedOffset + list.length;
-        setHasMore(list.length > 0 && (reset || newCustomers.length > 0));
+        offsetRef.current = requestedOffset + rawList.length;
+        setHasMore(rawList.length === CUSTOMER_PAGE_SIZE);
       } catch (loadError) {
         if (reset) setCustomers([]);
         setError(
@@ -413,13 +636,14 @@ export default function DebtTracking() {
         loadingRef.current = false;
       }
     },
-    [levelFilter, retailer],
+    [retailer],
   );
 
   useEffect(() => {
     setCustomers([]);
     setHasMore(true);
     privateTokenRef.current = { retailer: "", token: "" };
+    invoiceAgingRef.current = {};
     loadCustomers({ reset: true });
   }, [loadCustomers]);
 
@@ -507,7 +731,14 @@ export default function DebtTracking() {
           : response && typeof response === "object"
             ? [response]
             : [];
-        setSearchResults(list.map(normalizeCustomer));
+        setSearchResults(
+          list.map((customer, index) =>
+            applyInvoiceDebtAging(
+              normalizeCustomer(customer, index),
+              invoiceAgingRef.current,
+            ),
+          ),
+        );
       } catch (searchApiError) {
         if (searchRequestIdRef.current !== requestId) return;
         setSearchResults([]);
@@ -565,7 +796,7 @@ export default function DebtTracking() {
   const handleRefresh = async () => {
     const [, latestCustomers] = await Promise.all([
       loadCustomers({ reset: true }),
-      loadSummary(),
+      loadSummary({ forceInvoiceRefresh: true }),
     ]);
     if (!Array.isArray(latestCustomers)) return;
 
@@ -779,7 +1010,7 @@ export default function DebtTracking() {
         "Chi nhánh",
         "Tổng bán",
         "Công nợ",
-        "Ngày phát sinh nợ",
+        "HĐ còn nợ cũ nhất",
         "Tuổi nợ (ngày)",
         "Mức độ",
         "Công ty",
@@ -890,9 +1121,87 @@ export default function DebtTracking() {
     }
   };
 
+  const loadProgressPercent =
+    loadProgress.phase === "invoices" && loadProgress.total > 0
+      ? Math.min(
+          100,
+          Math.round((loadProgress.completed / loadProgress.total) * 100),
+        )
+      : null;
+
   return (
     <div className="relative h-full min-h-0 overflow-hidden bg-gradient-to-b from-cyan-50 via-white to-sky-50 p-3 text-slate-800 sm:p-4 lg:p-5">
       <div className="pointer-events-none absolute -top-24 left-1/2 h-80 w-[70rem] -translate-x-1/2 rounded-full bg-gradient-to-r from-cyan-200 via-sky-200 to-teal-100 opacity-40 blur-3xl" />
+      {summaryLoading && (
+        <div
+          className="absolute inset-0 z-50 grid place-items-center bg-slate-950/20 px-4 backdrop-blur-sm"
+          role="status"
+          aria-live="polite"
+        >
+          <div className="w-full max-w-md overflow-hidden rounded-3xl border border-cyan-100 bg-white shadow-[0_24px_80px_rgba(15,23,42,0.24)]">
+            <div className="bg-gradient-to-r from-cyan-600 to-sky-600 px-6 py-5 text-white">
+              <div className="flex items-center gap-3">
+                <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-white/15 ring-1 ring-white/25">
+                  <RefreshCw className="animate-spin" size={22} />
+                </span>
+                <div>
+                  <p className="text-base font-black">Đang cập nhật công nợ</p>
+                  <p className="mt-1 text-xs font-medium text-cyan-50">
+                    {RETAILERS.find((item) => item.value === retailer)?.label}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-4 px-6 py-6">
+              <div className="flex items-end justify-between gap-4">
+                <div>
+                  <p className="text-sm font-black text-slate-800">
+                    {loadProgress.phase === "customers"
+                      ? "Đang lấy danh sách khách hàng"
+                      : "Đang đối chiếu hóa đơn còn nợ"}
+                  </p>
+                  <p className="mt-1 text-xs font-medium text-slate-500">
+                    {loadProgress.phase === "customers"
+                      ? `Đã tìm thấy ${loadProgress.completed.toLocaleString("vi-VN")} khách hàng có công nợ`
+                      : `${loadProgress.completed.toLocaleString("vi-VN")} / ${loadProgress.total.toLocaleString("vi-VN")} khách hàng đã xử lý`}
+                  </p>
+                </div>
+                <span className="text-2xl font-black tabular-nums text-cyan-700">
+                  {loadProgressPercent === null
+                    ? "..."
+                    : `${loadProgressPercent}%`}
+                </span>
+              </div>
+
+              <div className="h-3 overflow-hidden rounded-full bg-slate-100 ring-1 ring-slate-200">
+                <div
+                  className={`h-full rounded-full bg-gradient-to-r from-cyan-500 via-sky-500 to-teal-400 transition-[width] duration-300 ${
+                    loadProgressPercent === null ? "animate-pulse" : ""
+                  }`}
+                  style={{
+                    width:
+                      loadProgressPercent === null
+                        ? "35%"
+                        : `${loadProgressPercent}%`,
+                  }}
+                />
+              </div>
+
+              {loadProgress.phase === "invoices" && loadProgress.cached > 0 && (
+                <p className="rounded-xl bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700">
+                  Đã dùng cache cho{" "}
+                  {loadProgress.cached.toLocaleString("vi-VN")} khách hàng, chỉ
+                  tải phần còn thiếu.
+                </p>
+              )}
+              <p className="text-center text-[11px] font-medium text-slate-400">
+                Vui lòng giữ màn hình này mở đến khi hoàn tất.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
       <div className="relative z-10 mx-auto flex h-full min-h-0 max-w-[1600px] flex-col gap-3 text-[12px]">
         <div className="shrink-0 space-y-3">
           <section className="overflow-hidden rounded-2xl border border-cyan-100 bg-white/95 shadow-[0_12px_35px_rgba(8,145,178,0.10)] backdrop-blur-xl">
@@ -968,10 +1277,12 @@ export default function DebtTracking() {
                 subtitle={
                   summaryError ||
                   (summaryLoading
-                    ? `Đang cộng dồn ${summaryLoadedCount} khách hàng...`
+                    ? `Đang tải hóa đơn của ${summaryLoadedCount} khách hàng...`
                     : `${stats.all} khách hàng đang có nợ · toàn công ty`)
                 }
                 icon={CircleDollarSign}
+                active={levelFilter === "all"}
+                onClick={() => selectDebtLevel("all")}
               />
               <SummaryCard
                 title="Mức xanh"
@@ -981,6 +1292,8 @@ export default function DebtTracking() {
                 subtitle={`${stats.green.length} khách hàng thiếu · 0–30 ngày`}
                 icon={ShieldCheck}
                 tone="green"
+                active={levelFilter === "green"}
+                onClick={() => selectDebtLevel("green")}
               />
               <SummaryCard
                 title="Mức vàng"
@@ -990,6 +1303,8 @@ export default function DebtTracking() {
                 subtitle={`${stats.yellow.length} khách hàng thiếu · 31–60 ngày`}
                 icon={TriangleAlert}
                 tone="yellow"
+                active={levelFilter === "yellow"}
+                onClick={() => selectDebtLevel("yellow")}
               />
               <SummaryCard
                 title="Mức đỏ"
@@ -999,6 +1314,8 @@ export default function DebtTracking() {
                 subtitle={`${stats.red.length} khách hàng thiếu · trên 60 ngày`}
                 icon={AlertCircle}
                 tone="red"
+                active={levelFilter === "red"}
+                onClick={() => selectDebtLevel("red")}
               />
             </div>
           </section>
@@ -1090,8 +1407,8 @@ export default function DebtTracking() {
                   hàng có công nợ
                 </h2>
                 <p className="mt-1 text-xs font-medium text-slate-500">
-                  Tuổi nợ tính từ ngày giao dịch phát sinh công nợ gần nhất trên
-                  KiotViet.
+                  Tuổi nợ tính từ hóa đơn còn thiếu tiền cũ nhất trên KiotViet;
+                  trường hợp không đối chiếu được sẽ tạm dùng ngày giao dịch.
                 </p>
               </div>
               <div className="flex flex-col gap-2 sm:flex-row">
@@ -1116,7 +1433,7 @@ export default function DebtTracking() {
                 </label>
                 <select
                   value={levelFilter}
-                  onChange={(event) => setLevelFilter(event.target.value)}
+                  onChange={(event) => selectDebtLevel(event.target.value)}
                   className="h-10 rounded-xl border border-cyan-100 bg-white px-3 text-xs font-bold text-slate-700 outline-none focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100"
                 >
                   <option value="all">Tất cả mức độ</option>
@@ -1152,175 +1469,185 @@ export default function DebtTracking() {
 
         <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
           <div ref={tableScrollRef} className="min-h-0 flex-1 overflow-auto">
-          {error ? (
-            <div className="m-5 flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-              <AlertCircle className="mt-0.5 shrink-0" size={19} />
-              <div>
-                <p className="font-black">Không tải được dữ liệu</p>
-                <p className="mt-1">{error}</p>
+            {error ? (
+              <div className="m-5 flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+                <AlertCircle className="mt-0.5 shrink-0" size={19} />
+                <div>
+                  <p className="font-black">Không tải được dữ liệu</p>
+                  <p className="mt-1">{error}</p>
+                </div>
               </div>
-            </div>
-          ) : loading ? (
-            <div className="grid min-h-72 place-items-center text-sm font-bold text-slate-500">
-              <span className="flex items-center gap-2">
-                <RefreshCw size={18} className="animate-spin" /> Đang lấy công
-                nợ từ KiotViet...
-              </span>
-            </div>
-          ) : searching ? (
-            <div className="grid min-h-72 place-items-center text-sm font-bold text-slate-500">
-              <span className="flex items-center gap-2">
-                <RefreshCw size={18} className="animate-spin" /> Đang tìm khách
-                hàng trên KiotViet...
-              </span>
-            </div>
-          ) : searchError ? (
-            <div className="m-5 flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-              <AlertCircle className="mt-0.5 shrink-0" size={19} />
-              <div>
-                <p className="font-black">Không tìm được khách hàng</p>
-                <p className="mt-1">{searchError}</p>
-              </div>
-            </div>
-          ) : filteredCustomers.length === 0 ? (
-            <div className="grid min-h-72 place-items-center px-4 text-center">
-              <div>
-                <ShieldCheck className="mx-auto text-cyan-500" size={36} />
-                <p className="mt-3 font-black text-slate-800">
-                  Không có khách hàng phù hợp
-                </p>
-                <p className="mt-1 text-sm text-slate-500">
-                  Thử đổi bộ lọc hoặc chọn công ty khác.
-                </p>
-              </div>
-            </div>
-          ) : (
-            <div>
-              <table className="w-full min-w-[1120px] border-collapse text-left text-sm">
-                <thead className="sticky top-0 z-10 bg-cyan-50 text-[11px] font-black uppercase tracking-wider text-cyan-800 shadow-[0_1px_0_rgba(165,243,252,1)]">
-                  <tr>
-                    <th className="px-5 py-3.5">Khách hàng</th>
-                    <th className="px-4 py-3.5">Liên hệ</th>
-                    <th className="px-4 py-3.5">Phụ trách</th>
-                    <th className="px-4 py-3.5 text-right">Tổng bán</th>
-                    <th className="px-4 py-3.5 text-right">Công nợ</th>
-                    <th className="px-4 py-3.5">Giao dịch gần nhất</th>
-                    <th className="px-4 py-3.5 text-center">Tuổi nợ</th>
-                    <th className="px-5 py-3.5 text-center">Mức độ</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-cyan-50">
-                  {filteredCustomers.map((customer) => {
-                    const level = LEVELS[customer.level];
-                    return (
-                      <tr
-                        key={customer.id}
-                        className="transition hover:bg-cyan-50/60"
-                      >
-                        <td className="px-5 py-4">
-                          <p className="font-black text-slate-900">
-                            {customer.name}
-                          </p>
-                          <p className="mt-1 text-xs font-bold text-slate-400">
-                            {customer.code} ·{" "}
-                            {Array.isArray(customer.group)
-                              ? customer.group.join(", ")
-                              : customer.group}
-                          </p>
-                        </td>
-                        <td className="max-w-64 px-4 py-4">
-                          <p className="font-bold text-slate-700">
-                            {customer.phone}
-                          </p>
-                          <p
-                            className="mt-1 truncate text-xs text-slate-500"
-                            title={[customer.address, customer.location]
-                              .filter(Boolean)
-                              .join(", ")}
-                          >
-                            {[customer.address, customer.location]
-                              .filter(Boolean)
-                              .join(", ")}
-                          </p>
-                        </td>
-                        <td className="px-4 py-4">
-                          <p className="font-bold text-slate-700">
-                            {customer.employee}
-                          </p>
-                          <p className="mt-1 text-xs text-slate-500">
-                            {customer.branch}
-                          </p>
-                        </td>
-                        <td className="px-4 py-4 text-right font-bold text-slate-600">
-                          {formatMoney(customer.totalInvoiced)}
-                        </td>
-                        <td className="px-4 py-4 text-right font-black text-slate-950">
-                          {formatMoney(customer.debt)}
-                        </td>
-                        <td className="px-4 py-4 font-semibold text-slate-600">
-                          {formatDate(customer.lastTradingDate)}
-                        </td>
-                        <td className="px-4 py-4 text-center">
-                          <span className="inline-flex items-center gap-1.5 font-black text-slate-700">
-                            <CalendarClock
-                              size={15}
-                              className="text-slate-400"
-                            />
-                            {customer.debtDays === null
-                              ? "—"
-                              : `${customer.debtDays} ngày`}
-                          </span>
-                        </td>
-                        <td className="px-5 py-4 text-center">
-                          <span
-                            title={level.hint}
-                            className={`inline-flex min-w-24 items-center justify-center gap-2 rounded-full border px-3 py-1.5 text-xs font-black ${level.badge}`}
-                          >
-                            <span
-                              className={`h-2 w-2 rounded-full ${level.dot}`}
-                            />{" "}
-                            {level.label}
-                          </span>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          {!loading && !error && !searching && !searchError && (
-            <div
-              ref={query.trim() ? null : loadMoreRef}
-              className="border-t border-slate-100 px-5 py-4 text-center text-xs font-bold text-slate-500"
-            >
-              {query.trim() ? (
-                <>
-                  Tìm thấy {filteredCustomers.length} khách hàng có công nợ trên
-                  KiotViet
-                </>
-              ) : loadingMore ? (
-                <span className="inline-flex items-center gap-2">
-                  <RefreshCw size={15} className="animate-spin" /> Đang tải thêm
-                  50 khách hàng...
+            ) : loading ? (
+              <div className="grid min-h-72 place-items-center text-sm font-bold text-slate-500">
+                <span className="flex items-center gap-2">
+                  <RefreshCw size={18} className="animate-spin" /> Đang lấy công
+                  nợ từ KiotViet...
                 </span>
-              ) : hasMore ? (
-                <button
-                  type="button"
-                  onClick={() => loadCustomers()}
-                  className="rounded-lg px-3 py-1.5 text-cyan-700 transition hover:bg-cyan-50"
-                >
-                  Cuộn xuống hoặc bấm để tải thêm 50 khách hàng
-                </button>
-              ) : (
-                <>
-                  Đã tải hết · Hiển thị {filteredCustomers.length} / {stats.all}
-                  khách hàng đang có công nợ
-                </>
-              )}
-            </div>
-          )}
+              </div>
+            ) : searching ? (
+              <div className="grid min-h-72 place-items-center text-sm font-bold text-slate-500">
+                <span className="flex items-center gap-2">
+                  <RefreshCw size={18} className="animate-spin" /> Đang tìm
+                  khách hàng trên KiotViet...
+                </span>
+              </div>
+            ) : searchError ? (
+              <div className="m-5 flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+                <AlertCircle className="mt-0.5 shrink-0" size={19} />
+                <div>
+                  <p className="font-black">Không tìm được khách hàng</p>
+                  <p className="mt-1">{searchError}</p>
+                </div>
+              </div>
+            ) : filteredCustomers.length === 0 ? (
+              <div className="grid min-h-72 place-items-center px-4 text-center">
+                <div>
+                  <ShieldCheck className="mx-auto text-cyan-500" size={36} />
+                  <p className="mt-3 font-black text-slate-800">
+                    Không có khách hàng phù hợp
+                  </p>
+                  <p className="mt-1 text-sm text-slate-500">
+                    Thử đổi bộ lọc hoặc chọn công ty khác.
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <div>
+                <table className="w-full min-w-[1120px] border-collapse text-left text-sm">
+                  <thead className="sticky top-0 z-10 bg-cyan-50 text-[11px] font-black uppercase tracking-wider text-cyan-800 shadow-[0_1px_0_rgba(165,243,252,1)]">
+                    <tr>
+                      <th className="px-5 py-3.5">Khách hàng</th>
+                      <th className="px-4 py-3.5">Liên hệ</th>
+                      <th className="px-4 py-3.5">Phụ trách</th>
+                      <th className="px-4 py-3.5 text-right">Tổng bán</th>
+                      <th className="px-4 py-3.5 text-right">Công nợ</th>
+                      <th className="px-4 py-3.5">HĐ còn nợ cũ nhất</th>
+                      <th className="px-4 py-3.5 text-center">Tuổi nợ</th>
+                      <th className="px-5 py-3.5 text-center">Mức độ</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-cyan-50">
+                    {filteredCustomers.map((customer) => {
+                      const level = LEVELS[customer.level];
+                      return (
+                        <tr
+                          key={customer.id}
+                          className="transition hover:bg-cyan-50/60"
+                        >
+                          <td className="px-5 py-4">
+                            <p className="font-black text-slate-900">
+                              {customer.name}
+                            </p>
+                            <p className="mt-1 text-xs font-bold text-slate-400">
+                              {customer.code} ·{" "}
+                              {Array.isArray(customer.group)
+                                ? customer.group.join(", ")
+                                : customer.group}
+                            </p>
+                          </td>
+                          <td className="max-w-64 px-4 py-4">
+                            <p className="font-bold text-slate-700">
+                              {customer.phone}
+                            </p>
+                            <p
+                              className="mt-1 truncate text-xs text-slate-500"
+                              title={[customer.address, customer.location]
+                                .filter(Boolean)
+                                .join(", ")}
+                            >
+                              {[customer.address, customer.location]
+                                .filter(Boolean)
+                                .join(", ")}
+                            </p>
+                          </td>
+                          <td className="px-4 py-4">
+                            <p className="font-bold text-slate-700">
+                              {customer.employee}
+                            </p>
+                            <p className="mt-1 text-xs text-slate-500">
+                              {customer.branch}
+                            </p>
+                          </td>
+                          <td className="px-4 py-4 text-right font-bold text-slate-600">
+                            {formatMoney(customer.totalInvoiced)}
+                          </td>
+                          <td className="px-4 py-4 text-right font-black text-slate-950">
+                            {formatMoney(customer.debt)}
+                          </td>
+                          <td className="px-4 py-4 font-semibold text-slate-600">
+                            {formatDate(customer.lastTradingDate)}
+                            {customer.oldestUnpaidInvoiceCode ? (
+                              <p className="mt-1 text-xs font-bold text-cyan-600">
+                                {customer.oldestUnpaidInvoiceCode}
+                              </p>
+                            ) : (
+                              <p className="mt-1 text-[11px] font-medium text-slate-400">
+                                Tạm theo ngày giao dịch
+                              </p>
+                            )}
+                          </td>
+                          <td className="px-4 py-4 text-center">
+                            <span className="inline-flex items-center gap-1.5 font-black text-slate-700">
+                              <CalendarClock
+                                size={15}
+                                className="text-slate-400"
+                              />
+                              {customer.debtDays === null
+                                ? "—"
+                                : `${customer.debtDays} ngày`}
+                            </span>
+                          </td>
+                          <td className="px-5 py-4 text-center">
+                            <span
+                              title={level.hint}
+                              className={`inline-flex min-w-24 items-center justify-center gap-2 rounded-full border px-3 py-1.5 text-xs font-black ${level.badge}`}
+                            >
+                              <span
+                                className={`h-2 w-2 rounded-full ${level.dot}`}
+                              />{" "}
+                              {level.label}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {!loading && !error && !searching && !searchError && (
+              <div
+                ref={query.trim() ? null : loadMoreRef}
+                className="border-t border-slate-100 px-5 py-4 text-center text-xs font-bold text-slate-500"
+              >
+                {query.trim() ? (
+                  <>
+                    Tìm thấy {filteredCustomers.length} khách hàng có công nợ
+                    trên KiotViet
+                  </>
+                ) : loadingMore ? (
+                  <span className="inline-flex items-center gap-2">
+                    <RefreshCw size={15} className="animate-spin" /> Đang tải
+                    thêm 50 khách hàng...
+                  </span>
+                ) : hasMore ? (
+                  <button
+                    type="button"
+                    onClick={() => loadCustomers()}
+                    className="rounded-lg px-3 py-1.5 text-cyan-700 transition hover:bg-cyan-50"
+                  >
+                    Cuộn xuống hoặc bấm để tải thêm 50 khách hàng
+                  </button>
+                ) : (
+                  <>
+                    Đã tải hết · Hiển thị {filteredCustomers.length} /{" "}
+                    {stats.all}
+                    khách hàng đang có công nợ
+                  </>
+                )}
+              </div>
+            )}
           </div>
         </section>
       </div>
