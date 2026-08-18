@@ -88,6 +88,8 @@ const LEAVE_TYPE_LABELS = {
   regular: "Nghỉ phép thường",
   emergency: "Off đột xuất",
   annual: "Phép năm",
+  remote_work: "Làm việc tại nhà",
+  business_trip: "Đi công vụ",
 };
 const LEAVE_SESSION_LABELS = {
   full_day: "Cả ngày",
@@ -262,7 +264,7 @@ function shiftHasInvalidPunch(shift) {
 function attendanceDayMeta(record, date, today = todayKey(), approvedLeave = null) {
   if (approvedLeave && (!record || record.status === "incomplete" || !hasAttendancePunch(record))) {
     return {
-      label: approvedLeave.leaveType === "annual" ? "Phép năm đã duyệt" : approvedLeave.leaveType === "emergency" ? "Off đột xuất đã duyệt" : "Nghỉ phép đã duyệt",
+      label: approvedLeave.leaveType === "annual" ? "Phép năm đã duyệt" : approvedLeave.leaveType === "emergency" ? "Off đột xuất đã duyệt" : approvedLeave.leaveType === "remote_work" ? "Làm việc tại nhà đã duyệt" : approvedLeave.leaveType === "business_trip" ? "Đi công vụ đã duyệt" : "Nghỉ phép đã duyệt",
       dot: "bg-violet-500",
       border: "border-violet-300",
       bg: "bg-violet-50",
@@ -365,7 +367,7 @@ function requestEvidenceList(request) {
 }
 
 function leaveIntervals(request) {
-  if (request.leaveType === "emergency") {
+  if (["emergency", "remote_work", "business_trip"].includes(request.leaveType)) {
     return [[request.startTime, request.endTime]];
   }
   if (request.leaveType === "annual" || request.session === "full_day") {
@@ -1847,16 +1849,17 @@ export default function AttendancePage() {
     event.preventDefault();
     if (!leaveForm.startDate || !leaveForm.endDate) return showMsg(false, "Vui lòng chọn thời gian nghỉ.");
     if (leaveForm.endDate < leaveForm.startDate) return showMsg(false, "Ngày kết thúc phải từ ngày bắt đầu trở đi.");
-    if (leaveForm.leaveType === "emergency" && (!leaveForm.startTime || !leaveForm.endTime || leaveForm.endTime <= leaveForm.startTime)) {
-      return showMsg(false, "Giờ bắt đầu và kết thúc off đột xuất không hợp lệ.");
+    if (["emergency", "remote_work", "business_trip"].includes(leaveForm.leaveType) && (!leaveForm.startTime || !leaveForm.endTime || leaveForm.endTime <= leaveForm.startTime)) {
+      return showMsg(false, "Giờ bắt đầu và kết thúc không hợp lệ.");
     }
-    if (leaveForm.leaveType === "emergency" && (leaveForm.startTime < "07:30" || leaveForm.endTime > "17:00")) {
-      return showMsg(false, "Off đột xuất phải nằm trong giờ làm việc 07:30-17:00.");
+    if (["emergency", "remote_work", "business_trip"].includes(leaveForm.leaveType) && (leaveForm.startTime < "07:30" || leaveForm.endTime > "17:00")) {
+      return showMsg(false, "Khung giờ đăng ký phải nằm trong giờ làm việc 07:30-17:00.");
     }
-    if (leaveForm.leaveType === "emergency" && leaveForm.startTime >= "11:30" && leaveForm.endTime <= "13:00") {
-      return showMsg(false, "Khoảng off không được chỉ nằm trong giờ nghỉ trưa 11:30-13:00.");
+    if (["emergency", "remote_work", "business_trip"].includes(leaveForm.leaveType) && leaveForm.startTime >= "11:30" && leaveForm.endTime <= "13:00") {
+      return showMsg(false, "Khoảng đăng ký không được chỉ nằm trong giờ nghỉ trưa 11:30-13:00.");
     }
     if (!leaveForm.reason.trim()) return showMsg(false, "Vui lòng nhập lý do xin nghỉ.");
+    if (leaveForm.leaveType === "business_trip" && leaveForm.evidences.length === 0) return showMsg(false, "Vui lòng chọn ít nhất một ảnh minh chứng đi công vụ.");
 
     const overlappingRequest = leaveRequests.find((request) =>
       ["pending", "approved", "cancel_pending"].includes(request.status)
@@ -1876,7 +1879,7 @@ export default function AttendancePage() {
       body.append("session", leaveForm.session);
       body.append("reason", leaveForm.reason.trim());
       if (convertAnnualToRegular) body.append("convertAnnualToRegular", "true");
-      leaveForm.evidences.forEach((file) => body.append("evidence", file));
+      if (leaveForm.leaveType !== "remote_work") leaveForm.evidences.forEach((file) => body.append("evidence", file));
       return api.post("/attendance-leave-requests", body);
     };
 
@@ -2697,8 +2700,8 @@ export default function AttendancePage() {
                 {todayRecord?.workHours != null && (
                   <div className="mb-3 rounded-xl border border-emerald-100 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700">
                     Tổng công hôm nay: {todayRecord.workHours}h
-                    {Number(todayRecord.remoteWorkHours || 0) > 0 && (
-                      <span className="ml-2 text-sky-700">Tại công ty: {todayRecord.onsiteWorkHours}h · WFH: {todayRecord.remoteWorkHours}h</span>
+                    {(Number(todayRecord.remoteWorkHours || 0) > 0 || Number(todayRecord.businessTripHours || 0) > 0) && (
+                      <span className="ml-2 text-sky-700">Tại công ty: {todayRecord.onsiteWorkHours}h{Number(todayRecord.remoteWorkHours || 0) > 0 ? ` · WFH: ${todayRecord.remoteWorkHours}h` : ""}{Number(todayRecord.businessTripHours || 0) > 0 ? ` · Công vụ: ${todayRecord.businessTripHours}h` : ""}</span>
                     )}
                     {Number(todayRecord.overtimeMinutes || 0) > 0 && <span className="ml-2 text-violet-700">Tăng ca: {todayRecord.overtimeMinutes} phút</span>}
                   </div>
@@ -2917,8 +2920,8 @@ export default function AttendancePage() {
                             {record.workHours != null && (
                               <div className="mt-2 flex items-center gap-2">
                                 <span className="text-xs font-semibold text-emerald-700">Tổng: {record.workHours}h</span>
-                                {Number(record.remoteWorkHours || 0) > 0 && (
-                                  <span className="text-xs font-semibold text-sky-700">Tại công ty {record.onsiteWorkHours}h + WFH {record.remoteWorkHours}h</span>
+                                {(Number(record.remoteWorkHours || 0) > 0 || Number(record.businessTripHours || 0) > 0) && (
+                                  <span className="text-xs font-semibold text-sky-700">Tại công ty {record.onsiteWorkHours}h{Number(record.remoteWorkHours || 0) > 0 ? ` + WFH ${record.remoteWorkHours}h` : ""}{Number(record.businessTripHours || 0) > 0 ? ` + Công vụ ${record.businessTripHours}h` : ""}</span>
                                 )}
                                 {Number(record.overtimeMinutes || 0) > 0 && (
                                   <span className="text-xs font-semibold text-violet-700">Tăng ca: {record.overtimeMinutes}p</span>
@@ -2992,8 +2995,9 @@ export default function AttendancePage() {
                         return {
                           ...current,
                           leaveType,
-                          endDate: leaveType === "emergency" ? current.startDate : current.endDate,
-                          session: leaveType === "annual" || leaveType === "emergency" ? "full_day" : current.session,
+                          endDate: ["emergency", "remote_work", "business_trip"].includes(leaveType) ? current.startDate : current.endDate,
+                          session: ["annual", "emergency", "remote_work", "business_trip"].includes(leaveType) ? "full_day" : current.session,
+                          evidences: leaveType === "remote_work" ? [] : current.evidences,
                         };
                       })}
                       className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
@@ -3001,15 +3005,17 @@ export default function AttendancePage() {
                       <option value="emergency">Off đột xuất</option>
                       <option value="regular">Nghỉ phép thường</option>
                       <option value="annual">Phép năm</option>
+                      <option value="remote_work">Làm việc tại nhà</option>
+                      <option value="business_trip">Đi công vụ</option>
                     </select>
                   </label>
 
-                  <div className={`grid gap-3 ${leaveForm.leaveType === "emergency" ? "grid-cols-1" : "grid-cols-2"}`}>
+                  <div className={`grid gap-3 ${["emergency", "remote_work", "business_trip"].includes(leaveForm.leaveType) ? "grid-cols-1" : "grid-cols-2"}`}>
                     <label className="block text-xs font-semibold text-slate-600">
                       TỪ NGÀY <span className="text-rose-500">*</span>
-                      <input type="date" required value={leaveForm.startDate} onChange={(event) => setLeaveForm((current) => ({ ...current, startDate: event.target.value, endDate: current.leaveType === "emergency" || current.endDate < event.target.value ? event.target.value : current.endDate }))} className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-violet-400" />
+                      <input type="date" required value={leaveForm.startDate} onChange={(event) => setLeaveForm((current) => ({ ...current, startDate: event.target.value, endDate: ["emergency", "remote_work", "business_trip"].includes(current.leaveType) || current.endDate < event.target.value ? event.target.value : current.endDate }))} className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-violet-400" />
                     </label>
-                    {leaveForm.leaveType !== "emergency" && (
+                    {!["emergency", "remote_work", "business_trip"].includes(leaveForm.leaveType) && (
                       <label className="block text-xs font-semibold text-slate-600">
                         ĐẾN NGÀY <span className="text-rose-500">*</span>
                         <input type="date" required min={leaveForm.startDate} value={leaveForm.endDate} onChange={(event) => setLeaveForm((current) => ({ ...current, endDate: event.target.value }))} className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-violet-400" />
@@ -3017,11 +3023,11 @@ export default function AttendancePage() {
                     )}
                   </div>
 
-                  {leaveForm.leaveType === "emergency" ? (
+                  {["emergency", "remote_work", "business_trip"].includes(leaveForm.leaveType) ? (
                     <div className="grid grid-cols-2 gap-3">
                       <label className="block text-xs font-semibold text-slate-600">TỪ GIỜ <span className="text-rose-500">*</span><input type="time" min="07:30" max="17:00" required value={leaveForm.startTime} onChange={(event) => setLeaveForm((current) => ({ ...current, startTime: event.target.value }))} className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-violet-400" /></label>
                       <label className="block text-xs font-semibold text-slate-600">ĐẾN GIỜ <span className="text-rose-500">*</span><input type="time" min="07:30" max="17:00" required value={leaveForm.endTime} onChange={(event) => setLeaveForm((current) => ({ ...current, endTime: event.target.value }))} className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-violet-400" /></label>
-                      <p className="col-span-2 text-xs text-slate-400">Chỉ tính thời gian trong giờ làm việc; tự động loại giờ nghỉ trưa 11:30–13:00.</p>
+                      <p className="col-span-2 text-xs text-slate-400">{["remote_work", "business_trip"].includes(leaveForm.leaveType) ? "Thời gian được duyệt sẽ cộng vào giờ làm trong bảng chấm công; tự động loại giờ nghỉ trưa 11:30–13:00." : "Chỉ tính thời gian trong giờ làm việc; tự động loại giờ nghỉ trưa 11:30–13:00."}</p>
                     </div>
                   ) : leaveForm.leaveType === "annual" ? (
                     <div className={`rounded-xl border p-3 text-xs ${TONE.emerald}`}><b>Điều kiện tự duyệt phép năm</b><span className="mt-1 block">Báo trước: 1 ngày ≥ 3 ngày, 2 ngày ≥ 7 ngày, từ 3 ngày ≥ 15 ngày. Chủ nhật không tính ngày nghỉ.</span></div>
@@ -3041,12 +3047,16 @@ export default function AttendancePage() {
                     <textarea required maxLength={1000} rows={4} value={leaveForm.reason} onChange={(event) => setLeaveForm((current) => ({ ...current, reason: event.target.value }))} placeholder="Nêu lý do và thông tin cần thiết..." className="mt-1.5 w-full resize-none rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100" />
                   </label>
 
-                  <label className="block cursor-pointer rounded-xl border border-dashed border-slate-300 bg-slate-50 p-3 transition hover:border-violet-300 hover:bg-violet-50/40">
+                  {leaveForm.leaveType !== "remote_work" && <label className="block cursor-pointer rounded-xl border border-dashed border-slate-300 bg-slate-50 p-3 transition hover:border-violet-300 hover:bg-violet-50/40">
                     <input type="file" multiple accept="image/jpeg,image/png,image/webp,image/gif" className="hidden" onChange={(event) => selectLeaveEvidences(event.target.files)} />
                     <span className="flex items-center gap-2 text-sm font-semibold text-slate-600"><ImagePlus size={17} className="text-violet-500" /> {leaveForm.evidences.length > 0 ? `Đã chọn ${leaveForm.evidences.length} ảnh` : "Chọn ảnh minh chứng"}</span>
                     {leaveForm.evidences.length > 0 && <span className="mt-1 block truncate text-xs text-slate-500">{leaveForm.evidences.map((file) => file.name).join(", ")}</span>}
-                    <span className="mt-1 block text-xs text-slate-400">Tối đa 3 ảnh, mỗi ảnh 8 MB. Bắt buộc với off đột xuất; có thể bổ sung sau khi gửi đơn.</span>
-                  </label>
+                    <span className="mt-1 block text-xs text-slate-400">Tối đa 3 ảnh, mỗi ảnh 8 MB. {leaveForm.leaveType === "business_trip" ? "Bắt buộc với đơn đi công vụ." : "Bắt buộc với off đột xuất; có thể bổ sung sau khi gửi đơn."}</span>
+                  </label>}
+
+                  {leaveForm.leaveType === "remote_work" && <div className={`rounded-xl border p-3 text-xs ${TONE.sky}`}><b>Không cần ảnh minh chứng.</b><span className="mt-1 block">Sau khi được duyệt, khung giờ này được tính là giờ làm việc bình thường trong bảng chấm công.</span></div>}
+
+                  {leaveForm.leaveType === "business_trip" && leaveForm.evidences.length === 0 && <div className={`flex gap-2 rounded-xl border p-3 text-xs ${TONE.amber}`}><AlertCircle size={15} className="mt-0.5 shrink-0" />Đơn đi công vụ phải có ít nhất một ảnh minh chứng trước khi gửi.</div>}
 
                   {leaveForm.leaveType === "emergency" && leaveForm.evidences.length === 0 && (
                     <div className={`flex gap-2 rounded-xl border p-3 text-xs ${TONE.amber}`}>
@@ -3086,14 +3096,14 @@ export default function AttendancePage() {
                           <div className="flex flex-wrap items-start justify-between gap-2">
                             <div>
                               <p className="text-sm font-bold text-slate-800">{LEAVE_TYPE_LABELS[request.leaveType] || request.leaveType}</p>
-                              <p className="mt-0.5 text-xs text-slate-500">{fmtShortDate(request.startDate)}{request.endDate !== request.startDate ? ` – ${fmtShortDate(request.endDate)}` : ""} · {request.leaveType === "emergency" ? `${request.startTime || "-"}–${request.endTime || "-"}` : LEAVE_SESSION_LABELS[request.session]}</p>
+                              <p className="mt-0.5 text-xs text-slate-500">{fmtShortDate(request.startDate)}{request.endDate !== request.startDate ? ` – ${fmtShortDate(request.endDate)}` : ""} · {["emergency", "remote_work", "business_trip"].includes(request.leaveType) ? `${request.startTime || "-"}–${request.endTime || "-"}` : LEAVE_SESSION_LABELS[request.session]}</p>
                             </div>
                             <Badge tone={status.tone}>{status.text}</Badge>
                           </div>
                           <p className="mt-2 whitespace-pre-wrap text-sm text-slate-600">{request.reason}</p>
                           {request.convertedFromAnnual && <p className="mt-1 text-xs font-semibold text-amber-700">Đơn này đã được chuyển sang phép thường không lương do không đủ phép năm.</p>}
                           {request.autoApproved && <p className="mt-1 text-xs font-semibold text-violet-700">Đã được hệ thống tự động duyệt.</p>}
-                          {(request.status === "approved" || request.status === "cancel_pending") && <p className="mt-1 text-xs font-semibold text-emerald-700">Đã duyệt: {request.leaveType === "emergency" ? `${Number(request.approvedMinutes || 0)} phút nghỉ` : `${Number(request.approvedDays || 0)} ngày nghỉ`}</p>}
+                          {(request.status === "approved" || request.status === "cancel_pending") && <p className="mt-1 text-xs font-semibold text-emerald-700">Đã duyệt: {request.leaveType === "remote_work" ? `${Number(request.approvedMinutes || 0)} phút làm việc tại nhà` : request.leaveType === "business_trip" ? `${Number(request.approvedMinutes || 0)} phút đi công vụ` : request.leaveType === "emergency" ? `${Number(request.approvedMinutes || 0)} phút nghỉ` : `${Number(request.approvedDays || 0)} ngày nghỉ`}</p>}
                           {request.cancellationReason && <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700"><strong>Lý do yêu cầu hủy:</strong> {request.cancellationReason}</p>}
                           {request.cancellationReviewNote && <p className="mt-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600"><strong>Phản hồi hủy đơn:</strong> {request.cancellationReviewNote}</p>}
                           {request.reviewNote && <p className={`mt-2 rounded-lg border px-3 py-2 text-xs ${request.status === "rejected" ? TONE.rose : TONE.slate}`}><strong>Phản hồi quản trị:</strong> {request.reviewNote}</p>}
@@ -3101,7 +3111,7 @@ export default function AttendancePage() {
                             {evidences.map((evidence, index) => (
                               <button key={evidence.url || index} type="button" onClick={() => openLeaveEvidence(request, index)} className="inline-flex items-center gap-1.5 rounded-lg border border-sky-200 bg-sky-50 px-2.5 py-1.5 text-xs font-semibold text-sky-700 hover:bg-sky-100"><ImagePlus size={13} /> Ảnh {index + 1}</button>
                             ))}
-                            {request.status === "pending" && evidences.length < 3 ? (
+                            {request.leaveType !== "remote_work" && request.status === "pending" && evidences.length < 3 ? (
                               <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs font-semibold text-amber-700 hover:bg-amber-100">
                                 <input type="file" multiple accept="image/jpeg,image/png,image/webp,image/gif" className="hidden" disabled={uploadingLeaveId === request._id} onChange={(event) => { uploadLeaveEvidence(request._id, event.target.files, 3 - evidences.length); event.target.value = ""; }} />
                                 {uploadingLeaveId === request._id ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />} Thêm ảnh ({evidences.length}/3)

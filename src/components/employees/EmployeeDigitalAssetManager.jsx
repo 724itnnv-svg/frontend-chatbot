@@ -96,7 +96,127 @@ function DigitalAssetForm({ value, saving, onChange, onClose, onSave }) {
 function AssignModal({ editor, employees, search, loading, saving, onEditorChange, onSearchChange, onSearch, onClose, onSave }) {
   const setValue = (field, value) => onEditorChange({ ...editor, values: { ...editor.values, [field]: value } });
   const selected = employees.find((employee) => employee._id === editor.values.profileId);
-  return <div className="fixed inset-0 z-[180] flex items-center justify-center bg-slate-950/60 p-3"><div className="w-full max-w-2xl rounded-3xl bg-white p-5 shadow-2xl"><div className="mb-4 flex items-start gap-3"><span className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-600 text-white"><UserPlus size={20} /></span><div className="mr-auto"><h3 className="text-lg font-black">Cấp {editor.asset.assetCode}</h3><p className="text-xs text-slate-500">{editor.asset.name} · {editor.asset.accountIdentifier}</p></div><button onClick={onClose}><X /></button></div><div className="grid gap-3 md:grid-cols-2"><div className="md:col-span-2"><EmployeeSearchSelect value={editor.values.profileId} employees={employees} search={search} loading={loading} onChange={(v) => setValue("profileId", v)} onSearchChange={onSearchChange} onSearch={onSearch} /></div>{selected && <div className="md:col-span-2 rounded-xl bg-blue-50 p-3 text-sm text-blue-800"><b>{selected.employeeCode} · {selected.personal?.fullName}</b><div className="text-xs">{selected.employment?.department || "Chưa có bộ phận"} · {selected.employment?.jobTitle || "Chưa có chức danh"}</div></div>}<Field type="date" label="Ngày cấp" value={editor.values.assignedAt} onChange={(v) => setValue("assignedAt", v)} /><Field type="date" label="Dự kiến thu hồi" value={editor.values.expectedRevokeDate} onChange={(v) => setValue("expectedRevokeDate", v)} /><div className="md:col-span-2"><Field label="Ghi chú bàn giao" value={editor.values.note} onChange={(v) => setValue("note", v)} /></div></div><div className="mt-5 flex justify-end gap-2"><button onClick={onClose} className="rounded-xl border px-4 py-2">Hủy</button><button disabled={saving || !editor.values.profileId} onClick={onSave} className="rounded-xl bg-blue-600 px-5 py-2 font-bold text-white disabled:opacity-50">Xác nhận cấp</button></div></div></div>;
+  return <div className="fixed inset-0 z-[180] flex items-center justify-center bg-slate-950/60 p-3"><div className="w-full max-w-2xl rounded-3xl bg-white p-5 shadow-2xl"><div className="mb-4 flex items-start gap-3"><span className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-600 text-white"><UserPlus size={20} /></span><div className="mr-auto"><h3 className="text-lg font-black">Cấp {editor.asset.assetCode}</h3><p className="text-xs text-slate-500">{editor.asset.name} · {editor.asset.accountIdentifier} · Không yêu cầu biên bản</p></div><button onClick={onClose}><X /></button></div><div className="grid gap-3 md:grid-cols-2"><div className="md:col-span-2"><EmployeeSearchSelect value={editor.values.profileId} employees={employees} search={search} loading={loading} onChange={(v) => setValue("profileId", v)} onSearchChange={onSearchChange} onSearch={onSearch} /></div>{selected && <div className="md:col-span-2 rounded-xl bg-blue-50 p-3 text-sm text-blue-800"><b>{selected.employeeCode} · {selected.personal?.fullName}</b><div className="text-xs">{selected.employment?.department || "Chưa có bộ phận"} · {selected.employment?.jobTitle || "Chưa có chức danh"}</div></div>}<Field type="date" label="Ngày cấp" value={editor.values.assignedAt} onChange={(v) => setValue("assignedAt", v)} /><Field type="date" label="Dự kiến thu hồi" value={editor.values.expectedRevokeDate} onChange={(v) => setValue("expectedRevokeDate", v)} /><div className="md:col-span-2"><Field label="Ghi chú cấp phát" value={editor.values.note} onChange={(v) => setValue("note", v)} /></div></div><div className="mt-5 flex justify-end gap-2"><button onClick={onClose} className="rounded-xl border px-4 py-2">Hủy</button><button disabled={saving || !editor.values.profileId} onClick={onSave} className="rounded-xl bg-blue-600 px-5 py-2 font-bold text-white disabled:opacity-50">Xác nhận cấp</button></div></div></div>;
+}
+
+export function EmployeeDigitalAssetSection({ profile, onChanged }) {
+  const { token, user } = useAuth();
+  const [assets, setAssets] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [assignEditor, setAssignEditor] = useState(null);
+  const [availableAssets, setAvailableAssets] = useState([]);
+  const [loadingAvailable, setLoadingAvailable] = useState(false);
+  const [savingAssignment, setSavingAssignment] = useState(false);
+  const [revokingAssetId, setRevokingAssetId] = useState("");
+  const canManageAssets = String(user?.role || "").toLowerCase() === "superadmin" || Number(user?.allpage) === 1 || user?.action?.employee_assets?.edit === true;
+
+  useEffect(() => {
+    if (!profile?._id) {
+      setAssets([]);
+      return undefined;
+    }
+    const controller = new AbortController();
+    const load = async () => {
+      try {
+        setLoading(true);
+        setError("");
+        const response = await fetch(`/api/employee-digital-assets/employee/${profile._id}`, {
+          headers: { Authorization: `Bearer ${token}` },
+          signal: controller.signal,
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(result.message || "Không thể lấy tài sản số của nhân viên");
+        setAssets(result.data || []);
+      } catch (loadError) {
+        if (loadError.name !== "AbortError") setError(loadError.message);
+      } finally {
+        if (!controller.signal.aborted) setLoading(false);
+      }
+    };
+    void load();
+    return () => controller.abort();
+  }, [profile?._id, refreshKey, token]);
+
+  const openAssign = async () => {
+    try {
+      setLoadingAvailable(true);
+      const response = await fetch("/api/employee-digital-assets?limit=200&status=available&category=all", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.message || "Không thể lấy tài sản số sẵn sàng cấp");
+      const items = result.data?.items || [];
+      setAvailableAssets(items);
+      setAssignEditor({ assetId: items[0]?._id || "", assignedAt: new Date().toISOString().slice(0, 10), expectedRevokeDate: "", note: "" });
+    } catch (loadError) {
+      window.alert(loadError.message);
+    } finally {
+      setLoadingAvailable(false);
+    }
+  };
+
+  const assign = async () => {
+    if (!assignEditor?.assetId) return window.alert("Vui lòng chọn tài sản số cần cấp");
+    try {
+      setSavingAssignment(true);
+      const response = await fetch(`/api/employee-digital-assets/${assignEditor.assetId}/assign`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          profileId: profile._id,
+          assignedAt: assignEditor.assignedAt,
+          expectedRevokeDate: assignEditor.expectedRevokeDate,
+          note: assignEditor.note,
+        }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.message || "Không thể cấp tài sản số");
+      setAssignEditor(null);
+      setRefreshKey((value) => value + 1);
+      await onChanged?.();
+    } catch (assignError) {
+      window.alert(assignError.message);
+    } finally {
+      setSavingAssignment(false);
+    }
+    return undefined;
+  };
+
+  const revoke = async (asset) => {
+    const note = window.prompt(`Ghi chú thu hồi ${asset.assetCode} (có thể để trống):`, "");
+    if (note === null) return;
+    try {
+      setRevokingAssetId(asset._id);
+      const response = await fetch(`/api/employee-digital-assets/${asset._id}/revoke`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ status: "available", revokedAt: new Date().toISOString(), note }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.message || "Không thể thu hồi tài sản số");
+      setRefreshKey((value) => value + 1);
+      await onChanged?.();
+    } catch (revokeError) {
+      window.alert(revokeError.message);
+    } finally {
+      setRevokingAssetId("");
+    }
+  };
+
+  const selectedAvailableAsset = availableAssets.find((asset) => asset._id === assignEditor?.assetId);
+
+  return <section className="rounded-2xl border border-cyan-100 bg-white p-4">
+    <div className="mb-4 flex flex-wrap items-center gap-3"><span className="flex h-10 w-10 items-center justify-center rounded-xl bg-cyan-600 text-white"><KeyRound size={19} /></span><div className="mr-auto"><h3 className="font-black text-cyan-900">Tài sản số được cấp phát</h3><p className="text-xs text-slate-500">Cấp phát và thu hồi trực tiếp, không cần ký biên bản · {assets.length} tài sản</p></div>{canManageAssets && <button disabled={loadingAvailable} onClick={openAssign} className="flex items-center gap-2 rounded-xl bg-cyan-600 px-3 py-2 text-sm font-bold text-white disabled:opacity-50"><Plus size={15} /> {loadingAvailable ? "Đang tải..." : "Cấp tài sản số"}</button>}</div>
+    {loading ? <div className="p-6 text-center text-sm text-slate-500">Đang tải tài sản số...</div> : error ? <div className="rounded-xl border border-red-100 bg-red-50 p-4 text-sm text-red-700">{error}</div> : assets.length ? <div className="grid gap-3 md:grid-cols-2">{assets.map((asset) => <article key={asset._id} className="rounded-xl border border-cyan-100 p-3">
+      <div className="flex items-start gap-3"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-cyan-50 text-cyan-700"><KeyRound size={17} /></span><div className="mr-auto min-w-0"><b className="block truncate text-slate-800">{asset.assetCode} · {asset.name}</b><div className="text-xs text-slate-500">{CATEGORY_LABELS[asset.category] || asset.category || "Khác"}{asset.provider ? ` · ${asset.provider}` : ""}</div></div>{canManageAssets && <button disabled={revokingAssetId === asset._id} onClick={() => revoke(asset)} className="flex items-center gap-1 rounded-lg border border-orange-200 px-2 py-1.5 text-xs font-bold text-orange-700 disabled:opacity-50"><RotateCcw size={13} /> {revokingAssetId === asset._id ? "Đang thu..." : "Thu hồi"}</button>}{safeLink(asset.loginUrl) && <a href={asset.loginUrl} target="_blank" rel="noreferrer" title="Mở trang đăng nhập" className="rounded-lg border border-cyan-200 p-2 text-cyan-700"><ExternalLink size={14} /></a>}</div>
+      <div className="mt-3 grid grid-cols-2 gap-2 rounded-lg bg-slate-50 p-2 text-xs"><div className="col-span-2"><span className="text-slate-400">Tài khoản/Định danh</span><div className="break-all font-semibold text-slate-700">{asset.accountIdentifier || "-"}</div></div><div><span className="text-slate-400">Ngày cấp</span><div className="font-semibold">{dateVN(asset.currentAssignment?.assignedAt)}</div></div><div><span className="text-slate-400">Dự kiến thu hồi</span><div className="font-semibold">{dateVN(asset.currentAssignment?.expectedRevokeDate)}</div></div><div><span className="text-slate-400">Bảo mật</span><div className={asset.mfaEnabled ? "font-semibold text-emerald-700" : "font-semibold text-amber-700"}>{asset.mfaEnabled ? "Đã bật 2FA" : "Chưa bật 2FA"}</div></div><div><span className="text-slate-400">Ngày gia hạn</span><div className="font-semibold">{dateVN(asset.renewalDate)}</div></div>{asset.currentAssignment?.note && <div className="col-span-2"><span className="text-slate-400">Ghi chú cấp phát</span><div className="font-semibold text-slate-700">{asset.currentAssignment.note}</div></div>}</div>
+    </article>)}</div> : <div className="rounded-xl bg-slate-50 p-6 text-center text-sm text-slate-500">Nhân viên chưa được cấp tài sản số.</div>}
+    {assignEditor && <div className="fixed inset-0 z-[180] flex items-center justify-center bg-slate-950/60 p-3"><div className="w-full max-w-2xl rounded-3xl bg-white p-5 shadow-2xl"><div className="mb-4 flex items-start gap-3"><span className="flex h-11 w-11 items-center justify-center rounded-xl bg-cyan-600 text-white"><KeyRound size={20} /></span><div className="mr-auto"><h3 className="text-lg font-black">Cấp tài sản số</h3><p className="text-xs text-slate-500">Cho {profile.employeeCode} · {profile.personal?.fullName}</p></div><button onClick={() => setAssignEditor(null)} className="rounded-xl p-2 text-slate-400 hover:bg-slate-100"><X /></button></div>
+      {availableAssets.length ? <><div className="mb-3 rounded-xl bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700">Cấp phát trực tiếp, không tạo và không yêu cầu ký biên bản.</div><div className="grid gap-3 md:grid-cols-2"><label className="md:col-span-2"><span className={labelClass}>Tài sản số sẵn sàng cấp *</span><select value={assignEditor.assetId} onChange={(event) => setAssignEditor({ ...assignEditor, assetId: event.target.value })} className={inputClass}>{availableAssets.map((asset) => <option key={asset._id} value={asset._id}>{asset.assetCode} - {asset.name} ({asset.accountIdentifier})</option>)}</select></label>{selectedAvailableAsset && <div className="md:col-span-2 rounded-xl border border-cyan-100 bg-cyan-50 p-3 text-sm text-cyan-900"><b>{selectedAvailableAsset.name}</b><div className="mt-1 text-xs">{CATEGORY_LABELS[selectedAvailableAsset.category] || selectedAvailableAsset.category} · {selectedAvailableAsset.provider || "Chưa có nhà cung cấp"} · {selectedAvailableAsset.mfaEnabled ? "Đã bật 2FA" : "Chưa bật 2FA"}</div></div>}<Field type="date" label="Ngày cấp" value={assignEditor.assignedAt} onChange={(value) => setAssignEditor({ ...assignEditor, assignedAt: value })} /><Field type="date" label="Dự kiến thu hồi" value={assignEditor.expectedRevokeDate} onChange={(value) => setAssignEditor({ ...assignEditor, expectedRevokeDate: value })} /><div className="md:col-span-2"><Field label="Ghi chú cấp phát" value={assignEditor.note} onChange={(value) => setAssignEditor({ ...assignEditor, note: value })} /></div></div><div className="mt-5 flex justify-end gap-2"><button onClick={() => setAssignEditor(null)} className="rounded-xl border px-4 py-2">Hủy</button><button disabled={savingAssignment || !assignEditor.assetId} onClick={assign} className="rounded-xl bg-cyan-600 px-5 py-2 font-bold text-white disabled:opacity-50">{savingAssignment ? "Đang cấp..." : "Xác nhận cấp"}</button></div></> : <div className="rounded-xl bg-slate-50 p-6 text-center text-sm text-slate-500">Không có tài sản số nào đang sẵn sàng cấp.<div className="mt-4"><button onClick={() => setAssignEditor(null)} className="rounded-xl border bg-white px-4 py-2">Đóng</button></div></div>}
+    </div></div>}
+  </section>;
 }
 
 export default function EmployeeDigitalAssetManager({ standalone = false }) {

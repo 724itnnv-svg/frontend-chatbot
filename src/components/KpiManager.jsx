@@ -25,15 +25,23 @@ import {
 import { useAuth } from "../context/AuthContext";
 import { getApiBaseUrl } from "../api/baseUrl";
 import { hasFullAccess } from "../utils/screenAccess";
+import { EvidenceThumbnail, KpiEvidenceViewer } from "./attendance/KpiEvidenceViewer";
 
 const nowPeriod = () => {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
 };
-const dueDateForPeriod = (period) => (period ? `${period}-02` : "");
+const dueDateForPeriod = (period) => {
+  const match = String(period || "").match(/^(\d{4})-(\d{2})$/);
+  if (!match) return "";
+  if (period < "2026-08") return `${period}-02`;
+  const date = new Date(Date.UTC(Number(match[1]), Number(match[2]), 1));
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-04`;
+};
 const payrollPeriodForKpi = (period) => {
   const match = String(period || "").match(/^(\d{4})-(\d{2})$/);
   if (!match) return "";
+  if (period >= "2026-08") return period;
   const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 2, 1));
   return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
 };
@@ -237,7 +245,7 @@ export default function KpiManager() {
     if (
       editingId &&
       !window.confirm(
-        "Lưu thay đổi sẽ đưa phiếu về trạng thái Đã giao và xóa phần tự chấm cùng ảnh minh chứng hiện tại. Tiếp tục?",
+        "Lưu thay đổi sẽ đưa phiếu về trạng thái Đã giao và xóa phần tự chấm cùng tệp minh chứng hiện tại. Tiếp tục?",
       )
     )
       return;
@@ -331,7 +339,7 @@ export default function KpiManager() {
 
   async function deleteEvaluation(row) {
     const confirmed = window.confirm(
-      `Xóa KPI tháng ${row.period} của ${row.employeeName}?\n\nPhiếu KPI và toàn bộ ảnh minh chứng sẽ bị xóa. Thao tác này không thể hoàn tác.`,
+      `Xóa KPI tháng ${row.period} của ${row.employeeName}?\n\nPhiếu KPI và toàn bộ tệp minh chứng sẽ bị xóa. Thao tác này không thể hoàn tác.`,
     );
     if (!confirmed) return;
     setBusy(true);
@@ -346,6 +354,28 @@ export default function KpiManager() {
         ok: false,
         text: error.response?.data?.message || "Không thể xóa KPI",
       });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function extendSubmission(row) {
+    const current = row.submissionExtensionUntil || row.dueDate || dueDateForPeriod(row.period);
+    const extensionUntil = window.prompt(
+      `Gia hạn nộp KPI tháng ${row.period} đến ngày (YYYY-MM-DD). Để trống để hủy gia hạn:`,
+      current,
+    );
+    if (extensionUntil === null) return;
+    setBusy(true);
+    setMessage(null);
+    try {
+      const response = await api.patch(`/kpi-evaluations/${row._id}/submission-extension`, {
+        extensionUntil: extensionUntil.trim(),
+      });
+      setMessage({ ok: true, text: response.data.message });
+      await load();
+    } catch (error) {
+      setMessage({ ok: false, text: error.response?.data?.message || "Không thể gia hạn KPI" });
     } finally {
       setBusy(false);
     }
@@ -366,7 +396,7 @@ export default function KpiManager() {
         "Mỗi dòng là một tiêu chí KPI của một nhân viên.",
       ],
       ["Kỳ KPI", period],
-      ["Hạn nộp", `Ngày 02/${period.slice(5, 7)}/${period.slice(0, 4)}. Điểm được tính vào bảng lương ${payrollPeriodForKpi(period)}.`],
+      ["Hạn nộp", `Ngày ${dueDateForPeriod(period).split("-").reverse().join("/")}. Điểm được tính vào bảng lương ${payrollPeriodForKpi(period)}.`],
       [
         "Quy tắc",
         "Các dòng cùng MSNV sẽ được gom thành một phiếu. Tổng điểm tiêu chuẩn của mỗi nhân viên phải bằng 100.",
@@ -745,8 +775,11 @@ export default function KpiManager() {
                       <td className="px-4 py-3">
                         <p>{row.period}</p>
                         <p className="text-xs text-slate-500">
-                          {row.dueDate || "Không đặt hạn"}
+                          {row.effectiveDueDate || row.dueDate || "Không đặt hạn"}
                         </p>
+                        {row.submissionExtensionUntil && (
+                          <p className="text-xs font-semibold text-sky-600">Đã gia hạn</p>
+                        )}
                       </td>
                       <td className="px-4 py-3">{row.items.length}</td>
                       <td className="px-4 py-3">
@@ -781,6 +814,12 @@ export default function KpiManager() {
                             Chờ bảng lương
                           </p>
                         )}
+                        {row.wasSubmittedLate && (
+                          <p className="mt-1 text-xs font-semibold text-rose-600">Nộp trễ hạn</p>
+                        )}
+                        {row.isOverdue && EDITABLE_STATUSES.has(row.status) && (
+                          <p className="mt-1 text-xs font-semibold text-rose-600">Đã quá hạn</p>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-right">
                         <div className="inline-flex items-center gap-2">
@@ -810,6 +849,16 @@ export default function KpiManager() {
                             >
                               <Pencil size={14} />
                               Sửa
+                            </button>
+                          )}
+                          {canEdit && !["APPROVED", "PAYROLL_LOCKED"].includes(row.status) && (
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={() => extendSubmission(row)}
+                              className="rounded-lg border border-amber-200 px-3 py-1.5 text-xs font-bold text-amber-700 hover:bg-amber-50 disabled:opacity-50"
+                            >
+                              Gia hạn
                             </button>
                           )}
                           {canDelete && DELETABLE_STATUSES.has(row.status) && (
@@ -1202,31 +1251,19 @@ export default function KpiManager() {
                   {item.evidences?.length > 0 && (
                     <div className="mt-3">
                       <p className="mb-2 text-xs font-semibold text-slate-600">
-                        Ảnh minh chứng ({item.evidences.length})
+                        Tệp minh chứng ({item.evidences.length})
                       </p>
                       <div className="grid grid-cols-4 gap-2 sm:grid-cols-6">
                         {item.evidences.map((evidence) => {
                           const fileUrl = `${getApiBaseUrl()}/kpi-evaluations/${reviewing._id}/items/${item._id}/evidences/${evidence._id}/file`;
                           return (
-                            <button
-                              type="button"
+                            <EvidenceThumbnail
                               key={evidence._id}
-                              onClick={() => setPreviewEvidence({
-                                url: fileUrl,
-                                name: evidence.originalName || evidence.filename || "Ảnh minh chứng KPI",
-                              })}
-                              className="aspect-square overflow-hidden rounded-lg border border-slate-200 bg-slate-100"
-                              title={evidence.originalName || evidence.filename}
-                            >
-                              <img
-                                src={fileUrl}
-                                alt={
-                                  evidence.originalName || "Ảnh minh chứng KPI"
-                                }
-                                className="h-full w-full object-cover"
-                                loading="lazy"
-                              />
-                            </button>
+                              evidence={evidence}
+                              url={fileUrl}
+                              onOpen={setPreviewEvidence}
+                              className="aspect-square"
+                            />
                           );
                         })}
                       </div>
@@ -1335,39 +1372,7 @@ export default function KpiManager() {
           </div>
         </div>
       )}
-      {previewEvidence && (
-        <div
-          className="fixed inset-0 z-[140] flex items-center justify-center bg-slate-950/85 p-3 sm:p-6"
-          role="dialog"
-          aria-modal="true"
-          aria-label={previewEvidence.name}
-          onClick={() => setPreviewEvidence(null)}
-        >
-          <div
-            className="relative flex max-h-full max-w-6xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="flex items-center justify-between gap-4 border-b px-4 py-3">
-              <p className="truncate text-sm font-bold text-slate-800">{previewEvidence.name}</p>
-              <button
-                type="button"
-                onClick={() => setPreviewEvidence(null)}
-                className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100"
-                aria-label="Đóng ảnh minh chứng"
-              >
-                <X size={20} />
-              </button>
-            </div>
-            <div className="min-h-0 overflow-auto bg-slate-100 p-2 sm:p-4">
-              <img
-                src={previewEvidence.url}
-                alt={previewEvidence.name}
-                className="mx-auto max-h-[82vh] max-w-full object-contain"
-              />
-            </div>
-          </div>
-        </div>
-      )}
+      <KpiEvidenceViewer evidence={previewEvidence} onClose={() => setPreviewEvidence(null)} />
     </div>
   );
 }

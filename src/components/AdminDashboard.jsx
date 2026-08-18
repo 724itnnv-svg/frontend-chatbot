@@ -21,10 +21,16 @@ import {
     ShoppingCart,
     TrendingUp,
     RefreshCw,
-    CircleDollarSign
+    CircleDollarSign,
+    Palette
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { canAccessScreen } from "../utils/screenAccess";
+import {
+    getLoginVisualMode,
+    LOGIN_VISUAL_MODE_OPTIONS,
+    setLoginVisualMode,
+} from "../utils/loginVisualMode";
 
 import ExcelComparer from "./ExcelComparer";
 
@@ -94,6 +100,14 @@ export default function AdminDashboard() {
     const navigate = useNavigate();
     const roleLower = user?.role?.toLowerCase?.() || "";
     const isAdmin = roleLower === "admin" || roleLower === "superadmin";
+    const [loginVisualMode, setSelectedLoginVisualMode] = useState(getLoginVisualMode);
+
+    const handleLoginVisualModeChange = (event) => {
+        const nextMode = event.target.value;
+        if (setLoginVisualMode(nextMode)) {
+            setSelectedLoginVisualMode(nextMode);
+        }
+    };
 
     // ===== States: Export đơn hàng =====
     const [exportConfig, setExportConfig] = useState(() => {
@@ -470,16 +484,35 @@ export default function AdminDashboard() {
             <div className="relative z-10 max-w-7xl mx-auto px-4 md:px-6 py-6 space-y-6">
 
                 {/* HEADER */}
-                <div className="flex items-center gap-3">
-                    <button onClick={() => navigate(-1)} className="p-2 rounded-xl bg-white/50 hover:bg-white border border-slate-200 text-slate-500 transition">
-                        <ArrowLeft size={20} />
-                    </button>
-                    <div>
-                        <h1 className="text-2xl font-bold tracking-tight text-slate-800 flex items-center gap-2">
-                            Quản Trị Cấp Cao <span className="text-lg">👑</span>
-                        </h1>
-                        <p className="text-xs text-slate-500">Dashboard điều hành hệ thống & Giám sát vận hành</p>
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex items-center gap-3">
+                        <button onClick={() => navigate(-1)} className="p-2 rounded-xl bg-white/50 hover:bg-white border border-slate-200 text-slate-500 transition">
+                            <ArrowLeft size={20} />
+                        </button>
+                        <div>
+                            <h1 className="text-2xl font-bold tracking-tight text-slate-800 flex items-center gap-2">
+                                Quản Trị Cấp Cao <span className="text-lg">👑</span>
+                            </h1>
+                            <p className="text-xs text-slate-500">Dashboard điều hành hệ thống & Giám sát vận hành</p>
+                        </div>
                     </div>
+
+                    <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white/80 px-3 py-2 shadow-sm backdrop-blur-sm">
+                        <Palette size={16} className="shrink-0 text-rose-500" />
+                        <span className="whitespace-nowrap text-xs font-semibold text-slate-600">Giao diện đăng nhập</span>
+                        <select
+                            value={loginVisualMode}
+                            onChange={handleLoginVisualModeChange}
+                            className="min-w-0 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs font-semibold text-slate-700 outline-none transition focus:border-rose-300 focus:ring-2 focus:ring-rose-200/60"
+                            aria-label="Chọn giao diện đăng nhập"
+                        >
+                            {LOGIN_VISUAL_MODE_OPTIONS.map((option) => (
+                                <option key={option.value} value={option.value}>
+                                    {option.label}
+                                </option>
+                            ))}
+                        </select>
+                    </label>
                 </div>
 
                 {/* EXPORT ĐƠN HÀNG */}

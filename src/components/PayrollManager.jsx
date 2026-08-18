@@ -147,6 +147,8 @@ const PAYROLL_COLUMNS = [
   { key: "tinhThueTNCN.thuNhapTinhThue", label: "TN tính thuế", width: 150, type: "number" },
   { key: "tinhThueTNCN.thueTNCNTamTinh", label: "Thuế TNCN", width: 150, type: "number" },
   { key: "luongThucLinh", label: "Lương thực lĩnh", width: 170, type: "number" },
+  { key: "__dot1ChinhThuc", label: "Lương nhận đợt 1", width: 180, type: "number", derived: true, readOnly: true },
+  { key: "__dot2ChinhThuc", label: "Lương nhận đợt 2", width: 180, type: "number", derived: true, readOnly: true },
   { key: "note", label: "Ghi chú", width: 240 },
 ].map((column) => ({
   ...column,
@@ -171,6 +173,8 @@ const DEFAULT_COLUMN_TEMPLATES = [
       "payrollBankAccount.accountHolder",
       "payrollBankAccount.accountNumber",
       "luongThucLinh",
+      "__dot1ChinhThuc",
+      "__dot2ChinhThuc",
     ],
   },
   {
@@ -200,11 +204,11 @@ const HIDDEN_INPUT_COLUMNS = new Set([
 ]);
 
 const INPUT_TEMPLATE_COLUMNS = PAYROLL_COLUMNS.filter(
-  (column) => !column.profileField && !COMPUTED_PAYROLL_KEYS.has(column.key) && !HIDDEN_INPUT_COLUMNS.has(column.key)
+  (column) => !column.profileField && !column.derived && !COMPUTED_PAYROLL_KEYS.has(column.key) && !HIDDEN_INPUT_COLUMNS.has(column.key)
 );
 const BULK_EDIT_EXCLUDED_KEYS = new Set(["maNhanVien", "tenNhanVien"]);
 const BULK_EDIT_COLUMNS = PAYROLL_COLUMNS.filter(
-  (column) => !column.profileField && !COMPUTED_PAYROLL_KEYS.has(column.key) && !BULK_EDIT_EXCLUDED_KEYS.has(column.key)
+  (column) => !column.profileField && !column.derived && !COMPUTED_PAYROLL_KEYS.has(column.key) && !BULK_EDIT_EXCLUDED_KEYS.has(column.key)
 );
 
 const IMPORT_COLUMN_ALIAS_MAP = new Map(
@@ -906,6 +910,12 @@ function calcPayrollDots(row) {
   return { dot1ChinhThuc: firstInstallment, dot2ChinhThuc: secondInstallment };
 }
 
+function getPayrollColumnValue(row, key) {
+  if (key === "__dot1ChinhThuc") return calculatePayrollInstallments(row).firstInstallment;
+  if (key === "__dot2ChinhThuc") return calculatePayrollInstallments(row).secondInstallment;
+  return getDeep(row, key);
+}
+
 // Hàm phụ trợ: Chuyển đổi số chỉ mục cột thành chữ cái Excel (VD: 0 -> A, 1 -> B, 26 -> AA)
 const getExcelColumnLetter = (index) => {
   let letter = '';
@@ -1017,7 +1027,7 @@ async function exportPayrollExcel(rows, columns, bankAccountsByEmployeeCode = ne
   const ExcelJS = await loadExcelJS();
   const workbook = new ExcelJS.Workbook();
 
-  const payrollColumns = columns.filter((column) => !column.profileField);
+  const payrollColumns = columns.filter((column) => !column.profileField && !column.derived);
   const bankColumns = [
     { key: "payrollBankAccount.bankName", label: "Tên ngân hàng", type: "text" },
     { key: "payrollBankAccount.accountHolder", label: "Tên chủ tài khoản", type: "text" },
@@ -1632,7 +1642,11 @@ export default function PayrollManager() {
     if (!column) return filtered;
     const direction = sortConfig.direction === "desc" ? -1 : 1;
     return [...filtered].sort((left, right) => {
-      const result = comparePayrollValues(getDeep(left, column.key), getDeep(right, column.key), column);
+      const result = comparePayrollValues(
+        getPayrollColumnValue(left, column.key),
+        getPayrollColumnValue(right, column.key),
+        column,
+      );
       if (result !== 0) return result * direction;
       return String(left.tenNhanVien || "").localeCompare(String(right.tenNhanVien || ""), "vi-VN", {
         numeric: true,
@@ -3022,7 +3036,7 @@ export default function PayrollManager() {
                         >
                           <CellInput
                             column={column}
-                            value={getDeep(row, column.key)}
+                            value={getPayrollColumnValue(row, column.key)}
                             readOnly={!canEdit || payrollReadOnly || isSaving || column.readOnly}
                             onChange={(value) => updateCell(row.__clientId, column.key, value)}
                           />
