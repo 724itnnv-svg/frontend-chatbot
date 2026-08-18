@@ -492,6 +492,7 @@ const hasMissingEInvoiceInformation = (customer = {}) => {
   return [
     customer?.ContactNumberEInvoice,
     customer?.NameEInvoice,
+    customer?.AddressEInvoice,
     customer?.AdministrativeAreaIdEInvoice,
   ].some((value) => !normalizeText(value));
 };
