@@ -6,11 +6,9 @@ import { getDeviceInfo } from "../../utils/deviceIdentity";
 import { WeatherBackground } from "./WeatherBackground.jsx";
 import { useCurrentWeather } from "./useCurrentWeather.js";
 import { getWeatherVisual } from "./weatherVisual.js";
+import { getLoginVisualMode } from "../../utils/loginVisualMode.js";
 
 const REMEMBER_KEY = "rememberLogin";
-
-// Chọn: "legacy" (Noel cũ), "seasonal" (bốn mùa), hoặc "weather" (thời tiết thực tế).
-const LOGIN_VISUAL_MODE = "legacy";
 
 const LEGACY_LOGIN_THEME = {
   name: "Giao diện Noel",
@@ -263,11 +261,12 @@ function Toggle({ checked, onChange, label, activeClass }) {
 export default function Login() {
   const { login } = useAuth();
   const navigate = useNavigate();
-  const weatherState = useCurrentWeather(LOGIN_VISUAL_MODE === "weather");
+  const loginVisualMode = getLoginVisualMode();
+  const weatherState = useCurrentWeather(loginVisualMode === "weather");
   const requestedWeatherScene = getRequestedWeatherScene();
-  const weatherUnavailable = LOGIN_VISUAL_MODE === "weather" && weatherState.status === "error" && !weatherState.weather && !requestedWeatherScene;
-  const useWeatherInterface = LOGIN_VISUAL_MODE === "weather" && !weatherUnavailable;
-  const useSeasonalInterface = LOGIN_VISUAL_MODE === "seasonal" || weatherUnavailable;
+  const weatherUnavailable = loginVisualMode === "weather" && weatherState.status === "error" && !weatherState.weather && !requestedWeatherScene;
+  const useWeatherInterface = loginVisualMode === "weather" && !weatherUnavailable;
+  const useSeasonalInterface = loginVisualMode === "seasonal" || weatherUnavailable;
   const theme = useWeatherInterface
     ? WEATHER_LOGIN_THEME
     : useSeasonalInterface

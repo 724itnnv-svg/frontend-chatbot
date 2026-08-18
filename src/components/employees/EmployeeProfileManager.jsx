@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { AlertTriangle, ArrowLeft, BadgeCheck, Building2, CalendarClock, Copy, Download, Eye, FileText, History, PanelLeftClose, PanelLeftOpen, Plus, RefreshCcw, Save, Search, Sparkles, Trash2, Upload, X } from "lucide-react";
+import { AlertTriangle, ArrowLeft, BadgeCheck, Building2, CalendarClock, Copy, Download, Eye, FileText, History, IdCard, Image as ImageIcon, LockKeyhole, PanelLeftClose, PanelLeftOpen, Plus, RefreshCcw, Save, Search, Sparkles, Trash2, Upload, UsersRound, X } from "lucide-react";
 import * as XLSX from "xlsx";
 import { saveAs } from "file-saver";
 import { useAuth } from "../../context/AuthContext";
+import { apiUrl } from "../../api/baseUrl";
 import { EmployeeAssetSection } from "./EmployeeAssetManager";
+import { EmployeeDigitalAssetSection } from "./EmployeeDigitalAssetManager";
 import { EmployeeSupplySection } from "./EmployeeSupplyManager";
 
 const HEADERS = [
@@ -19,15 +21,27 @@ const HEADERS = [
   "MÃ NGÂN HÀNG", "TÊN NGÂN HÀNG", "SỐ TÀI KHOẢN", "TÊN CHỦ TÀI KHOẢN", "CHI NHÁNH NGÂN HÀNG", "TÀI KHOẢN ĐÃ XÁC MINH",
 ];
 
+const FAMILY_HEADERS = ["MSNV", "HỌ VÀ TÊN", "QUAN HỆ", "GIỚI TÍNH", "NGÀY SINH", "SỐ CCCD/CMND", "SĐT", "NGHỀ NGHIỆP", "LÀ NGƯỜI PHỤ THUỘC", "TRẠNG THÁI PHỤ THUỘC", "TỪ NGÀY", "ĐẾN NGÀY", "MÃ SỐ THUẾ", "GHI CHÚ ĐĂNG KÝ", "GHI CHÚ"];
+const FAMILY_RELATIONSHIP_OPTIONS = [["child", "Con"], ["father", "Cha"], ["mother", "Mẹ"], ["spouse", "Vợ/chồng"], ["other", "Khác"]];
+const FAMILY_RELATIONSHIP_LABELS = Object.fromEntries(FAMILY_RELATIONSHIP_OPTIONS);
+const DEPENDENCY_STATUS_OPTIONS = [["pending", "Chờ đăng ký"], ["registered", "Đã đăng ký"]];
+const DEPENDENCY_STATUS_LABELS = { none: "Không phụ thuộc", pending: "Chờ đăng ký", registered: "Đã đăng ký", ended: "Đã kết thúc" };
+const emptyFamilyMember = {
+  fullName: "", relationship: "child", gender: "unknown", dateOfBirth: "", identityNumber: "", phone: "", occupation: "", isDependent: false,
+  dependency: { status: "none", effectiveFrom: "", effectiveTo: "", taxCode: "", registrationNote: "" }, note: "",
+};
+
 const emptyProfile = {
   userId: "", employeeCode: "",
   personal: { fullName: "", gender: "unknown", dateOfBirth: "", personalPhone: "", ethnicity: "", nationality: "", maritalStatus: "unknown" },
-  identityDocument: { type: "CCCD", number: "", issuedDate: "", issuedPlace: "" },
+  identityDocument: { type: "CCCD", number: "", issuedDate: "", issuedPlace: "", images: { front: null, back: null } },
+  profilePhoto: null,
   employment: { company: "NNV", department: "", jobTitle: "", startDate: "", officialDate: "", endDate: "", employmentStatus: "unknown" },
   compensation: { baseSalary: 0, allowances: "" },
   education: { level: "", major: "" }, placeOfOrigin: { ward: "", province: "" },
   permanentAddress: { street: "", ward: "", district: "", province: "" }, socialInsuranceNumber: "",
   payrollBankAccount: { bankCode: "", bankName: "", accountNumber: "", accountHolder: "", branch: "", isVerified: false, verifiedAt: null, verifiedBy: null, note: "" },
+  familyMembers: [],
   annualLeaveBalance: { year: new Date().getFullYear(), remainingDays: 0, note: "" }, notes: "",
 };
 
@@ -158,6 +172,46 @@ function parseAnnualLeaveRow(row, index) {
   };
 }
 
+const familyRelationshipValue = (value) => {
+  const text = norm(value);
+  if (text === "con" || text.includes("con trai") || text.includes("con gai")) return "child";
+  if (text.includes("cha") || text.includes("bo")) return "father";
+  if (text.includes("me")) return "mother";
+  if (text.includes("vo") || text.includes("chong")) return "spouse";
+  return "other";
+};
+const yesValue = (value) => ["1", "true", "yes", "y", "co", "x"].includes(norm(value));
+const dependencyStatusValue = (value, isDependent) => {
+  const text = norm(value);
+  if (!isDependent) return text.includes("ket thuc") ? "ended" : "none";
+  return text.includes("da dang ky") || text === "registered" ? "registered" : "pending";
+};
+function parseFamilyMemberRow(row, index) {
+  const isDependent = yesValue(cell(row, "LÀ NGƯỜI PHỤ THUỘC"));
+  return {
+    rowNumber: index + 2,
+    employeeCode: String(cell(row, "MSNV") || "").trim().toUpperCase(),
+    member: {
+      fullName: String(cell(row, "HỌ VÀ TÊN") || "").trim(),
+      relationship: familyRelationshipValue(cell(row, "QUAN HỆ")),
+      gender: genderValue(cell(row, "GIỚI TÍNH")),
+      dateOfBirth: isoDate(cell(row, "NGÀY SINH")),
+      identityNumber: String(cell(row, "SỐ CCCD/CMND") || "").trim(),
+      phone: String(cell(row, "SĐT") || "").trim(),
+      occupation: String(cell(row, "NGHỀ NGHIỆP") || "").trim(),
+      isDependent,
+      dependency: {
+        status: dependencyStatusValue(cell(row, "TRẠNG THÁI PHỤ THUỘC"), isDependent),
+        effectiveFrom: isoDate(cell(row, "TỪ NGÀY")),
+        effectiveTo: isoDate(cell(row, "ĐẾN NGÀY")),
+        taxCode: String(cell(row, "MÃ SỐ THUẾ") || "").trim(),
+        registrationNote: String(cell(row, "GHI CHÚ ĐĂNG KÝ") || "").trim(),
+      },
+      note: String(cell(row, "GHI CHÚ") || "").trim(),
+    },
+  };
+}
+
 const excelDate = (value) => {
   if (!value) return "";
   const date = new Date(value);
@@ -184,6 +238,26 @@ const AUDIT_ACTION_LABELS = {
   asset_assigned: "Cấp thiết bị", asset_returned: "Thu hồi thiết bị",
 };
 const auditDateVN = (value) => value ? new Intl.DateTimeFormat("vi-VN", { dateStyle: "short", timeStyle: "medium" }).format(new Date(value)) : "-";
+
+function familyMemberToExcelRow(profile, member) {
+  return {
+    "MSNV": profile.employeeCode || "",
+    "HỌ VÀ TÊN": member.fullName || "",
+    "QUAN HỆ": FAMILY_RELATIONSHIP_LABELS[member.relationship] || "Khác",
+    "GIỚI TÍNH": exportGender[member.gender] || "",
+    "NGÀY SINH": excelDate(member.dateOfBirth),
+    "SỐ CCCD/CMND": member.identityNumber || "",
+    "SĐT": member.phone || "",
+    "NGHỀ NGHIỆP": member.occupation || "",
+    "LÀ NGƯỜI PHỤ THUỘC": member.isDependent ? "Có" : "Không",
+    "TRẠNG THÁI PHỤ THUỘC": DEPENDENCY_STATUS_LABELS[member.dependency?.status] || "",
+    "TỪ NGÀY": excelDate(member.dependency?.effectiveFrom),
+    "ĐẾN NGÀY": excelDate(member.dependency?.effectiveTo),
+    "MÃ SỐ THUẾ": member.dependency?.taxCode || "",
+    "GHI CHÚ ĐĂNG KÝ": member.dependency?.registrationNote || "",
+    "GHI CHÚ": member.note || "",
+  };
+}
 
 function profileToExcelRow(profile) {
   const contracts = Array.isArray(profile.contracts) ? profile.contracts : [];
@@ -279,6 +353,126 @@ function MoneyField({ label, value, onChange, numeric = false }) {
 }
 function SelectField({ label, value, onChange, options }) {
   return <label><span className={labelClass}>{label}</span><select value={value} onChange={(e) => onChange(e.target.value)} className={inputClass}>{options.map(([v, n]) => <option key={v} value={v}>{n}</option>)}</select></label>;
+}
+function FamilyMembersSection({ members = [], onChange, editable }) {
+  const [editingIndex, setEditingIndex] = useState(null);
+  const [draft, setDraft] = useState(null);
+  const [error, setError] = useState("");
+  const childrenCount = members.filter((item) => item.relationship === "child").length;
+  const dependentCount = members.filter((item) => item.isDependent).length;
+  const openMember = (member, index) => {
+    const next = member ? {
+      ...clone(emptyFamilyMember), ...clone(member),
+      dateOfBirth: dateInput(member.dateOfBirth),
+      dependency: {
+        ...emptyFamilyMember.dependency, ...clone(member.dependency || {}),
+        effectiveFrom: dateInput(member.dependency?.effectiveFrom),
+        effectiveTo: dateInput(member.dependency?.effectiveTo),
+      },
+    } : clone(emptyFamilyMember);
+    setEditingIndex(index);
+    setDraft(next);
+    setError("");
+  };
+  const updateDraft = (key, value) => setDraft((current) => ({ ...current, [key]: value }));
+  const updateDependency = (key, value) => setDraft((current) => ({ ...current, dependency: { ...current.dependency, [key]: value } }));
+  const saveMember = () => {
+    if (!String(draft.fullName || "").trim()) return setError("Vui lòng nhập họ và tên người thân.");
+    if (draft.isDependent && !draft.dateOfBirth) return setError("Người phụ thuộc phải có ngày sinh.");
+    if (draft.isDependent && !draft.dependency?.effectiveFrom) return setError("Người phụ thuộc phải có ngày bắt đầu phụ thuộc.");
+    if (draft.dependency?.effectiveFrom && draft.dependency?.effectiveTo && draft.dependency.effectiveTo < draft.dependency.effectiveFrom) return setError("Ngày kết thúc không được trước ngày bắt đầu phụ thuộc.");
+    const duplicate = members.some((member, index) => index !== editingIndex
+      && norm(member.fullName) === norm(draft.fullName)
+      && member.relationship === draft.relationship
+      && dateInput(member.dateOfBirth) === dateInput(draft.dateOfBirth));
+    if (duplicate) return setError("Người thân này đã có trong danh sách.");
+    const nextMember = { ...draft, fullName: draft.fullName.trim() };
+    onChange(editingIndex === -1 ? [...members, nextMember] : members.map((item, index) => index === editingIndex ? nextMember : item));
+    setDraft(null);
+  };
+  const toggleDependent = (checked) => setDraft((current) => ({
+    ...current,
+    isDependent: checked,
+    dependency: { ...current.dependency, status: checked ? "pending" : current.isDependent ? "ended" : "none" },
+  }));
+
+  return <section className="rounded-2xl border border-violet-100 bg-white p-4">
+    <div className="mb-4 flex flex-wrap items-center gap-3">
+      <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-violet-100 text-violet-700"><UsersRound size={20} /></span>
+      <div className="mr-auto"><h3 className="font-black text-violet-900">Người thân và người phụ thuộc</h3><p className="text-xs text-slate-500">{members.length} người thân · {childrenCount} người con · {dependentCount} người đang phụ thuộc</p></div>
+      {editable && <button type="button" onClick={() => openMember(null, -1)} className="flex items-center gap-2 rounded-xl bg-violet-600 px-3 py-2 text-sm font-bold text-white"><Plus size={15} /> Thêm người thân</button>}
+    </div>
+    {members.length ? <div className="overflow-auto rounded-xl border border-violet-100"><table className="w-full min-w-[760px] text-left text-sm"><thead className="bg-violet-50 text-xs uppercase text-slate-500"><tr><th className="p-3">Họ và tên</th><th>Quan hệ</th><th>Ngày sinh</th><th>CCCD/CMND</th><th>Phụ thuộc</th>{editable && <th className="pr-3 text-right">Thao tác</th>}</tr></thead><tbody>{members.map((member, index) => <tr key={member._id || `${member.fullName}-${index}`} className="border-t border-violet-50"><td className="p-3 font-bold text-slate-800">{member.fullName}</td><td>{FAMILY_RELATIONSHIP_LABELS[member.relationship] || "Khác"}</td><td>{member.dateOfBirth ? excelDate(member.dateOfBirth) : "-"}</td><td>{member.identityNumber || "-"}</td><td><span className={`rounded-full px-2 py-1 text-xs font-semibold ${member.isDependent ? "bg-emerald-50 text-emerald-700" : member.dependency?.status === "ended" ? "bg-slate-100 text-slate-600" : "bg-violet-50 text-violet-700"}`}>{DEPENDENCY_STATUS_LABELS[member.dependency?.status] || "Không phụ thuộc"}</span></td>{editable && <td className="space-x-2 pr-3 text-right"><button type="button" onClick={() => openMember(member, index)} className="rounded-lg border border-violet-200 px-2.5 py-1.5 text-xs font-bold text-violet-700">Sửa</button><button type="button" onClick={() => onChange(members.filter((_, itemIndex) => itemIndex !== index))} className="rounded-lg border border-red-200 px-2.5 py-1.5 text-xs font-bold text-red-700">Xóa</button></td>}</tr>)}</tbody></table></div> : <div className="rounded-xl border border-dashed border-violet-200 bg-violet-50/40 p-6 text-center text-sm text-slate-500">Chưa có thông tin người thân.</div>}
+    {draft && createPortal(<div className="fixed inset-0 z-[210] flex items-center justify-center bg-slate-950/55 p-4"><div className="max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-2xl bg-white p-5 shadow-2xl">
+      <div className="mb-4 flex items-center"><div className="mr-auto"><h3 className="text-lg font-black text-slate-900">{editingIndex === -1 ? "Thêm người thân" : "Cập nhật người thân"}</h3><p className="text-xs text-slate-500">Quan hệ gia đình và trạng thái đăng ký người phụ thuộc</p></div><button type="button" onClick={() => setDraft(null)} className="rounded-xl p-2 text-slate-500 hover:bg-slate-100"><X size={20} /></button></div>
+      {error && <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700">{error}</div>}
+      <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3"><Field label="Họ và tên *" value={draft.fullName} onChange={(value) => updateDraft("fullName", value)} /><SelectField label="Quan hệ *" value={draft.relationship} onChange={(value) => updateDraft("relationship", value)} options={FAMILY_RELATIONSHIP_OPTIONS} /><SelectField label="Giới tính" value={draft.gender} onChange={(value) => updateDraft("gender", value)} options={[["unknown", "Chưa xác định"], ["male", "Nam"], ["female", "Nữ"], ["other", "Khác"]]} /><Field label="Ngày sinh" type="date" value={draft.dateOfBirth} onChange={(value) => updateDraft("dateOfBirth", value)} /><Field label="Số CCCD/CMND" value={draft.identityNumber} onChange={(value) => updateDraft("identityNumber", value)} /><Field label="Số điện thoại" value={draft.phone} onChange={(value) => updateDraft("phone", value)} /><Field label="Nghề nghiệp" value={draft.occupation} onChange={(value) => updateDraft("occupation", value)} /></div>
+      <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50/50 p-4"><label className="flex cursor-pointer items-center gap-3"><input type="checkbox" checked={draft.isDependent} onChange={(event) => toggleDependent(event.target.checked)} className="h-4 w-4 rounded border-slate-300 text-emerald-600" /><span><b className="block text-sm text-emerald-900">Là người phụ thuộc</b><small className="text-emerald-700">Bật khi HR đang theo dõi đăng ký giảm trừ cho người này.</small></span></label>{draft.isDependent && <div className="mt-4 grid gap-3 md:grid-cols-2 lg:grid-cols-3"><SelectField label="Trạng thái" value={draft.dependency.status} onChange={(value) => updateDependency("status", value)} options={DEPENDENCY_STATUS_OPTIONS} /><Field label="Từ ngày *" type="date" value={draft.dependency.effectiveFrom} onChange={(value) => updateDependency("effectiveFrom", value)} /><Field label="Đến ngày" type="date" value={draft.dependency.effectiveTo} onChange={(value) => updateDependency("effectiveTo", value)} /><Field label="Mã số thuế" value={draft.dependency.taxCode} onChange={(value) => updateDependency("taxCode", value)} /><div className="md:col-span-2"><Field label="Ghi chú đăng ký" value={draft.dependency.registrationNote} onChange={(value) => updateDependency("registrationNote", value)} /></div></div>}</div>
+      <div className="mt-4"><Field label="Ghi chú" value={draft.note} onChange={(value) => updateDraft("note", value)} /></div>
+      <div className="mt-5 flex justify-end gap-2"><button type="button" onClick={() => setDraft(null)} className="rounded-xl border px-4 py-2 text-sm font-semibold text-slate-600">Hủy</button><button type="button" onClick={saveMember} className="rounded-xl bg-violet-600 px-5 py-2 text-sm font-bold text-white">Lưu người thân</button></div>
+    </div></div>, document.body)}
+  </section>;
+}
+const employeeFileUrl = (file) => file?.url ? apiUrl(`${file.url}${file.url.includes("?") ? "&" : "?"}v=${encodeURIComponent(file.uploadedAt || "current")}`) : "";
+const withProfileFileValue = (profile, kind, file) => {
+  if (!profile) return profile;
+  if (kind === "profile-photo") return { ...profile, profilePhoto: file };
+  const side = kind === "cccd-front" ? "front" : "back";
+  return { ...profile, identityDocument: { ...profile.identityDocument, images: { ...(profile.identityDocument?.images || {}), [side]: file } } };
+};
+const formatFileSize = (value) => {
+  const bytes = Number(value || 0);
+  if (!bytes) return "";
+  return bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.ceil(bytes / 1024)} KB`;
+};
+function EmployeeProfileFilesSection({ profile, canEdit, canDelete, canViewSensitive, onChanged, notify, confirmAction }) {
+  const [uploadingKind, setUploadingKind] = useState("");
+  const [deletingKind, setDeletingKind] = useState("");
+  const [previewErrors, setPreviewErrors] = useState({});
+  const uploadFile = async (kind, file) => {
+    if (!file || !profile?._id) return;
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) return notify("Chỉ chấp nhận ảnh JPEG, PNG hoặc WEBP", "warning");
+    if (file.size > 8 * 1024 * 1024) return notify("Ảnh hồ sơ không được vượt quá 8 MB", "warning");
+    try {
+      setUploadingKind(kind);
+      const formData = new FormData();
+      formData.append("file", file);
+      const response = await fetch(`/api/employee-profiles/${profile._id}/files/${kind}`, { method: "PATCH", credentials: "include", body: formData });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.message || "Không thể tải ảnh hồ sơ");
+      setPreviewErrors((current) => ({ ...current, [kind]: false }));
+      onChanged(kind, result.data || null);
+      notify(result.message || "Đã lưu ảnh hồ sơ");
+    } catch (error) { notify(error.message, "error"); }
+    finally { setUploadingKind(""); }
+  };
+  const deleteFile = async (kind, label) => {
+    if (!(await confirmAction(`Xóa ${label} khỏi hồ sơ và Google Drive?`))) return;
+    try {
+      setDeletingKind(kind);
+      const response = await fetch(`/api/employee-profiles/${profile._id}/files/${kind}`, { method: "DELETE", credentials: "include" });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.message || "Không thể xóa ảnh hồ sơ");
+      setPreviewErrors((current) => ({ ...current, [kind]: false }));
+      onChanged(kind, null);
+      notify(result.message || "Đã xóa ảnh hồ sơ");
+    } catch (error) { notify(error.message, "error"); }
+    finally { setDeletingKind(""); }
+  };
+  const renderFileCard = ({ kind, title, description, file, identity = false }) => {
+    const src = employeeFileUrl(file);
+    const busy = uploadingKind === kind || deletingKind === kind;
+    return <article className={`overflow-hidden rounded-2xl border bg-white ${identity ? "border-amber-200" : "border-sky-200"}`}>
+      <div className={`relative grid place-items-center overflow-hidden ${identity ? "aspect-[1.58/1] bg-amber-50" : "aspect-square max-h-64 bg-sky-50"}`}>
+        {src && !previewErrors[kind] ? <img src={src} alt={title} onError={() => setPreviewErrors((current) => ({ ...current, [kind]: true }))} className={`h-full w-full ${identity ? "object-contain" : "object-cover"}`} /> : <div className={`flex flex-col items-center gap-2 text-sm font-semibold ${identity ? "text-amber-500" : "text-sky-500"}`}>{identity ? <IdCard size={36} /> : <ImageIcon size={36} />}<span>{file?.available ? "Không tải được ảnh xem trước" : "Chưa có ảnh"}</span></div>}
+        {busy && <div className="absolute inset-0 grid place-items-center bg-slate-950/45 text-sm font-bold text-white"><RefreshCcw size={20} className="mb-2 animate-spin" />{uploadingKind === kind ? "Đang tải lên..." : "Đang xóa..."}</div>}
+      </div>
+      <div className="p-3"><div className="font-black text-slate-800">{title}</div><p className="mt-1 text-xs text-slate-500">{file?.available ? [formatFileSize(file.size), file.uploadedAt ? auditDateVN(file.uploadedAt) : ""].filter(Boolean).join(" · ") : description}</p><div className="mt-3 flex flex-wrap gap-2">{file?.available && <button type="button" onClick={() => window.open(src, "_blank", "noopener,noreferrer")} className="flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-bold text-slate-700"><Eye size={13} /> Xem</button>}{canEdit && <label className={`flex cursor-pointer items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-bold text-white ${identity ? "bg-amber-600" : "bg-sky-600"}`}><Upload size={13} /> {file?.available ? "Thay ảnh" : "Tải ảnh"}<input type="file" accept="image/jpeg,image/png,image/webp" disabled={busy} onChange={(event) => { const selected = event.target.files?.[0]; event.target.value = ""; void uploadFile(kind, selected); }} className="hidden" /></label>}{file?.available && canDelete && <button type="button" disabled={busy} onClick={() => void deleteFile(kind, title.toLowerCase())} className="flex items-center gap-1 rounded-lg border border-red-200 px-2.5 py-1.5 text-xs font-bold text-red-700"><Trash2 size={13} /> Xóa</button>}</div></div>
+    </article>;
+  };
+
+  if (!profile?._id) return <section className="rounded-2xl border border-dashed border-sky-200 bg-sky-50/50 p-5"><div className="flex items-center gap-3"><ImageIcon className="text-sky-600" /><div><h3 className="font-black text-sky-900">Ảnh nhân viên và CCCD</h3><p className="text-xs text-slate-500">Lưu hồ sơ nhân viên trước, sau đó bạn có thể tải ảnh lên Google Drive.</p></div></div></section>;
+  return <section className="rounded-2xl border border-sky-100 bg-white p-4"><div className="mb-4"><h3 className="font-black text-sky-900">Ảnh nhân viên và giấy tờ định danh</h3><p className="mt-1 text-xs text-slate-500">Ảnh được lưu private trên Google Drive; JPEG, PNG hoặc WEBP, tối đa 8 MB.</p></div><div className="grid gap-4 md:grid-cols-3">{renderFileCard({ kind: "profile-photo", title: "Ảnh đại diện", description: "Ảnh nhận diện trong hồ sơ nhân sự", file: profile.profilePhoto })}{canViewSensitive ? <>{renderFileCard({ kind: "cccd-front", title: "Mặt trước CCCD/CMND", description: "Chụp rõ toàn bộ bốn góc giấy tờ", file: profile.identityDocument?.images?.front, identity: true })}{renderFileCard({ kind: "cccd-back", title: "Mặt sau CCCD/CMND", description: "Chụp rõ toàn bộ nội dung mặt sau", file: profile.identityDocument?.images?.back, identity: true })}</> : <div className="md:col-span-2 grid min-h-48 place-items-center rounded-2xl border border-dashed border-violet-200 bg-violet-50 p-6 text-center"><div><LockKeyhole size={28} className="mx-auto text-violet-500" /><b className="mt-2 block text-sm text-violet-900">Ảnh CCCD được bảo vệ</b><p className="mt-1 text-xs text-violet-700">Cần quyền “Xem giấy tờ nhạy cảm” để mở hoặc cập nhật hai mặt CCCD.</p></div></div>}</div></section>;
 }
 function ContractTemplateDynamicFields({ definitions = [], values = {}, onChange, title = "Dữ liệu Word của hợp đồng", description = "Các giá trị được lưu riêng theo hợp đồng và có thể thay đổi so với giá trị mặc định của mẫu." }) {
   if (!definitions.length) return null;
@@ -679,6 +873,7 @@ export default function EmployeeProfileManager({ users, onClose, standalone = fa
   const [confirmState, setConfirmState] = useState(null);
   const [editorSnapshot, setEditorSnapshot] = useState(null);
   const canProfileAction = (action) => String(user?.role || "").toLowerCase() === "superadmin" || Number(user?.allpage) === 1 || user?.action?.employee_profiles?.[action] === true;
+  const canViewSensitiveProfileFiles = canProfileAction("view_sensitive");
 
   const dismissToast = (id) => setToasts((current) => current.filter((toast) => toast.id !== id));
   const notify = (message, type = "success") => {
@@ -779,6 +974,15 @@ export default function EmployeeProfileManager({ users, onClose, standalone = fa
     }
     setEditor((old) => ({ ...old, [section]: { ...old[section], [key]: value } }));
   };
+  const handleProfileFileChanged = (kind, file) => {
+    setEditor((current) => withProfileFileValue(current, kind, file));
+    setEditorSnapshot((current) => {
+      if (current == null) return current;
+      try { return JSON.stringify(withProfileFileValue(JSON.parse(current), kind, file)); }
+      catch { return current; }
+    });
+    void loadProfiles();
+  };
   const openNew = async () => {
     const requestId = ++employeeCodeRequestRef.current;
     try {
@@ -824,7 +1028,7 @@ export default function EmployeeProfileManager({ users, onClose, standalone = fa
         request(`/api/employee-profiles/${profile._id}/history?limit=100`).catch(() => ({ data: { items: [], total: 0 } })),
       ]);
       const value = result.data;
-      const normalized = { ...clone(emptyProfile), ...value, userId: value.userId?._id || value.userId || "", personal: { ...emptyProfile.personal, ...value.personal, dateOfBirth: dateInput(value.personal?.dateOfBirth) }, identityDocument: { ...emptyProfile.identityDocument, ...value.identityDocument, issuedDate: dateInput(value.identityDocument?.issuedDate) }, employment: { ...emptyProfile.employment, ...value.employment, startDate: dateInput(value.employment?.startDate), officialDate: dateInput(value.employment?.officialDate), endDate: dateInput(value.employment?.endDate) }, compensation: { ...emptyProfile.compensation, ...value.compensation }, payrollBankAccount: { ...emptyProfile.payrollBankAccount, ...value.payrollBankAccount }, annualLeaveBalance: { ...emptyProfile.annualLeaveBalance, ...value.annualLeaveBalance }, contracts: value.contracts || [] };
+      const normalized = { ...clone(emptyProfile), ...value, userId: value.userId?._id || value.userId || "", personal: { ...emptyProfile.personal, ...value.personal, dateOfBirth: dateInput(value.personal?.dateOfBirth) }, identityDocument: { ...emptyProfile.identityDocument, ...value.identityDocument, issuedDate: dateInput(value.identityDocument?.issuedDate) }, employment: { ...emptyProfile.employment, ...value.employment, startDate: dateInput(value.employment?.startDate), officialDate: dateInput(value.employment?.officialDate), endDate: dateInput(value.employment?.endDate) }, compensation: { ...emptyProfile.compensation, ...value.compensation }, payrollBankAccount: { ...emptyProfile.payrollBankAccount, ...value.payrollBankAccount }, familyMembers: (value.familyMembers || []).map((member) => ({ ...member, dateOfBirth: dateInput(member.dateOfBirth), dependency: { ...emptyFamilyMember.dependency, ...(member.dependency || {}), effectiveFrom: dateInput(member.dependency?.effectiveFrom), effectiveTo: dateInput(member.dependency?.effectiveTo) } })), annualLeaveBalance: { ...emptyProfile.annualLeaveBalance, ...value.annualLeaveBalance }, contracts: value.contracts || [] };
       setEditor(normalized);
       setEditorSnapshot(JSON.stringify(normalized));
       setAuditHistory(historyResult.data || { items: [], total: 0 });
@@ -1149,8 +1353,21 @@ export default function EmployeeProfileManager({ users, onClose, standalone = fa
       const workbook = XLSX.read(await file.arrayBuffer(), { type: "array", cellDates: true });
       const raw = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { defval: "", raw: true });
       const parsed = raw.map(parseEmployeeRow).filter((row) => row.employeeCode || row.personal.fullName);
+      const familySheetName = workbook.SheetNames.find((name) => norm(name).includes("nguoi than") || norm(name).includes("phu thuoc"));
+      if (familySheetName) {
+        const familyRaw = XLSX.utils.sheet_to_json(workbook.Sheets[familySheetName], { defval: "", raw: true });
+        const familyRows = familyRaw.map(parseFamilyMemberRow).filter((row) => row.employeeCode || row.member.fullName);
+        const invalidRow = familyRows.find((row) => !row.employeeCode || !row.member.fullName);
+        if (invalidRow) throw new Error(`Sheet người thân có dữ liệu thiếu MSNV hoặc họ tên tại dòng ${invalidRow.rowNumber}`);
+        const familyByCode = new Map();
+        familyRows.forEach((row) => familyByCode.set(row.employeeCode, [...(familyByCode.get(row.employeeCode) || []), row.member]));
+        const employeeCodes = new Set(parsed.map((row) => row.employeeCode));
+        const missingCode = familyRows.find((row) => !employeeCodes.has(row.employeeCode));
+        if (missingCode) throw new Error(`MSNV ${missingCode.employeeCode} trong sheet người thân không có ở sheet hồ sơ`);
+        parsed.forEach((row) => { if (familyByCode.has(row.employeeCode)) row.familyMembers = familyByCode.get(row.employeeCode); });
+      }
       setImportRows(parsed); setImportFileName(file.name); setImportResult(null);
-    } catch { notify("Không đọc được file Excel", "error"); }
+    } catch (error) { notify(error.message || "Không đọc được file Excel", "error"); }
   };
   const confirmImport = async () => {
     try { setImporting(true); const data = await request("/api/employee-profiles/import", { method: "POST", body: JSON.stringify({ rows: importRows }) }); setImportResult(data.data); await loadProfiles(); }
@@ -1160,7 +1377,9 @@ export default function EmployeeProfileManager({ users, onClose, standalone = fa
     const sample = Object.fromEntries(HEADERS.map((header) => [header, ""]));
     Object.assign(sample, { MSNV: "NV001", "HỌ VÀ TÊN": "Nguyễn Văn A", "GIỚI TÍNH": "Nam", "LOẠI HỢP ĐỒNG": "Xác định thời hạn", "THỜI HẠN HỢP ĐỒNG": "12 tháng", "SỐ HỢP ĐỒNG LAO ĐỘNG": "01/2026/HĐLĐ", "MÃ NGÂN HÀNG": "VCB", "TÊN NGÂN HÀNG": "Vietcombank", "SỐ TÀI KHOẢN": "0123456789", "TÊN CHỦ TÀI KHOẢN": "NGUYEN VAN A" });
     const sheet = XLSX.utils.json_to_sheet([sample], { header: HEADERS }); sheet["!cols"] = HEADERS.map(() => ({ wch: 24 }));
-    const book = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(book, sheet, "Ho so nhan su"); XLSX.writeFile(book, "mau_import_ho_so_nhan_su.xlsx");
+    const familySample = { "MSNV": "NV001", "HỌ VÀ TÊN": "Nguyễn Văn B", "QUAN HỆ": "Con", "GIỚI TÍNH": "Nam", "NGÀY SINH": "12/05/2015", "LÀ NGƯỜI PHỤ THUỘC": "Có", "TRẠNG THÁI PHỤ THUỘC": "Đã đăng ký", "TỪ NGÀY": "01/01/2026" };
+    const familySheet = XLSX.utils.json_to_sheet([familySample], { header: FAMILY_HEADERS }); familySheet["!cols"] = FAMILY_HEADERS.map(() => ({ wch: 22 }));
+    const book = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(book, sheet, "Ho so nhan su"); XLSX.utils.book_append_sheet(book, familySheet, "Nguoi than - phu thuoc"); XLSX.writeFile(book, "mau_import_ho_so_nhan_su.xlsx");
   };
   const downloadAnnualLeaveTemplate = () => {
     const headers = ["MSNV", "NĂM", "SỐ NGÀY PHÉP NĂM", "GHI CHÚ"];
@@ -1229,6 +1448,11 @@ export default function EmployeeProfileManager({ users, onClose, standalone = fa
       sheet["!autofilter"] = { ref: sheet["!ref"] };
       const book = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(book, sheet, "Hồ sơ nhân viên");
+      const familyRows = items.flatMap((profile) => (profile.familyMembers || []).map((member) => familyMemberToExcelRow(profile, member)));
+      const familySheet = XLSX.utils.json_to_sheet(familyRows, { header: FAMILY_HEADERS });
+      familySheet["!cols"] = FAMILY_HEADERS.map((header) => ({ wch: Math.min(36, Math.max(14, header.length + 3)) }));
+      if (familySheet["!ref"]) familySheet["!autofilter"] = { ref: familySheet["!ref"] };
+      XLSX.utils.book_append_sheet(book, familySheet, "Người thân - phụ thuộc");
       XLSX.writeFile(book, `ho_so_nhan_vien_day_du_${new Date().toISOString().slice(0, 10)}.xlsx`);
     } catch (error) { notify(error.message || "Không thể xuất hồ sơ nhân viên", "error"); }
     finally { setExportingProfiles(false); }
@@ -1274,9 +1498,11 @@ export default function EmployeeProfileManager({ users, onClose, standalone = fa
         <div className="overflow-auto rounded-2xl border border-cyan-100 bg-white"><table className="w-full min-w-[1000px] text-left text-sm"><thead className="bg-cyan-50 text-xs uppercase text-slate-500"><tr><th className="p-3">Nhân viên</th><th>MSNV</th><th>Bộ phận / chức danh</th><th>Công ty</th><th>Tình trạng</th><th>Phép năm</th><th>Thâm niên</th><th className="pr-3 text-right">Thao tác</th></tr></thead><tbody>{loading ? <tr><td colSpan="8" className="p-10 text-center">Đang tải...</td></tr> : filtered.map((p) => <tr key={p._id} className="border-t border-cyan-50 hover:bg-cyan-50/50"><td className="p-3 font-bold text-slate-800">{p.personal?.fullName}</td><td>{p.employeeCode}</td><td>{p.employment?.department || "-"}<div className="text-xs text-slate-400">{p.employment?.jobTitle}</div></td><td>{p.employment?.company || "-"}</td><td><span className={`rounded-full px-2 py-1 text-xs font-semibold ${ACTIVE_EMPLOYMENT_STATUSES.includes(p.employment?.employmentStatus) ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"}`}>{exportEmploymentStatus[p.employment?.employmentStatus] || "Chưa xác định"}</span></td><td><b className="text-emerald-700">{Number(p.annualLeaveBalance?.remainingDays || 0)} ngày</b></td><td>{p.seniority?.years || 0} năm</td><td className="pr-3 text-right"><button onClick={() => openProfile(p)} className="rounded-lg bg-cyan-600 px-3 py-1.5 text-xs font-bold text-white">Chi tiết</button></td></tr>)}</tbody></table></div>
       </main> : <main className="space-y-5 p-5">
         <section className="rounded-2xl border border-cyan-100 bg-white p-4"><h3 className="mb-4 font-black text-cyan-800">Thông tin tài khoản và cá nhân</h3><div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4"><label><span className={labelClass}>Liên kết tài khoản</span><select value={editor.userId || ""} onChange={(e) => setEditor({ ...editor, userId: e.target.value || null })} className={inputClass}><option value="">Không có tài khoản</option>{profileUsers.map((u) => <option key={u._id} value={u._id}>{u.code || "--"} - {u.fullName}</option>)}</select></label><Field label="MSNV" value={editor.employeeCode} onChange={(v) => setEditor({ ...editor, employeeCode: v })} /><Field label="Họ và tên" value={editor.personal.fullName} onChange={(v) => setNested("personal", "fullName", v)} /><SelectField label="Giới tính" value={editor.personal.gender} onChange={(v) => setNested("personal", "gender", v)} options={[["unknown", "Chưa xác định"], ["male", "Nam"], ["female", "Nữ"], ["other", "Khác"]]} /><Field label="Ngày sinh" type="date" value={editor.personal.dateOfBirth} onChange={(v) => setNested("personal", "dateOfBirth", v)} /><Field label="SĐT cá nhân" value={editor.personal.personalPhone} onChange={(v) => setNested("personal", "personalPhone", v)} /><Field label="Dân tộc" value={editor.personal.ethnicity} onChange={(v) => setNested("personal", "ethnicity", v)} /><SelectField label="Hôn nhân" value={editor.personal.maritalStatus} onChange={(v) => setNested("personal", "maritalStatus", v)} options={[["unknown", "Chưa xác định"], ["single", "Độc thân"], ["married", "Đã kết hôn"], ["divorced", "Ly hôn"], ["widowed", "Góa"]]} /></div></section>
+        <EmployeeProfileFilesSection profile={editor} canEdit={canProfileAction(editor._id ? "edit" : "create")} canDelete={canProfileAction("delete")} canViewSensitive={canViewSensitiveProfileFiles} onChanged={handleProfileFileChanged} notify={notify} confirmAction={confirmAction} />
+        <FamilyMembersSection members={editor.familyMembers || []} editable={canProfileAction(editor._id ? "edit" : "create")} onChange={(familyMembers) => setEditor((current) => ({ ...current, familyMembers }))} />
         <section className="rounded-2xl border border-cyan-100 bg-white p-4"><h3 className="mb-4 font-black text-cyan-800">CCCD, BHXH và công việc</h3><div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4"><Field label="Số CCCD/CMND" value={editor.identityDocument.number} onChange={(v) => setNested("identityDocument", "number", v)} /><Field label="Ngày cấp" type="date" value={editor.identityDocument.issuedDate} onChange={(v) => setNested("identityDocument", "issuedDate", v)} /><Field label="Nơi cấp" value={editor.identityDocument.issuedPlace} onChange={(v) => setNested("identityDocument", "issuedPlace", v)} /><Field label="Mã số BHXH" value={editor.socialInsuranceNumber} onChange={(v) => setEditor({ ...editor, socialInsuranceNumber: v })} /><SelectField label="Công ty" value={editor.employment.company} onChange={(v) => setNested("employment", "company", v)} options={COMPANY_OPTIONS} /><Field label="Bộ phận" value={editor.employment.department} onChange={(v) => setNested("employment", "department", v)} /><Field label="Chức danh" value={editor.employment.jobTitle} onChange={(v) => setNested("employment", "jobTitle", v)} /><Field label="Ngày vào làm" type="date" value={editor.employment.startDate} onChange={(v) => setNested("employment", "startDate", v)} /><Field label="Ngày chính thức" type="date" value={editor.employment.officialDate} onChange={(v) => setNested("employment", "officialDate", v)} /><SelectField label="Tình trạng" value={editor.employment.employmentStatus} onChange={(v) => setNested("employment", "employmentStatus", v)} options={[["unknown", "Chưa xác định"], ["probation", "Thử việc"], ["official", "Chính thức"], ["leave", "Tạm nghỉ"], ["resigned", "Nghỉ việc"], ["terminated", "Chấm dứt"]]} /><Field label="Học vấn" value={editor.education.level} onChange={(v) => setNested("education", "level", v)} /><Field label="Ngành nghề" value={editor.education.major} onChange={(v) => setNested("education", "major", v)} /></div></section>
         <section className="rounded-2xl border border-emerald-100 bg-white p-4"><h3 className="mb-1 font-black text-emerald-800">Lương và phụ cấp</h3><p className="mb-4 text-xs text-slate-500">Thông tin này sẽ được tự động điền khi tạo hợp đồng lao động mới.</p><div className="grid gap-3 md:grid-cols-2"><MoneyField label="Lương căn bản" numeric value={editor.compensation.baseSalary} onChange={(v) => setNested("compensation", "baseSalary", v)} /><MoneyField label="Phụ cấp" value={editor.compensation.allowances} onChange={(v) => setNested("compensation", "allowances", v)} /></div></section>
-        <section className="rounded-2xl border border-cyan-100 bg-white p-4"><h3 className="mb-4 font-black text-cyan-800">Nguyên quán và hộ khẩu thường trú</h3><div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4"><Field label="Nguyên quán xã/phường" value={editor.placeOfOrigin.ward} onChange={(v) => setNested("placeOfOrigin", "ward", v)} /><Field label="Nguyên quán tỉnh/TP" value={editor.placeOfOrigin.province} onChange={(v) => setNested("placeOfOrigin", "province", v)} /><Field label="Ấp/đường/khóm" value={editor.permanentAddress.street} onChange={(v) => setNested("permanentAddress", "street", v)} /><Field label="Phường/xã" value={editor.permanentAddress.ward} onChange={(v) => setNested("permanentAddress", "ward", v)} /><Field label="Quận/huyện" value={editor.permanentAddress.district} onChange={(v) => setNested("permanentAddress", "district", v)} /><Field label="Tỉnh/TP" value={editor.permanentAddress.province} onChange={(v) => setNested("permanentAddress", "province", v)} /><div className="md:col-span-2"><Field label="HKTT đầy đủ (tự tính)" disabled value={[editor.permanentAddress.street, editor.permanentAddress.ward, editor.permanentAddress.district, editor.permanentAddress.province].filter(Boolean).join(", ")} onChange={() => { }} /></div></div></section>
+        <section className="rounded-2xl border border-cyan-100 bg-white p-4"><h3 className="mb-4 font-black text-cyan-800">Nguyên quán và hộ khẩu thường trú</h3><div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4"><Field label="Nguyên quán xã/phường" value={editor.placeOfOrigin.ward} onChange={(v) => setNested("placeOfOrigin", "ward", v)} /><Field label="Nguyên quán tỉnh/TP" value={editor.placeOfOrigin.province} onChange={(v) => setNested("placeOfOrigin", "province", v)} /><div className="lg:col-start-1"><Field label="Ấp/đường/khóm" value={editor.permanentAddress.street} onChange={(v) => setNested("permanentAddress", "street", v)} /></div><Field label="Phường/xã" value={editor.permanentAddress.ward} onChange={(v) => setNested("permanentAddress", "ward", v)} /><Field label="Quận/huyện" value={editor.permanentAddress.district} onChange={(v) => setNested("permanentAddress", "district", v)} /><Field label="Tỉnh/TP" value={editor.permanentAddress.province} onChange={(v) => setNested("permanentAddress", "province", v)} /><div className="md:col-span-2"><Field label="HKTT đầy đủ (tự tính)" disabled value={[editor.permanentAddress.street, editor.permanentAddress.ward, editor.permanentAddress.district, editor.permanentAddress.province].filter(Boolean).join(", ")} onChange={() => { }} /></div></div></section>
         <section className="rounded-2xl border border-emerald-200 bg-emerald-50/40 p-4">
           <div className="mb-4"><h3 className="font-black text-emerald-800">Quản lý phép năm {editor.annualLeaveBalance.year}</h3><p className="text-xs text-slate-500">Mỗi tháng dương lịch làm đủ được cộng 1 ngày vào đầu tháng kế tiếp; số còn lại tự động giảm khi duyệt đơn và được hoàn khi hủy đơn.</p></div>
           <div className="max-w-sm"><Field label="Số ngày phép năm" type="number" immediate value={editor.annualLeaveBalance.remainingDays} onChange={(v) => setNested("annualLeaveBalance", "remainingDays", Number(v))} /></div>
@@ -1294,6 +1520,7 @@ export default function EmployeeProfileManager({ users, onClose, standalone = fa
           <p className="mt-3 text-xs text-slate-500">Thay đổi ngân hàng, số tài khoản hoặc tên chủ tài khoản sẽ tự động hủy trạng thái xác minh.</p>
         </section>
         {editor._id && <EmployeeAssetSection profile={editor} onChanged={() => openProfile(editor)} />}
+        {editor._id && <EmployeeDigitalAssetSection profile={editor} onChanged={() => openProfile(editor)} />}
         {editor._id && <EmployeeSupplySection profile={editor} onChanged={() => openProfile(editor)} />}
         {editor._id && <section className="overflow-hidden rounded-2xl border border-indigo-100 bg-white">
           <div className="flex items-center gap-3 border-b border-indigo-100 bg-indigo-50/70 px-4 py-3"><span className="flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-600 text-white"><History size={18} /></span><div className="mr-auto"><h3 className="font-black text-indigo-900">Lịch sử thay đổi</h3><p className="text-xs text-slate-500">{auditHistory.total || 0} hoạt động · hiển thị tối đa 100 hoạt động gần nhất</p></div><button disabled={auditLoading} onClick={() => openProfile(editor)} className="rounded-xl border border-indigo-200 bg-white p-2 text-indigo-700 disabled:opacity-50"><RefreshCcw size={15} className={auditLoading ? "animate-spin" : ""} /></button></div>

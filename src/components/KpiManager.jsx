@@ -31,10 +31,17 @@ const nowPeriod = () => {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
 };
-const dueDateForPeriod = (period) => (period ? `${period}-02` : "");
+const dueDateForPeriod = (period) => {
+  const match = String(period || "").match(/^(\d{4})-(\d{2})$/);
+  if (!match) return "";
+  if (period < "2026-08") return `${period}-02`;
+  const date = new Date(Date.UTC(Number(match[1]), Number(match[2]), 1));
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-04`;
+};
 const payrollPeriodForKpi = (period) => {
   const match = String(period || "").match(/^(\d{4})-(\d{2})$/);
   if (!match) return "";
+  if (period >= "2026-08") return period;
   const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 2, 1));
   return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
 };
@@ -352,6 +359,28 @@ export default function KpiManager() {
     }
   }
 
+  async function extendSubmission(row) {
+    const current = row.submissionExtensionUntil || row.dueDate || dueDateForPeriod(row.period);
+    const extensionUntil = window.prompt(
+      `Gia hạn nộp KPI tháng ${row.period} đến ngày (YYYY-MM-DD). Để trống để hủy gia hạn:`,
+      current,
+    );
+    if (extensionUntil === null) return;
+    setBusy(true);
+    setMessage(null);
+    try {
+      const response = await api.patch(`/kpi-evaluations/${row._id}/submission-extension`, {
+        extensionUntil: extensionUntil.trim(),
+      });
+      setMessage({ ok: true, text: response.data.message });
+      await load();
+    } catch (error) {
+      setMessage({ ok: false, text: error.response?.data?.message || "Không thể gia hạn KPI" });
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function downloadImportTemplate() {
     const ExcelJS = (await import("exceljs")).default;
     const { saveAs } = await import("file-saver");
@@ -367,7 +396,7 @@ export default function KpiManager() {
         "Mỗi dòng là một tiêu chí KPI của một nhân viên.",
       ],
       ["Kỳ KPI", period],
-      ["Hạn nộp", `Ngày 02/${period.slice(5, 7)}/${period.slice(0, 4)}. Điểm được tính vào bảng lương ${payrollPeriodForKpi(period)}.`],
+      ["Hạn nộp", `Ngày ${dueDateForPeriod(period).split("-").reverse().join("/")}. Điểm được tính vào bảng lương ${payrollPeriodForKpi(period)}.`],
       [
         "Quy tắc",
         "Các dòng cùng MSNV sẽ được gom thành một phiếu. Tổng điểm tiêu chuẩn của mỗi nhân viên phải bằng 100.",
@@ -746,8 +775,11 @@ export default function KpiManager() {
                       <td className="px-4 py-3">
                         <p>{row.period}</p>
                         <p className="text-xs text-slate-500">
-                          {row.dueDate || "Không đặt hạn"}
+                          {row.effectiveDueDate || row.dueDate || "Không đặt hạn"}
                         </p>
+                        {row.submissionExtensionUntil && (
+                          <p className="text-xs font-semibold text-sky-600">Đã gia hạn</p>
+                        )}
                       </td>
                       <td className="px-4 py-3">{row.items.length}</td>
                       <td className="px-4 py-3">
@@ -782,6 +814,12 @@ export default function KpiManager() {
                             Chờ bảng lương
                           </p>
                         )}
+                        {row.wasSubmittedLate && (
+                          <p className="mt-1 text-xs font-semibold text-rose-600">Nộp trễ hạn</p>
+                        )}
+                        {row.isOverdue && EDITABLE_STATUSES.has(row.status) && (
+                          <p className="mt-1 text-xs font-semibold text-rose-600">Đã quá hạn</p>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-right">
                         <div className="inline-flex items-center gap-2">
@@ -811,6 +849,16 @@ export default function KpiManager() {
                             >
                               <Pencil size={14} />
                               Sửa
+                            </button>
+                          )}
+                          {canEdit && !["APPROVED", "PAYROLL_LOCKED"].includes(row.status) && (
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={() => extendSubmission(row)}
+                              className="rounded-lg border border-amber-200 px-3 py-1.5 text-xs font-bold text-amber-700 hover:bg-amber-50 disabled:opacity-50"
+                            >
+                              Gia hạn
                             </button>
                           )}
                           {canDelete && DELETABLE_STATUSES.has(row.status) && (

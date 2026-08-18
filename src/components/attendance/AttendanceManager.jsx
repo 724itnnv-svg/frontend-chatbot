@@ -65,6 +65,8 @@ const LEAVE_TYPE_LABELS = {
   regular: "Nghỉ phép thường",
   emergency: "Off đột xuất",
   annual: "Phép năm",
+  remote_work: "Làm việc tại nhà",
+  business_trip: "Đi công vụ",
 };
 const LEAVE_SESSION_LABELS = { full_day: "Cả ngày", morning: "Buổi sáng", afternoon: "Buổi chiều" };
 const AI_REVIEW_FLAG_LABELS = {
@@ -250,7 +252,7 @@ function getAttendanceDayStyle(record, date, today, approvedLeave = null) {
 
   if (approvedLeave) {
     const typeLabel = LEAVE_TYPE_LABELS[approvedLeave.leaveType] || "Nghỉ phép";
-    const timeLabel = approvedLeave.leaveType === "emergency" && approvedLeave.startTime && approvedLeave.endTime
+    const timeLabel = ["emergency", "remote_work", "business_trip"].includes(approvedLeave.leaveType) && approvedLeave.startTime && approvedLeave.endTime
       ? ` ${approvedLeave.startTime}-${approvedLeave.endTime}`
       : "";
     return {
@@ -354,6 +356,7 @@ function buildExportRows(records) {
       "Ca ngày công": dayShift.workHours ?? "",
       "Giờ tại công ty": record.onsiteWorkHours ?? "",
       "Giờ WFH": record.remoteWorkHours ?? "",
+      "Giờ công vụ": record.businessTripHours ?? "",
       "Ca ngày tăng ca phút": dayShift.overtimeMinutes ?? "",
       "Ca ngày trạng thái": shiftStatusLabel(dayShift),
       "Ca ngày ghi chú": summarizeShift(dayShift),
@@ -1293,7 +1296,10 @@ export default function AttendanceManager() {
   }
 
   async function reviewLeaveRequest(request, action) {
-    const approveWithoutEvidence = action === "approve" && request.needsEvidence;
+    if (action === "approve" && request.leaveType === "business_trip" && request.needsEvidence) {
+      return showFlash(false, "Đơn đi công vụ phải có ảnh minh chứng trước khi duyệt.");
+    }
+    const approveWithoutEvidence = action === "approve" && request.leaveType === "emergency" && request.needsEvidence;
     const actionMeta = {
       approve: { verb: "duyệt", prompt: "Ghi chú duyệt (không bắt buộc):" },
       reject: { verb: "từ chối", prompt: "Lý do từ chối (không bắt buộc):" },
@@ -3192,7 +3198,7 @@ export default function AttendanceManager() {
                             );
                           })}
                           {record.workHours != null && <p className="text-xs font-semibold text-emerald-700">Tổng công: {record.workHours}h</p>}
-                          {Number(record.remoteWorkHours || 0) > 0 && <p className="text-xs font-semibold text-sky-700">Tại công ty {record.onsiteWorkHours}h + WFH {record.remoteWorkHours}h</p>}
+                          {(Number(record.remoteWorkHours || 0) > 0 || Number(record.businessTripHours || 0) > 0) && <p className="text-xs font-semibold text-sky-700">Tại công ty {record.onsiteWorkHours}h{Number(record.remoteWorkHours || 0) > 0 ? ` + WFH ${record.remoteWorkHours}h` : ""}{Number(record.businessTripHours || 0) > 0 ? ` + Công vụ ${record.businessTripHours}h` : ""}</p>}
                           {Number(record.overtimeMinutes || 0) > 0 && <p className="text-xs font-semibold text-violet-700">Tăng ca: {record.overtimeMinutes} phút ({Number(record.overtimeHours || 0).toFixed(2)}h)</p>}
                         </div>
                         <Badge tone={sc.tone} icon={sc.Icon}>{sc.label}</Badge>
@@ -3561,6 +3567,8 @@ export default function AttendanceManager() {
                 <span className="rounded-full border border-violet-200 bg-violet-50 px-2 py-1 text-violet-700">Phép thường</span>
                 <span className="rounded-full border border-rose-200 bg-rose-50 px-2 py-1 text-rose-700">Off đột xuất cần ảnh</span>
                 <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 text-emerald-700">Phép năm</span>
+                <span className="rounded-full border border-sky-200 bg-sky-50 px-2 py-1 text-sky-700">Làm việc tại nhà</span>
+                <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-1 text-amber-700">Đi công vụ cần ảnh</span>
               </div>
             </div>
 
@@ -3596,13 +3604,13 @@ export default function AttendanceManager() {
                             <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
                               <span className="font-semibold text-violet-700">{LEAVE_TYPE_LABELS[request.leaveType] || request.leaveType}</span>
                               <span>{fmtShortDate(request.startDate)}{request.endDate !== request.startDate ? ` – ${fmtShortDate(request.endDate)}` : ""}</span>
-                              <span>{request.leaveType === "emergency" ? `${request.startTime || "-"}–${request.endTime || "-"}` : (LEAVE_SESSION_LABELS[request.session] || request.session)}</span>
+                              <span>{["emergency", "remote_work", "business_trip"].includes(request.leaveType) ? `${request.startTime || "-"}–${request.endTime || "-"}` : (LEAVE_SESSION_LABELS[request.session] || request.session)}</span>
                               <span>Gửi {new Date(request.createdAt).toLocaleString("vi-VN")}</span>
                             </div>
                             <p className="mt-2 whitespace-pre-wrap text-sm text-slate-600">{request.reason}</p>
                             {request.convertedFromAnnual && <p className="mt-1 text-xs font-semibold text-amber-700">Đã chuyển từ phép năm sang phép thường không lương do không đủ số dư.</p>}
                             {request.autoApproved && <p className="mt-1 text-xs font-semibold text-violet-700">Hệ thống tự động duyệt · báo trước {Number(request.autoApprovalNoticeDays || 0)}/{Number(request.autoApprovalRequiredDays || 0)} ngày{request.leaveType === "regular" ? " · không trừ phép năm" : ""}.</p>}
-                            {(request.status === "approved" || request.status === "cancel_pending") && <p className="mt-1 text-xs font-semibold text-emerald-700">Đã duyệt: {request.leaveType === "emergency" ? `${Number(request.approvedMinutes || 0)} phút nghỉ` : `${Number(request.approvedDays || 0)} ngày nghỉ`}</p>}
+                            {(request.status === "approved" || request.status === "cancel_pending") && <p className="mt-1 text-xs font-semibold text-emerald-700">Đã duyệt: {request.leaveType === "remote_work" ? `${Number(request.approvedMinutes || 0)} phút làm việc tại nhà` : request.leaveType === "business_trip" ? `${Number(request.approvedMinutes || 0)} phút đi công vụ` : request.leaveType === "emergency" ? `${Number(request.approvedMinutes || 0)} phút nghỉ` : `${Number(request.approvedDays || 0)} ngày nghỉ`}</p>}
                             {request.leaveType === "emergency" && evidences.length > 0 && (
                               <div className={`mt-3 rounded-xl border p-3 text-xs ${request.aiReview?.recommendation === "recommend_approve" ? TONE.emerald : request.aiReview?.status === "failed" ? TONE.rose : TONE.amber}`}>
                                 <div className="flex flex-wrap items-center gap-2 font-bold">
@@ -3628,14 +3636,14 @@ export default function AttendanceManager() {
                                 <button key={evidence.url || index} type="button" onClick={() => openLeaveEvidence(request, index)} className="inline-flex items-center gap-1.5 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs font-semibold text-sky-700 hover:bg-sky-100"><ImagePlus size={14} /> Ảnh {index + 1}</button>
                               ))
                             ) : (
-                              <span className={`inline-flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-semibold ${request.leaveType === "emergency" ? TONE.amber : TONE.slate}`}><ImagePlus size={14} /> Chưa có ảnh</span>
+                              <span className={`inline-flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-semibold ${request.leaveType === "emergency" || request.leaveType === "business_trip" ? TONE.amber : request.leaveType === "remote_work" ? TONE.sky : TONE.slate}`}><ImagePlus size={14} /> {request.leaveType === "remote_work" ? "Không cần ảnh" : request.leaveType === "business_trip" ? "Thiếu ảnh bắt buộc" : "Chưa có ảnh"}</span>
                             )}
                             {request.leaveType === "emergency" && request.status === "pending" && evidences.length > 0 && request.aiReview?.status !== "processing" && request.aiReview?.status !== "completed" && (
                               <button type="button" disabled={isReviewing} onClick={() => retryLeaveAiReview(request)} className="inline-flex items-center gap-1.5 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-xs font-bold text-violet-700 hover:bg-violet-100 disabled:opacity-45"><ShieldCheck size={14} /> Phân tích AI</button>
                             )}
                             {request.status === "pending" && (
                               <>
-                                <button type="button" disabled={isReviewing} onClick={() => reviewLeaveRequest(request, "approve")} title={request.needsEvidence ? "Duyệt đơn chưa có ảnh minh chứng" : "Duyệt đơn"} className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3 py-2 text-xs font-bold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-45">
+                                <button type="button" disabled={isReviewing || (request.leaveType === "business_trip" && request.needsEvidence)} onClick={() => reviewLeaveRequest(request, "approve")} title={request.leaveType === "business_trip" && request.needsEvidence ? "Cần bổ sung ảnh minh chứng trước khi duyệt" : request.needsEvidence ? "Duyệt đơn chưa có ảnh minh chứng" : "Duyệt đơn"} className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3 py-2 text-xs font-bold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-45">
                                   {isReviewing ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />} Duyệt
                                 </button>
                                 <button type="button" disabled={isReviewing} onClick={() => reviewLeaveRequest(request, "reject")} className="inline-flex items-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700 hover:bg-rose-100 disabled:opacity-45"><XCircle size={14} /> Từ chối</button>

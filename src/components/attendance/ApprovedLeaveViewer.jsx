@@ -25,6 +25,8 @@ const LEAVE_TYPE_LABELS = {
   regular: "Nghỉ phép thường",
   emergency: "Off đột xuất",
   annual: "Phép năm",
+  remote_work: "Làm việc tại nhà",
+  business_trip: "Đi công vụ",
 };
 const SESSION_LABELS = {
   full_day: "Cả ngày",
@@ -72,12 +74,12 @@ function dateTime(value) {
 }
 
 function leaveDuration(row) {
-  if (row.leaveType === "emergency") return `${Number(row.approvedMinutes || 0)} phút`;
+  if (["emergency", "remote_work", "business_trip"].includes(row.leaveType)) return `${Number(row.approvedMinutes || 0)} phút`;
   return `${Number(row.approvedDays || 0)} ngày`;
 }
 
 function leaveSchedule(row) {
-  if (row.leaveType === "emergency") return `${row.startTime || "-"} – ${row.endTime || "-"}`;
+  if (["emergency", "remote_work", "business_trip"].includes(row.leaveType)) return `${row.startTime || "-"} – ${row.endTime || "-"}`;
   return SESSION_LABELS[row.session] || row.session || "-";
 }
 
@@ -293,6 +295,8 @@ export default function ApprovedLeaveViewer() {
                 <option value="regular">Nghỉ phép thường</option>
                 <option value="emergency">Off đột xuất</option>
                 <option value="annual">Phép năm</option>
+                <option value="remote_work">Làm việc tại nhà</option>
+                <option value="business_trip">Đi công vụ</option>
               </select>
             </label>
             {mayViewAll && (
@@ -363,7 +367,7 @@ export default function ApprovedLeaveViewer() {
                     </div>
 
                     <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-700">
-                      <span className="font-bold text-slate-600">Lý do xin nghỉ:</span>{" "}
+                      <span className="font-bold text-slate-600">{row.leaveType === "remote_work" ? "Lý do làm việc tại nhà:" : row.leaveType === "business_trip" ? "Lý do đi công vụ:" : "Lý do xin nghỉ:"}</span>{" "}
                       <span className="whitespace-pre-wrap break-words">{row.reason || "Không có lý do"}</span>
                     </div>
 
@@ -373,7 +377,7 @@ export default function ApprovedLeaveViewer() {
                           <ImagePlus size={14} /> Ảnh minh chứng {index + 1}
                         </button>
                       ))}
-                      {evidences.length === 0 && <span className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-500"><ImagePlus size={14} /> Chưa có ảnh minh chứng</span>}
+                      {evidences.length === 0 && <span className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-500"><ImagePlus size={14} /> {row.leaveType === "remote_work" ? "Không yêu cầu ảnh minh chứng" : "Chưa có ảnh minh chứng"}</span>}
                     </div>
 
                     {aiReview.status && aiReview.status !== "not_requested" && (

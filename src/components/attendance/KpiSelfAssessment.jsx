@@ -331,9 +331,9 @@ export default function KpiSelfAssessment() {
                 >
                   {statusMeta[0]}
                 </span>
-                {evaluation.dueDate && (
+                {(evaluation.effectiveDueDate || evaluation.dueDate) && (
                   <span className="ml-2 text-xs text-slate-500">
-                    Hạn nộp: {evaluation.dueDate.split("-").reverse().join("/")}
+                    Hạn nộp: {(evaluation.effectiveDueDate || evaluation.dueDate).split("-").reverse().join("/")}
                   </span>
                 )}
               </div>
@@ -356,6 +356,11 @@ export default function KpiSelfAssessment() {
             {evaluation.reviewSummary && (
               <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
                 <strong>Phản hồi quản lý:</strong> {evaluation.reviewSummary}
+              </div>
+            )}
+            {evaluation.isOverdue && isEditable(evaluation.status) && (
+              <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700">
+                Phiếu KPI đã quá hạn nộp. Bạn có thể tiếp tục lưu nháp nhưng cần liên hệ quản lý để được gia hạn trước khi gửi duyệt.
               </div>
             )}
           </div>
@@ -567,7 +572,7 @@ export default function KpiSelfAssessment() {
                 </button>
                 <button
                   type="button"
-                  disabled={saving}
+                  disabled={saving || evaluation.isOverdue}
                   onClick={submit}
                   className="inline-flex items-center gap-2 rounded-xl bg-violet-600 px-4 py-2 text-sm font-bold text-white hover:bg-violet-700 disabled:opacity-50"
                 >
