@@ -17,6 +17,18 @@ const currency = new Intl.NumberFormat("vi-VN");
 
 const normalizeText = (value) => String(value ?? "").trim();
 
+const normalizeAdministrativeAreaSearchName = (value, level) => {
+  const text = normalizeText(value);
+  if (!text) return "";
+
+  const prefixPattern =
+    Number(level) === 1
+      ? /^(?:tỉnh|thành\s+phố|tp\.?)\s+/iu
+      : /^(?:xã|phường|thị\s+trấn|huyện|quận|thị\s+xã|thành\s+phố|tp\.?)\s+/iu;
+
+  return text.replace(prefixPattern, "").trim();
+};
+
 const normalizePhoneNumber = (value) =>
   normalizeText(value).replace(/[^\d]/g, "");
 
@@ -624,19 +636,27 @@ const buildCustomerAddressUpdatePayload = async (
       row?.customerDistrictName ??
       "",
   );
+  const provinceSearchName = normalizeAdministrativeAreaSearchName(
+    provinceName,
+    1,
+  );
+  const wardSearchName = normalizeAdministrativeAreaSearchName(districtName, 2);
 
   const provinceIds = await getIdAdministrativearea(
     retailer,
     accessPrivateToken,
-    provinceName,
+    provinceSearchName,
     1,
+  );
+  const resolvedProvinceName = normalizeText(
+    provinceIds?.[0]?.Name ?? provinceIds?.[0]?.FullName ?? provinceSearchName,
   );
   const wardId = await getIdAdministrativearea(
     retailer,
     accessPrivateToken,
-    districtName,
+    wardSearchName,
     2,
-    provinceName,
+    resolvedProvinceName,
   );
 
   return {
@@ -2103,7 +2123,7 @@ export default function EinvoicesTab({
                                     ? "whitespace-nowrap"
                                     : column.id === "invoiceNumber"
                                       ? "w-[150px] min-w-[150px] whitespace-nowrap"
-                                    : ""
+                                      : ""
                                 }`}
                               >
                                 {column.id === "customer" ? (
