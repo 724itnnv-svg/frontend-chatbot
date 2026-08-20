@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { EyeIcon, EyeCloseIcon } from "../../icons.jsx";
 import { useAuth } from "../../context/AuthContext";
@@ -6,7 +6,10 @@ import { getDeviceInfo } from "../../utils/deviceIdentity";
 import { WeatherBackground } from "./WeatherBackground.jsx";
 import { useCurrentWeather } from "./useCurrentWeather.js";
 import { getWeatherVisual } from "./weatherVisual.js";
-import { getLoginVisualMode } from "../../utils/loginVisualMode.js";
+import {
+  fetchLoginVisualMode,
+  getLoginVisualMode,
+} from "../../utils/loginVisualMode.js";
 
 const REMEMBER_KEY = "rememberLogin";
 
@@ -261,7 +264,22 @@ function Toggle({ checked, onChange, label, activeClass }) {
 export default function Login() {
   const { login } = useAuth();
   const navigate = useNavigate();
-  const loginVisualMode = getLoginVisualMode();
+  const [loginVisualMode, setLoginVisualMode] = useState(getLoginVisualMode);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchLoginVisualMode()
+      .then((mode) => {
+        if (!cancelled) setLoginVisualMode(mode);
+      })
+      .catch((requestError) => {
+        console.warn("Không thể đồng bộ giao diện đăng nhập từ server:", requestError);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const weatherState = useCurrentWeather(loginVisualMode === "weather");
   const requestedWeatherScene = getRequestedWeatherScene();
   const weatherUnavailable = loginVisualMode === "weather" && weatherState.status === "error" && !weatherState.weather && !requestedWeatherScene;
