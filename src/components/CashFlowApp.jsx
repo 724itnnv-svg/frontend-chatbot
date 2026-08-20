@@ -322,9 +322,17 @@ const mergeOrderDeliveryIntoRow = (row, orderDelivery) => {
       row["Nhân viên"] ||
       "",
     "Tiền hàng":
-      row["Tiền thu hộ(VNĐ)"] ?? row["(1)"] ?? orderDelivery.invoiceTotal ?? "",
+      row["Tiền thu hộ(VNĐ)"] ??
+      row["(1)"] ??
+      row["Tiền hàng"] ??
+      orderDelivery.invoiceTotal ??
+      "",
     "Phí ship NVC thu":
-      row["Tiền cước (VNĐ)"] ?? row["(5)"] ?? orderDelivery.totalPrice ?? "",
+      row["Tiền cước (VNĐ)"] ??
+      row["(5)"] ??
+      row["Phí ship NVC"] ??
+      orderDelivery.totalPrice ??
+      "",
     "Số điện thoại": orderDelivery.phoneNumber || row["Số điện thoại"] || "",
     PartnerName: orderDelivery.partnerDeliveryName || row.PartnerName || "",
     PartnerCode: orderDelivery.partnerDeliveryCode || row.PartnerCode || "",
@@ -1496,8 +1504,7 @@ export default function CashFlowApp() {
               onExportExcel={handleExportExcel}
               isSendingPayloads={sendingPayloads}
               isLoadingOrderDeliveries={
-                orderDeliveryLoadProgress.active ||
-                isInitializingRetailerData
+                orderDeliveryLoadProgress.active || isInitializingRetailerData
               }
               sendPayloadProgress={sendPayloadProgress}
               isExportingExcel={exportingExcel}

@@ -757,7 +757,7 @@ const INVOICE_COLUMNS = [
   },
   {
     id: "eInvoiceAddress",
-    label: "Địa chỉ xuất hóa đơn",
+    label: "Thông tin xuất hóa đơn",
     defaultVisible: true,
     getValue: (row) =>
       [
@@ -1423,6 +1423,15 @@ export default function EinvoicesTab({
             continue;
           }
 
+          if (!normalizeText(customer?.Address ?? customer?.address)) {
+            failedCount += 1;
+            failedRows.push({
+              label: getRowDisplayLabel(row, index),
+              reason: "Thiếu địa chỉ chi tiết, không thể đồng bộ.",
+            });
+            continue;
+          }
+
           const customerAddressRow = buildCustomerAddressSourceRow(
             customer,
             row,
@@ -1526,13 +1535,39 @@ export default function EinvoicesTab({
             !resolvedLocationSuggestResult?.LocationV2 ||
             !resolvedLocationSuggestResult?.WardV2
           ) {
-            const addressConvertQuery = buildAddressConvertQuery(
-              customerAddressRow,
+            try {
+              const addressConvertQuery =
+                buildAddressConvertQuery(customerAddressRow);
+              const convertedAddress =
+                await autoConvertAddress2(addressConvertQuery);
+              resolvedLocationSuggestResult =
+                buildFallbackLocationSuggestResult(convertedAddress);
+            } catch (autoConvertError) {
+              console.warn(
+                "autoConvertAddress2 for e-invoice error, fallback to original customer address:",
+                autoConvertError,
+              );
+            }
+          }
+
+          if (
+            !resolvedLocationSuggestResult?.LocationV2 ||
+            !resolvedLocationSuggestResult?.WardV2
+          ) {
+            const originalProvinceName = normalizeText(
+              customerAddressRow.CustomerLocationName,
             );
-            const convertedAddress =
-              await autoConvertAddress2(addressConvertQuery);
-            resolvedLocationSuggestResult =
-              buildFallbackLocationSuggestResult(convertedAddress);
+            const originalWardName = normalizeText(
+              customerAddressRow.CustomerWardName ||
+                customerAddressRow.CustomerDistrictName,
+            );
+            resolvedLocationSuggestResult = {
+              LocationV2: originalProvinceName
+                ? { Name: originalProvinceName }
+                : null,
+              WardV2: originalWardName ? { Name: originalWardName } : null,
+              __source: "originalCustomerAddress",
+            };
           }
 
           if (
