@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-const WEATHER_CACHE_KEY = "loginCurrentWeather";
+const WEATHER_CACHE_KEY = "loginCurrentWeather:v2";
 const CACHE_DURATION = 15 * 60 * 1000;
 const DEFAULT_LOCATION = {
-  latitude: 10.7769,
-  longitude: 106.7009,
-  label: "TP. Hồ Chí Minh",
+  latitude: 9.9347,
+  longitude: 106.3453,
+  label: "Trà Vinh",
 };
 
 function readWeatherCache() {

@@ -57,7 +57,7 @@ const TABS = [
   { id: "list", label: "Danh sách", icon: CalendarDays },
   { id: "auto", label: "Tự động", icon: Zap },
   { id: "pending", label: "Cần duyệt", icon: AlertCircle },
-  { id: "leave", label: "Đơn nghỉ phép", icon: FileText },
+  { id: "leave", label: "Đơn từ", icon: FileText },
   { id: "report", label: "Báo cáo", icon: BarChart3 },
 ];
 
@@ -67,7 +67,9 @@ const LEAVE_TYPE_LABELS = {
   annual: "Phép năm",
   remote_work: "Làm việc tại nhà",
   business_trip: "Đi công vụ",
+  forgotten_punch: "Quên chấm công",
 };
+const TIMED_REQUEST_TYPES = ["emergency", "remote_work", "business_trip", "forgotten_punch"];
 const LEAVE_SESSION_LABELS = { full_day: "Cả ngày", morning: "Buổi sáng", afternoon: "Buổi chiều" };
 const AI_REVIEW_FLAG_LABELS = {
   unreadable: "Ảnh khó đọc",
@@ -252,7 +254,7 @@ function getAttendanceDayStyle(record, date, today, approvedLeave = null) {
 
   if (approvedLeave) {
     const typeLabel = LEAVE_TYPE_LABELS[approvedLeave.leaveType] || "Nghỉ phép";
-    const timeLabel = ["emergency", "remote_work", "business_trip"].includes(approvedLeave.leaveType) && approvedLeave.startTime && approvedLeave.endTime
+    const timeLabel = TIMED_REQUEST_TYPES.includes(approvedLeave.leaveType) && approvedLeave.startTime && approvedLeave.endTime
       ? ` ${approvedLeave.startTime}-${approvedLeave.endTime}`
       : "";
     return {
@@ -357,6 +359,7 @@ function buildExportRows(records) {
       "Giờ tại công ty": record.onsiteWorkHours ?? "",
       "Giờ WFH": record.remoteWorkHours ?? "",
       "Giờ công vụ": record.businessTripHours ?? "",
+      "Giờ bổ sung": record.correctionWorkHours ?? "",
       "Ca ngày tăng ca phút": dayShift.overtimeMinutes ?? "",
       "Ca ngày trạng thái": shiftStatusLabel(dayShift),
       "Ca ngày ghi chú": summarizeShift(dayShift),
@@ -1309,9 +1312,10 @@ export default function AttendanceManager() {
     }[action];
     if (!actionMeta) return;
     const verb = actionMeta.verb;
+    const requestLabel = request.leaveType === "forgotten_punch" ? "yêu cầu bổ sung chấm công" : "đơn nghỉ";
     const confirmationMessage = approveWithoutEvidence
       ? `${request.userName || "Nhân viên này"} chưa có ảnh minh chứng cho đơn off đột xuất. Bạn có đồng ý duyệt đơn không?`
-      : `Xác nhận ${verb} đơn nghỉ của ${request.userName || "nhân viên này"}?`;
+      : `Xác nhận ${verb} ${requestLabel} của ${request.userName || "nhân viên này"}?`;
     if (!window.confirm(confirmationMessage)) return;
     const reviewNote = window.prompt(actionMeta.prompt, "");
     if (reviewNote === null) return;
@@ -1864,7 +1868,7 @@ export default function AttendanceManager() {
 
   const overviewLeaveByUserDate = useMemo(() => {
     const map = new Map();
-    overviewLeaveRequests.forEach((request) => {
+    overviewLeaveRequests.filter((request) => request.leaveType !== "forgotten_punch").forEach((request) => {
       const dates = Array.isArray(request.approvedDates) && request.approvedDates.length
         ? request.approvedDates
         : (() => {
@@ -3198,7 +3202,7 @@ export default function AttendanceManager() {
                             );
                           })}
                           {record.workHours != null && <p className="text-xs font-semibold text-emerald-700">Tổng công: {record.workHours}h</p>}
-                          {(Number(record.remoteWorkHours || 0) > 0 || Number(record.businessTripHours || 0) > 0) && <p className="text-xs font-semibold text-sky-700">Tại công ty {record.onsiteWorkHours}h{Number(record.remoteWorkHours || 0) > 0 ? ` + WFH ${record.remoteWorkHours}h` : ""}{Number(record.businessTripHours || 0) > 0 ? ` + Công vụ ${record.businessTripHours}h` : ""}</p>}
+                          {(Number(record.remoteWorkHours || 0) > 0 || Number(record.businessTripHours || 0) > 0 || Number(record.correctionWorkHours || 0) > 0) && <p className="text-xs font-semibold text-sky-700">Tại công ty {record.onsiteWorkHours}h{Number(record.remoteWorkHours || 0) > 0 ? ` + WFH ${record.remoteWorkHours}h` : ""}{Number(record.businessTripHours || 0) > 0 ? ` + Công vụ ${record.businessTripHours}h` : ""}{Number(record.correctionWorkHours || 0) > 0 ? ` + Bổ sung ${record.correctionWorkHours}h` : ""}</p>}
                           {Number(record.overtimeMinutes || 0) > 0 && <p className="text-xs font-semibold text-violet-700">Tăng ca: {record.overtimeMinutes} phút ({Number(record.overtimeHours || 0).toFixed(2)}h)</p>}
                         </div>
                         <Badge tone={sc.tone} icon={sc.Icon}>{sc.label}</Badge>
@@ -3560,7 +3564,7 @@ export default function AttendanceManager() {
           <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-4 py-3 sm:px-5">
               <div>
-                <p className="text-sm font-semibold text-slate-800">Đơn xin nghỉ phép</p>
+                <p className="text-sm font-semibold text-slate-800">Đơn từ chấm công và nghỉ phép</p>
                 <p className="text-xs text-slate-400">{leaveTotal} đơn theo bộ lọc · {leavePendingTotal} đơn đang chờ xử lý</p>
               </div>
               <div className="flex flex-wrap gap-2 text-[11px] font-semibold">
@@ -3569,6 +3573,7 @@ export default function AttendanceManager() {
                 <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 text-emerald-700">Phép năm</span>
                 <span className="rounded-full border border-sky-200 bg-sky-50 px-2 py-1 text-sky-700">Làm việc tại nhà</span>
                 <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-1 text-amber-700">Đi công vụ cần ảnh</span>
+                <span className="rounded-full border border-cyan-200 bg-cyan-50 px-2 py-1 text-cyan-700">Quên chấm công</span>
               </div>
             </div>
 
@@ -3604,13 +3609,13 @@ export default function AttendanceManager() {
                             <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
                               <span className="font-semibold text-violet-700">{LEAVE_TYPE_LABELS[request.leaveType] || request.leaveType}</span>
                               <span>{fmtShortDate(request.startDate)}{request.endDate !== request.startDate ? ` – ${fmtShortDate(request.endDate)}` : ""}</span>
-                              <span>{["emergency", "remote_work", "business_trip"].includes(request.leaveType) ? `${request.startTime || "-"}–${request.endTime || "-"}` : (LEAVE_SESSION_LABELS[request.session] || request.session)}</span>
+                              <span>{TIMED_REQUEST_TYPES.includes(request.leaveType) ? `${request.startTime || "-"}–${request.endTime || "-"}` : (LEAVE_SESSION_LABELS[request.session] || request.session)}</span>
                               <span>Gửi {new Date(request.createdAt).toLocaleString("vi-VN")}</span>
                             </div>
                             <p className="mt-2 whitespace-pre-wrap text-sm text-slate-600">{request.reason}</p>
                             {request.convertedFromAnnual && <p className="mt-1 text-xs font-semibold text-amber-700">Đã chuyển từ phép năm sang phép thường không lương do không đủ số dư.</p>}
                             {request.autoApproved && <p className="mt-1 text-xs font-semibold text-violet-700">Hệ thống tự động duyệt · báo trước {Number(request.autoApprovalNoticeDays || 0)}/{Number(request.autoApprovalRequiredDays || 0)} ngày{request.leaveType === "regular" ? " · không trừ phép năm" : ""}.</p>}
-                            {(request.status === "approved" || request.status === "cancel_pending") && <p className="mt-1 text-xs font-semibold text-emerald-700">Đã duyệt: {request.leaveType === "remote_work" ? `${Number(request.approvedMinutes || 0)} phút làm việc tại nhà` : request.leaveType === "business_trip" ? `${Number(request.approvedMinutes || 0)} phút đi công vụ` : request.leaveType === "emergency" ? `${Number(request.approvedMinutes || 0)} phút nghỉ` : `${Number(request.approvedDays || 0)} ngày nghỉ`}</p>}
+                            {(request.status === "approved" || request.status === "cancel_pending") && <p className="mt-1 text-xs font-semibold text-emerald-700">Đã duyệt: {request.leaveType === "remote_work" ? `${Number(request.approvedMinutes || 0)} phút làm việc tại nhà` : request.leaveType === "business_trip" ? `${Number(request.approvedMinutes || 0)} phút đi công vụ` : request.leaveType === "forgotten_punch" ? `${Number(request.creditedMinutes ?? request.approvedMinutes ?? 0)} phút bổ sung chấm công` : request.leaveType === "emergency" ? `${Number(request.approvedMinutes || 0)} phút nghỉ` : `${Number(request.approvedDays || 0)} ngày nghỉ`}</p>}
                             {request.leaveType === "emergency" && evidences.length > 0 && (
                               <div className={`mt-3 rounded-xl border p-3 text-xs ${request.aiReview?.recommendation === "recommend_approve" ? TONE.emerald : request.aiReview?.status === "failed" ? TONE.rose : TONE.amber}`}>
                                 <div className="flex flex-wrap items-center gap-2 font-bold">

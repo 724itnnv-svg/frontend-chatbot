@@ -27,9 +27,10 @@ import {
 import { useNavigate } from "react-router-dom";
 import { canAccessScreen } from "../utils/screenAccess";
 import {
+    fetchLoginVisualMode,
     getLoginVisualMode,
     LOGIN_VISUAL_MODE_OPTIONS,
-    setLoginVisualMode,
+    updateGlobalLoginVisualMode,
 } from "../utils/loginVisualMode";
 
 import ExcelComparer from "./ExcelComparer";
@@ -101,11 +102,37 @@ export default function AdminDashboard() {
     const roleLower = user?.role?.toLowerCase?.() || "";
     const isAdmin = roleLower === "admin" || roleLower === "superadmin";
     const [loginVisualMode, setSelectedLoginVisualMode] = useState(getLoginVisualMode);
+    const [loginThemeSaving, setLoginThemeSaving] = useState(false);
+    const [loginThemeError, setLoginThemeError] = useState("");
 
-    const handleLoginVisualModeChange = (event) => {
+    useEffect(() => {
+        let cancelled = false;
+        fetchLoginVisualMode()
+            .then((mode) => {
+                if (!cancelled) setSelectedLoginVisualMode(mode);
+            })
+            .catch((error) => {
+                if (!cancelled) setLoginThemeError(error.message);
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, []);
+
+    const handleLoginVisualModeChange = async (event) => {
         const nextMode = event.target.value;
-        if (setLoginVisualMode(nextMode)) {
-            setSelectedLoginVisualMode(nextMode);
+        const previousMode = loginVisualMode;
+        setSelectedLoginVisualMode(nextMode);
+        setLoginThemeSaving(true);
+        setLoginThemeError("");
+        try {
+            const savedMode = await updateGlobalLoginVisualMode(nextMode);
+            setSelectedLoginVisualMode(savedMode);
+        } catch (error) {
+            setSelectedLoginVisualMode(previousMode);
+            setLoginThemeError(error.message);
+        } finally {
+            setLoginThemeSaving(false);
         }
     };
 
@@ -497,22 +524,31 @@ export default function AdminDashboard() {
                         </div>
                     </div>
 
-                    <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white/80 px-3 py-2 shadow-sm backdrop-blur-sm">
-                        <Palette size={16} className="shrink-0 text-rose-500" />
-                        <span className="whitespace-nowrap text-xs font-semibold text-slate-600">Giao diện đăng nhập</span>
-                        <select
-                            value={loginVisualMode}
-                            onChange={handleLoginVisualModeChange}
-                            className="min-w-0 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs font-semibold text-slate-700 outline-none transition focus:border-rose-300 focus:ring-2 focus:ring-rose-200/60"
-                            aria-label="Chọn giao diện đăng nhập"
-                        >
-                            {LOGIN_VISUAL_MODE_OPTIONS.map((option) => (
-                                <option key={option.value} value={option.value}>
-                                    {option.label}
-                                </option>
-                            ))}
-                        </select>
-                    </label>
+                    {isAdmin && (
+                        <div>
+                            <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white/80 px-3 py-2 shadow-sm backdrop-blur-sm">
+                                <Palette size={16} className="shrink-0 text-rose-500" />
+                                <span className="whitespace-nowrap text-xs font-semibold text-slate-600">Giao diện đăng nhập chung</span>
+                                <select
+                                    value={loginVisualMode}
+                                    onChange={handleLoginVisualModeChange}
+                                    disabled={loginThemeSaving}
+                                    className="min-w-0 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs font-semibold text-slate-700 outline-none transition focus:border-rose-300 focus:ring-2 focus:ring-rose-200/60 disabled:cursor-wait disabled:opacity-60"
+                                    aria-label="Chọn giao diện đăng nhập chung"
+                                >
+                                    {LOGIN_VISUAL_MODE_OPTIONS.map((option) => (
+                                        <option key={option.value} value={option.value}>
+                                            {option.label}
+                                        </option>
+                                    ))}
+                                </select>
+                                {loginThemeSaving && <Loader2 size={14} className="animate-spin text-rose-500" />}
+                            </label>
+                            {loginThemeError && (
+                                <p className="mt-1 max-w-sm text-right text-[11px] font-medium text-rose-600">{loginThemeError}</p>
+                            )}
+                        </div>
+                    )}
                 </div>
 
                 {/* EXPORT ĐƠN HÀNG */}
