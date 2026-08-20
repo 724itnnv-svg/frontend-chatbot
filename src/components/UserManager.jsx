@@ -53,7 +53,7 @@ export default function UsersPage() {
     total: 0,
     totalPages: 1,
   });
-  const [facets, setFacets] = useState({ roles: [], teamIds: [] });
+  const [facets, setFacets] = useState({ roles: [], companyCodes: [], teamIds: [] });
   const [userStats, setUserStats] = useState({
     total: 0,
     approved: 0,
@@ -64,7 +64,7 @@ export default function UsersPage() {
   const [filters, setFilters] = useState({
     search: "",
     role: "all",
-    teamId: "all",
+    companyCode: "all",
     approveStatus: "all",
     codeStatus: "all",
     sortBy: "newest",
@@ -80,7 +80,7 @@ export default function UsersPage() {
         limit: String(pagination.limit),
         search: filters.search,
         role: filters.role,
-        teamId: filters.teamId,
+        companyCode: filters.companyCode,
         approveStatus: filters.approveStatus,
         codeStatus: filters.codeStatus,
         sortBy: filters.sortBy,
@@ -289,14 +289,14 @@ export default function UsersPage() {
       .trim();
 
   const uniqueRoles = facets.roles || [];
-  const uniqueTeams = facets.teamIds || [];
+  const uniqueCompanies = facets.companyCodes || facets.teamIds || [];
   const filteredUsers = users;
 
   const hasActiveFilters = useMemo(() => {
     return Boolean(
       filters.search ||
       filters.role !== "all" ||
-      filters.teamId !== "all" ||
+      filters.companyCode !== "all" ||
       filters.approveStatus !== "all" ||
       filters.codeStatus !== "all" ||
       filters.sortBy !== "newest"
@@ -313,7 +313,7 @@ export default function UsersPage() {
     setFilters({
       search: "",
       role: "all",
-      teamId: "all",
+      companyCode: "all",
       approveStatus: "all",
       codeStatus: "all",
       sortBy: "newest",
@@ -382,7 +382,7 @@ export default function UsersPage() {
             "MSNV",
           ]),
           role: pickExcelValue(row, ["role", "quyền", "quyen", "nhóm quyền", "nhom quyen", "roleID"]),
-          teamId: pickExcelValue(row, ["teamId", "team", "Team ID", "Mã team", "Ma team"]),
+          companyCode: pickExcelValue(row, ["companyCode", "company", "Mã công ty", "Ma cong ty", "teamId", "team", "Team ID", "Mã team", "Ma team"]),
           approveStatus: pickExcelValue(row, [
             "approveStatus",
             "approved",
@@ -446,7 +446,7 @@ export default function UsersPage() {
       Email: user.email || "",
       "SĐT": user.phone || "",
       Role: user.role || "",
-      "Team ID": user.teamId || "",
+      "Mã công ty": user.companyCode || user.teamId || "",
       "Trạng thái": user.approveStatus === 1 ? "Đã duyệt" : "Chờ duyệt",
       "Page quản lý": getUserPageNames(user).join(", "),
       "Ngày tạo": user.createdAt ? new Date(user.createdAt).toLocaleString("vi-VN") : "",
@@ -633,7 +633,7 @@ export default function UsersPage() {
         "SĐT": "0900000001",
         Email: "nguyenvana@gmail.com",
         Role: "user",
-        "Team ID": "NNV",
+        "Mã công ty": "NNV",
         "Trạng thái duyệt": 1,
         Password: "",
       },
@@ -794,13 +794,13 @@ export default function UsersPage() {
               ))}
             </select>
             <select
-              value={filters.teamId}
-              onChange={(event) => updateFilter("teamId", event.target.value)}
+              value={filters.companyCode}
+              onChange={(event) => updateFilter("companyCode", event.target.value)}
               className="rounded-2xl border border-cyan-100 bg-white px-3 py-2.5 text-sm outline-none focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100"
             >
-              <option value="all">Tất cả team</option>
-              {uniqueTeams.map((team) => (
-                <option key={team} value={team}>{team}</option>
+              <option value="all">Tất cả công ty</option>
+              {uniqueCompanies.map((companyCode) => (
+                <option key={companyCode} value={companyCode}>{companyCode}</option>
               ))}
             </select>
             <select
@@ -914,7 +914,7 @@ export default function UsersPage() {
                     <th className="px-3 py-3 text-left">Email</th>
                     <th className="px-2 py-3 text-left">SĐT</th>
                     <th className="px-2 py-3 text-left">Role</th>
-                    <th className="px-2 py-3 text-left">Team ID</th>
+                    <th className="px-2 py-3 text-left">Mã công ty</th>
 
                     <th className="hidden px-3 py-3 text-center xl:table-cell">
                       Page quản lý
@@ -999,8 +999,8 @@ export default function UsersPage() {
                         </td>
 
                         <td className="px-2 py-3">
-                          <span className="inline-flex max-w-full items-center truncate px-2 py-1 rounded-full text-xs font-semibold border bg-cyan-50 border-cyan-100 text-cyan-700" title={u.teamId || "Chưa gán"}>
-                            {u.teamId || "Chưa gán"}
+                          <span className="inline-flex max-w-full items-center truncate px-2 py-1 rounded-full text-xs font-semibold border bg-cyan-50 border-cyan-100 text-cyan-700" title={u.companyCode || u.teamId || "Chưa gán"}>
+                            {u.companyCode || u.teamId || "Chưa gán"}
                           </span>
                         </td>
 

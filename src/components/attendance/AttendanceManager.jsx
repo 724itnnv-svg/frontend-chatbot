@@ -688,7 +688,29 @@ function Badge({ tone = "slate", children, icon: Icon }) {
 }
 
 export default function AttendanceManager() {
-  const { api, token } = useAuth();
+  const { api, token, user } = useAuth();
+  const isAttendanceAdmin = String(user?.role || "").toLowerCase() === "superadmin" || Number(user?.allpage) === 1;
+  const attendanceActions = user?.action?.attendance || {};
+  const canCreateAttendance = isAttendanceAdmin || attendanceActions.create === true;
+  const canEditAttendance = isAttendanceAdmin || attendanceActions.edit === true;
+  const canDeleteAttendance = isAttendanceAdmin || attendanceActions.delete === true;
+  const canExportAttendance = isAttendanceAdmin || attendanceActions.export === true;
+  const canReviewLeave = isAttendanceAdmin || attendanceActions.review_leave === true || attendanceActions.edit === true;
+  const configuredManagementScope = user?.managementAccess?.scope;
+  const hasRestrictedManagementScope = ["none", "restricted"].includes(configuredManagementScope)
+    || (!configuredManagementScope && user?.attendanceAccess?.scope === "managed");
+  const canViewAllAttendance = String(user?.role || "").toLowerCase() === "superadmin"
+    || attendanceActions.view_all === true
+    || !hasRestrictedManagementScope;
+  const canManageAttendance = canCreateAttendance || canEditAttendance || canDeleteAttendance;
+  const visibleTabs = useMemo(
+    () => TABS.filter((item) => {
+      if (item.id === "auto") return canManageAttendance;
+      if (item.id === "pending") return canCreateAttendance || canEditAttendance;
+      return true;
+    }),
+    [canCreateAttendance, canEditAttendance, canManageAttendance],
+  );
   const formRef = useRef(null);
   const realtimeRefreshRef = useRef(null);
   const [tab, setTab] = useState("overview");
@@ -2038,38 +2060,38 @@ export default function AttendanceManager() {
             <h1 className="text-xl font-bold text-slate-900">Quản lý chấm công</h1>
             <p className="text-sm text-slate-500">Theo dõi chấm công 1 ca full-day: 07:30 – 17:00</p>
           </div>
-          <button
+          {canCreateAttendance && <button
             onClick={openCreateForm}
             className="flex items-center gap-1.5 rounded-xl bg-violet-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-violet-700"
           >
             <Plus size={14} /> Thêm bản ghi
-          </button>
-          <button
+          </button>}
+          {canCreateAttendance && <button
             onClick={openBulkStampPanel}
             className="flex items-center gap-1.5 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-sm font-semibold text-violet-700 shadow-sm hover:bg-violet-100"
           >
             <Users size={14} /> Chấm hàng loạt
-          </button>
-          <button
+          </button>}
+          {canEditAttendance && <button
             onClick={openBulkEditTimePanel}
             className="flex items-center gap-1.5 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-sm font-semibold text-sky-700 shadow-sm hover:bg-sky-100"
           >
             <Pencil size={14} /> Sửa giờ hàng loạt
-          </button>
-          <button
+          </button>}
+          {canDeleteAttendance && <button
             onClick={openBulkDeletePanel}
             className="flex items-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700 shadow-sm hover:bg-rose-100"
           >
             <Trash2 size={14} /> Xóa hàng loạt
-          </button>
-          <button
+          </button>}
+          {canExportAttendance && <button
             onClick={exportAttendanceExcel}
             disabled={exporting}
             className="flex items-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700 shadow-sm hover:bg-emerald-100 disabled:opacity-50"
           >
             {exporting ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
             Xuất Excel
-          </button>
+          </button>}
           <button
             onClick={refreshCurrentTab}
             className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 shadow-sm hover:bg-slate-50"
@@ -2868,7 +2890,7 @@ export default function AttendanceManager() {
         </div>
 
         <div className="flex gap-1 overflow-x-auto rounded-2xl border border-slate-200 bg-white p-1 shadow-sm">
-          {TABS.map((item) => {
+          {visibleTabs.map((item) => {
             const Icon = item.icon;
             const isPending = item.id === "pending";
             const isLeave = item.id === "leave";
@@ -2993,14 +3015,14 @@ export default function AttendanceManager() {
                                 <button
                                   key={`mobile-${employee.id}-${date}`}
                                   type="button"
-                                  onClick={() => record && openEditForm(record)}
+                                  onClick={() => canEditAttendance && record && openEditForm(record)}
                                   onDoubleClick={(event) => {
-                                    if (record || approvedLeave || isSundayDate(date)) return;
+                                    if (!canCreateAttendance || record || approvedLeave || isSundayDate(date)) return;
                                     event.preventDefault();
                                     openCreateFormFromOverviewCell(employee, date);
                                   }}
                                   className={`min-h-[112px] rounded-lg border px-2.5 py-2 text-left transition ${dayStyle.bg} ${dayStyle.border} ${record ? "hover:shadow-sm" : `${dayStyle.text} hover:bg-violet-50/50`} ${isToday ? "ring-2 ring-violet-100" : ""}`}
-                                  title={record ? "Sửa bản ghi" : "Chưa chấm công - chạm đúp để chấm"}
+                                  title={canEditAttendance && record ? "Sửa bản ghi" : "Xem chấm công"}
                                 >
                                   <div className="mb-2 flex items-start justify-between gap-2">
                                     <div>
@@ -3097,14 +3119,14 @@ export default function AttendanceManager() {
                               <div key={`${employee.id}-${date}`} className={`border-r border-slate-100 p-2 last:border-r-0 ${isToday && !record ? "bg-violet-50/30" : ""}`}>
                                 <button
                                   type="button"
-                                  onClick={() => record && openEditForm(record)}
+                                  onClick={() => canEditAttendance && record && openEditForm(record)}
                                   onDoubleClick={(event) => {
-                                    if (record || approvedLeave || isSundayDate(date)) return;
+                                    if (!canCreateAttendance || record || approvedLeave || isSundayDate(date)) return;
                                     event.preventDefault();
                                     openCreateFormFromOverviewCell(employee, date);
                                   }}
                                   className={`w-full rounded-lg border px-2 py-2 text-left transition ${isWeek ? "min-h-[100px]" : "min-h-[92px]"} ${dayStyle.bg} ${dayStyle.border} ${record ? "hover:shadow-sm" : `${dayStyle.text} hover:bg-violet-50/50`}`}
-                                  title={record ? "Sửa bản ghi" : "Chưa chấm công - click đúp chuột vào để chấm"}
+                                  title={canEditAttendance && record ? "Sửa bản ghi" : "Xem chấm công"}
                                 >
                                   {record ? (
                                     <div className="space-y-1.5">
@@ -3206,14 +3228,14 @@ export default function AttendanceManager() {
                           {Number(record.overtimeMinutes || 0) > 0 && <p className="text-xs font-semibold text-violet-700">Tăng ca: {record.overtimeMinutes} phút ({Number(record.overtimeHours || 0).toFixed(2)}h)</p>}
                         </div>
                         <Badge tone={sc.tone} icon={sc.Icon}>{sc.label}</Badge>
-                        <div className="flex gap-1">
-                          <button onClick={() => openEditForm(record)} title="Sửa bản ghi" className="flex items-center justify-center rounded-xl border border-slate-200 p-1.5 text-slate-500 hover:bg-slate-50">
+                        {(canEditAttendance || canDeleteAttendance) && <div className="flex gap-1">
+                          {canEditAttendance && <button onClick={() => openEditForm(record)} title="Sửa bản ghi" className="flex items-center justify-center rounded-xl border border-slate-200 p-1.5 text-slate-500 hover:bg-slate-50">
                             <Pencil size={13} />
-                          </button>
-                          <button onClick={() => handleDelete(record)} title="Xóa bản ghi" className="flex items-center justify-center rounded-xl border border-rose-200 p-1.5 text-rose-400 hover:bg-rose-50">
+                          </button>}
+                          {canDeleteAttendance && <button onClick={() => handleDelete(record)} title="Xóa bản ghi" className="flex items-center justify-center rounded-xl border border-rose-200 p-1.5 text-rose-400 hover:bg-rose-50">
                             <Trash2 size={13} />
-                          </button>
-                        </div>
+                          </button>}
+                        </div>}
                       </div>
                     );
                   })}
@@ -3643,10 +3665,10 @@ export default function AttendanceManager() {
                             ) : (
                               <span className={`inline-flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-semibold ${request.leaveType === "emergency" || request.leaveType === "business_trip" ? TONE.amber : request.leaveType === "remote_work" ? TONE.sky : TONE.slate}`}><ImagePlus size={14} /> {request.leaveType === "remote_work" ? "Không cần ảnh" : request.leaveType === "business_trip" ? "Thiếu ảnh bắt buộc" : "Chưa có ảnh"}</span>
                             )}
-                            {request.leaveType === "emergency" && request.status === "pending" && evidences.length > 0 && request.aiReview?.status !== "processing" && request.aiReview?.status !== "completed" && (
+                            {canReviewLeave && request.leaveType === "emergency" && request.status === "pending" && evidences.length > 0 && request.aiReview?.status !== "processing" && request.aiReview?.status !== "completed" && (
                               <button type="button" disabled={isReviewing} onClick={() => retryLeaveAiReview(request)} className="inline-flex items-center gap-1.5 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-xs font-bold text-violet-700 hover:bg-violet-100 disabled:opacity-45"><ShieldCheck size={14} /> Phân tích AI</button>
                             )}
-                            {request.status === "pending" && (
+                            {canReviewLeave && request.status === "pending" && (
                               <>
                                 <button type="button" disabled={isReviewing || (request.leaveType === "business_trip" && request.needsEvidence)} onClick={() => reviewLeaveRequest(request, "approve")} title={request.leaveType === "business_trip" && request.needsEvidence ? "Cần bổ sung ảnh minh chứng trước khi duyệt" : request.needsEvidence ? "Duyệt đơn chưa có ảnh minh chứng" : "Duyệt đơn"} className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3 py-2 text-xs font-bold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-45">
                                   {isReviewing ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />} Duyệt
@@ -3654,7 +3676,7 @@ export default function AttendanceManager() {
                                 <button type="button" disabled={isReviewing} onClick={() => reviewLeaveRequest(request, "reject")} className="inline-flex items-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700 hover:bg-rose-100 disabled:opacity-45"><XCircle size={14} /> Từ chối</button>
                               </>
                             )}
-                            {request.status === "cancel_pending" && (
+                            {canReviewLeave && request.status === "cancel_pending" && (
                               <>
                                 <button type="button" disabled={isReviewing} onClick={() => reviewLeaveRequest(request, "approve_cancel")} className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3 py-2 text-xs font-bold text-white hover:bg-emerald-700 disabled:opacity-45">
                                   {isReviewing ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />} Duyệt hủy
@@ -3662,7 +3684,7 @@ export default function AttendanceManager() {
                                 <button type="button" disabled={isReviewing} onClick={() => reviewLeaveRequest(request, "reject_cancel")} className="inline-flex items-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700 hover:bg-rose-100 disabled:opacity-45"><XCircle size={14} /> Từ chối hủy</button>
                               </>
                             )}
-                            {request.status === "approved" && (
+                            {canReviewLeave && canViewAllAttendance && request.status === "approved" && (
                               <button type="button" disabled={isReviewing} onClick={() => reviewLeaveRequest(request, "cancel")} className="inline-flex items-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700 hover:bg-rose-100 disabled:opacity-45">
                                 {isReviewing ? <Loader2 size={14} className="animate-spin" /> : <XCircle size={14} />} Hủy đơn
                               </button>
