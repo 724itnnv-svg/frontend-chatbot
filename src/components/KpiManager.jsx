@@ -96,6 +96,7 @@ export default function KpiManager() {
   const canCreate = fullAccess || permissions.create === true;
   const canEdit = fullAccess || permissions.edit === true;
   const canDelete = fullAccess || permissions.delete === true;
+  const canReview = fullAccess || permissions.review_kpi === true || permissions.edit === true;
   const [period, setPeriod] = useState(nowPeriod);
   const [status, setStatus] = useState("ALL");
   const [search, setSearch] = useState("");
@@ -701,7 +702,7 @@ export default function KpiManager() {
               <RefreshCcw size={16} className={loading ? "animate-spin" : ""} />
               Tải lại
             </button>
-            {canEdit && selectedIds.length > 0 && (
+            {canReview && selectedIds.length > 0 && (
               <button
                 type="button"
                 onClick={approveSelected}
@@ -726,7 +727,7 @@ export default function KpiManager() {
               <table className="w-full text-left text-sm">
                 <thead className="bg-slate-50 text-xs uppercase text-slate-500">
                   <tr>
-                    {canEdit && (
+                    {canReview && (
                       <th className="w-10 px-4 py-3">
                         <input
                           type="checkbox"
@@ -749,7 +750,7 @@ export default function KpiManager() {
                 <tbody className="divide-y">
                   {rows.map((row) => (
                     <tr key={row._id} className="hover:bg-slate-50">
-                      {canEdit && (
+                      {canReview && (
                         <td className="px-4 py-3">
                           {row.status === "SUBMITTED" && (
                             <input
@@ -823,7 +824,7 @@ export default function KpiManager() {
                       </td>
                       <td className="px-4 py-3 text-right">
                         <div className="inline-flex items-center gap-2">
-                          {row.status === "SUBMITTED" && canEdit ? (
+                          {row.status === "SUBMITTED" && canReview ? (
                             <button
                               onClick={() => openReview(row)}
                               className="inline-flex items-center gap-1 rounded-lg bg-violet-600 px-3 py-1.5 text-xs font-bold text-white"
@@ -1273,7 +1274,7 @@ export default function KpiManager() {
                     <label className="text-xs font-semibold text-slate-600">
                       Kết quả xác nhận
                       <input
-                        disabled={!canEdit || reviewing.status !== "SUBMITTED"}
+                        disabled={!canReview || reviewing.status !== "SUBMITTED"}
                         type={item.scoringMethod === "standard_points" ? "text" : "number"}
                         value={item.scoringMethod === "standard_points" ? item.approvedActualText : (item.approvedActual ?? "")}
                         onChange={(event) =>
@@ -1289,7 +1290,7 @@ export default function KpiManager() {
                     <label className="text-xs font-semibold text-slate-600">
                       {item.scoringMethod === "standard_points" ? "Điểm hệ thống tính" : "Mức hoàn thành duyệt (%)"}
                       <input
-                        disabled={item.scoringMethod === "standard_points" || !canEdit || reviewing.status !== "SUBMITTED"}
+                        disabled={item.scoringMethod === "standard_points" || !canReview || reviewing.status !== "SUBMITTED"}
                         type="number"
                         min="0"
                         max={item.maxAchievementPercent || 150}
@@ -1307,7 +1308,7 @@ export default function KpiManager() {
                     <label className="text-xs font-semibold text-slate-600">
                       Nhận xét
                       <input
-                        disabled={!canEdit || reviewing.status !== "SUBMITTED"}
+                        disabled={!canReview || reviewing.status !== "SUBMITTED"}
                         value={item.reviewNote || ""}
                         onChange={(event) =>
                           changeReviewItem(
@@ -1325,7 +1326,7 @@ export default function KpiManager() {
               <label className="block text-sm font-semibold text-slate-700">
                 Nhận xét tổng
                 <textarea
-                  disabled={!canEdit || reviewing.status !== "SUBMITTED"}
+                  disabled={!canReview || reviewing.status !== "SUBMITTED"}
                   value={reviewing.reviewSummary || ""}
                   onChange={(event) =>
                     setReviewing((current) => ({
@@ -1345,7 +1346,7 @@ export default function KpiManager() {
               >
                 Đóng
               </button>
-              {canEdit && reviewing.status === "SUBMITTED" && (
+              {canReview && reviewing.status === "SUBMITTED" && (
                 <>
                   <button
                     disabled={busy}

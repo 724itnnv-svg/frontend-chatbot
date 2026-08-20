@@ -1118,7 +1118,7 @@ export default function AttendancePage() {
   const [advanceLoading, setAdvanceLoading] = useState(false);
   const [advanceSaving, setAdvanceSaving] = useState(false);
   const [deletingAdvanceId, setDeletingAdvanceId] = useState("");
-  const [advanceLimit, setAdvanceLimit] = useState({ limitMode: "salary_ratio", minAmount: 100000, maxAmount: 0, monthlyLimit: 0, actualGrossIncome: 0, canRequest: false, restrictionMessage: "Đang kiểm tra điều kiện ứng lương..." });
+  const [advanceLimit, setAdvanceLimit] = useState({ limitMode: "salary_ratio", minAmount: 100000, maxAmount: 0, monthlyLimit: 0, actualGrossIncome: 0, requestWindowStartDay: 19, requestWindowEndDay: 19, canRequest: false, restrictionMessage: "Đang kiểm tra điều kiện ứng lương..." });
   const [advanceLimitLoading, setAdvanceLimitLoading] = useState(false);
   const [approvalNotifications, setApprovalNotifications] = useState([]);
   const [notificationHistory, setNotificationHistory] = useState([]);
@@ -1145,6 +1145,11 @@ export default function AttendancePage() {
   );
   const advanceRestrictionMessage = advanceLimit.restrictionMessage || "";
   const usesSalaryRatioLimit = advanceLimit.limitMode !== "fixed_cap";
+  const advanceWindowStartDay = Number(advanceLimit.requestWindowStartDay) || 19;
+  const advanceWindowEndDay = Number(advanceLimit.requestWindowEndDay) || 19;
+  const advanceWindowLabel = advanceWindowStartDay === advanceWindowEndDay
+    ? `ngày ${advanceWindowStartDay}`
+    : `từ ngày ${advanceWindowStartDay} đến ngày ${advanceWindowEndDay}`;
   const advanceFormDisabled = advanceSaving || advanceLimitLoading || advanceLimit.canRequest !== true;
   const [myAutoAttendance, setMyAutoAttendance] = useState(null);
   const [showTaskbarRunner, setShowTaskbarRunner] = useState(() => {
@@ -1924,8 +1929,6 @@ export default function AttendancePage() {
     if (advanceFormDisabled) return showMsg(false, advanceRestrictionMessage || "Hiện chưa thể tạo phiếu ứng lương.");
     const requestedAmount = Number(advanceForm.requestedAmount);
     if (!Number.isFinite(requestedAmount) || requestedAmount < 100000) return showMsg(false, "Số tiền muốn ứng tối thiểu là 100.000 đ.");
-    const remainingAmount = Number(advanceLimit.remainingAmount ?? advanceLimit.maxAmount ?? 0);
-    if (requestedAmount > remainingAmount) return showMsg(false, `Bạn chỉ còn có thể ứng tối đa ${money(remainingAmount)} trong tháng này.`);
     if (!advanceForm.requestedPayDate || !advanceForm.payrollPeriod) return showMsg(false, "Vui lòng chọn ngày nhận và kỳ khấu trừ.");
     setAdvanceSaving(true);
     try {
@@ -3156,18 +3159,23 @@ export default function AttendancePage() {
                   <span className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600"><HandCoins size={22} /></span>
                   <div>
                     <h2 className="font-bold text-slate-900">Tạo phiếu ứng lương</h2>
-                    <p className="text-xs text-slate-500">Chỉ gửi trong ngày 19 hằng tháng; {usesSalaryRatioLimit ? "tổng các phiếu trong tháng không vượt quá 50% tổng thu nhập thực tế đã làm, chưa trừ BHXH." : "tổng các phiếu trong tháng không vượt quá 2.600.000 đ."}</p>
+                    <p className="text-xs text-slate-500">Chỉ gửi {advanceWindowLabel} hằng tháng. Phiếu trong hạn mức được tự động duyệt; phiếu vượt hạn mức sẽ chuyển quản trị viên duyệt.</p>
                   </div>
                 </div>
                 <div className="space-y-3">
                   <label className="block text-xs font-semibold text-slate-600">SỐ TIỀN MUỐN ỨNG
-                    <input type="number" required disabled={advanceFormDisabled} min="100000" max={advanceLimit.maxAmount ?? 0} step="1000" value={advanceForm.requestedAmount} onChange={(event) => setAdvanceForm((current) => ({ ...current, requestedAmount: event.target.value }))} placeholder={`Từ 100.000 đ đến ${money(advanceLimit.maxAmount ?? 0)}`} className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-emerald-400 disabled:cursor-not-allowed disabled:opacity-60" />
+                    <input type="number" required disabled={advanceFormDisabled} min="100000" step="1000" value={advanceForm.requestedAmount} onChange={(event) => setAdvanceForm((current) => ({ ...current, requestedAmount: event.target.value }))} placeholder="Từ 100.000 đ" className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-emerald-400 disabled:cursor-not-allowed disabled:opacity-60" />
                   </label>
                   {Number(advanceForm.requestedAmount) > 0 && <p className="-mt-1 text-sm font-bold text-emerald-700">{money(advanceForm.requestedAmount)}</p>}
+                  {Number(advanceForm.requestedAmount) > Number(advanceLimit.remainingAmount ?? 0) && (
+                    <div className={`rounded-xl border px-3 py-2 text-xs font-semibold ${TONE.amber}`}>
+                      Số tiền này vượt hạn mức còn lại {money(advanceLimit.remainingAmount ?? 0)} và sẽ được chuyển sang chờ quản trị duyệt.
+                    </div>
+                  )}
                   <div className={`rounded-xl border px-3 py-2 text-xs ${TONE.emerald}`}>
                     {advanceLimitLoading ? "Đang tải hạn mức ứng lương..." : usesSalaryRatioLimit
-                      ? <>Tổng thu nhập thực tế đã làm, chưa trừ BHXH: <strong>{money(advanceLimit.actualGrossIncome ?? 0)}</strong>. Hạn mức 50%: <strong>{money(advanceLimit.monthlyLimit ?? 0)}</strong>. Đã tính trong tháng: <strong>{money(advanceLimit.usedAmount ?? 0)}</strong>. Còn có thể ứng: <strong>{money(advanceLimit.remainingAmount ?? advanceLimit.maxAmount ?? 0)}</strong>.</>
-                      : <>Hạn mức cố định: <strong>{money(advanceLimit.monthlyLimit ?? 2600000)}</strong>. Đã tính trong tháng: <strong>{money(advanceLimit.usedAmount ?? 0)}</strong>. Còn có thể ứng: <strong>{money(advanceLimit.remainingAmount ?? advanceLimit.maxAmount ?? 0)}</strong>.</>}
+                      ? <>Tổng thu nhập thực tế đã làm, chưa trừ BHXH: <strong>{money(advanceLimit.actualGrossIncome ?? 0)}</strong>. Hạn mức 50%: <strong>{money(advanceLimit.monthlyLimit ?? 0)}</strong>. Đã tính trong tháng: <strong>{money(advanceLimit.usedAmount ?? 0)}</strong>. Còn trong hạn mức tự động duyệt: <strong>{money(advanceLimit.remainingAmount ?? advanceLimit.maxAmount ?? 0)}</strong>.</>
+                      : <>Hạn mức cố định: <strong>{money(advanceLimit.monthlyLimit ?? 2600000)}</strong>. Đã tính trong tháng: <strong>{money(advanceLimit.usedAmount ?? 0)}</strong>. Còn trong hạn mức tự động duyệt: <strong>{money(advanceLimit.remainingAmount ?? advanceLimit.maxAmount ?? 0)}</strong>.</>}
                   </div>
                   {!advanceLimitLoading && advanceRestrictionMessage && <div className={`rounded-xl border px-3 py-2 text-xs font-semibold ${TONE.amber}`}>{advanceRestrictionMessage}</div>}
                   <div className="grid grid-cols-2 gap-3">
@@ -3187,7 +3195,7 @@ export default function AttendancePage() {
                     <textarea disabled={advanceFormDisabled} maxLength={1000} rows={4} value={advanceForm.reason} onChange={(event) => setAdvanceForm((current) => ({ ...current, reason: event.target.value }))} placeholder="Có thể để trống..." className="mt-1.5 w-full resize-none rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 disabled:cursor-not-allowed disabled:opacity-60" />
                   </label>
                   <button type="submit" disabled={advanceFormDisabled} className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60">
-                    {advanceSaving ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />} Gửi phiếu chờ duyệt
+                    {advanceSaving ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />} Gửi phiếu ứng lương
                   </button>
                 </div>
               </form>
@@ -3207,7 +3215,7 @@ export default function AttendancePage() {
                     </div>
                     {Number(request.approvedAmount) > 0 && <p className="mt-2 text-xs font-semibold text-emerald-700">Số tiền được duyệt: {money(request.approvedAmount)}</p>}
                     <p className="mt-2 whitespace-pre-wrap text-sm text-slate-600">{request.reason}</p>
-                    {request.reviewNote && <p className="mt-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600"><strong>Phản hồi quản trị:</strong> {request.reviewNote}</p>}
+                    {request.reviewNote && <p className="mt-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600"><strong>Ghi chú xử lý:</strong> {request.reviewNote}</p>}
                     {request.paymentNote && <p className="mt-2 text-xs text-slate-500"><strong>Ghi chú chi:</strong> {request.paymentNote}</p>}
                     {request.cancellationReason && <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700"><strong>Lý do hủy:</strong> {request.cancellationReason}</p>}
                     <div className="mt-3 flex flex-wrap items-center gap-2">

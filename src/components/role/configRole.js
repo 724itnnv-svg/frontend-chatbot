@@ -163,7 +163,19 @@ const APP_PERMISSIONS = {
       id: "view_all",
       name: "Xem toàn công ty",
       color: "violet",
-      screenIds: ["approved_leave"],
+      screenIds: ["attendance", "approved_leave"],
+    },
+    {
+      id: "review_leave",
+      name: "Duyệt đơn nghỉ phép",
+      color: "emerald",
+      screenIds: ["attendance"],
+    },
+    {
+      id: "review_kpi",
+      name: "Duyệt KPI",
+      color: "emerald",
+      screenIds: ["kpi_management"],
     },
   ],
 };

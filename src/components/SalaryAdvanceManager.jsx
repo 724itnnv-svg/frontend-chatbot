@@ -163,7 +163,13 @@ export default function SalaryAdvanceManager() {
   const [paymentDialog, setPaymentDialog] = useState(null);
   const [paymentForm, setPaymentForm] = useState({ payrollPeriod: "", paymentMethod: "bank_transfer", paymentNote: "" });
   const [message, setMessage] = useState(null);
-  const [limitPolicy, setLimitPolicy] = useState({ limitMode: "salary_ratio", salaryRatio: 0.5, fixedMaxAmount: 2600000 });
+  const [limitPolicy, setLimitPolicy] = useState({
+    limitMode: "salary_ratio",
+    salaryRatio: 0.5,
+    fixedMaxAmount: 2600000,
+    requestWindowStartDay: 19,
+    requestWindowEndDay: 19,
+  });
   const [policyLoading, setPolicyLoading] = useState(false);
   const [policySaving, setPolicySaving] = useState(false);
 
@@ -209,7 +215,7 @@ export default function SalaryAdvanceManager() {
       const response = await fetch("/api/salary-advance-requests/policy", { headers: authHeader });
       const data = await response.json();
       if (!response.ok || data?.ok === false) throw new Error(data?.message || "Không tải được cấu hình hạn mức ứng lương");
-      setLimitPolicy(data.data || { limitMode: "salary_ratio", salaryRatio: 0.5, fixedMaxAmount: 2600000 });
+      setLimitPolicy((current) => ({ ...current, ...(data.data || {}) }));
     } catch (error) {
       setMessage({ ok: false, text: error.message || "Không tải được cấu hình hạn mức ứng lương" });
     } finally {
@@ -225,7 +231,11 @@ export default function SalaryAdvanceManager() {
       const response = await fetch("/api/salary-advance-requests/policy", {
         method: "PUT",
         headers: { ...authHeader, "Content-Type": "application/json" },
-        body: JSON.stringify({ limitMode }),
+        body: JSON.stringify({
+          limitMode,
+          requestWindowStartDay: limitPolicy.requestWindowStartDay,
+          requestWindowEndDay: limitPolicy.requestWindowEndDay,
+        }),
       });
       const data = await response.json();
       if (!response.ok || data?.ok === false) throw new Error(data?.message || "Không lưu được cấu hình hạn mức ứng lương");
@@ -233,6 +243,41 @@ export default function SalaryAdvanceManager() {
       setMessage({ ok: true, text: data.message || "Đã cập nhật cấu hình hạn mức ứng lương." });
     } catch (error) {
       setMessage({ ok: false, text: error.message || "Không lưu được cấu hình hạn mức ứng lương" });
+    } finally {
+      setPolicySaving(false);
+    }
+  }
+
+  async function saveRequestWindow() {
+    if (!canEdit || policyLoading || policySaving) return;
+    const requestWindowStartDay = Number(limitPolicy.requestWindowStartDay);
+    const requestWindowEndDay = Number(limitPolicy.requestWindowEndDay);
+    if (!Number.isInteger(requestWindowStartDay) || !Number.isInteger(requestWindowEndDay)
+      || requestWindowStartDay < 1 || requestWindowEndDay > 31) {
+      setMessage({ ok: false, text: "Ngày bắt đầu và kết thúc phải là số nguyên từ 1 đến 31." });
+      return;
+    }
+    if (requestWindowStartDay > requestWindowEndDay) {
+      setMessage({ ok: false, text: "Ngày bắt đầu không được lớn hơn ngày kết thúc." });
+      return;
+    }
+    setPolicySaving(true);
+    try {
+      const response = await fetch("/api/salary-advance-requests/policy", {
+        method: "PUT",
+        headers: { ...authHeader, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          limitMode: limitPolicy.limitMode,
+          requestWindowStartDay,
+          requestWindowEndDay,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok || data?.ok === false) throw new Error(data?.message || "Không lưu được khoảng ngày ứng lương");
+      setLimitPolicy(data.data);
+      setMessage({ ok: true, text: data.message || "Đã cập nhật khoảng ngày được phép ứng lương." });
+    } catch (error) {
+      setMessage({ ok: false, text: error.message || "Không lưu được khoảng ngày ứng lương" });
     } finally {
       setPolicySaving(false);
     }
@@ -423,8 +468,8 @@ export default function SalaryAdvanceManager() {
       const rawAmount = window.prompt("Số tiền duyệt:", String(request.requestedAmount || ""));
       if (rawAmount == null) return;
       const approvedAmount = Number(String(rawAmount).replace(/[^\d.-]/g, ""));
-      if (!Number.isFinite(approvedAmount) || approvedAmount < 100000 || approvedAmount > 2600000) {
-        window.alert("Số tiền duyệt phải từ 100.000 đ đến 2.600.000 đ.");
+      if (!Number.isFinite(approvedAmount) || approvedAmount < 100000) {
+        window.alert("Số tiền duyệt tối thiểu là 100.000 đ.");
         return;
       }
       const payrollPeriod = window.prompt("Kỳ lương khấu trừ (YYYY-MM):", request.payrollPeriod || period);
@@ -588,6 +633,46 @@ export default function SalaryAdvanceManager() {
                 <div className="mt-0.5 text-xs font-normal">Thu nhập đã làm, chưa trừ BHXH</div>
               </div>
               {(policyLoading || policySaving) && <Loader2 size={18} className="animate-spin text-emerald-600" />}
+            </div>
+          </div>
+          <div className="mt-4 flex flex-col gap-3 border-t border-emerald-100 pt-4 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <div className="text-sm font-bold text-slate-800">Khoảng ngày được gửi phiếu hằng tháng</div>
+              <p className="mt-0.5 text-xs text-slate-500">Tính theo múi giờ Việt Nam, bao gồm cả ngày bắt đầu và ngày kết thúc.</p>
+            </div>
+            <div className="flex flex-wrap items-end gap-2">
+              <label className="text-xs font-bold text-slate-500">TỪ NGÀY
+                <input
+                  type="number"
+                  min="1"
+                  max="31"
+                  value={limitPolicy.requestWindowStartDay}
+                  onChange={(event) => setLimitPolicy((current) => ({ ...current, requestWindowStartDay: event.target.value }))}
+                  disabled={!canEdit || policyLoading || policySaving}
+                  className="mt-1 block w-24 rounded-xl border bg-white px-3 py-2 text-sm font-semibold outline-none focus:ring-2 focus:ring-emerald-100 disabled:opacity-60"
+                />
+              </label>
+              <label className="text-xs font-bold text-slate-500">ĐẾN NGÀY
+                <input
+                  type="number"
+                  min="1"
+                  max="31"
+                  value={limitPolicy.requestWindowEndDay}
+                  onChange={(event) => setLimitPolicy((current) => ({ ...current, requestWindowEndDay: event.target.value }))}
+                  disabled={!canEdit || policyLoading || policySaving}
+                  className="mt-1 block w-24 rounded-xl border bg-white px-3 py-2 text-sm font-semibold outline-none focus:ring-2 focus:ring-emerald-100 disabled:opacity-60"
+                />
+              </label>
+              {canEdit && (
+                <button
+                  type="button"
+                  onClick={saveRequestWindow}
+                  disabled={policyLoading || policySaving}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-700 disabled:opacity-50"
+                >
+                  {policySaving && <Loader2 size={16} className="animate-spin" />} Lưu khoảng ngày
+                </button>
+              )}
             </div>
           </div>
           {!canEdit && <p className="mt-3 text-xs font-semibold text-slate-500">Bạn chỉ có quyền xem chính sách hiện tại.</p>}
