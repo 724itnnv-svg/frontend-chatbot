@@ -55,7 +55,7 @@ const ADMIN_CONFIRM_FAILURE_LIMIT = 1;
 const ATTENDANCE_TABS = [
   { id: "attendance", label: "Chấm công", Icon: Clock },
   { id: "history", label: "Lịch sử chấm công", Icon: CalendarDays },
-  { id: "leave", label: "Xin nghỉ phép", Icon: FileText },
+  { id: "leave", label: "Đơn xin nghỉ", Icon: FileText },
   { id: "advance", label: "Ứng lương", Icon: HandCoins },
   { id: "kpi", label: "Chấm điểm KPI", Icon: Target },
   { id: "payroll", label: "Lương của tôi", Icon: Wallet },
@@ -90,7 +90,9 @@ const LEAVE_TYPE_LABELS = {
   annual: "Phép năm",
   remote_work: "Làm việc tại nhà",
   business_trip: "Đi công vụ",
+  forgotten_punch: "Quên chấm công",
 };
+const TIMED_REQUEST_TYPES = ["emergency", "remote_work", "business_trip", "forgotten_punch"];
 const LEAVE_SESSION_LABELS = {
   full_day: "Cả ngày",
   morning: "Buổi sáng",
@@ -367,7 +369,7 @@ function requestEvidenceList(request) {
 }
 
 function leaveIntervals(request) {
-  if (["emergency", "remote_work", "business_trip"].includes(request.leaveType)) {
+  if (TIMED_REQUEST_TYPES.includes(request.leaveType)) {
     return [[request.startTime, request.endTime]];
   }
   if (request.leaveType === "annual" || request.session === "full_day") {
@@ -1116,7 +1118,7 @@ export default function AttendancePage() {
   const [advanceLoading, setAdvanceLoading] = useState(false);
   const [advanceSaving, setAdvanceSaving] = useState(false);
   const [deletingAdvanceId, setDeletingAdvanceId] = useState("");
-  const [advanceLimit, setAdvanceLimit] = useState({ limitMode: "salary_ratio", minAmount: 100000, maxAmount: 0, monthlyLimit: 0, estimatedGrossIncome: 0, fullAttendanceDays: 0, canRequest: false, restrictionMessage: "Đang kiểm tra điều kiện ứng lương..." });
+  const [advanceLimit, setAdvanceLimit] = useState({ limitMode: "salary_ratio", minAmount: 100000, maxAmount: 0, monthlyLimit: 0, actualGrossIncome: 0, canRequest: false, restrictionMessage: "Đang kiểm tra điều kiện ứng lương..." });
   const [advanceLimitLoading, setAdvanceLimitLoading] = useState(false);
   const [approvalNotifications, setApprovalNotifications] = useState([]);
   const [notificationHistory, setNotificationHistory] = useState([]);
@@ -1487,9 +1489,9 @@ export default function AttendancePage() {
     setAdvanceLimitLoading(true);
     try {
       const res = await api.get(`/salary-advance-requests/my-limit?period=${encodeURIComponent(period)}`);
-      setAdvanceLimit(res.data?.data || { limitMode: "salary_ratio", minAmount: 100000, maxAmount: 0, monthlyLimit: 0, estimatedGrossIncome: 0, fullAttendanceDays: 0, canRequest: false, restrictionMessage: "Không xác định được điều kiện ứng lương." });
+      setAdvanceLimit(res.data?.data || { limitMode: "salary_ratio", minAmount: 100000, maxAmount: 0, monthlyLimit: 0, actualGrossIncome: 0, canRequest: false, restrictionMessage: "Không xác định được điều kiện ứng lương." });
     } catch (err) {
-      setAdvanceLimit({ limitMode: "salary_ratio", minAmount: 100000, maxAmount: 0, monthlyLimit: 0, estimatedGrossIncome: 0, fullAttendanceDays: 0, canRequest: false, restrictionMessage: err.response?.data?.message || "Không thể kiểm tra điều kiện ứng lương. Vui lòng thử lại." });
+      setAdvanceLimit({ limitMode: "salary_ratio", minAmount: 100000, maxAmount: 0, monthlyLimit: 0, actualGrossIncome: 0, canRequest: false, restrictionMessage: err.response?.data?.message || "Không thể kiểm tra điều kiện ứng lương. Vui lòng thử lại." });
     } finally {
       setAdvanceLimitLoading(false);
     }
@@ -1763,7 +1765,7 @@ export default function AttendancePage() {
   const historyMonthDates = useMemo(() => monthDateKeys(historyPeriod), [historyPeriod]);
   const approvedLeavesByDate = useMemo(() => {
     const map = new Map();
-    leaveRequests.filter((request) => request.status === "approved" || request.status === "cancel_pending").forEach((request) => {
+    leaveRequests.filter((request) => request.leaveType !== "forgotten_punch" && (request.status === "approved" || request.status === "cancel_pending")).forEach((request) => {
       const dates = request.approvedDates?.length ? request.approvedDates : countedLeaveDateKeys(request.startDate, request.endDate);
       dates.forEach((date) => map.set(date, request));
     });
@@ -1849,16 +1851,19 @@ export default function AttendancePage() {
     event.preventDefault();
     if (!leaveForm.startDate || !leaveForm.endDate) return showMsg(false, "Vui lòng chọn thời gian nghỉ.");
     if (leaveForm.endDate < leaveForm.startDate) return showMsg(false, "Ngày kết thúc phải từ ngày bắt đầu trở đi.");
-    if (["emergency", "remote_work", "business_trip"].includes(leaveForm.leaveType) && (!leaveForm.startTime || !leaveForm.endTime || leaveForm.endTime <= leaveForm.startTime)) {
+    if (TIMED_REQUEST_TYPES.includes(leaveForm.leaveType) && (!leaveForm.startTime || !leaveForm.endTime || leaveForm.endTime <= leaveForm.startTime)) {
       return showMsg(false, "Giờ bắt đầu và kết thúc không hợp lệ.");
     }
-    if (["emergency", "remote_work", "business_trip"].includes(leaveForm.leaveType) && (leaveForm.startTime < "07:30" || leaveForm.endTime > "17:00")) {
+    if (TIMED_REQUEST_TYPES.includes(leaveForm.leaveType) && (leaveForm.startTime < "07:30" || leaveForm.endTime > "17:00")) {
       return showMsg(false, "Khung giờ đăng ký phải nằm trong giờ làm việc 07:30-17:00.");
     }
-    if (["emergency", "remote_work", "business_trip"].includes(leaveForm.leaveType) && leaveForm.startTime >= "11:30" && leaveForm.endTime <= "13:00") {
+    if (TIMED_REQUEST_TYPES.includes(leaveForm.leaveType) && leaveForm.startTime >= "11:30" && leaveForm.endTime <= "13:00") {
       return showMsg(false, "Khoảng đăng ký không được chỉ nằm trong giờ nghỉ trưa 11:30-13:00.");
     }
-    if (!leaveForm.reason.trim()) return showMsg(false, "Vui lòng nhập lý do xin nghỉ.");
+    if (leaveForm.leaveType === "forgotten_punch" && leaveForm.startDate > todayKey()) {
+      return showMsg(false, "Quên chấm công chỉ áp dụng cho hôm nay hoặc ngày đã qua.");
+    }
+    if (!leaveForm.reason.trim()) return showMsg(false, "Vui lòng nhập lý do gửi đơn.");
     if (leaveForm.leaveType === "business_trip" && leaveForm.evidences.length === 0) return showMsg(false, "Vui lòng chọn ít nhất một ảnh minh chứng đi công vụ.");
 
     const overlappingRequest = leaveRequests.find((request) =>
@@ -1899,7 +1904,7 @@ export default function AttendancePage() {
       setLeaveForm(createLeaveForm());
       await loadLeaveRequests();
     } catch (err) {
-      showMsg(false, err.response?.data?.message || "Không thể gửi đơn xin nghỉ phép.");
+      showMsg(false, err.response?.data?.message || "Không thể gửi đơn.");
     } finally {
       setLeaveSaving(false);
     }
@@ -2700,8 +2705,8 @@ export default function AttendancePage() {
                 {todayRecord?.workHours != null && (
                   <div className="mb-3 rounded-xl border border-emerald-100 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700">
                     Tổng công hôm nay: {todayRecord.workHours}h
-                    {(Number(todayRecord.remoteWorkHours || 0) > 0 || Number(todayRecord.businessTripHours || 0) > 0) && (
-                      <span className="ml-2 text-sky-700">Tại công ty: {todayRecord.onsiteWorkHours}h{Number(todayRecord.remoteWorkHours || 0) > 0 ? ` · WFH: ${todayRecord.remoteWorkHours}h` : ""}{Number(todayRecord.businessTripHours || 0) > 0 ? ` · Công vụ: ${todayRecord.businessTripHours}h` : ""}</span>
+                    {(Number(todayRecord.remoteWorkHours || 0) > 0 || Number(todayRecord.businessTripHours || 0) > 0 || Number(todayRecord.correctionWorkHours || 0) > 0) && (
+                      <span className="ml-2 text-sky-700">Tại công ty: {todayRecord.onsiteWorkHours}h{Number(todayRecord.remoteWorkHours || 0) > 0 ? ` · WFH: ${todayRecord.remoteWorkHours}h` : ""}{Number(todayRecord.businessTripHours || 0) > 0 ? ` · Công vụ: ${todayRecord.businessTripHours}h` : ""}{Number(todayRecord.correctionWorkHours || 0) > 0 ? ` · Bổ sung: ${todayRecord.correctionWorkHours}h` : ""}</span>
                     )}
                     {Number(todayRecord.overtimeMinutes || 0) > 0 && <span className="ml-2 text-violet-700">Tăng ca: {todayRecord.overtimeMinutes} phút</span>}
                   </div>
@@ -2920,8 +2925,8 @@ export default function AttendancePage() {
                             {record.workHours != null && (
                               <div className="mt-2 flex items-center gap-2">
                                 <span className="text-xs font-semibold text-emerald-700">Tổng: {record.workHours}h</span>
-                                {(Number(record.remoteWorkHours || 0) > 0 || Number(record.businessTripHours || 0) > 0) && (
-                                  <span className="text-xs font-semibold text-sky-700">Tại công ty {record.onsiteWorkHours}h{Number(record.remoteWorkHours || 0) > 0 ? ` + WFH ${record.remoteWorkHours}h` : ""}{Number(record.businessTripHours || 0) > 0 ? ` + Công vụ ${record.businessTripHours}h` : ""}</span>
+                                {(Number(record.remoteWorkHours || 0) > 0 || Number(record.businessTripHours || 0) > 0 || Number(record.correctionWorkHours || 0) > 0) && (
+                                  <span className="text-xs font-semibold text-sky-700">Tại công ty {record.onsiteWorkHours}h{Number(record.remoteWorkHours || 0) > 0 ? ` + WFH ${record.remoteWorkHours}h` : ""}{Number(record.businessTripHours || 0) > 0 ? ` + Công vụ ${record.businessTripHours}h` : ""}{Number(record.correctionWorkHours || 0) > 0 ? ` + Bổ sung ${record.correctionWorkHours}h` : ""}</span>
                                 )}
                                 {Number(record.overtimeMinutes || 0) > 0 && (
                                   <span className="text-xs font-semibold text-violet-700">Tăng ca: {record.overtimeMinutes}p</span>
@@ -2965,8 +2970,8 @@ export default function AttendancePage() {
                     <FileText size={22} />
                   </span>
                   <div>
-                    <h2 className="font-bold text-slate-900">Tạo đơn xin nghỉ phép</h2>
-                    <p className="text-xs text-slate-500">Có thể đăng ký trước cho ngày nghỉ trong tương lai. <span className="font-semibold text-rose-500">* Bắt buộc</span></p>
+                    <h2 className="font-bold text-slate-900">Tạo đơn</h2>
+                    <p className="text-xs text-slate-500">Gửi đơn nghỉ phép, công tác hoặc bổ sung chấm công. <span className="font-semibold text-rose-500">* Bắt buộc</span></p>
                   </div>
                 </div>
 
@@ -2987,7 +2992,7 @@ export default function AttendancePage() {
 
                 <div className="space-y-3">
                   <label className="block text-xs font-semibold text-slate-600">
-                    LOẠI NGHỈ <span className="text-rose-500">*</span>
+                    LOẠI ĐƠN <span className="text-rose-500">*</span>
                     <select
                       value={leaveForm.leaveType}
                       onChange={(event) => setLeaveForm((current) => {
@@ -2995,8 +3000,9 @@ export default function AttendancePage() {
                         return {
                           ...current,
                           leaveType,
-                          endDate: ["emergency", "remote_work", "business_trip"].includes(leaveType) ? current.startDate : current.endDate,
-                          session: ["annual", "emergency", "remote_work", "business_trip"].includes(leaveType) ? "full_day" : current.session,
+                          startDate: leaveType === "forgotten_punch" && current.startDate > todayKey() ? todayKey() : current.startDate,
+                          endDate: TIMED_REQUEST_TYPES.includes(leaveType) ? (leaveType === "forgotten_punch" && current.startDate > todayKey() ? todayKey() : current.startDate) : current.endDate,
+                          session: ["annual", ...TIMED_REQUEST_TYPES].includes(leaveType) ? "full_day" : current.session,
                           evidences: leaveType === "remote_work" ? [] : current.evidences,
                         };
                       })}
@@ -3007,15 +3013,16 @@ export default function AttendancePage() {
                       <option value="annual">Phép năm</option>
                       <option value="remote_work">Làm việc tại nhà</option>
                       <option value="business_trip">Đi công vụ</option>
+                      <option value="forgotten_punch">Quên chấm công</option>
                     </select>
                   </label>
 
-                  <div className={`grid gap-3 ${["emergency", "remote_work", "business_trip"].includes(leaveForm.leaveType) ? "grid-cols-1" : "grid-cols-2"}`}>
+                  <div className={`grid gap-3 ${TIMED_REQUEST_TYPES.includes(leaveForm.leaveType) ? "grid-cols-1" : "grid-cols-2"}`}>
                     <label className="block text-xs font-semibold text-slate-600">
                       TỪ NGÀY <span className="text-rose-500">*</span>
-                      <input type="date" required value={leaveForm.startDate} onChange={(event) => setLeaveForm((current) => ({ ...current, startDate: event.target.value, endDate: ["emergency", "remote_work", "business_trip"].includes(current.leaveType) || current.endDate < event.target.value ? event.target.value : current.endDate }))} className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-violet-400" />
+                      <input type="date" required max={leaveForm.leaveType === "forgotten_punch" ? todayKey() : undefined} value={leaveForm.startDate} onChange={(event) => setLeaveForm((current) => ({ ...current, startDate: event.target.value, endDate: TIMED_REQUEST_TYPES.includes(current.leaveType) || current.endDate < event.target.value ? event.target.value : current.endDate }))} className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-violet-400" />
                     </label>
-                    {!["emergency", "remote_work", "business_trip"].includes(leaveForm.leaveType) && (
+                    {!TIMED_REQUEST_TYPES.includes(leaveForm.leaveType) && (
                       <label className="block text-xs font-semibold text-slate-600">
                         ĐẾN NGÀY <span className="text-rose-500">*</span>
                         <input type="date" required min={leaveForm.startDate} value={leaveForm.endDate} onChange={(event) => setLeaveForm((current) => ({ ...current, endDate: event.target.value }))} className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-violet-400" />
@@ -3023,11 +3030,11 @@ export default function AttendancePage() {
                     )}
                   </div>
 
-                  {["emergency", "remote_work", "business_trip"].includes(leaveForm.leaveType) ? (
+                  {TIMED_REQUEST_TYPES.includes(leaveForm.leaveType) ? (
                     <div className="grid grid-cols-2 gap-3">
                       <label className="block text-xs font-semibold text-slate-600">TỪ GIỜ <span className="text-rose-500">*</span><input type="time" min="07:30" max="17:00" required value={leaveForm.startTime} onChange={(event) => setLeaveForm((current) => ({ ...current, startTime: event.target.value }))} className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-violet-400" /></label>
                       <label className="block text-xs font-semibold text-slate-600">ĐẾN GIỜ <span className="text-rose-500">*</span><input type="time" min="07:30" max="17:00" required value={leaveForm.endTime} onChange={(event) => setLeaveForm((current) => ({ ...current, endTime: event.target.value }))} className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-violet-400" /></label>
-                      <p className="col-span-2 text-xs text-slate-400">{["remote_work", "business_trip"].includes(leaveForm.leaveType) ? "Thời gian được duyệt sẽ cộng vào giờ làm trong bảng chấm công; tự động loại giờ nghỉ trưa 11:30–13:00." : "Chỉ tính thời gian trong giờ làm việc; tự động loại giờ nghỉ trưa 11:30–13:00."}</p>
+                      <p className="col-span-2 text-xs text-slate-400">{["remote_work", "business_trip", "forgotten_punch"].includes(leaveForm.leaveType) ? "Thời gian chưa được ghi nhận sau khi duyệt sẽ cộng vào bảng công; tự động loại giờ nghỉ trưa 11:30–13:00 và không cộng trùng giờ đã chấm." : "Chỉ tính thời gian trong giờ làm việc; tự động loại giờ nghỉ trưa 11:30–13:00."}</p>
                     </div>
                   ) : leaveForm.leaveType === "annual" ? (
                     <div className={`rounded-xl border p-3 text-xs ${TONE.emerald}`}><b>Điều kiện tự duyệt phép năm</b><span className="mt-1 block">Báo trước: 1 ngày ≥ 3 ngày, 2 ngày ≥ 7 ngày, từ 3 ngày ≥ 15 ngày. Chủ nhật không tính ngày nghỉ.</span></div>
@@ -3051,10 +3058,12 @@ export default function AttendancePage() {
                     <input type="file" multiple accept="image/jpeg,image/png,image/webp,image/gif" className="hidden" onChange={(event) => selectLeaveEvidences(event.target.files)} />
                     <span className="flex items-center gap-2 text-sm font-semibold text-slate-600"><ImagePlus size={17} className="text-violet-500" /> {leaveForm.evidences.length > 0 ? `Đã chọn ${leaveForm.evidences.length} ảnh` : "Chọn ảnh minh chứng"}</span>
                     {leaveForm.evidences.length > 0 && <span className="mt-1 block truncate text-xs text-slate-500">{leaveForm.evidences.map((file) => file.name).join(", ")}</span>}
-                    <span className="mt-1 block text-xs text-slate-400">Tối đa 3 ảnh, mỗi ảnh 8 MB. {leaveForm.leaveType === "business_trip" ? "Bắt buộc với đơn đi công vụ." : "Bắt buộc với off đột xuất; có thể bổ sung sau khi gửi đơn."}</span>
+                    <span className="mt-1 block text-xs text-slate-400">Tối đa 3 ảnh, mỗi ảnh 8 MB. {leaveForm.leaveType === "business_trip" ? "Bắt buộc với đơn đi công vụ." : leaveForm.leaveType === "forgotten_punch" ? "Không bắt buộc, dùng để quản trị đối chiếu khi cần." : "Bắt buộc với off đột xuất; có thể bổ sung sau khi gửi đơn."}</span>
                   </label>}
 
                   {leaveForm.leaveType === "remote_work" && <div className={`rounded-xl border p-3 text-xs ${TONE.sky}`}><b>Không cần ảnh minh chứng.</b><span className="mt-1 block">Sau khi được duyệt, khung giờ này được tính là giờ làm việc bình thường trong bảng chấm công.</span></div>}
+
+                  {leaveForm.leaveType === "forgotten_punch" && <div className={`rounded-xl border p-3 text-xs ${TONE.sky}`}><b>Bổ sung giờ công, không tạo dấu chấm GPS giả.</b><span className="mt-1 block">Chỉ phần thời gian còn thiếu được cộng sau khi quản trị duyệt; không tự tính tăng ca.</span></div>}
 
                   {leaveForm.leaveType === "business_trip" && leaveForm.evidences.length === 0 && <div className={`flex gap-2 rounded-xl border p-3 text-xs ${TONE.amber}`}><AlertCircle size={15} className="mt-0.5 shrink-0" />Đơn đi công vụ phải có ít nhất một ảnh minh chứng trước khi gửi.</div>}
 
@@ -3084,7 +3093,7 @@ export default function AttendancePage() {
                 {leaveLoading ? (
                   <div className="flex justify-center py-12"><Loader2 size={22} className="animate-spin text-slate-400" /></div>
                 ) : leaveRequests.length === 0 ? (
-                  <div className="px-5 py-12 text-center text-sm text-slate-400">Bạn chưa gửi đơn xin nghỉ phép nào.</div>
+                  <div className="px-5 py-12 text-center text-sm text-slate-400">Bạn chưa gửi đơn nào.</div>
                 ) : (
                   <div className="divide-y divide-slate-100">
                     {leaveRequests.map((request) => {
@@ -3096,14 +3105,14 @@ export default function AttendancePage() {
                           <div className="flex flex-wrap items-start justify-between gap-2">
                             <div>
                               <p className="text-sm font-bold text-slate-800">{LEAVE_TYPE_LABELS[request.leaveType] || request.leaveType}</p>
-                              <p className="mt-0.5 text-xs text-slate-500">{fmtShortDate(request.startDate)}{request.endDate !== request.startDate ? ` – ${fmtShortDate(request.endDate)}` : ""} · {["emergency", "remote_work", "business_trip"].includes(request.leaveType) ? `${request.startTime || "-"}–${request.endTime || "-"}` : LEAVE_SESSION_LABELS[request.session]}</p>
+                              <p className="mt-0.5 text-xs text-slate-500">{fmtShortDate(request.startDate)}{request.endDate !== request.startDate ? ` – ${fmtShortDate(request.endDate)}` : ""} · {TIMED_REQUEST_TYPES.includes(request.leaveType) ? `${request.startTime || "-"}–${request.endTime || "-"}` : LEAVE_SESSION_LABELS[request.session]}</p>
                             </div>
                             <Badge tone={status.tone}>{status.text}</Badge>
                           </div>
                           <p className="mt-2 whitespace-pre-wrap text-sm text-slate-600">{request.reason}</p>
                           {request.convertedFromAnnual && <p className="mt-1 text-xs font-semibold text-amber-700">Đơn này đã được chuyển sang phép thường không lương do không đủ phép năm.</p>}
                           {request.autoApproved && <p className="mt-1 text-xs font-semibold text-violet-700">Đã được hệ thống tự động duyệt.</p>}
-                          {(request.status === "approved" || request.status === "cancel_pending") && <p className="mt-1 text-xs font-semibold text-emerald-700">Đã duyệt: {request.leaveType === "remote_work" ? `${Number(request.approvedMinutes || 0)} phút làm việc tại nhà` : request.leaveType === "business_trip" ? `${Number(request.approvedMinutes || 0)} phút đi công vụ` : request.leaveType === "emergency" ? `${Number(request.approvedMinutes || 0)} phút nghỉ` : `${Number(request.approvedDays || 0)} ngày nghỉ`}</p>}
+                          {(request.status === "approved" || request.status === "cancel_pending") && <p className="mt-1 text-xs font-semibold text-emerald-700">Đã duyệt: {request.leaveType === "remote_work" ? `${Number(request.approvedMinutes || 0)} phút làm việc tại nhà` : request.leaveType === "business_trip" ? `${Number(request.approvedMinutes || 0)} phút đi công vụ` : request.leaveType === "forgotten_punch" ? `${Number(request.creditedMinutes ?? request.approvedMinutes ?? 0)} phút bổ sung chấm công` : request.leaveType === "emergency" ? `${Number(request.approvedMinutes || 0)} phút nghỉ` : `${Number(request.approvedDays || 0)} ngày nghỉ`}</p>}
                           {request.cancellationReason && <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700"><strong>Lý do yêu cầu hủy:</strong> {request.cancellationReason}</p>}
                           {request.cancellationReviewNote && <p className="mt-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600"><strong>Phản hồi hủy đơn:</strong> {request.cancellationReviewNote}</p>}
                           {request.reviewNote && <p className={`mt-2 rounded-lg border px-3 py-2 text-xs ${request.status === "rejected" ? TONE.rose : TONE.slate}`}><strong>Phản hồi quản trị:</strong> {request.reviewNote}</p>}
@@ -3147,7 +3156,7 @@ export default function AttendancePage() {
                   <span className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600"><HandCoins size={22} /></span>
                   <div>
                     <h2 className="font-bold text-slate-900">Tạo phiếu ứng lương</h2>
-                    <p className="text-xs text-slate-500">Chỉ gửi từ ngày 01–20; {usesSalaryRatioLimit ? "tổng các phiếu trong tháng không vượt quá 50% tổng thu nhập tạm tính từ ngày 01–20, giả định đủ ngày công chuẩn." : "tổng các phiếu trong tháng không vượt quá 2.600.000 đ."}</p>
+                    <p className="text-xs text-slate-500">Chỉ gửi trong ngày 19 hằng tháng; {usesSalaryRatioLimit ? "tổng các phiếu trong tháng không vượt quá 50% tổng thu nhập thực tế đã làm, chưa trừ BHXH." : "tổng các phiếu trong tháng không vượt quá 2.600.000 đ."}</p>
                   </div>
                 </div>
                 <div className="space-y-3">
@@ -3157,7 +3166,7 @@ export default function AttendancePage() {
                   {Number(advanceForm.requestedAmount) > 0 && <p className="-mt-1 text-sm font-bold text-emerald-700">{money(advanceForm.requestedAmount)}</p>}
                   <div className={`rounded-xl border px-3 py-2 text-xs ${TONE.emerald}`}>
                     {advanceLimitLoading ? "Đang tải hạn mức ứng lương..." : usesSalaryRatioLimit
-                      ? <>Tổng thu nhập tạm tính 01–20 ({toNumber(advanceLimit.fullAttendanceDays)} ngày công chuẩn): <strong>{money(advanceLimit.estimatedGrossIncome ?? 0)}</strong>. Hạn mức 50%: <strong>{money(advanceLimit.monthlyLimit ?? 0)}</strong>. Đã tính trong tháng: <strong>{money(advanceLimit.usedAmount ?? 0)}</strong>. Còn có thể ứng: <strong>{money(advanceLimit.remainingAmount ?? advanceLimit.maxAmount ?? 0)}</strong>.</>
+                      ? <>Tổng thu nhập thực tế đã làm, chưa trừ BHXH: <strong>{money(advanceLimit.actualGrossIncome ?? 0)}</strong>. Hạn mức 50%: <strong>{money(advanceLimit.monthlyLimit ?? 0)}</strong>. Đã tính trong tháng: <strong>{money(advanceLimit.usedAmount ?? 0)}</strong>. Còn có thể ứng: <strong>{money(advanceLimit.remainingAmount ?? advanceLimit.maxAmount ?? 0)}</strong>.</>
                       : <>Hạn mức cố định: <strong>{money(advanceLimit.monthlyLimit ?? 2600000)}</strong>. Đã tính trong tháng: <strong>{money(advanceLimit.usedAmount ?? 0)}</strong>. Còn có thể ứng: <strong>{money(advanceLimit.remainingAmount ?? advanceLimit.maxAmount ?? 0)}</strong>.</>}
                   </div>
                   {!advanceLimitLoading && advanceRestrictionMessage && <div className={`rounded-xl border px-3 py-2 text-xs font-semibold ${TONE.amber}`}>{advanceRestrictionMessage}</div>}

@@ -245,8 +245,10 @@ const LUONG_DANG_AP_DUNG_KEYS = [
 const LUONG_DANG_AP_DUNG_KEY_SET = new Set(LUONG_DANG_AP_DUNG_KEYS);
 const OLD_KPI_BONUS_EXPRESSION =
   "iff(thuNhapTheoNgayCong.diemKPI > 0, iff(thuNhapTheoNgayCong.diemKPI <= 100, dataTinhLuong.luongCoBan * settings.tyLeKPINhoHonBang100, dataTinhLuong.luongCoBan * settings.tyLeKPILonHon100), thuNhapTheoNgayCong.thuongKPI)";
-const KPI_BONUS_EXPRESSION =
+const PREVIOUS_KPI_BONUS_EXPRESSION =
   "iff(thuNhapTheoNgayCong.diemKPI > 0, iff(thuNhapTheoNgayCong.diemKPI <= 100, dataTinhLuong.luongCoBan * settings.tyLeKPINhoHonBang100, dataTinhLuong.luongCoBan * settings.tyLeKPILonHon100), 0)";
+const KPI_BONUS_EXPRESSION =
+  "iff(thuNhapTheoNgayCong.diemKPI > 100, dataTinhLuong.luongCoBan * settings.tyLeKPILonHon100, iff(thuNhapTheoNgayCong.diemKPI === 100, dataTinhLuong.luongCoBan * settings.tyLeKPINhoHonBang100, 0))";
 const OLD_BHXH_EXPRESSION = "dataTinhLuong.mucDongBHXH * settings.tyLeBHXH";
 const BHXH_EXPRESSION = "iff(khauTru.apDungBHXH, dataTinhLuong.mucDongBHXH * settings.tyLeBHXH, 0)";
 const OLD_UNION_EXPRESSION = "iff(eqText(congTyDongBHXH, \"NNV\"), dataTinhLuong.luongCoBan * settings.tyLeCongDoanNNV, 0)";
@@ -356,7 +358,7 @@ const DEFAULT_PAYROLL_FORMULA_SETTINGS = {
       target: "thuNhapTheoNgayCong.thuongKPI",
       enabled: true,
       expression: KPI_BONUS_EXPRESSION,
-      note: "KPI = 0 thuong 0; KPI <= 100 thuong 6%, > 100 thuong 12%",
+      note: "KPI < 100 thuong 0; KPI = 100 thuong 6%; KPI > 100 thuong 12%",
     },
     {
       target: "thuNhapTheoNgayCong.tongThuNhap",
@@ -504,17 +506,17 @@ function mergeFormulaSettings(value) {
       const savedFormula = savedByTarget.get(formula.target) || {};
       const migratedFormula =
         formula.target === "thuNhapTheoNgayCong.thuongKPI" &&
-          savedFormula.expression === OLD_KPI_BONUS_EXPRESSION
+          [OLD_KPI_BONUS_EXPRESSION, PREVIOUS_KPI_BONUS_EXPRESSION].includes(savedFormula.expression)
           ? { ...savedFormula, expression: KPI_BONUS_EXPRESSION }
           : formula.target === "thuNhapTheoNgayCong.tongThuNhap" && savedFormula.expression === OLD_TOTAL_INCOME_EXPRESSION
             ? { ...savedFormula, expression: TOTAL_INCOME_EXPRESSION }
-          : formula.target === "khauTru.bhxh" && savedFormula.expression === OLD_BHXH_EXPRESSION
-            ? { ...savedFormula, expression: BHXH_EXPRESSION }
-            : formula.target === "khauTru.congDoan" && savedFormula.expression === OLD_UNION_EXPRESSION
-              ? { ...savedFormula, expression: UNION_EXPRESSION }
-              : formula.target === "tinhThueTNCN.tongThuNhapChiuThue" && savedFormula.expression === OLD_TAXABLE_INCOME_EXPRESSION
-                ? { ...savedFormula, expression: TAXABLE_INCOME_EXPRESSION }
-                : savedFormula;
+            : formula.target === "khauTru.bhxh" && savedFormula.expression === OLD_BHXH_EXPRESSION
+              ? { ...savedFormula, expression: BHXH_EXPRESSION }
+              : formula.target === "khauTru.congDoan" && savedFormula.expression === OLD_UNION_EXPRESSION
+                ? { ...savedFormula, expression: UNION_EXPRESSION }
+                : formula.target === "tinhThueTNCN.tongThuNhapChiuThue" && savedFormula.expression === OLD_TAXABLE_INCOME_EXPRESSION
+                  ? { ...savedFormula, expression: TAXABLE_INCOME_EXPRESSION }
+                  : savedFormula;
       return {
         ...formula,
         ...migratedFormula,
