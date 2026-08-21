@@ -417,7 +417,13 @@ function formatRoleLabel(user) {
 }
 
 const Sidebar = memo(() => {
-  const { api, logout, user } = useAuth();
+  const {
+    api,
+    attendanceLeavePendingTotal,
+    logout,
+    refreshAttendanceLeavePendingTotal,
+    user,
+  } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -427,8 +433,6 @@ const Sidebar = memo(() => {
   );
   const [focusedIndex, setFocusedIndex] = useState(-1);
   const [openGroups, setOpenGroups] = useState({});
-  const [attendanceLeavePendingTotal, setAttendanceLeavePendingTotal] =
-    useState(0);
   const [salaryAdvancePendingTotal, setSalaryAdvancePendingTotal] = useState(0);
   const [onlineUsers, setOnlineUsers] = useState([]);
   const [isPresenceConnected, setIsPresenceConnected] = useState(false);
@@ -494,23 +498,16 @@ const Sidebar = memo(() => {
   }, [canViewOnlineUsers, presenceUserId]);
 
   const loadAttendanceLeavePendingTotal = useCallback(async () => {
-    if (!canViewAttendance) {
-      setAttendanceLeavePendingTotal(0);
-      return;
-    }
+    if (!canViewAttendance) return;
     try {
-      const response = await api.get(
-        "/attendance-leave-requests/pending-count",
-      );
-      setAttendanceLeavePendingTotal(Number(response.data?.total) || 0);
+      await refreshAttendanceLeavePendingTotal();
     } catch {
       // Bộ đếm nền không làm gián đoạn điều hướng sidebar.
     }
-  }, [api, canViewAttendance]);
+  }, [canViewAttendance, refreshAttendanceLeavePendingTotal]);
 
   useEffect(() => {
     if (!canViewAttendance) {
-      setAttendanceLeavePendingTotal(0);
       return undefined;
     }
 
@@ -523,11 +520,9 @@ const Sidebar = memo(() => {
       loadAttendanceLeavePendingTotal,
       30000,
     );
-    window.addEventListener("focus", loadAttendanceLeavePendingTotal);
     document.addEventListener("visibilitychange", refreshWhenVisible);
     return () => {
       window.clearInterval(intervalId);
-      window.removeEventListener("focus", loadAttendanceLeavePendingTotal);
       document.removeEventListener("visibilitychange", refreshWhenVisible);
     };
   }, [canViewAttendance, loadAttendanceLeavePendingTotal]);

@@ -688,7 +688,13 @@ function Badge({ tone = "slate", children, icon: Icon }) {
 }
 
 export default function AttendanceManager() {
-  const { api, token, user } = useAuth();
+  const {
+    api,
+    attendanceLeavePendingTotal: leavePendingTotal,
+    refreshAttendanceLeavePendingTotal,
+    token,
+    user,
+  } = useAuth();
   const isAttendanceAdmin = String(user?.role || "").toLowerCase() === "superadmin" || Number(user?.allpage) === 1;
   const attendanceActions = user?.action?.attendance || {};
   const canCreateAttendance = isAttendanceAdmin || attendanceActions.create === true;
@@ -746,7 +752,6 @@ export default function AttendanceManager() {
   const [leaveRequests, setLeaveRequests] = useState([]);
   const [leaveLoading, setLeaveLoading] = useState(false);
   const [leaveTotal, setLeaveTotal] = useState(0);
-  const [leavePendingTotal, setLeavePendingTotal] = useState(0);
   const [leavePage, setLeavePage] = useState(1);
   const [leaveStatusFilter, setLeaveStatusFilter] = useState("pending");
   const [leaveFrom, setLeaveFrom] = useState("");
@@ -1042,15 +1047,6 @@ export default function AttendanceManager() {
     }
   }, [api, leaveFrom, leaveStatusFilter, leaveTo, searchUser, teamFilter]);
 
-  const loadLeavePendingCount = useCallback(async () => {
-    try {
-      const res = await api.get("/attendance-leave-requests/pending-count");
-      setLeavePendingTotal(Number(res.data?.total || 0));
-    } catch {
-      // Giữ im lặng khi bộ đếm nền lỗi; tab vẫn hiển thị lỗi tải thông thường.
-    }
-  }, [api]);
-
   const loadAutoSettings = useCallback(async () => {
     setAutoLoading(true);
     try {
@@ -1206,17 +1202,14 @@ export default function AttendanceManager() {
 
   useEffect(() => {
     loadPendingCount();
-    loadLeavePendingCount();
 
     const refreshWhenVisible = () => {
       if (document.visibilityState === "visible") {
         loadPendingCount();
-        loadLeavePendingCount();
       }
     };
     const refreshCounts = () => {
       loadPendingCount();
-      loadLeavePendingCount();
     };
     const intervalId = window.setInterval(refreshCounts, 30000);
     window.addEventListener("focus", refreshCounts);
@@ -1227,11 +1220,10 @@ export default function AttendanceManager() {
       window.removeEventListener("focus", refreshCounts);
       document.removeEventListener("visibilitychange", refreshWhenVisible);
     };
-  }, [loadLeavePendingCount, loadPendingCount]);
+  }, [loadPendingCount]);
 
   realtimeRefreshRef.current = {
     leavePage,
-    loadLeavePendingCount,
     loadLeaveRequests,
     loadOverview,
     loadPending,
@@ -1258,22 +1250,25 @@ export default function AttendanceManager() {
     let refreshTimer = null;
     const connectTimer = window.setTimeout(() => socket.connect(), 0);
 
-    const refreshAttendance = () => {
+    const refreshAttendance = (payload = {}) => {
       window.clearTimeout(refreshTimer);
       refreshTimer = window.setTimeout(() => {
         const refresh = realtimeRefreshRef.current;
         refresh?.loadPendingCount();
-        refresh?.loadLeavePendingCount();
+        if (payload.entity === "leave-request") {
+          void refreshAttendanceLeavePendingTotal().catch(() => {});
+        }
         if (refresh?.tab === "overview") refresh.loadOverview();
         if (refresh?.tab === "pending") refresh.loadPending(refresh.pendingPage);
-        if (refresh?.tab === "leave") refresh.loadLeaveRequests(refresh.leavePage);
+        if (payload.entity === "leave-request" && refresh?.tab === "leave") {
+          refresh.loadLeaveRequests(refresh.leavePage);
+        }
       }, 200);
     };
 
     const loadRealtimeCounts = () => {
       const refresh = realtimeRefreshRef.current;
       refresh?.loadPendingCount();
-      refresh?.loadLeavePendingCount();
     };
     socket.on("connect", loadRealtimeCounts);
     socket.on("attendance:changed", refreshAttendance);
@@ -1285,7 +1280,7 @@ export default function AttendanceManager() {
       socket.off("attendance:changed", refreshAttendance);
       socket.disconnect();
     };
-  }, [token]);
+  }, [refreshAttendanceLeavePendingTotal, token]);
 
   useEffect(() => {
     if (tab === "overview") {
@@ -1316,7 +1311,7 @@ export default function AttendanceManager() {
     if (tab === "list") await loadList(listPage);
     if (tab === "pending") await loadPending(pendingListPage);
     if (tab === "auto") await loadAutoSettings();
-    if (tab === "leave") await Promise.all([loadLeaveRequests(leavePage), loadLeavePendingCount()]);
+    if (tab === "leave") await loadLeaveRequests(leavePage);
     if (tab === "report") await loadReport();
   }
 
@@ -1350,7 +1345,10 @@ export default function AttendanceManager() {
         approveWithoutEvidence,
       });
       showFlash(true, res.data?.message || `Đã ${verb} đơn nghỉ phép.`);
-      await Promise.all([loadLeaveRequests(leavePage), loadLeavePendingCount()]);
+      await Promise.all([
+        loadLeaveRequests(leavePage),
+        refreshAttendanceLeavePendingTotal({ force: true }).catch(() => null),
+      ]);
     } catch (err) {
       showFlash(false, err.response?.data?.message || "Không thể xử lý đơn nghỉ phép.");
     } finally {
