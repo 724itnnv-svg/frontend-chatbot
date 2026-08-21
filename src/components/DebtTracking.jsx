@@ -47,7 +47,7 @@ const DEBT_SNAPSHOT_STORAGE_PREFIX = "debt_tracking_snapshot_";
 const DEBT_CHANGES_STORAGE_PREFIX = "debt_tracking_changes_";
 const INVOICE_AGING_CACHE_PREFIX = "debt_tracking_invoice_aging_";
 const INVOICE_AGING_CACHE_TTL_MS = 25 * 60 * 1000;
-const INVOICE_AGING_CACHE_VERSION = 1;
+const INVOICE_AGING_CACHE_VERSION = 2;
 
 const filterCustomersByRetailer = (retailer, customers) => {
   if (retailer !== "nnvtv") return customers;
@@ -510,7 +510,6 @@ export default function DebtTracking() {
           const loadedInvoiceAging = customersMissingInvoiceCache.length
             ? await getCustomerInvoiceDebtAging(
                 retailer,
-                privateToken,
                 customersMissingInvoiceCache,
                 {
                   shouldContinue: () =>
