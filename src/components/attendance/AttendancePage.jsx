@@ -2150,7 +2150,7 @@ export default function AttendancePage() {
         locationId: selectedLocationId,
         latitude: currentGps?.lat ?? null,
         longitude: currentGps?.lng ?? null,
-        note: noteInput,
+        note: noteInput.trim(),
         ...(targetShift?.shiftNo ? { shiftNo: targetShift.shiftNo } : {}),
         ...(isRetryInvalid ? { retryInvalid: true } : {}),
         ...(options.notifyAdmin ? { requireAdminApproval: true, gpsErrorNote: gpsError } : {}),
@@ -2163,6 +2163,7 @@ export default function AttendancePage() {
 
       if (isWrongLocation && !options.notifyAdmin) {
         setWrongLocationAlert({
+          attendanceId: res.data?.data?._id,
           punchType: "checkIn",
           shiftName: targetShift?.name || `Ca ${punchShiftNo}`,
           shiftNo: punchShiftNo,
@@ -2172,7 +2173,7 @@ export default function AttendancePage() {
       } else {
         showMsg(true, res.data?.message || "Check-in thành công!");
       }
-      setNoteInput("");
+      if (!isWrongLocation || options.notifyAdmin) setNoteInput("");
       setIsFixingInvalidLocation(false);
       resetAdminConfirmFailures();
       refreshAttendance();
@@ -2207,7 +2208,7 @@ export default function AttendancePage() {
         ...(isRetryInvalid ? { retryInvalid: true } : {}),
         latitude: currentGps?.lat ?? null,
         longitude: currentGps?.lng ?? null,
-        note: noteInput,
+        note: noteInput.trim(),
         ...(options.notifyAdmin ? { requireAdminApproval: true, gpsErrorNote: gpsError } : {}),
       });
       const punchShiftNo = targetShift?.shiftNo ?? activeShiftNo;
@@ -2218,6 +2219,7 @@ export default function AttendancePage() {
 
       if (isWrongLocation && !options.notifyAdmin) {
         setWrongLocationAlert({
+          attendanceId: res.data?.data?._id,
           punchType: "checkOut",
           shiftName: targetShift?.name || `Ca ${punchShiftNo}`,
           shiftNo: punchShiftNo,
@@ -2227,7 +2229,7 @@ export default function AttendancePage() {
       } else {
         showMsg(true, res.data?.message || "Check-out thành công!");
       }
-      setNoteInput("");
+      if (!isWrongLocation || options.notifyAdmin) setNoteInput("");
       setIsFixingInvalidLocation(false);
       resetAdminConfirmFailures();
       refreshAttendance();
@@ -2251,8 +2253,28 @@ export default function AttendancePage() {
     showMsg(true, "Bạn có thể chọn lại vị trí làm việc rồi bấm Chấm lại.");
   }
 
-  function handleWrongLocationNotifyAdmin() {
-    setWrongLocationAlert(null);
+  async function handleWrongLocationNotifyAdmin() {
+    if (!wrongLocationAlert?.attendanceId) {
+      showMsg(false, "Không xác định được bản ghi cần gửi duyệt. Vui lòng tải lại trang.");
+      return;
+    }
+
+    setActionLoading(true);
+    try {
+      const res = await api.post(`/attendance/${wrongLocationAlert.attendanceId}/request-review`, {
+        shiftNo: wrongLocationAlert.shiftNo,
+        punchType: wrongLocationAlert.punchType,
+        note: noteInput.trim(),
+      });
+      setWrongLocationAlert(null);
+      setNoteInput("");
+      showMsg(true, res.data?.message || "Đã gửi ghi chú và yêu cầu admin xác nhận.");
+      await refreshAttendance();
+    } catch (err) {
+      showMsg(false, err.response?.data?.message || "Không thể gửi yêu cầu cho admin.");
+    } finally {
+      setActionLoading(false);
+    }
   }
 
   function handleRetryInvalidLocation() {
@@ -2719,6 +2741,7 @@ export default function AttendancePage() {
                   <input
                     value={noteInput}
                     onChange={(e) => setNoteInput(e.target.value)}
+                    maxLength={500}
                     placeholder="Ghi chú (tuỳ chọn)..."
                     className="mb-3 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
                   />
@@ -3554,7 +3577,7 @@ export default function AttendancePage() {
                 <h3 className="font-bold text-slate-900">GPS bị lỗi</h3>
                 <p className="mt-1 text-sm text-slate-600">{gpsError}</p>
                 <p className="mt-1.5 text-xs text-slate-400">
-                  Bạn có thể gửi để admin xác nhận chấm công thủ công.
+                  Ghi chú ở màn hình chấm công sẽ được gửi kèm nếu bạn đã nhập.
                 </p>
               </div>
               <button
@@ -3573,7 +3596,7 @@ export default function AttendancePage() {
               </button>
               {canCheckIn && (
                 <button
-                  onClick={() => { setGpsAlertDismissed(true); handleCheckIn({ notifyAdmin: true }); }}
+                  onClick={() => handleCheckIn({ notifyAdmin: true })}
                   disabled={actionLoading || !selectedLocationId}
                   className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-amber-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-amber-700 disabled:opacity-60"
                 >
@@ -3583,7 +3606,7 @@ export default function AttendancePage() {
               )}
               {canCheckOut && (
                 <button
-                  onClick={() => { setGpsAlertDismissed(true); handleCheckOut({ notifyAdmin: true }); }}
+                  onClick={() => handleCheckOut({ notifyAdmin: true })}
                   disabled={actionLoading}
                   className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-amber-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-amber-700 disabled:opacity-60"
                 >
@@ -3614,7 +3637,7 @@ export default function AttendancePage() {
                   .
                 </p>
                 <p className="mt-1 text-xs text-slate-400">
-                  Bấm &quot;Gửi admin xác nhận&quot; để yêu cầu admin duyệt bản ghi này.
+                  Ghi chú ở màn hình chấm công sẽ được gửi kèm nếu bạn đã nhập.
                 </p>
               </div>
             </div>
@@ -3627,9 +3650,10 @@ export default function AttendancePage() {
               </button>
               <button
                 onClick={handleWrongLocationNotifyAdmin}
-                className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-rose-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-rose-700"
+                disabled={actionLoading}
+                className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-rose-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                <AlertCircle size={14} />
+                {actionLoading ? <Loader2 size={14} className="animate-spin" /> : <AlertCircle size={14} />}
                 Gửi admin xác nhận
               </button>
             </div>

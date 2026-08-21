@@ -3534,18 +3534,23 @@ export default function AttendanceManager() {
                           </div>
                           <div className="mt-1.5 space-y-1">
                             {shifts.map((shift) => (
-                              <div key={shift.shiftNo || shift.name} className="flex flex-wrap items-center gap-1.5 text-xs">
-                                <span className="font-semibold text-slate-600">{shift.name || `Ca ${shift.shiftNo}`}:</span>
-                                <span className="text-slate-500">{fmtTime(shift.checkIn?.time)} → {fmtTime(shift.checkOut?.time)}</span>
-                                <span className="font-semibold text-slate-500">Vào {punchLocationName(shift.checkIn, record.locationName)} / Ra {punchLocationName(shift.checkOut, record.locationName)}</span>
-                                {(shift.checkIn?.reviewStatus === "pending" || shift.checkIn?.isValid === false) && (
-                                  <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 font-semibold text-amber-700">Vào chờ duyệt</span>
-                                )}
-                                {(shift.checkOut?.reviewStatus === "pending" || shift.checkOut?.isValid === false) && (
-                                  <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 font-semibold text-amber-700">Ra chờ duyệt</span>
-                                )}
+                              <div key={shift.shiftNo || shift.name} className="rounded-xl border border-slate-100 bg-slate-50/70 p-2 text-xs">
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  <span className="font-semibold text-slate-600">{shift.name || `Ca ${shift.shiftNo}`}:</span>
+                                  <span className="text-slate-500">{fmtTime(shift.checkIn?.time)} → {fmtTime(shift.checkOut?.time)}</span>
+                                  <span className="font-semibold text-slate-500">Vào {punchLocationName(shift.checkIn, record.locationName)} / Ra {punchLocationName(shift.checkOut, record.locationName)}</span>
+                                  {(shift.checkIn?.reviewStatus === "pending" || shift.checkIn?.isValid === false) && (
+                                    <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 font-semibold text-amber-700">Vào chờ duyệt</span>
+                                  )}
+                                  {(shift.checkOut?.reviewStatus === "pending" || shift.checkOut?.isValid === false) && (
+                                    <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 font-semibold text-amber-700">Ra chờ duyệt</span>
+                                  )}
+                                </div>
+                                {shift.checkIn?.note && <p className="mt-1.5 rounded-lg border border-amber-100 bg-white px-2 py-1.5 text-slate-700"><strong>Ghi chú giờ vào:</strong> {shift.checkIn.note}</p>}
+                                {shift.checkOut?.note && <p className="mt-1.5 rounded-lg border border-amber-100 bg-white px-2 py-1.5 text-slate-700"><strong>Ghi chú giờ ra:</strong> {shift.checkOut.note}</p>}
                               </div>
                             ))}
+                            {record.gpsErrorNote && <p className="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-xs text-amber-800"><strong>Lỗi định vị:</strong> {record.gpsErrorNote}</p>}
                             {reasons.length > 0 && (
                               <div className="flex flex-wrap gap-1.5 pt-0.5">
                                 {reasons.map((reason, idx) => (
