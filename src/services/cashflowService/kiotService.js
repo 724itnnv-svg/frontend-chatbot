@@ -117,8 +117,8 @@ export async function updateCustomerEInvoiceAddress(
       customerPayload.CustomerGroupDetails,
     );
     const incomingGroupIds = hasIncomingGroups
-      ? customerPayload.CustomerGroupDetails.map((item) =>
-          item?.GroupId,
+      ? customerPayload.CustomerGroupDetails.map(
+          (item) => item?.GroupId,
         ).filter((groupId) => groupId != null)
       : currentCustomer.CustomerGroupIds;
     const hasIncomingTaxCode = Object.prototype.hasOwnProperty.call(
@@ -191,23 +191,9 @@ const KIOT_RETRY_DELAY_MS = 1000;
 const KIOT_RETRY_LIMIT = 4;
 const KIOT_RETRY_STATUS_CODES = new Set([401, 500, 504, 520]);
 const SAFE_RETRY_POST_PATHS = new Set(["/token", "/login"]);
-const KIOT_INVOICE_REQUEST_INTERVAL_MS = 850;
 const KIOT_INVOICE_RATE_LIMIT_RETRIES = 3;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-let kiotInvoiceRequestQueue = Promise.resolve();
-let lastKiotInvoiceRequestAt = 0;
-
-const waitForKiotInvoiceRequestSlot = () => {
-  const scheduledRequest = kiotInvoiceRequestQueue.then(async () => {
-    const elapsed = Date.now() - lastKiotInvoiceRequestAt;
-    const waitTime = Math.max(0, KIOT_INVOICE_REQUEST_INTERVAL_MS - elapsed);
-    if (waitTime > 0) await sleep(waitTime);
-    lastKiotInvoiceRequestAt = Date.now();
-  });
-  kiotInvoiceRequestQueue = scheduledRequest.catch(() => undefined);
-  return scheduledRequest;
-};
 
 const canSafelyRetryRequest = (config = {}) => {
   const method = String(config.method || "get").toLowerCase();
@@ -1604,17 +1590,334 @@ export async function getListCustomer(
 
 //tạo log hóa đơn điện tử
 // Lấy hóa đơn còn dư nợ cũ nhất của từng khách hàng từ API quản lý KiotViet.
+// export async function getCustomerInvoiceDebtAging(
+//   retailer = "kingfarm",
+//   accessPrivateToken,
+//   customers = [],
+//   options = {},
+// ) {
+//   if (!accessPrivateToken) throw new Error("Thiếu accessPrivateToken");
+
+//   const uniqueCustomers = [
+//     ...new Map(
+//       customers
+//         .filter((customer) => customer?.id && customer?.code)
+//         .map((customer) => [String(customer.id), customer]),
+//     ).values(),
+//   ];
+//   if (uniqueCustomers.length === 0) return {};
+
+//   const shouldContinue =
+//     typeof options.shouldContinue === "function"
+//       ? options.shouldContinue
+//       : () => true;
+//   const onProgress =
+//     typeof options.onProgress === "function" ? options.onProgress : () => {};
+
+//   const { branchId } = getRetailerConfig(retailer);
+//   const agingByCustomer = {};
+//   const pageSize = 100;
+//   let nextCustomerIndex = 0;
+//   let completedCustomers = 0;
+
+//   const isInvoiceCancelled = (item) => {
+//     const statusText = String(
+//       item?.StatusValue ?? item?.statusValue ?? "",
+//     ).toLocaleLowerCase("vi-VN");
+//     return statusText.includes("hủy") || statusText.includes("huy");
+//   };
+//   const sumActiveAmounts = (items, amountKeys) =>
+//     (Array.isArray(items) ? items : []).reduce((sum, item) => {
+//       if (isInvoiceCancelled(item)) return sum;
+//       const amountKey = amountKeys.find(
+//         (key) => item?.[key] !== undefined && item?.[key] !== null,
+//       );
+//       return sum + Number(item?.[amountKey] || 0);
+//     }, 0);
+//   const extractInvoices = (payload) => {
+//     const responseData = payload?.Data ?? payload?.data;
+//     if (Array.isArray(responseData?.[1])) return responseData[1];
+//     if (Array.isArray(responseData)) {
+//       return responseData.filter(
+//         (item) =>
+//           item &&
+//           typeof item === "object" &&
+//           !Array.isArray(item) &&
+//           Number(item.Id ?? item.id) !== -1 &&
+//           (item.Code !== undefined ||
+//             item.code !== undefined ||
+//             item.PurchaseDate !== undefined ||
+//             item.purchaseDate !== undefined),
+//       );
+//     }
+//     const nestedInvoices =
+//       responseData?.Items ||
+//       responseData?.items ||
+//       responseData?.Invoices ||
+//       responseData?.invoices;
+//     return Array.isArray(nestedInvoices) ? nestedInvoices : [];
+//   };
+
+//   const loadCustomerInvoices = async (customer) => {
+//     let skip = 0;
+
+//     while (shouldContinue()) {
+//       const queryParams = new URLSearchParams();
+//       queryParams.append("format", "json");
+//       [
+//         "BranchName",
+//         "Branch",
+//         "DeliveryInfoes",
+//         "DeliveryPackages",
+//         "Customer",
+//         "Payments",
+//         "SoldBy",
+//         "User",
+//         "InvoiceOrderSurcharges",
+//         "Order",
+//         "SaleChannel",
+//         "Returns",
+//         "Refunds",
+//         "InvoiceMedicine",
+//         "PriceBook",
+//         "InvoiceExtraData",
+//         "EInvoice",
+//       ].forEach((include) => queryParams.append("Includes", include));
+//       queryParams.append("ForSummaryRow", "true");
+//       queryParams.append("UsingTotalApi", "true");
+//       queryParams.append("UsingStoreProcedure", "false");
+
+//       const requestBody = {
+//         $inlinecount: "allpages",
+//         $format: "json",
+//         CustomerKey: String(customer.code),
+//         UserNameKey: "",
+//         CreateUserName: "",
+//         SerialKey: "",
+//         EInvoiceNumber: "",
+//         BatchExpireKey: "",
+//         DescriptionProductKey: "",
+//         DeliveryCode: "",
+//         ExpectedDeliveryFilterType: "alltime",
+//         OrderCode: "",
+//         FiltersForOrm: JSON.stringify({
+//           Code: "",
+//           Description: "",
+//           DescriptionProduct: "",
+//           BranchIds: branchId ? [branchId] : [],
+//           PriceBookIds: [],
+//           FromDate: null,
+//           ToDate: null,
+//           FromDateStr: null,
+//           ToDateStr: null,
+//           TimeRange: "year",
+//           InvoiceStatus: [3, 1],
+//           UsingCod: [0, 1],
+//           TableIds: [],
+//           SalechannelIds: [],
+//           StartDeliveryDate: null,
+//           EndDeliveryDate: null,
+//           StartDeliveryDateStr: null,
+//           EndDeliveryDateStr: null,
+//           UsingPrescription: 2,
+//           Prescription: "",
+//           Patient: "",
+//           Diagnosis: "",
+//           EInvoiceStatus: [],
+//           EInvoiceExternalStatus: [],
+//           InvoiceAdjustmentType: [],
+//         }),
+//         InvoiceStatus: "[3,1]",
+//         $top: pageSize,
+//         $skip: skip,
+//         $filter:
+//           "(PurchaseDate eq 'year' and (UsingCod eq 0 or UsingCod eq null or UsingCod eq 1))",
+//       };
+
+//       let response;
+//       for (
+//         let attempt = 0;
+//         attempt <= KIOT_INVOICE_RATE_LIMIT_RETRIES;
+//         attempt += 1
+//       ) {
+//         if (!shouldContinue()) return;
+//         await waitForKiotInvoiceRequestSlot();
+//         if (!shouldContinue()) return;
+
+//         try {
+//           response = await kiotDirectApi.post(
+//             "https://api-man1.kiotviet.vn/api/invoices/list",
+//             requestBody,
+//             {
+//               params: queryParams,
+//               headers: {
+//                 Accept: "application/json",
+//                 "Content-Type": "application/json",
+//                 Authorization: `Bearer ${accessPrivateToken}`,
+//                 Retailer: retailer,
+//               },
+//             },
+//           );
+//           break;
+//         } catch (error) {
+//           const isRateLimited = error.response?.status === 429;
+//           if (!isRateLimited || attempt >= KIOT_INVOICE_RATE_LIMIT_RETRIES) {
+//             throw error;
+//           }
+
+//           const retryAfterSeconds = Number(
+//             error.response?.headers?.["retry-after"],
+//           );
+//           const retryDelay =
+//             Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0
+//               ? retryAfterSeconds * 1000
+//               : 1200 * (attempt + 1);
+//           await sleep(retryDelay);
+//         }
+//       }
+//       if (!response || !shouldContinue()) return;
+//       const invoices = extractInvoices(response.data);
+
+//       invoices.forEach((invoice) => {
+//         if (isInvoiceCancelled(invoice)) return;
+
+//         const invoiceCustomerCode = String(
+//           invoice.CustomerCode ??
+//             invoice.customerCode ??
+//             invoice.Customer?.Code ??
+//             invoice.customer?.code ??
+//             "",
+//         ).trim();
+//         if (
+//           invoiceCustomerCode &&
+//           invoiceCustomerCode.toLocaleLowerCase("vi-VN") !==
+//             String(customer.code).trim().toLocaleLowerCase("vi-VN")
+//         ) {
+//           return;
+//         }
+
+//         // Response thực tế của /api/invoices/list trả sẵn Debt trên từng hóa đơn.
+//         // Chỉ dùng phép tính dự phòng nếu một response khác không có field này.
+//         const invoiceDebtKey = [
+//           "Debt",
+//           "debt",
+//           "RemainingAmount",
+//           "remainingAmount",
+//           "UnpaidAmount",
+//           "unpaidAmount",
+//           "AmountDue",
+//           "amountDue",
+//         ].find(
+//           (key) => invoice?.[key] !== undefined && invoice?.[key] !== null,
+//         );
+//         const total = Number(
+//           invoice.Total ??
+//             invoice.total ??
+//             invoice.NewInvoiceTotal ??
+//             invoice.newInvoiceTotal ??
+//             0,
+//         );
+//         const totalPaymentValue = invoice.TotalPayment ?? invoice.totalPayment;
+//         const paid =
+//           totalPaymentValue !== undefined && totalPaymentValue !== null
+//             ? Number(totalPaymentValue)
+//             : sumActiveAmounts(invoice.Payments ?? invoice.payments, [
+//                 "Amount",
+//                 "amount",
+//               ]);
+//         const returned = sumActiveAmounts(invoice.Returns ?? invoice.returns, [
+//           "ReturnTotal",
+//           "returnTotal",
+//           "Total",
+//           "total",
+//           "Amount",
+//           "amount",
+//         ]);
+//         const refunded = sumActiveAmounts(invoice.Refunds ?? invoice.refunds, [
+//           "Amount",
+//           "amount",
+//           "Total",
+//           "total",
+//         ]);
+//         const reportedDebt = invoiceDebtKey
+//           ? Number(invoice[invoiceDebtKey])
+//           : Number.NaN;
+//         const calculatedDebt = total - paid - returned + refunded;
+//         // Một số hóa đơn cũ có Debt = 0 nhưng TotalPayment chưa đủ Total.
+//         // Khi đó vẫn phải xem đây là hóa đơn còn nợ để ngày thanh toán mới
+//         // không làm reset tuổi nợ của khách hàng.
+//         const outstanding = Math.max(
+//           Number.isFinite(reportedDebt) ? reportedDebt : 0,
+//           Number.isFinite(calculatedDebt) ? calculatedDebt : 0,
+//         );
+//         if (!Number.isFinite(outstanding) || outstanding <= 0.5) return;
+
+//         const purchaseDate =
+//           invoice.PurchaseDate ??
+//           invoice.purchaseDate ??
+//           invoice.CreatedDate ??
+//           invoice.createdDate;
+//         if (!purchaseDate) return;
+
+//         const customerId = String(customer.id);
+//         const existing = agingByCustomer[customerId];
+//         if (
+//           !existing ||
+//           new Date(purchaseDate).getTime() <
+//             new Date(existing.oldestUnpaidDate).getTime()
+//         ) {
+//           agingByCustomer[customerId] = {
+//             oldestUnpaidDate: purchaseDate,
+//             invoiceCode: invoice.Code ?? invoice.code ?? "",
+//             outstanding,
+//           };
+//         }
+//       });
+
+//       skip += invoices.length;
+//       if (invoices.length === 0 || invoices.length < pageSize) break;
+//     }
+//   };
+
+//   try {
+//     const workerCount = Math.min(3, uniqueCustomers.length);
+//     await Promise.all(
+//       Array.from({ length: workerCount }, async () => {
+//         while (nextCustomerIndex < uniqueCustomers.length && shouldContinue()) {
+//           const customer = uniqueCustomers[nextCustomerIndex];
+//           nextCustomerIndex += 1;
+//           await loadCustomerInvoices(customer);
+//           if (shouldContinue()) {
+//             completedCustomers += 1;
+//             onProgress({
+//               completed: completedCustomers,
+//               total: uniqueCustomers.length,
+//             });
+//           }
+//         }
+//       }),
+//     );
+//     return agingByCustomer;
+//   } catch (error) {
+//     const message =
+//       error.userMessage ||
+//       error.response?.data?.ResponseStatus?.Message ||
+//       error.response?.data?.responseStatus?.message ||
+//       error.response?.data?.message ||
+//       error.message;
+//     throw new Error(`Lấy hóa đơn công nợ thất bại: ${message}`);
+//   }
+// }
+
 export async function getCustomerInvoiceDebtAging(
   retailer = "kingfarm",
-  accessPrivateToken,
   customers = [],
   options = {},
 ) {
-  if (!accessPrivateToken) throw new Error("Thiếu accessPrivateToken");
-
+  const customerList = Array.isArray(customers) ? customers : [];
   const uniqueCustomers = [
     ...new Map(
-      customers
+      customerList
         .filter((customer) => customer?.id && customer?.code)
         .map((customer) => [String(customer.id), customer]),
     ).values(),
@@ -1628,9 +1931,7 @@ export async function getCustomerInvoiceDebtAging(
   const onProgress =
     typeof options.onProgress === "function" ? options.onProgress : () => {};
 
-  const { branchId } = getRetailerConfig(retailer);
   const agingByCustomer = {};
-  const pageSize = 100;
   let nextCustomerIndex = 0;
   let completedCustomers = 0;
 
@@ -1673,228 +1974,140 @@ export async function getCustomerInvoiceDebtAging(
   };
 
   const loadCustomerInvoices = async (customer) => {
-    let skip = 0;
+    if (!shouldContinue()) return;
 
-    while (shouldContinue()) {
-      const queryParams = new URLSearchParams();
-      queryParams.append("format", "json");
-      [
-        "BranchName",
-        "Branch",
-        "DeliveryInfoes",
-        "DeliveryPackages",
-        "Customer",
-        "Payments",
-        "SoldBy",
-        "User",
-        "InvoiceOrderSurcharges",
-        "Order",
-        "SaleChannel",
-        "Returns",
-        "Refunds",
-        "InvoiceMedicine",
-        "PriceBook",
-        "InvoiceExtraData",
-        "EInvoice",
-      ].forEach((include) => queryParams.append("Includes", include));
-      queryParams.append("ForSummaryRow", "true");
-      queryParams.append("UsingTotalApi", "true");
-      queryParams.append("UsingStoreProcedure", "false");
+    let response;
+    for (
+      let attempt = 0;
+      attempt <= KIOT_INVOICE_RATE_LIMIT_RETRIES;
+      attempt += 1
+    ) {
+      if (!shouldContinue()) return;
 
-      const requestBody = {
-        $inlinecount: "allpages",
-        $format: "json",
-        CustomerKey: String(customer.code),
-        UserNameKey: "",
-        CreateUserName: "",
-        SerialKey: "",
-        EInvoiceNumber: "",
-        BatchExpireKey: "",
-        DescriptionProductKey: "",
-        DeliveryCode: "",
-        ExpectedDeliveryFilterType: "alltime",
-        OrderCode: "",
-        FiltersForOrm: JSON.stringify({
-          Code: "",
-          Description: "",
-          DescriptionProduct: "",
-          BranchIds: branchId ? [branchId] : [],
-          PriceBookIds: [],
-          FromDate: null,
-          ToDate: null,
-          FromDateStr: null,
-          ToDateStr: null,
-          TimeRange: "year",
-          InvoiceStatus: [3, 1],
-          UsingCod: [0, 1],
-          TableIds: [],
-          SalechannelIds: [],
-          StartDeliveryDate: null,
-          EndDeliveryDate: null,
-          StartDeliveryDateStr: null,
-          EndDeliveryDateStr: null,
-          UsingPrescription: 2,
-          Prescription: "",
-          Patient: "",
-          Diagnosis: "",
-          EInvoiceStatus: [],
-          EInvoiceExternalStatus: [],
-          InvoiceAdjustmentType: [],
-        }),
-        InvoiceStatus: "[3,1]",
-        $top: pageSize,
-        $skip: skip,
-        $filter:
-          "(PurchaseDate eq 'year' and (UsingCod eq 0 or UsingCod eq null or UsingCod eq 1))",
-      };
-
-      let response;
-      for (
-        let attempt = 0;
-        attempt <= KIOT_INVOICE_RATE_LIMIT_RETRIES;
-        attempt += 1
-      ) {
-        if (!shouldContinue()) return;
-        await waitForKiotInvoiceRequestSlot();
-        if (!shouldContinue()) return;
-
-        try {
-          response = await kiotDirectApi.post(
-            "https://api-man1.kiotviet.vn/api/invoices/list",
-            requestBody,
-            {
-              params: queryParams,
-              headers: {
-                Accept: "application/json",
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${accessPrivateToken}`,
-                Retailer: retailer,
-              },
-            },
-          );
-          break;
-        } catch (error) {
-          const isRateLimited = error.response?.status === 429;
-          if (!isRateLimited || attempt >= KIOT_INVOICE_RATE_LIMIT_RETRIES) {
-            throw error;
-          }
-
-          const retryAfterSeconds = Number(
-            error.response?.headers?.["retry-after"],
-          );
-          const retryDelay =
-            Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0
-              ? retryAfterSeconds * 1000
-              : 1200 * (attempt + 1);
-          await sleep(retryDelay);
+      try {
+        response = await cashflowApi.get("/get-backup-invoices", {
+          params: {
+            retailerName: retailer,
+            CustomerCode: String(customer.code),
+          },
+        });
+        break;
+      } catch (error) {
+        const isRateLimited = error.response?.status === 429;
+        if (!isRateLimited || attempt >= KIOT_INVOICE_RATE_LIMIT_RETRIES) {
+          throw error;
         }
+
+        const retryAfterSeconds = Number(
+          error.response?.headers?.["retry-after"],
+        );
+        const retryDelay =
+          Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0
+            ? retryAfterSeconds * 1000
+            : 500 * (attempt + 1);
+        await sleep(retryDelay);
       }
-      if (!response || !shouldContinue()) return;
-      const invoices = extractInvoices(response.data);
-
-      invoices.forEach((invoice) => {
-        if (isInvoiceCancelled(invoice)) return;
-
-        const invoiceCustomerCode = String(
-          invoice.CustomerCode ??
-            invoice.customerCode ??
-            invoice.Customer?.Code ??
-            invoice.customer?.code ??
-            "",
-        ).trim();
-        if (
-          invoiceCustomerCode &&
-          invoiceCustomerCode.toLocaleLowerCase("vi-VN") !==
-            String(customer.code).trim().toLocaleLowerCase("vi-VN")
-        ) {
-          return;
-        }
-
-        // Response thực tế của /api/invoices/list trả sẵn Debt trên từng hóa đơn.
-        // Chỉ dùng phép tính dự phòng nếu một response khác không có field này.
-        const invoiceDebtKey = [
-          "Debt",
-          "debt",
-          "RemainingAmount",
-          "remainingAmount",
-          "UnpaidAmount",
-          "unpaidAmount",
-          "AmountDue",
-          "amountDue",
-        ].find(
-          (key) => invoice?.[key] !== undefined && invoice?.[key] !== null,
-        );
-        const total = Number(
-          invoice.Total ??
-            invoice.total ??
-            invoice.NewInvoiceTotal ??
-            invoice.newInvoiceTotal ??
-            0,
-        );
-        const totalPaymentValue = invoice.TotalPayment ?? invoice.totalPayment;
-        const paid =
-          totalPaymentValue !== undefined && totalPaymentValue !== null
-            ? Number(totalPaymentValue)
-            : sumActiveAmounts(invoice.Payments ?? invoice.payments, [
-                "Amount",
-                "amount",
-              ]);
-        const returned = sumActiveAmounts(invoice.Returns ?? invoice.returns, [
-          "ReturnTotal",
-          "returnTotal",
-          "Total",
-          "total",
-          "Amount",
-          "amount",
-        ]);
-        const refunded = sumActiveAmounts(invoice.Refunds ?? invoice.refunds, [
-          "Amount",
-          "amount",
-          "Total",
-          "total",
-        ]);
-        const reportedDebt = invoiceDebtKey
-          ? Number(invoice[invoiceDebtKey])
-          : Number.NaN;
-        const calculatedDebt = total - paid - returned + refunded;
-        // Một số hóa đơn cũ có Debt = 0 nhưng TotalPayment chưa đủ Total.
-        // Khi đó vẫn phải xem đây là hóa đơn còn nợ để ngày thanh toán mới
-        // không làm reset tuổi nợ của khách hàng.
-        const outstanding = Math.max(
-          Number.isFinite(reportedDebt) ? reportedDebt : 0,
-          Number.isFinite(calculatedDebt) ? calculatedDebt : 0,
-        );
-        if (!Number.isFinite(outstanding) || outstanding <= 0.5) return;
-
-        const purchaseDate =
-          invoice.PurchaseDate ??
-          invoice.purchaseDate ??
-          invoice.CreatedDate ??
-          invoice.createdDate;
-        if (!purchaseDate) return;
-
-        const customerId = String(customer.id);
-        const existing = agingByCustomer[customerId];
-        if (
-          !existing ||
-          new Date(purchaseDate).getTime() <
-            new Date(existing.oldestUnpaidDate).getTime()
-        ) {
-          agingByCustomer[customerId] = {
-            oldestUnpaidDate: purchaseDate,
-            invoiceCode: invoice.Code ?? invoice.code ?? "",
-            outstanding,
-          };
-        }
-      });
-
-      skip += invoices.length;
-      if (invoices.length === 0 || invoices.length < pageSize) break;
     }
+    if (!response || !shouldContinue()) return;
+    const invoices = extractInvoices(response.data);
+
+    invoices.forEach((invoice) => {
+      if (isInvoiceCancelled(invoice)) return;
+
+      const invoiceCustomerCode = String(
+        invoice.CustomerCode ??
+          invoice.customerCode ??
+          invoice.Customer?.Code ??
+          invoice.customer?.code ??
+          "",
+      ).trim();
+      if (
+        invoiceCustomerCode &&
+        invoiceCustomerCode.toLocaleLowerCase("vi-VN") !==
+          String(customer.code).trim().toLocaleLowerCase("vi-VN")
+      ) {
+        return;
+      }
+
+      // Bản backup Mongo lưu sẵn Debt trên từng hóa đơn.
+      // Chỉ dùng phép tính dự phòng nếu bản ghi cũ không có field này.
+      const invoiceDebtKey = [
+        "Debt",
+        "debt",
+        "RemainingAmount",
+        "remainingAmount",
+        "UnpaidAmount",
+        "unpaidAmount",
+        "AmountDue",
+        "amountDue",
+      ].find((key) => invoice?.[key] !== undefined && invoice?.[key] !== null);
+      const total = Number(
+        invoice.Total ??
+          invoice.total ??
+          invoice.NewInvoiceTotal ??
+          invoice.newInvoiceTotal ??
+          0,
+      );
+      const totalPaymentValue = invoice.TotalPayment ?? invoice.totalPayment;
+      const paid =
+        totalPaymentValue !== undefined && totalPaymentValue !== null
+          ? Number(totalPaymentValue)
+          : sumActiveAmounts(invoice.Payments ?? invoice.payments, [
+              "Amount",
+              "amount",
+            ]);
+      const returned = sumActiveAmounts(invoice.Returns ?? invoice.returns, [
+        "ReturnTotal",
+        "returnTotal",
+        "Total",
+        "total",
+        "Amount",
+        "amount",
+      ]);
+      const refunded = sumActiveAmounts(invoice.Refunds ?? invoice.refunds, [
+        "Amount",
+        "amount",
+        "Total",
+        "total",
+      ]);
+      const reportedDebt = invoiceDebtKey
+        ? Number(invoice[invoiceDebtKey])
+        : Number.NaN;
+      const calculatedDebt = total - paid - returned + refunded;
+      // Một số hóa đơn cũ có Debt = 0 nhưng TotalPayment chưa đủ Total.
+      // Khi đó vẫn phải xem đây là hóa đơn còn nợ để ngày thanh toán mới
+      // không làm reset tuổi nợ của khách hàng.
+      const outstanding = Math.max(
+        Number.isFinite(reportedDebt) ? reportedDebt : 0,
+        Number.isFinite(calculatedDebt) ? calculatedDebt : 0,
+      );
+      if (!Number.isFinite(outstanding) || outstanding <= 0.5) return;
+
+      const purchaseDate =
+        invoice.PurchaseDate ??
+        invoice.purchaseDate ??
+        invoice.CreatedDate ??
+        invoice.createdDate;
+      if (!purchaseDate) return;
+
+      const customerId = String(customer.id);
+      const existing = agingByCustomer[customerId];
+      if (
+        !existing ||
+        new Date(purchaseDate).getTime() <
+          new Date(existing.oldestUnpaidDate).getTime()
+      ) {
+        agingByCustomer[customerId] = {
+          oldestUnpaidDate: purchaseDate,
+          invoiceCode: invoice.Code ?? invoice.code ?? "",
+          outstanding,
+        };
+      }
+    });
   };
 
   try {
-    const workerCount = Math.min(3, uniqueCustomers.length);
+    const workerCount = Math.min(10, uniqueCustomers.length);
     await Promise.all(
       Array.from({ length: workerCount }, async () => {
         while (nextCustomerIndex < uniqueCustomers.length && shouldContinue()) {
@@ -1980,3 +2193,322 @@ export async function getTaxCodeCompanyInfo(taxCode) {
     throw new Error(`Failed to call administrative area API: ${message}`);
   }
 }
+
+// export async function getCustomerInvoiceDebtAging(
+//   retailer = "kingfarm",
+//   accessPrivateToken,
+//   customers = [],
+//   options = {},
+// ) {
+//   if (!accessPrivateToken) throw new Error("Thiếu accessPrivateToken");
+
+//   const uniqueCustomers = [
+//     ...new Map(
+//       customers
+//         .filter((customer) => customer?.id && customer?.code)
+//         .map((customer) => [String(customer.id), customer]),
+//     ).values(),
+//   ];
+//   if (uniqueCustomers.length === 0) return {};
+
+//   const shouldContinue =
+//     typeof options.shouldContinue === "function"
+//       ? options.shouldContinue
+//       : () => true;
+//   const onProgress =
+//     typeof options.onProgress === "function" ? options.onProgress : () => {};
+
+//   const { branchId } = getRetailerConfig(retailer);
+//   const agingByCustomer = {};
+//   const pageSize = 100;
+//   let nextCustomerIndex = 0;
+//   let completedCustomers = 0;
+
+//   const isInvoiceCancelled = (item) => {
+//     const statusText = String(
+//       item?.StatusValue ?? item?.statusValue ?? "",
+//     ).toLocaleLowerCase("vi-VN");
+//     return statusText.includes("hủy") || statusText.includes("huy");
+//   };
+//   const sumActiveAmounts = (items, amountKeys) =>
+//     (Array.isArray(items) ? items : []).reduce((sum, item) => {
+//       if (isInvoiceCancelled(item)) return sum;
+//       const amountKey = amountKeys.find(
+//         (key) => item?.[key] !== undefined && item?.[key] !== null,
+//       );
+//       return sum + Number(item?.[amountKey] || 0);
+//     }, 0);
+//   const extractInvoices = (payload) => {
+//     const responseData = payload?.Data ?? payload?.data;
+//     if (Array.isArray(responseData?.[1])) return responseData[1];
+//     if (Array.isArray(responseData)) {
+//       return responseData.filter(
+//         (item) =>
+//           item &&
+//           typeof item === "object" &&
+//           !Array.isArray(item) &&
+//           Number(item.Id ?? item.id) !== -1 &&
+//           (item.Code !== undefined ||
+//             item.code !== undefined ||
+//             item.PurchaseDate !== undefined ||
+//             item.purchaseDate !== undefined),
+//       );
+//     }
+//     const nestedInvoices =
+//       responseData?.Items ||
+//       responseData?.items ||
+//       responseData?.Invoices ||
+//       responseData?.invoices;
+//     return Array.isArray(nestedInvoices) ? nestedInvoices : [];
+//   };
+
+//   const loadCustomerInvoices = async (customer) => {
+//     let skip = 0;
+
+//     while (shouldContinue()) {
+//       const queryParams = new URLSearchParams();
+//       queryParams.append("format", "json");
+//       [
+//         "BranchName",
+//         "Branch",
+//         "DeliveryInfoes",
+//         "DeliveryPackages",
+//         "Customer",
+//         "Payments",
+//         "SoldBy",
+//         "User",
+//         "InvoiceOrderSurcharges",
+//         "Order",
+//         "SaleChannel",
+//         "Returns",
+//         "Refunds",
+//         "InvoiceMedicine",
+//         "PriceBook",
+//         "InvoiceExtraData",
+//         "EInvoice",
+//       ].forEach((include) => queryParams.append("Includes", include));
+//       queryParams.append("ForSummaryRow", "true");
+//       queryParams.append("UsingTotalApi", "true");
+//       queryParams.append("UsingStoreProcedure", "false");
+
+//       const requestBody = {
+//         $inlinecount: "allpages",
+//         $format: "json",
+//         CustomerKey: String(customer.code),
+//         UserNameKey: "",
+//         CreateUserName: "",
+//         SerialKey: "",
+//         EInvoiceNumber: "",
+//         BatchExpireKey: "",
+//         DescriptionProductKey: "",
+//         DeliveryCode: "",
+//         ExpectedDeliveryFilterType: "alltime",
+//         OrderCode: "",
+//         FiltersForOrm: JSON.stringify({
+//           Code: "",
+//           Description: "",
+//           DescriptionProduct: "",
+//           BranchIds: branchId ? [branchId] : [],
+//           PriceBookIds: [],
+//           FromDate: null,
+//           ToDate: null,
+//           FromDateStr: null,
+//           ToDateStr: null,
+//           TimeRange: "year",
+//           InvoiceStatus: [3, 1],
+//           UsingCod: [0, 1],
+//           TableIds: [],
+//           SalechannelIds: [],
+//           StartDeliveryDate: null,
+//           EndDeliveryDate: null,
+//           StartDeliveryDateStr: null,
+//           EndDeliveryDateStr: null,
+//           UsingPrescription: 2,
+//           Prescription: "",
+//           Patient: "",
+//           Diagnosis: "",
+//           EInvoiceStatus: [],
+//           EInvoiceExternalStatus: [],
+//           InvoiceAdjustmentType: [],
+//         }),
+//         InvoiceStatus: "[3,1]",
+//         $top: pageSize,
+//         $skip: skip,
+//         $filter:
+//           "(PurchaseDate eq 'year' and (UsingCod eq 0 or UsingCod eq null or UsingCod eq 1))",
+//       };
+
+//       let response;
+//       for (
+//         let attempt = 0;
+//         attempt <= KIOT_INVOICE_RATE_LIMIT_RETRIES;
+//         attempt += 1
+//       ) {
+//         if (!shouldContinue()) return;
+//         await waitForKiotInvoiceRequestSlot();
+//         if (!shouldContinue()) return;
+
+//         try {
+//           response = await kiotDirectApi.post(
+//             "https://api-man1.kiotviet.vn/api/invoices/list",
+//             requestBody,
+//             {
+//               params: queryParams,
+//               headers: {
+//                 Accept: "application/json",
+//                 "Content-Type": "application/json",
+//                 Authorization: `Bearer ${accessPrivateToken}`,
+//                 Retailer: retailer,
+//               },
+//             },
+//           );
+//           break;
+//         } catch (error) {
+//           const isRateLimited = error.response?.status === 429;
+//           if (!isRateLimited || attempt >= KIOT_INVOICE_RATE_LIMIT_RETRIES) {
+//             throw error;
+//           }
+
+//           const retryAfterSeconds = Number(
+//             error.response?.headers?.["retry-after"],
+//           );
+//           const retryDelay =
+//             Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0
+//               ? retryAfterSeconds * 1000
+//               : 1200 * (attempt + 1);
+//           await sleep(retryDelay);
+//         }
+//       }
+//       if (!response || !shouldContinue()) return;
+//       const invoices = extractInvoices(response.data);
+
+//       invoices.forEach((invoice) => {
+//         if (isInvoiceCancelled(invoice)) return;
+
+//         const invoiceCustomerCode = String(
+//           invoice.CustomerCode ??
+//             invoice.customerCode ??
+//             invoice.Customer?.Code ??
+//             invoice.customer?.code ??
+//             "",
+//         ).trim();
+//         if (
+//           invoiceCustomerCode &&
+//           invoiceCustomerCode.toLocaleLowerCase("vi-VN") !==
+//             String(customer.code).trim().toLocaleLowerCase("vi-VN")
+//         ) {
+//           return;
+//         }
+
+//         // Response thực tế của /api/invoices/list trả sẵn Debt trên từng hóa đơn.
+//         // Chỉ dùng phép tính dự phòng nếu một response khác không có field này.
+//         const invoiceDebtKey = [
+//           "Debt",
+//           "debt",
+//           "RemainingAmount",
+//           "remainingAmount",
+//           "UnpaidAmount",
+//           "unpaidAmount",
+//           "AmountDue",
+//           "amountDue",
+//         ].find(
+//           (key) => invoice?.[key] !== undefined && invoice?.[key] !== null,
+//         );
+//         const total = Number(
+//           invoice.Total ??
+//             invoice.total ??
+//             invoice.NewInvoiceTotal ??
+//             invoice.newInvoiceTotal ??
+//             0,
+//         );
+//         const totalPaymentValue = invoice.TotalPayment ?? invoice.totalPayment;
+//         const paid =
+//           totalPaymentValue !== undefined && totalPaymentValue !== null
+//             ? Number(totalPaymentValue)
+//             : sumActiveAmounts(invoice.Payments ?? invoice.payments, [
+//                 "Amount",
+//                 "amount",
+//               ]);
+//         const returned = sumActiveAmounts(invoice.Returns ?? invoice.returns, [
+//           "ReturnTotal",
+//           "returnTotal",
+//           "Total",
+//           "total",
+//           "Amount",
+//           "amount",
+//         ]);
+//         const refunded = sumActiveAmounts(invoice.Refunds ?? invoice.refunds, [
+//           "Amount",
+//           "amount",
+//           "Total",
+//           "total",
+//         ]);
+//         const reportedDebt = invoiceDebtKey
+//           ? Number(invoice[invoiceDebtKey])
+//           : Number.NaN;
+//         const calculatedDebt = total - paid - returned + refunded;
+//         // Một số hóa đơn cũ có Debt = 0 nhưng TotalPayment chưa đủ Total.
+//         // Khi đó vẫn phải xem đây là hóa đơn còn nợ để ngày thanh toán mới
+//         // không làm reset tuổi nợ của khách hàng.
+//         const outstanding = Math.max(
+//           Number.isFinite(reportedDebt) ? reportedDebt : 0,
+//           Number.isFinite(calculatedDebt) ? calculatedDebt : 0,
+//         );
+//         if (!Number.isFinite(outstanding) || outstanding <= 0.5) return;
+
+//         const purchaseDate =
+//           invoice.PurchaseDate ??
+//           invoice.purchaseDate ??
+//           invoice.CreatedDate ??
+//           invoice.createdDate;
+//         if (!purchaseDate) return;
+
+//         const customerId = String(customer.id);
+//         const existing = agingByCustomer[customerId];
+//         if (
+//           !existing ||
+//           new Date(purchaseDate).getTime() <
+//             new Date(existing.oldestUnpaidDate).getTime()
+//         ) {
+//           agingByCustomer[customerId] = {
+//             oldestUnpaidDate: purchaseDate,
+//             invoiceCode: invoice.Code ?? invoice.code ?? "",
+//             outstanding,
+//           };
+//         }
+//       });
+
+//       skip += invoices.length;
+//       if (invoices.length === 0 || invoices.length < pageSize) break;
+//     }
+//   };
+
+//   try {
+//     const workerCount = Math.min(3, uniqueCustomers.length);
+//     await Promise.all(
+//       Array.from({ length: workerCount }, async () => {
+//         while (nextCustomerIndex < uniqueCustomers.length && shouldContinue()) {
+//           const customer = uniqueCustomers[nextCustomerIndex];
+//           nextCustomerIndex += 1;
+//           await loadCustomerInvoices(customer);
+//           if (shouldContinue()) {
+//             completedCustomers += 1;
+//             onProgress({
+//               completed: completedCustomers,
+//               total: uniqueCustomers.length,
+//             });
+//           }
+//         }
+//       }),
+//     );
+//     return agingByCustomer;
+//   } catch (error) {
+//     const message =
+//       error.userMessage ||
+//       error.response?.data?.ResponseStatus?.Message ||
+//       error.response?.data?.responseStatus?.message ||
+//       error.response?.data?.message ||
+//       error.message;
+//     throw new Error(`Lấy hóa đơn công nợ thất bại: ${message}`);
+//   }
+// }
