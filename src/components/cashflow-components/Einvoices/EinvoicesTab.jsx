@@ -691,13 +691,54 @@ const buildCustomerAddressUpdatePayload = async (
   const resolvedProvinceName = normalizeText(
     provinceIds?.[0]?.Name ?? provinceIds?.[0]?.FullName ?? provinceSearchName,
   );
-  const wardId = await getIdAdministrativearea(
-    retailer,
-    accessPrivateToken,
-    wardSearchName,
-    2,
-    resolvedProvinceName,
-  );
+  const wardNameFormats = wardSearchName
+    ? [
+        wardSearchName,
+        wardSearchName.replace(/\s*[-–—]\s*/gu, " - "),
+      ]
+    : [];
+  const wardSearchVariants = wardNameFormats
+    .flatMap((wardNameFormat) => [
+      wardNameFormat,
+      `Phường ${wardNameFormat}`,
+      `Xã ${wardNameFormat}`,
+      `Thành phố ${wardNameFormat}`,
+      `TP ${wardNameFormat}`,
+    ])
+    .filter((value, index, values) => {
+      const normalizedValue = normalizeText(value).toLocaleLowerCase("vi-VN");
+      return (
+        normalizedValue &&
+        values.findIndex(
+          (item) =>
+            normalizeText(item).toLocaleLowerCase("vi-VN") === normalizedValue,
+          ) === index
+      );
+    });
+  let wardId = [];
+  let lastWardSearchError = null;
+
+  for (const wardSearchVariant of wardSearchVariants) {
+    try {
+      const wardSearchResult = await getIdAdministrativearea(
+        retailer,
+        accessPrivateToken,
+        wardSearchVariant,
+        2,
+        resolvedProvinceName,
+      );
+      if (Array.isArray(wardSearchResult) && wardSearchResult.length > 0) {
+        wardId = wardSearchResult;
+        break;
+      }
+    } catch (wardSearchError) {
+      lastWardSearchError = wardSearchError;
+    }
+  }
+
+  if (wardId.length === 0 && lastWardSearchError) {
+    throw lastWardSearchError;
+  }
 
   return {
     Id: row?.CustomerId ?? row?.CustomerId ?? "",
