@@ -488,6 +488,49 @@ const buildAddressConvertQuery = (row) =>
     .filter(Boolean)
     .join(", ");
 
+const buildAddressConvertQueryVariants = (row) => {
+  const originalQuery = buildAddressConvertQuery(row);
+  const provinceName = normalizeText(
+    row?.CustomerLocationName ?? row?.customerLocationName,
+  );
+  const provinceBaseName = normalizeAdministrativeAreaSearchName(
+    provinceName,
+    1,
+  );
+  const addressPartsWithoutProvince = [
+    row?.CustomerAddress ?? row?.customerAddress ?? "",
+    row?.CustomerWardName ?? row?.customerWardName ?? "",
+    row?.CustomerDistrictName ?? row?.customerDistrictName ?? "",
+  ]
+    .map(normalizeText)
+    .filter(Boolean);
+  const provinceVariants = provinceBaseName
+    ? [
+        provinceName,
+        provinceBaseName,
+        `Tỉnh ${provinceBaseName}`,
+        `Thành phố ${provinceBaseName}`,
+        `TP ${provinceBaseName}`,
+      ]
+    : [provinceName];
+  const seen = new Set();
+
+  return [
+    originalQuery,
+    ...provinceVariants.map((provinceVariant) =>
+      [...addressPartsWithoutProvince, provinceVariant]
+        .map(normalizeText)
+        .filter(Boolean)
+        .join(", "),
+    ),
+  ].filter((query) => {
+    const normalizedQuery = normalizeText(query).toLocaleLowerCase("vi-VN");
+    if (!normalizedQuery || seen.has(normalizedQuery)) return false;
+    seen.add(normalizedQuery);
+    return true;
+  });
+};
+
 const hasMissingEInvoiceInformation = (customer = {}) => {
   return [
     customer?.ContactNumberEInvoice,
@@ -1535,17 +1578,37 @@ export default function EinvoicesTab({
             !resolvedLocationSuggestResult?.LocationV2 ||
             !resolvedLocationSuggestResult?.WardV2
           ) {
-            try {
-              const addressConvertQuery =
-                buildAddressConvertQuery(customerAddressRow);
-              const convertedAddress =
-                await autoConvertAddress2(addressConvertQuery);
-              resolvedLocationSuggestResult =
-                buildFallbackLocationSuggestResult(convertedAddress);
-            } catch (autoConvertError) {
+            const addressConvertQueries =
+              buildAddressConvertQueryVariants(customerAddressRow);
+            let lastAutoConvertError = null;
+
+            for (const addressConvertQuery of addressConvertQueries) {
+              try {
+                const convertedAddress =
+                  await autoConvertAddress2(addressConvertQuery);
+                const convertedLocationResult =
+                  buildFallbackLocationSuggestResult(convertedAddress);
+
+                if (
+                  convertedLocationResult?.LocationV2 &&
+                  convertedLocationResult?.WardV2
+                ) {
+                  resolvedLocationSuggestResult = convertedLocationResult;
+                  break;
+                }
+              } catch (autoConvertError) {
+                lastAutoConvertError = autoConvertError;
+              }
+            }
+
+            if (
+              (!resolvedLocationSuggestResult?.LocationV2 ||
+                !resolvedLocationSuggestResult?.WardV2) &&
+              lastAutoConvertError
+            ) {
               console.warn(
                 "autoConvertAddress2 for e-invoice error, fallback to original customer address:",
-                autoConvertError,
+                lastAutoConvertError,
               );
             }
           }
