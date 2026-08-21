@@ -3,16 +3,16 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
     BadgeCheck,
+    Camera,
+    CheckCircle2,
     Eye,
     EyeOff,
-    Image,
     KeyRound,
+    LockKeyhole,
     LogOut,
     Mail,
     Save,
     Shield,
-    ShieldCheck,
-    Sparkles,
     Upload,
     UserRound,
 } from "lucide-react";
@@ -27,12 +27,12 @@ export default function UserProfile() {
 
     const [managedPages, setManagedPages] = useState([]);
 
-    const rawUserPageIds = user?.pageId || user?.pageIds || [];
     const userPageIds = useMemo(() => {
+        const rawUserPageIds = user?.pageId || user?.pageIds || [];
         if (Array.isArray(rawUserPageIds)) return rawUserPageIds;
         if (rawUserPageIds) return [rawUserPageIds];
         return [];
-    }, [rawUserPageIds]);
+    }, [user?.pageId, user?.pageIds]);
 
     const [profileForm, setProfileForm] = useState({
         fullName: "",
@@ -43,9 +43,12 @@ export default function UserProfile() {
     const [passwordForm, setPasswordForm] = useState({
         currentPassword: "",
         newPassword: "",
+        confirmPassword: "",
     });
 
-    const [showPassword, setShowPassword] = useState(false);
+    const [showCurrentPassword, setShowCurrentPassword] = useState(false);
+    const [showNewPassword, setShowNewPassword] = useState(false);
+    const [showConfirmPassword, setShowConfirmPassword] = useState(false);
     const [savingProfile, setSavingProfile] = useState(false);
     const [uploadingAvatar, setUploadingAvatar] = useState(false);
     const [savingPassword, setSavingPassword] = useState(false);
@@ -193,8 +196,18 @@ export default function UserProfile() {
         setErrorPassword("");
         setPasswordMessage("");
 
-        if (!passwordForm.currentPassword || !passwordForm.newPassword) {
-            setErrorPassword("Vui lòng nhập đầy đủ mật khẩu hiện tại và mật khẩu mới");
+        if (!passwordForm.currentPassword || !passwordForm.newPassword || !passwordForm.confirmPassword) {
+            setErrorPassword("Vui lòng nhập đầy đủ các trường mật khẩu");
+            return;
+        }
+
+        if (passwordForm.newPassword.length < 8) {
+            setErrorPassword("Mật khẩu mới cần có ít nhất 8 ký tự");
+            return;
+        }
+
+        if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+            setErrorPassword("Mật khẩu xác nhận chưa trùng khớp");
             return;
         }
 
@@ -217,7 +230,7 @@ export default function UserProfile() {
             if (!res.ok) throw new Error(data?.message || "Đổi mật khẩu thất bại");
 
             setPasswordMessage(data?.message || "Đổi mật khẩu thành công.");
-            setPasswordForm({ currentPassword: "", newPassword: "" });
+            setPasswordForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
 
             setTimeout(() => {
                 logout?.();
@@ -248,334 +261,363 @@ export default function UserProfile() {
     }
 
     const displayName = user.fullName || user.name || user.email || "Người dùng";
-    const roleLabel = isAdmin ? "ADMIN" : "USER";
+    const roleLabel = isAdmin ? "Quản trị viên" : "Người dùng";
+    const savedFullName = user.fullName || user.name || "";
+    const savedAvatarUrl = user.avatarUrl || "";
+    const isProfileDirty =
+        profileForm.fullName.trim() !== savedFullName.trim() ||
+        profileForm.avatarUrl !== savedAvatarUrl;
+    const passwordRules = [
+        passwordForm.newPassword.length >= 8,
+        /[a-z]/.test(passwordForm.newPassword),
+        /[A-Z]/.test(passwordForm.newPassword),
+        /\d/.test(passwordForm.newPassword),
+    ];
+    const passwordScore = passwordRules.filter(Boolean).length;
+    const passwordStrength = [
+        { label: "Chưa nhập", color: "bg-slate-200", text: "text-slate-400" },
+        { label: "Yếu", color: "bg-rose-500", text: "text-rose-600" },
+        { label: "Trung bình", color: "bg-amber-400", text: "text-amber-600" },
+        { label: "Khá", color: "bg-sky-500", text: "text-sky-600" },
+        { label: "Mạnh", color: "bg-emerald-500", text: "text-emerald-600" },
+    ][passwordForm.newPassword ? passwordScore : 0];
     const inputClass =
-        "w-full rounded-2xl border border-[#DCE9FB] bg-white px-3 py-2.5 text-sm text-[#0B1E3D] shadow-sm outline-none transition placeholder:text-slate-400 focus:border-[#1D6FE0] focus:ring-4 focus:ring-[#1D6FE0]/10";
+        "w-full rounded-xl border border-sky-100 bg-white px-3.5 py-3 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 hover:border-sky-200 focus:border-sky-400 focus:ring-4 focus:ring-sky-100";
     const mutedInputClass =
-        "w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-500 shadow-sm outline-none";
+        "w-full cursor-not-allowed rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-3 text-sm text-slate-500 outline-none";
+    const cardClass =
+        "overflow-hidden rounded-[20px] border border-sky-100 bg-white shadow-[0_14px_40px_-28px_rgba(14,116,144,0.35)]";
+
+    const PasswordToggle = ({ visible, onToggle, label }) => (
+        <button
+            type="button"
+            onClick={onToggle}
+            className="absolute right-2.5 top-1/2 grid h-8 w-8 -translate-y-1/2 place-items-center rounded-lg text-slate-400 transition hover:bg-sky-50 hover:text-sky-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
+            aria-label={`${visible ? "Ẩn" : "Hiện"} ${label}`}
+        >
+            {visible ? <EyeOff size={17} /> : <Eye size={17} />}
+        </button>
+    );
 
     return (
-        <div className="profile-premium relative min-h-screen overflow-x-hidden bg-[#F3F8FF] text-[#28374C]">
-            {/* Ambient aurora backdrop — signature element, alive but unobtrusive */}
-            <div className="pointer-events-none absolute inset-0 overflow-hidden">
-                <div className="aurora-veil absolute inset-0" />
-                <div className="aurora-blob absolute -left-24 -top-24 h-96 w-96 rounded-full bg-[#BFE0FF] opacity-60 blur-3xl" />
-                <div className="aurora-blob delay-1 absolute -right-20 top-10 h-80 w-80 rounded-full bg-[#E7C878] opacity-25 blur-3xl" />
-                <div className="aurora-blob delay-2 absolute bottom-[-6rem] left-1/3 h-96 w-96 rounded-full bg-[#DCEBFF] opacity-70 blur-3xl" />
-                <div className="aurora-blob delay-3 absolute right-1/4 bottom-[-4rem] h-72 w-72 rounded-full bg-[#9CCBFF] opacity-30 blur-3xl" />
-            </div>
+        <div className="relative min-h-screen overflow-x-hidden bg-[#F4FAFF] text-slate-700">
+            <div className="pointer-events-none absolute inset-x-0 top-0 h-80 bg-[radial-gradient(circle_at_20%_0%,rgba(125,211,252,0.22),transparent_42%),radial-gradient(circle_at_85%_10%,rgba(186,230,253,0.3),transparent_36%)]" />
 
-            <div className="relative z-10 mx-auto max-w-5xl px-4 py-6 md:px-6 md:py-8">
-                <header className="overflow-hidden rounded-[28px] border border-white/70 bg-white/85 shadow-[0_22px_60px_-38px_rgba(11,30,61,0.35)] backdrop-blur-xl">
-                    <div className="h-[3px] bg-[linear-gradient(90deg,#1D6FE0_0%,#7CC3FF_35%,#E7C878_65%,#1D6FE0_100%)]" />
-                    <div className="grid gap-5 p-5 md:grid-cols-[1fr_auto] md:items-center md:p-6">
-                        <div className="flex min-w-0 items-center gap-4">
-                            <div className="relative shrink-0">
-                                <div className="avatar-ring h-[88px] w-[88px] rounded-[26px] p-[3px]">
-                                    <div className="h-full w-full rounded-[23px] bg-white p-[3px]">
-                                        <img
-                                            src={avatarPreview}
-                                            alt="Avatar"
-                                            className="h-full w-full rounded-[20px] object-cover"
-                                            onError={(e) => {
-                                                e.currentTarget.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(
-                                                    avatarName,
-                                                )}&background=1D6FE0&color=ffffff&size=128`;
-                                            }}
-                                        />
-                                    </div>
-                                </div>
-                            </div>
+            <div className="relative mx-auto max-w-6xl px-4 py-6 sm:px-6 lg:py-8">
+                <div className="mb-5 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                        <p className="text-sm font-semibold text-sky-600">Cài đặt tài khoản</p>
+                        <h1 className="mt-1 text-2xl font-bold tracking-tight text-slate-900 md:text-3xl">
+                            Tài khoản của tôi
+                        </h1>
+                        <p className="mt-1 text-sm text-slate-500">
+                            Quản lý thông tin cá nhân và bảo mật đăng nhập.
+                        </p>
+                    </div>
+                    <button
+                        onClick={() => {
+                            logout?.();
+                            navigate?.("/login");
+                        }}
+                        className="inline-flex h-10 items-center justify-center gap-2 self-start rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-600 shadow-sm transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600 active:scale-[0.98] sm:self-auto"
+                    >
+                        <LogOut size={16} />
+                        Đăng xuất
+                    </button>
+                </div>
 
-                            <div className="min-w-0">
-                                <div className="mb-2 flex flex-wrap items-center gap-2">
-                                    <span
-                                        className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-semibold ${isAdmin
-                                                ? "border-[#F0DDA6] bg-[#FBF3DF] text-[#9C7A1E]"
-                                                : "border-[#CFE3FF] bg-[#EEF6FF] text-[#1D6FE0]"
-                                            }`}
-                                    >
-                                        {isAdmin ? <Sparkles size={13} /> : <BadgeCheck size={13} />}
-                                        {roleLabel}
-                                    </span>
-                                    <span className="inline-flex items-center gap-1 rounded-full border border-[#CFE3FF] bg-white px-2.5 py-1 text-[11px] font-semibold text-[#1D6FE0]">
-                                        <ShieldCheck size={13} />
-                                        Hồ sơ đã xác thực
-                                    </span>
-                                </div>
-                                <h1 className="truncate font-display text-2xl font-extrabold tracking-tight text-[#0B1E3D] md:text-3xl">
+                <header className={`${cardClass} p-5 sm:p-6`}>
+                    <div className="flex flex-col gap-5 sm:flex-row sm:items-center">
+                        <div className="relative w-fit shrink-0">
+                            <img
+                                src={avatarPreview}
+                                alt={`Ảnh đại diện của ${displayName}`}
+                                className="h-24 w-24 rounded-[22px] border-4 border-white object-cover shadow-[0_10px_28px_-12px_rgba(14,116,144,0.45)]"
+                                onError={(e) => {
+                                    e.currentTarget.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(
+                                        avatarName,
+                                    )}&background=38BDF8&color=ffffff&size=128`;
+                                }}
+                            />
+                            <label
+                                className={`absolute -bottom-2 -right-2 grid h-9 w-9 place-items-center rounded-xl border-2 border-white shadow-md transition ${uploadingAvatar
+                                    ? "cursor-not-allowed bg-slate-200 text-slate-400"
+                                    : "cursor-pointer bg-sky-500 text-white hover:bg-sky-600"
+                                    }`}
+                                title="Thay ảnh đại diện"
+                            >
+                                {uploadingAvatar ? (
+                                    <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/50 border-t-white" />
+                                ) : (
+                                    <Camera size={17} />
+                                )}
+                                <input
+                                    type="file"
+                                    accept="image/*"
+                                    className="hidden"
+                                    disabled={uploadingAvatar}
+                                    onChange={handleAvatarFileChange}
+                                />
+                            </label>
+                        </div>
+
+                        <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                                <h2 className="truncate text-xl font-bold text-slate-900 sm:text-2xl">
                                     {displayName}
-                                </h1>
-                                <p className="mt-1 flex min-w-0 items-center gap-2 text-sm text-slate-500">
-                                    <Mail size={15} className="shrink-0 text-[#1D6FE0]" />
-                                    <span className="truncate">{user.email || "Chưa có email"}</span>
-                                </p>
+                                </h2>
+                                <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold ${isAdmin
+                                    ? "bg-amber-50 text-amber-700 ring-1 ring-amber-200"
+                                    : "bg-sky-50 text-sky-700 ring-1 ring-sky-200"
+                                    }`}>
+                                    <BadgeCheck size={13} />
+                                    {roleLabel}
+                                </span>
+                            </div>
+                            <p className="mt-1.5 flex min-w-0 items-center gap-2 text-sm text-slate-500">
+                                <Mail size={15} className="shrink-0 text-sky-500" />
+                                <span className="truncate">{user.email || "Chưa có email"}</span>
+                            </p>
+                            <div className="mt-3 flex flex-wrap gap-2 text-xs font-medium text-slate-500">
+                                <span className="rounded-lg bg-sky-50 px-2.5 py-1.5 text-sky-700">
+                                    {isAdmin ? "Quản lý tất cả Page" : `${managedPages.length} Page được phân quyền`}
+                                </span>
+                                <span className="inline-flex items-center gap-1 rounded-lg bg-emerald-50 px-2.5 py-1.5 text-emerald-700">
+                                    <CheckCircle2 size={13} /> Tài khoản đang hoạt động
+                                </span>
                             </div>
                         </div>
 
-                        <button
-                            onClick={() => {
-                                logout?.();
-                                navigate?.("/login");
-                            }}
-                            className="inline-flex h-11 items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-700 active:scale-[0.98]"
-                            title="Đăng xuất"
-                        >
-                            <LogOut size={16} />
-                            Đăng xuất
-                        </button>
+                        <label className={`inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-xl border px-4 text-sm font-semibold transition ${uploadingAvatar
+                            ? "cursor-not-allowed border-slate-200 bg-slate-50 text-slate-400"
+                            : "cursor-pointer border-sky-200 bg-sky-50 text-sky-700 hover:bg-sky-100"
+                            }`}>
+                            <Upload size={16} />
+                            {uploadingAvatar ? "Đang tải ảnh..." : "Thay ảnh"}
+                            <input
+                                type="file"
+                                accept="image/*"
+                                className="hidden"
+                                disabled={uploadingAvatar}
+                                onChange={handleAvatarFileChange}
+                            />
+                        </label>
                     </div>
                 </header>
 
-                <main className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1.1fr)_minmax(320px,0.9fr)]">
-                    <section className="overflow-hidden rounded-[28px] border border-white/70 bg-white/88 shadow-[0_18px_55px_-40px_rgba(11,30,61,0.4)] backdrop-blur-xl">
-                        <div className="border-b border-[#DCE9FB] bg-[linear-gradient(90deg,#EEF6FF_0%,#FFFFFF_55%,#FBF6EA_100%)] px-5 py-4">
-                            <div className="flex items-start justify-between gap-3">
-                                <div>
-                                    <h2 className="flex items-center gap-2 font-display text-base font-bold text-[#0B1E3D]">
-                                        <UserRound size={18} className="text-[#1D6FE0]" />
-                                        Thông tin cá nhân
-                                    </h2>
-                                    <p className="mt-1 text-xs text-slate-500">
-                                        Cập nhật tên hiển thị và ảnh đại diện tài khoản.
-                                    </p>
-                                </div>
-                                <div className="hidden h-10 w-10 items-center justify-center rounded-2xl border border-[#CFE3FF] bg-white text-[#1D6FE0] shadow-sm sm:flex">
-                                    <Sparkles size={18} />
-                                </div>
-                            </div>
+                <main className="mt-5 grid items-start gap-5 lg:grid-cols-[minmax(0,1.15fr)_minmax(340px,0.85fr)]">
+                    <section className={cardClass}>
+                        <div className="border-b border-sky-100 px-5 py-4 sm:px-6">
+                            <h2 className="flex items-center gap-2 text-base font-bold text-slate-900">
+                                <span className="grid h-9 w-9 place-items-center rounded-xl bg-sky-50 text-sky-600">
+                                    <UserRound size={18} />
+                                </span>
+                                Thông tin cá nhân
+                            </h2>
+                            <p className="ml-11 mt-0.5 text-xs text-slate-500">
+                                Thông tin dùng để hiển thị trong hệ thống.
+                            </p>
                         </div>
 
-                        <form onSubmit={handleSaveProfile} className="p-5 md:p-6">
-                            <div className="grid gap-6 md:grid-cols-[220px_1fr]">
-                                <div className="space-y-4">
-                                    <div className="rounded-[24px] border border-[#DCE9FB] bg-[linear-gradient(160deg,#EEF6FF_0%,#FFFFFF_60%,#FBF6EA_100%)] p-4">
-                                        <img
-                                            src={avatarPreview}
-                                            alt="Avatar preview"
-                                            className="mx-auto h-28 w-28 rounded-[24px] border border-white object-cover shadow-[0_18px_34px_-24px_rgba(11,30,61,0.45)]"
-                                            onError={(e) => {
-                                                e.currentTarget.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(
-                                                    avatarName,
-                                                )}&background=1D6FE0&color=ffffff&size=128`;
-                                            }}
-                                        />
-                                        <label
-                                            className={`mt-3 flex h-9 w-full cursor-pointer items-center justify-center gap-2 rounded-2xl border text-xs font-semibold transition ${uploadingAvatar
-                                                    ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400"
-                                                    : "border-[#CFE3FF] bg-white text-[#1D6FE0] hover:bg-[#EEF6FF]"
-                                                }`}
-                                        >
-                                            <Upload size={14} />
-                                            {uploadingAvatar ? "Đang tải ảnh..." : "Tải ảnh lên"}
-                                            <input
-                                                type="file"
-                                                accept="image/*"
-                                                className="hidden"
-                                                disabled={uploadingAvatar}
-                                                onChange={handleAvatarFileChange}
-                                            />
-                                        </label>
-                                        <p className="mt-2 text-center text-xs leading-5 text-slate-500">
-                                            Hoặc dán đường dẫn ảnh ở ô bên cạnh.
-                                        </p>
-                                    </div>
-
-                                    <div className="rounded-[24px] border border-slate-200 bg-white p-4">
-                                        <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                                            Page đang quản lý
-                                        </div>
-                                        {isAdmin ? (
-                                            <p className="rounded-2xl border border-emerald-100 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700">
-                                                Admin quản lý tất cả Page.
-                                            </p>
-                                        ) : managedPages.length > 0 ? (
-                                            <div className="flex flex-wrap gap-2">
-                                                {managedPages.map((p) => (
-                                                    <span
-                                                        key={p._id}
-                                                        className="rounded-full border border-[#CFE3FF] bg-[#EEF6FF] px-2.5 py-1 text-xs font-medium text-[#1D6FE0]"
-                                                        title={p.facebookId}
-                                                    >
-                                                        {p.name}
-                                                    </span>
-                                                ))}
-                                            </div>
-                                        ) : (
-                                            <p className="text-xs italic text-slate-400">
-                                                Tài khoản hiện chưa được gán Page nào.
-                                            </p>
-                                        )}
-                                    </div>
+                        <form onSubmit={handleSaveProfile} className="space-y-5 p-5 sm:p-6">
+                            <div>
+                                <label className="mb-1.5 block text-sm font-semibold text-slate-700">
+                                    Họ và tên hiển thị
+                                </label>
+                                <div className="relative">
+                                    <UserRound size={17} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-sky-500" />
+                                    <input
+                                        type="text"
+                                        name="fullName"
+                                        value={profileForm.fullName}
+                                        onChange={handleProfileChange}
+                                        className={`${inputClass} pl-11`}
+                                        placeholder="Nhập tên hiển thị"
+                                        autoComplete="name"
+                                    />
                                 </div>
+                            </div>
 
-                                <div className="space-y-4">
-                                    <div>
-                                        <label className="mb-1.5 block text-xs font-semibold text-slate-700">
-                                            Họ và tên hiển thị
-                                        </label>
-                                        <div className="relative">
-                                            <UserRound
-                                                size={16}
-                                                className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
-                                            />
-                                            <input
-                                                type="text"
-                                                name="fullName"
-                                                value={profileForm.fullName}
-                                                onChange={handleProfileChange}
-                                                className={`${inputClass} pl-10`}
-                                                placeholder="Nhập tên hiển thị"
-                                            />
-                                        </div>
-                                    </div>
-
-                                    <div>
-                                        <label className="mb-1.5 block text-xs font-semibold text-slate-700">
-                                            Email
-                                        </label>
-                                        <div className="relative">
-                                            <Mail
-                                                size={16}
-                                                className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
-                                            />
-                                            <input
-                                                type="email"
-                                                value={profileForm.email}
-                                                disabled
-                                                className={`${mutedInputClass} pl-10`}
-                                            />
-                                        </div>
-                                    </div>
-
-                                    <div>
-                                        <label className="mb-1.5 block text-xs font-semibold text-slate-700">
-                                            Avatar URL
-                                        </label>
-                                        <div className="relative">
-                                            <Image
-                                                size={16}
-                                                className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
-                                            />
-                                            <input
-                                                type="text"
-                                                name="avatarUrl"
-                                                value={profileForm.avatarUrl}
-                                                onChange={handleProfileChange}
-                                                className={`${inputClass} pl-10`}
-                                                placeholder="https://example.com/avatar.jpg"
-                                            />
-                                        </div>
-                                    </div>
-
-                                    {errorProfile && (
-                                        <div className="rounded-2xl border border-rose-100 bg-rose-50 px-3 py-2 text-xs font-medium text-rose-700">
-                                            {errorProfile}
-                                        </div>
-                                    )}
-                                    {profileMessage && (
-                                        <div className="rounded-2xl border border-emerald-100 bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-700">
-                                            {profileMessage}
-                                        </div>
-                                    )}
-
-                                    <div className="flex justify-end pt-2">
-                                        <button
-                                            type="submit"
-                                            disabled={savingProfile || uploadingAvatar}
-                                            className="btn-shine inline-flex h-11 items-center justify-center gap-2 rounded-2xl bg-[linear-gradient(90deg,#1653B0_0%,#1D6FE0_55%,#3B93FF_100%)] px-4 text-sm font-semibold text-white shadow-[0_16px_32px_-20px_rgba(29,111,224,0.85)] transition hover:brightness-105 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
-                                        >
-                                            <Save size={16} />
-                                            {savingProfile ? "Đang lưu..." : "Lưu thay đổi"}
-                                        </button>
-                                    </div>
+                            <div>
+                                <div className="mb-1.5 flex items-center justify-between gap-3">
+                                    <label className="text-sm font-semibold text-slate-700">Email</label>
+                                    <span className="inline-flex items-center gap-1 text-xs text-slate-400">
+                                        <LockKeyhole size={12} /> Không thể thay đổi
+                                    </span>
                                 </div>
+                                <div className="relative">
+                                    <Mail size={17} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                                    <input
+                                        type="email"
+                                        value={profileForm.email}
+                                        disabled
+                                        className={`${mutedInputClass} pl-11`}
+                                    />
+                                </div>
+                            </div>
+
+                            {errorProfile && (
+                                <div role="alert" className="rounded-xl border border-rose-100 bg-rose-50 px-3.5 py-3 text-sm font-medium text-rose-700">
+                                    {errorProfile}
+                                </div>
+                            )}
+                            {profileMessage && (
+                                <div role="status" className="flex items-center gap-2 rounded-xl border border-emerald-100 bg-emerald-50 px-3.5 py-3 text-sm font-medium text-emerald-700">
+                                    <CheckCircle2 size={16} /> {profileMessage}
+                                </div>
+                            )}
+
+                            <div className="flex items-center justify-between gap-3 border-t border-sky-50 pt-5">
+                                <p className="text-xs text-slate-400">
+                                    {isProfileDirty ? "Bạn có thay đổi chưa lưu" : "Thông tin đã được cập nhật"}
+                                </p>
+                                <button
+                                    type="submit"
+                                    disabled={savingProfile || uploadingAvatar || !isProfileDirty}
+                                    className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-sky-500 px-4 text-sm font-semibold text-white shadow-[0_8px_20px_-10px_rgba(14,165,233,0.8)] transition hover:bg-sky-600 active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none"
+                                >
+                                    <Save size={16} />
+                                    {savingProfile ? "Đang lưu..." : "Lưu thay đổi"}
+                                </button>
                             </div>
                         </form>
                     </section>
 
-                    <section className="overflow-hidden rounded-[28px] border border-white/70 bg-white/88 shadow-[0_18px_55px_-40px_rgba(11,30,61,0.4)] backdrop-blur-xl">
-                        <div className="border-b border-[#DCE9FB] bg-[linear-gradient(90deg,#FFFFFF_0%,#EEF6FF_55%,#FBF6EA_100%)] px-5 py-4">
-                            <div className="flex items-start justify-between gap-3">
-                                <div>
-                                    <h2 className="flex items-center gap-2 font-display text-base font-bold text-[#0B1E3D]">
-                                        <KeyRound size={18} className="text-[#1D6FE0]" />
-                                        Đổi mật khẩu
-                                    </h2>
-                                    <p className="mt-1 text-xs text-slate-500">
-                                        Sau khi đổi mật khẩu, hệ thống sẽ yêu cầu đăng nhập lại.
-                                    </p>
-                                </div>
-                                <button
-                                    type="button"
-                                    onClick={() => setShowPassword((v) => !v)}
-                                    className="inline-flex h-10 items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-[#CFE3FF] hover:bg-[#EEF6FF]"
-                                    title={showPassword ? "Ẩn mật khẩu" : "Hiện mật khẩu"}
-                                >
-                                    {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-                                    <span className="hidden sm:inline">{showPassword ? "Ẩn" : "Hiện"}</span>
-                                </button>
-                            </div>
+                    <section className={cardClass}>
+                        <div className="border-b border-sky-100 px-5 py-4 sm:px-6">
+                            <h2 className="flex items-center gap-2 text-base font-bold text-slate-900">
+                                <span className="grid h-9 w-9 place-items-center rounded-xl bg-sky-50 text-sky-600">
+                                    <KeyRound size={18} />
+                                </span>
+                                Bảo mật tài khoản
+                            </h2>
+                            <p className="ml-11 mt-0.5 text-xs text-slate-500">
+                                Bạn sẽ cần đăng nhập lại sau khi đổi mật khẩu.
+                            </p>
                         </div>
 
-                        <form onSubmit={handleSavePassword} className="space-y-4 p-5 md:p-6">
+                        <form onSubmit={handleSavePassword} className="space-y-4 p-5 sm:p-6">
                             <div>
-                                <label className="mb-1.5 block text-xs font-semibold text-slate-700">
-                                    Mật khẩu hiện tại
-                                </label>
-                                <input
-                                    type={showPassword ? "text" : "password"}
-                                    name="currentPassword"
-                                    value={passwordForm.currentPassword}
-                                    onChange={handlePasswordChange}
-                                    className={inputClass}
-                                    placeholder="Nhập mật khẩu hiện tại"
-                                />
+                                <label className="mb-1.5 block text-sm font-semibold text-slate-700">Mật khẩu hiện tại</label>
+                                <div className="relative">
+                                    <input
+                                        type={showCurrentPassword ? "text" : "password"}
+                                        name="currentPassword"
+                                        value={passwordForm.currentPassword}
+                                        onChange={handlePasswordChange}
+                                        className={`${inputClass} pr-12`}
+                                        placeholder="Nhập mật khẩu hiện tại"
+                                        autoComplete="current-password"
+                                    />
+                                    <PasswordToggle visible={showCurrentPassword} onToggle={() => setShowCurrentPassword((value) => !value)} label="mật khẩu hiện tại" />
+                                </div>
                             </div>
 
                             <div>
-                                <label className="mb-1.5 block text-xs font-semibold text-slate-700">
-                                    Mật khẩu mới
-                                </label>
-                                <input
-                                    type={showPassword ? "text" : "password"}
-                                    name="newPassword"
-                                    value={passwordForm.newPassword}
-                                    onChange={handlePasswordChange}
-                                    className={inputClass}
-                                    placeholder="Nhập mật khẩu mới"
-                                />
-                                <p className="mt-1.5 text-xs leading-5 text-slate-500">
-                                    Nên dùng mật khẩu tối thiểu 8 ký tự, có chữ hoa, chữ thường và số.
-                                </p>
+                                <label className="mb-1.5 block text-sm font-semibold text-slate-700">Mật khẩu mới</label>
+                                <div className="relative">
+                                    <input
+                                        type={showNewPassword ? "text" : "password"}
+                                        name="newPassword"
+                                        value={passwordForm.newPassword}
+                                        onChange={handlePasswordChange}
+                                        className={`${inputClass} pr-12`}
+                                        placeholder="Tối thiểu 8 ký tự"
+                                        autoComplete="new-password"
+                                    />
+                                    <PasswordToggle visible={showNewPassword} onToggle={() => setShowNewPassword((value) => !value)} label="mật khẩu mới" />
+                                </div>
+                                <div className="mt-2">
+                                    <div className="flex gap-1.5">
+                                        {[1, 2, 3, 4].map((level) => (
+                                            <span key={level} className={`h-1 flex-1 rounded-full transition-colors ${passwordScore >= level && passwordForm.newPassword ? passwordStrength.color : "bg-slate-100"}`} />
+                                        ))}
+                                    </div>
+                                    <div className="mt-1.5 flex items-center justify-between text-xs">
+                                        <span className="text-slate-400">8+ ký tự, chữ hoa, chữ thường và số</span>
+                                        <span className={`font-semibold ${passwordStrength.text}`}>{passwordStrength.label}</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div>
+                                <label className="mb-1.5 block text-sm font-semibold text-slate-700">Xác nhận mật khẩu mới</label>
+                                <div className="relative">
+                                    <input
+                                        type={showConfirmPassword ? "text" : "password"}
+                                        name="confirmPassword"
+                                        value={passwordForm.confirmPassword}
+                                        onChange={handlePasswordChange}
+                                        className={`${inputClass} pr-12`}
+                                        placeholder="Nhập lại mật khẩu mới"
+                                        autoComplete="new-password"
+                                    />
+                                    <PasswordToggle visible={showConfirmPassword} onToggle={() => setShowConfirmPassword((value) => !value)} label="mật khẩu xác nhận" />
+                                </div>
+                                {passwordForm.confirmPassword && (
+                                    <p className={`mt-1.5 text-xs font-medium ${passwordForm.confirmPassword === passwordForm.newPassword ? "text-emerald-600" : "text-rose-600"}`}>
+                                        {passwordForm.confirmPassword === passwordForm.newPassword ? "Mật khẩu đã trùng khớp" : "Mật khẩu chưa trùng khớp"}
+                                    </p>
+                                )}
                             </div>
 
                             {errorPassword && (
-                                <div className="rounded-2xl border border-rose-100 bg-rose-50 px-3 py-2 text-xs font-medium text-rose-700">
+                                <div role="alert" className="rounded-xl border border-rose-100 bg-rose-50 px-3.5 py-3 text-sm font-medium text-rose-700">
                                     {errorPassword}
                                 </div>
                             )}
                             {passwordMessage && (
-                                <div className="rounded-2xl border border-emerald-100 bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-700">
-                                    {passwordMessage}
+                                <div role="status" className="flex items-center gap-2 rounded-xl border border-emerald-100 bg-emerald-50 px-3.5 py-3 text-sm font-medium text-emerald-700">
+                                    <CheckCircle2 size={16} /> {passwordMessage}
                                 </div>
                             )}
 
                             <button
                                 type="submit"
                                 disabled={savingPassword}
-                                className="btn-shine inline-flex h-11 w-full items-center justify-center gap-2 rounded-2xl bg-[#0B1E3D] px-4 text-sm font-semibold text-white shadow-[0_16px_32px_-22px_rgba(11,30,61,0.9)] transition hover:bg-[#122A4E] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
+                                className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 text-sm font-semibold text-white transition hover:bg-slate-800 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
                             >
                                 <Shield size={16} />
-                                {savingPassword ? "Đang đổi..." : "Đổi mật khẩu"}
+                                {savingPassword ? "Đang đổi..." : "Cập nhật mật khẩu"}
                             </button>
                         </form>
                     </section>
                 </main>
 
-                <footer className="mt-6 text-center text-xs text-slate-400">
-                    TranKhanh © 2026. All rights reserved.
-                </footer>
+                <section className={`${cardClass} mt-5 p-5 sm:p-6`}>
+                    <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                        <div>
+                            <h2 className="text-base font-bold text-slate-900">Page được phân quyền</h2>
+                            <p className="mt-1 text-sm text-slate-500">Các Page mà tài khoản có thể truy cập và quản lý.</p>
+                        </div>
+                        {!isAdmin && managedPages.length > 0 && (
+                            <span className="w-fit rounded-full bg-sky-50 px-3 py-1 text-xs font-semibold text-sky-700">
+                                {managedPages.length} Page
+                            </span>
+                        )}
+                    </div>
+
+                    <div className="mt-4 border-t border-sky-50 pt-4">
+                        {isAdmin ? (
+                            <div className="flex items-center gap-3 rounded-xl bg-sky-50 px-4 py-3 text-sm font-medium text-sky-800">
+                                <BadgeCheck size={18} className="shrink-0 text-sky-600" />
+                                Quản trị viên có quyền quản lý tất cả Page trong hệ thống.
+                            </div>
+                        ) : managedPages.length > 0 ? (
+                            <div className="flex flex-wrap gap-2">
+                                {managedPages.map((page) => (
+                                    <span key={page._id} className="rounded-xl border border-sky-100 bg-[#F4FAFF] px-3 py-2 text-sm font-semibold text-sky-700" title={page.facebookId}>
+                                        {page.name}
+                                    </span>
+                                ))}
+                            </div>
+                        ) : (
+                            <div className="rounded-xl border border-dashed border-sky-200 bg-sky-50/50 px-4 py-6 text-center text-sm text-slate-500">
+                                Tài khoản hiện chưa được phân quyền Page nào.
+                            </div>
+                        )}
+                    </div>
+                </section>
             </div>
         </div>
     );

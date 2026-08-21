@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { createApi } from "../api/api";
 import { setupServerPushNotifications } from "../utils/serverPushNotifications";
 
@@ -7,7 +7,11 @@ const AuthContext = createContext();
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [isAuthReady, setIsAuthReady] = useState(false);
+  const [attendanceLeavePendingTotal, setAttendanceLeavePendingTotal] = useState(0);
   const didLogoutRef = useRef(false);
+  const attendanceLeavePendingRequestRef = useRef(null);
+  const attendanceLeavePendingLastLoadRef = useRef(0);
+  const attendanceLeavePendingTotalRef = useRef(0);
   const isLoggedIn = Boolean(user);
 
   const api = useMemo(
@@ -18,6 +22,31 @@ export function AuthProvider({ children }) {
     [],
   );
 
+  const refreshAttendanceLeavePendingTotal = useCallback(async ({ force = false } = {}) => {
+    const now = Date.now();
+    if (!force && now - attendanceLeavePendingLastLoadRef.current < 1000) {
+      return attendanceLeavePendingTotalRef.current;
+    }
+    if (attendanceLeavePendingRequestRef.current) {
+      return attendanceLeavePendingRequestRef.current;
+    }
+
+    const request = api.get("/attendance-leave-requests/pending-count")
+      .then((response) => {
+        const total = Number(response.data?.total) || 0;
+        attendanceLeavePendingTotalRef.current = total;
+        attendanceLeavePendingLastLoadRef.current = Date.now();
+        setAttendanceLeavePendingTotal(total);
+        return total;
+      })
+      .finally(() => {
+        attendanceLeavePendingRequestRef.current = null;
+      });
+
+    attendanceLeavePendingRequestRef.current = request;
+    return request;
+  }, [api]);
+
   function login(userData) {
     didLogoutRef.current = false;
     setUser(userData || null);
@@ -26,6 +55,8 @@ export function AuthProvider({ children }) {
 
   async function logout(redirect = true) {
     setUser(null);
+    attendanceLeavePendingTotalRef.current = 0;
+    setAttendanceLeavePendingTotal(0);
 
     try {
       await api.post("/auth/logout");
@@ -95,6 +126,8 @@ export function AuthProvider({ children }) {
         logout: safeLogout,
         updateUser,
         api,
+        attendanceLeavePendingTotal,
+        refreshAttendanceLeavePendingTotal,
       }}
     >
       {children}

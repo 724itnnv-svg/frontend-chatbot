@@ -44,7 +44,7 @@ const AI_FLAG_LABELS = {
 };
 
 function statusMeta(status) {
-  if (status === "pending") return { label: "Chờ xử lý", className: "border-violet-200 bg-violet-50 text-violet-700" };
+  if (status === "pending") return { label: "Chờ xử lý", className: "border-sky-200 bg-sky-50 text-sky-700" };
   if (status === "cancel_pending") return { label: "Chờ duyệt hủy", className: "border-amber-200 bg-amber-50 text-amber-700" };
   return { label: "Đã duyệt", className: "border-emerald-200 bg-emerald-50 text-emerald-700" };
 }
@@ -258,39 +258,40 @@ export default function ApprovedLeaveViewer() {
     }, nextZoom));
   }
 
+  const filterControlClass = "w-full rounded-xl border border-sky-100 bg-white px-3 py-2.5 text-sm font-medium text-slate-700 outline-none transition hover:border-sky-200 focus:border-sky-400 focus:ring-4 focus:ring-sky-100";
+  const cardClass = "overflow-hidden rounded-[20px] border border-sky-100 bg-white shadow-[0_16px_40px_-28px_rgba(14,116,144,0.42)]";
+
   return (
-    <div className="min-h-full bg-slate-50 p-4 sm:p-6">
-      <div className="mx-auto max-w-7xl space-y-4">
-        <div className="rounded-2xl border border-violet-100 bg-gradient-to-r from-violet-600 to-indigo-600 p-5 text-white shadow-sm sm:p-6">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <div className="flex items-center gap-2 text-violet-100">
-                <FileCheck2 size={20} />
-                <span className="text-xs font-bold uppercase tracking-[0.16em]">Tra cứu nghỉ phép</span>
-              </div>
-              <h1 className="mt-2 text-xl font-black sm:text-2xl">Theo dõi đơn nghỉ phép</h1>
-              <p className="mt-1 text-sm text-violet-100">Xem đơn chờ xử lý, đơn đã duyệt, ảnh minh chứng và kết quả AI.</p>
-            </div>
-            <div className="inline-flex w-fit items-center gap-2 rounded-xl border border-white/20 bg-white/10 px-3 py-2 text-xs font-bold backdrop-blur">
+    <div className="relative min-h-full overflow-hidden bg-[#F4FAFF] p-4 text-slate-700 sm:p-6">
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-80 bg-[radial-gradient(circle_at_18%_0%,rgba(125,211,252,0.22),transparent_40%),radial-gradient(circle_at_88%_8%,rgba(186,230,253,0.32),transparent_34%)]" />
+      <div className="relative mx-auto max-w-7xl space-y-5">
+        <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <p className="flex items-center gap-2 text-sm font-semibold text-sky-600">
+              <FileCheck2 size={17} /> Quản lý chấm công
+            </p>
+            <h1 className="mt-1 text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">Theo dõi đơn nghỉ phép</h1>
+            <p className="mt-1 text-sm text-slate-500">Tra cứu trạng thái đơn, ảnh minh chứng và kết quả phân tích AI.</p>
+          </div>
+          <div className="inline-flex w-fit items-center gap-2 rounded-xl border border-sky-100 bg-white px-3.5 py-2.5 text-xs font-semibold text-sky-700 shadow-sm">
               {serverScope === "team" ? <Users size={15} /> : <ShieldCheck size={15} />}
               {serverScope === "team" ? `Phạm vi team ${serverTeam || user?.teamId || "-"}` : "Phạm vi toàn công ty"}
-            </div>
           </div>
-        </div>
+        </header>
 
-        <form onSubmit={applyFilters} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <form onSubmit={applyFilters} className={`${cardClass} p-4 sm:p-5`}>
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
-            <label className="space-y-1 text-xs font-bold text-slate-500">
-              <span>TỪ NGÀY</span>
-              <input type="date" value={filters.from} onChange={(event) => updateFilter("from", event.target.value)} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700 outline-none focus:border-violet-400" />
+            <label className="space-y-1.5 text-xs font-semibold text-slate-500">
+              <span>Từ ngày</span>
+              <input type="date" value={filters.from} onChange={(event) => updateFilter("from", event.target.value)} className={filterControlClass} />
             </label>
-            <label className="space-y-1 text-xs font-bold text-slate-500">
-              <span>ĐẾN NGÀY</span>
-              <input type="date" value={filters.to} onChange={(event) => updateFilter("to", event.target.value)} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700 outline-none focus:border-violet-400" />
+            <label className="space-y-1.5 text-xs font-semibold text-slate-500">
+              <span>Đến ngày</span>
+              <input type="date" value={filters.to} onChange={(event) => updateFilter("to", event.target.value)} className={filterControlClass} />
             </label>
-            <label className="space-y-1 text-xs font-bold text-slate-500">
-              <span>LOẠI NGHỈ</span>
-              <select value={filters.leaveType} onChange={(event) => updateFilter("leaveType", event.target.value)} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700 outline-none focus:border-violet-400">
+            <label className="space-y-1.5 text-xs font-semibold text-slate-500">
+              <span>Loại nghỉ</span>
+              <select value={filters.leaveType} onChange={(event) => updateFilter("leaveType", event.target.value)} className={filterControlClass}>
                 <option value="">Tất cả</option>
                 <option value="regular">Nghỉ phép thường</option>
                 <option value="emergency">Off đột xuất</option>
@@ -300,53 +301,53 @@ export default function ApprovedLeaveViewer() {
               </select>
             </label>
             {mayViewAll && (
-              <label className="space-y-1 text-xs font-bold text-slate-500">
-                <span>TEAM</span>
-                <input value={filters.teamId} onChange={(event) => updateFilter("teamId", event.target.value.toUpperCase())} placeholder="Tất cả team" className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700 outline-none focus:border-violet-400" />
+              <label className="space-y-1.5 text-xs font-semibold text-slate-500">
+                <span>Team</span>
+                <input value={filters.teamId} onChange={(event) => updateFilter("teamId", event.target.value.toUpperCase())} placeholder="Tất cả team" className={filterControlClass} />
               </label>
             )}
-            <label className={`space-y-1 text-xs font-bold text-slate-500 ${mayViewAll ? "xl:col-span-2" : "xl:col-span-3"}`}>
-              <span>NHÂN VIÊN</span>
+            <label className={`space-y-1.5 text-xs font-semibold text-slate-500 ${mayViewAll ? "xl:col-span-2" : "xl:col-span-3"}`}>
+              <span>Nhân viên</span>
               <div className="relative">
-                <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                <input value={filters.search} onChange={(event) => updateFilter("search", event.target.value)} placeholder="Tên, mã nhân viên hoặc team" className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2 pl-9 pr-3 text-sm font-medium text-slate-700 outline-none focus:border-violet-400" />
+                <Search size={15} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-sky-500" />
+                <input value={filters.search} onChange={(event) => updateFilter("search", event.target.value)} placeholder="Tên, mã nhân viên hoặc team" className={`${filterControlClass} pl-10`} />
               </div>
             </label>
           </div>
-          <div className="mt-3 flex flex-wrap justify-end gap-2">
-            <button type="button" onClick={resetFilters} className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 px-3 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50"><RotateCcw size={14} /> Đặt lại</button>
-            <button type="submit" className="inline-flex items-center gap-1.5 rounded-xl bg-violet-600 px-4 py-2 text-xs font-bold text-white hover:bg-violet-700"><Filter size={14} /> Áp dụng</button>
+          <div className="mt-4 flex flex-wrap justify-end gap-2 border-t border-sky-50 pt-4">
+            <button type="button" onClick={resetFilters} className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-sky-100 bg-white px-3.5 text-sm font-semibold text-slate-600 transition hover:bg-sky-50 hover:text-sky-700"><RotateCcw size={14} /> Đặt lại</button>
+            <button type="submit" className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-sky-500 px-4 text-sm font-semibold text-white shadow-[0_8px_20px_-10px_rgba(14,165,233,0.8)] transition hover:bg-sky-600 active:scale-[0.98]"><Filter size={14} /> Áp dụng</button>
           </div>
         </form>
 
-        <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-          <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3 sm:px-5">
+        <section className={cardClass}>
+          <div className="flex items-center justify-between border-b border-sky-100 px-4 py-4 sm:px-5">
             <div>
-              <h2 className="text-sm font-bold text-slate-800">Kết quả tra cứu</h2>
-              <p className="text-xs text-slate-400">{total} đơn chờ xử lý, đã duyệt hoặc đang chờ duyệt hủy</p>
+              <h2 className="text-base font-bold text-slate-900">Kết quả tra cứu</h2>
+              <p className="mt-0.5 text-xs text-slate-500">{total} đơn chờ xử lý, đã duyệt hoặc đang chờ duyệt hủy</p>
             </div>
-            <CalendarDays size={20} className="text-violet-500" />
+            <span className="grid h-9 w-9 place-items-center rounded-xl bg-sky-50 text-sky-600"><CalendarDays size={18} /></span>
           </div>
 
           {loading ? (
-            <div className="flex justify-center py-16"><Loader2 size={24} className="animate-spin text-violet-500" /></div>
+            <div className="flex flex-col items-center justify-center gap-2 py-16 text-sm text-slate-400"><Loader2 size={24} className="animate-spin text-sky-500" /> Đang tải danh sách...</div>
           ) : error ? (
             <div className="px-5 py-14 text-center text-sm font-medium text-rose-600">{error}</div>
           ) : rows.length === 0 ? (
             <div className="px-5 py-14 text-center text-sm text-slate-400">Không có đơn nghỉ phù hợp với bộ lọc.</div>
           ) : (
-            <div className="divide-y divide-slate-100">
+            <div className="divide-y divide-sky-50">
               {rows.map((row) => {
                 const status = statusMeta(row.status);
                 const evidences = Array.isArray(row.evidences) ? row.evidences : [];
                 const aiReview = row.aiReview || {};
                 return (
-                  <article key={row._id} className="p-4 sm:px-5">
+                  <article key={row._id} className="p-4 transition-colors hover:bg-sky-50/35 sm:px-5 sm:py-5">
                     <div className="grid gap-3 lg:grid-cols-[1.2fr_1fr_1fr_auto] lg:items-center">
                       <div>
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="font-bold text-slate-800">{row.userName || "-"}</span>
-                          {row.employeeCode && <span className="rounded-md bg-slate-100 px-2 py-0.5 text-[11px] font-bold text-slate-500">{row.employeeCode}</span>}
+                          {row.employeeCode && <span className="rounded-lg bg-sky-50 px-2 py-1 text-[11px] font-semibold text-sky-700">{row.employeeCode}</span>}
                           {row.teamId && <span className="text-xs font-semibold text-slate-400">{row.teamId}</span>}
                         </div>
                         <p className="mt-1 text-xs text-slate-400">
@@ -354,7 +355,7 @@ export default function ApprovedLeaveViewer() {
                         </p>
                       </div>
                       <div>
-                        <p className="text-sm font-bold text-violet-700">{LEAVE_TYPE_LABELS[row.leaveType] || row.leaveType}</p>
+                        <p className="text-sm font-bold text-sky-700">{LEAVE_TYPE_LABELS[row.leaveType] || row.leaveType}</p>
                         <p className="mt-1 text-xs text-slate-500">{leaveSchedule(row)}</p>
                       </div>
                       <div>
@@ -366,7 +367,7 @@ export default function ApprovedLeaveViewer() {
                       </span>
                     </div>
 
-                    <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-700">
+                    <div className="mt-3 rounded-xl border border-sky-100 bg-[#F8FCFF] px-3.5 py-3 text-sm text-slate-700">
                       <span className="font-bold text-slate-600">{row.leaveType === "remote_work" ? "Lý do làm việc tại nhà:" : row.leaveType === "business_trip" ? "Lý do đi công vụ:" : "Lý do xin nghỉ:"}</span>{" "}
                       <span className="whitespace-pre-wrap break-words">{row.reason || "Không có lý do"}</span>
                     </div>
@@ -400,28 +401,28 @@ export default function ApprovedLeaveViewer() {
           )}
 
           {pageCount > 1 && (
-            <div className="flex items-center justify-between border-t border-slate-100 bg-slate-50 px-4 py-3 sm:px-5">
-              <button disabled={page <= 1 || loading} onClick={() => setPage((current) => current - 1)} className="inline-flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-600 disabled:opacity-40"><ChevronLeft size={14} /> Trước</button>
-              <span className="text-xs font-semibold text-slate-500">Trang {page}/{pageCount}</span>
-              <button disabled={page >= pageCount || loading} onClick={() => setPage((current) => current + 1)} className="inline-flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-600 disabled:opacity-40">Sau <ChevronRight size={14} /></button>
+            <div className="flex items-center justify-between border-t border-sky-100 bg-sky-50/50 px-4 py-3 sm:px-5">
+              <button disabled={page <= 1 || loading} onClick={() => setPage((current) => current - 1)} className="inline-flex items-center gap-1 rounded-xl border border-sky-100 bg-white px-3 py-1.5 text-xs font-semibold text-sky-700 transition hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-40"><ChevronLeft size={14} /> Trước</button>
+              <span className="text-xs font-semibold text-slate-500">Trang <b className="text-slate-800">{page}</b>/{pageCount}</span>
+              <button disabled={page >= pageCount || loading} onClick={() => setPage((current) => current + 1)} className="inline-flex items-center gap-1 rounded-xl border border-sky-100 bg-white px-3 py-1.5 text-xs font-semibold text-sky-700 transition hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-40">Sau <ChevronRight size={14} /></button>
             </div>
           )}
         </section>
       </div>
 
       {evidencePreview && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/80 p-4" onClick={closeEvidence}>
-          <div className="relative flex h-[92dvh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
-            <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm" onClick={closeEvidence}>
+          <div className="relative flex h-[92dvh] w-full max-w-5xl flex-col overflow-hidden rounded-[20px] border border-white/20 bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
+            <div className="flex items-center justify-between border-b border-sky-100 px-4 py-3.5 sm:px-5">
               <div>
-                <p className="text-sm font-black text-slate-800">Ảnh minh chứng</p>
-                <p className="text-xs text-slate-400">{evidencePreview.employeeName || "-"}</p>
+                <p className="text-sm font-bold text-slate-900">Ảnh minh chứng</p>
+                <p className="mt-0.5 text-xs text-slate-500">{evidencePreview.employeeName || "-"}</p>
               </div>
-              <button type="button" onClick={closeEvidence} className="rounded-xl p-2 text-slate-500 hover:bg-slate-100"><X size={20} /></button>
+              <button type="button" onClick={closeEvidence} className="grid h-9 w-9 place-items-center rounded-xl text-slate-400 transition hover:bg-sky-50 hover:text-sky-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400" aria-label="Đóng ảnh minh chứng"><X size={19} /></button>
             </div>
             <div
               ref={evidenceViewportRef}
-              className={`relative flex min-h-64 flex-1 touch-none select-none items-center justify-center overflow-hidden bg-slate-100 ${isDraggingEvidence ? "cursor-grabbing" : "cursor-grab"}`}
+              className={`relative flex min-h-64 flex-1 touch-none select-none items-center justify-center overflow-hidden bg-[#EEF8FF] ${isDraggingEvidence ? "cursor-grabbing" : "cursor-grab"}`}
               onWheel={handleEvidenceWheel}
               onPointerDown={handleEvidencePointerDown}
               onPointerMove={handleEvidencePointerMove}
@@ -430,7 +431,7 @@ export default function ApprovedLeaveViewer() {
               onLostPointerCapture={stopDraggingEvidence}
               onDoubleClick={resetEvidenceView}
             >
-              {evidencePreview.loading && <div className="absolute inset-0 z-30 flex items-center justify-center bg-slate-100"><Loader2 size={28} className="animate-spin text-violet-500" /></div>}
+              {evidencePreview.loading && <div className="absolute inset-0 z-30 flex items-center justify-center bg-[#EEF8FF]"><Loader2 size={28} className="animate-spin text-sky-500" /></div>}
               {!evidencePreview.error && !evidencePreview.loading && (
                 <div className="pointer-events-none absolute left-1/2 top-3 z-20 flex w-fit -translate-x-1/2 items-center gap-2 rounded-full bg-slate-900/75 px-3 py-1.5 text-[11px] font-semibold text-white shadow-sm backdrop-blur-sm">
                   <span>Cuộn để thu phóng · Kéo để di chuyển · Nhấp đúp để đặt lại</span>
