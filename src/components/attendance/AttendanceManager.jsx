@@ -757,6 +757,8 @@ export default function AttendanceManager() {
   const [leaveFrom, setLeaveFrom] = useState("");
   const [leaveTo, setLeaveTo] = useState("");
   const [reviewingLeaveId, setReviewingLeaveId] = useState("");
+  const [selectedLeaveIds, setSelectedLeaveIds] = useState(new Set());
+  const [bulkReviewingLeave, setBulkReviewingLeave] = useState(false);
   const [evidencePreview, setEvidencePreview] = useState(null);
   const [evidencePreviewLoading, setEvidencePreviewLoading] = useState(false);
   const [evidencePreviewError, setEvidencePreviewError] = useState("");
@@ -1038,7 +1040,14 @@ export default function AttendanceManager() {
       if (leaveStatusFilter) params.set("status", leaveStatusFilter);
       if (searchUser.trim()) params.set("search", searchUser.trim());
       const res = await api.get(`/attendance-leave-requests?${params}`);
-      setLeaveRequests(res.data?.data || []);
+      const rows = res.data?.data || [];
+      setLeaveRequests(rows);
+      setSelectedLeaveIds((current) => {
+        const visiblePendingIds = new Set(rows
+          .filter((request) => request.status === "pending" && !(request.leaveType === "business_trip" && request.needsEvidence))
+          .map((request) => String(request._id)));
+        return new Set([...current].filter((id) => visiblePendingIds.has(String(id))));
+      });
       setLeaveTotal(Number(res.data?.total || 0));
     } catch (err) {
       showFlash(false, err.response?.data?.message || "Không thể tải danh sách đơn nghỉ phép.");
@@ -1297,6 +1306,7 @@ export default function AttendanceManager() {
       loadAutoSettings();
     } else if (tab === "leave") {
       setLeavePage(1);
+      setSelectedLeaveIds(new Set());
       loadLeaveRequests(1);
     } else {
       loadReport();
@@ -1356,6 +1366,71 @@ export default function AttendanceManager() {
     }
   }
 
+  function toggleLeaveSelect(id) {
+    const normalizedId = String(id);
+    setSelectedLeaveIds((current) => {
+      const next = new Set(current);
+      if (next.has(normalizedId)) next.delete(normalizedId);
+      else next.add(normalizedId);
+      return next;
+    });
+  }
+
+  function toggleSelectAllLeave(requests) {
+    const ids = requests.map((request) => String(request._id));
+    const allSelected = ids.length > 0 && ids.every((id) => selectedLeaveIds.has(id));
+    setSelectedLeaveIds((current) => {
+      const next = new Set(current);
+      ids.forEach((id) => {
+        if (allSelected) next.delete(id);
+        else next.add(id);
+      });
+      return next;
+    });
+  }
+
+  async function handleBulkApproveLeave() {
+    const selectedRequests = leaveRequests.filter((request) => selectedLeaveIds.has(String(request._id)));
+    if (selectedRequests.length === 0) return showFlash(false, "Chưa chọn đơn nghỉ phép nào.");
+    const missingEvidenceCount = selectedRequests.filter((request) => request.leaveType === "emergency" && request.needsEvidence).length;
+    const warning = missingEvidenceCount > 0
+      ? ` Trong đó có ${missingEvidenceCount} đơn off đột xuất chưa có ảnh minh chứng.`
+      : "";
+    if (!window.confirm(`Xác nhận duyệt ${selectedRequests.length} đơn nghỉ phép?${warning}`)) return;
+    const reviewNote = window.prompt("Ghi chú duyệt chung (không bắt buộc):", "");
+    if (reviewNote === null) return;
+
+    setBulkReviewingLeave(true);
+    const failures = [];
+    let approvedCount = 0;
+    try {
+      for (const request of selectedRequests) {
+        try {
+          await api.patch(`/attendance-leave-requests/${request._id}/review`, {
+            action: "approve",
+            reviewNote,
+            approveWithoutEvidence: request.leaveType === "emergency" && request.needsEvidence,
+          });
+          approvedCount += 1;
+        } catch (err) {
+          failures.push(err.response?.data?.message || `${request.userName || "Nhân viên"}: không thể duyệt`);
+        }
+      }
+      setSelectedLeaveIds(new Set());
+      await Promise.all([
+        loadLeaveRequests(leavePage),
+        refreshAttendanceLeavePendingTotal({ force: true }).catch(() => null),
+      ]);
+      if (failures.length === 0) {
+        showFlash(true, `Đã duyệt ${approvedCount} đơn nghỉ phép.`);
+      } else {
+        showFlash(false, `Đã duyệt ${approvedCount}/${selectedRequests.length} đơn. ${failures[0]}`);
+      }
+    } finally {
+      setBulkReviewingLeave(false);
+    }
+  }
+
   async function retryLeaveAiReview(request) {
     if (!window.confirm(`Phân tích ảnh minh chứng của ${request.userName || "nhân viên này"} bằng AI?`)) return;
     setReviewingLeaveId(request._id);
@@ -1371,6 +1446,7 @@ export default function AttendanceManager() {
   }
 
   function clearLeaveFilters() {
+    setSelectedLeaveIds(new Set());
     setSearchUser("");
     setTeamFilter("");
     setLeaveFrom("");
@@ -1989,6 +2065,11 @@ export default function AttendanceManager() {
   }, [autoUserSearch, users]);
 
   const totalPages = Math.ceil(total / PAGE_LIMIT);
+  const bulkApprovableLeaveRequests = leaveRequests.filter(
+    (request) => request.status === "pending" && !(request.leaveType === "business_trip" && request.needsEvidence),
+  );
+  const allBulkApprovableLeavesSelected = bulkApprovableLeaveRequests.length > 0
+    && bulkApprovableLeaveRequests.every((request) => selectedLeaveIds.has(String(request._id)));
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-violet-50/20 p-3 sm:p-4 md:p-6">
@@ -3592,13 +3673,38 @@ export default function AttendanceManager() {
                 <p className="text-sm font-semibold text-slate-800">Đơn từ chấm công và nghỉ phép</p>
                 <p className="text-xs text-slate-400">{leaveTotal} đơn theo bộ lọc · {leavePendingTotal} đơn đang chờ xử lý</p>
               </div>
-              <div className="flex flex-wrap gap-2 text-[11px] font-semibold">
-                <span className="rounded-full border border-violet-200 bg-violet-50 px-2 py-1 text-violet-700">Phép thường</span>
-                <span className="rounded-full border border-rose-200 bg-rose-50 px-2 py-1 text-rose-700">Off đột xuất cần ảnh</span>
-                <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 text-emerald-700">Phép năm</span>
-                <span className="rounded-full border border-sky-200 bg-sky-50 px-2 py-1 text-sky-700">Làm việc tại nhà</span>
-                <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-1 text-amber-700">Đi công vụ cần ảnh</span>
-                <span className="rounded-full border border-cyan-200 bg-cyan-50 px-2 py-1 text-cyan-700">Quên chấm công</span>
+              <div className="flex flex-col items-end gap-2">
+                {canReviewLeave && bulkApprovableLeaveRequests.length > 0 && (
+                  <div className="flex flex-wrap items-center justify-end gap-2">
+                    <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-100">
+                      <input
+                        type="checkbox"
+                        checked={allBulkApprovableLeavesSelected}
+                        onChange={() => toggleSelectAllLeave(bulkApprovableLeaveRequests)}
+                        disabled={bulkReviewingLeave || leaveLoading}
+                        className="accent-violet-600"
+                      />
+                      Chọn tất cả
+                    </label>
+                    <button
+                      type="button"
+                      onClick={handleBulkApproveLeave}
+                      disabled={bulkReviewingLeave || leaveLoading || selectedLeaveIds.size === 0}
+                      className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white shadow-sm hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {bulkReviewingLeave ? <Loader2 size={13} className="animate-spin" /> : <ShieldCheck size={13} />}
+                      Duyệt{selectedLeaveIds.size > 0 ? ` (${selectedLeaveIds.size})` : " hàng loạt"}
+                    </button>
+                  </div>
+                )}
+                <div className="flex flex-wrap justify-end gap-2 text-[11px] font-semibold">
+                  <span className="rounded-full border border-violet-200 bg-violet-50 px-2 py-1 text-violet-700">Phép thường</span>
+                  <span className="rounded-full border border-rose-200 bg-rose-50 px-2 py-1 text-rose-700">Off đột xuất cần ảnh</span>
+                  <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 text-emerald-700">Phép năm</span>
+                  <span className="rounded-full border border-sky-200 bg-sky-50 px-2 py-1 text-sky-700">Làm việc tại nhà</span>
+                  <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-1 text-amber-700">Đi công vụ cần ảnh</span>
+                  <span className="rounded-full border border-cyan-200 bg-cyan-50 px-2 py-1 text-cyan-700">Quên chấm công</span>
+                </div>
               </div>
             </div>
 
@@ -3621,11 +3727,25 @@ export default function AttendanceManager() {
                     const status = leaveStatusMeta(request.status, request.needsEvidence);
                     const isReviewing = reviewingLeaveId === request._id;
                     const evidences = requestEvidenceList(request);
+                    const isSelected = selectedLeaveIds.has(String(request._id));
+                    const canSelectForBulkApproval = request.status === "pending"
+                      && !(request.leaveType === "business_trip" && request.needsEvidence);
                     return (
-                      <div key={request._id} className="p-4 sm:px-5">
+                      <div key={request._id} className={`p-4 transition-colors sm:px-5 ${isSelected ? "bg-violet-50/60" : ""}`}>
                         <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                           <div className="min-w-0 flex-1">
                             <div className="flex flex-wrap items-center gap-2">
+                              {canReviewLeave && request.status === "pending" && (
+                                <input
+                                  type="checkbox"
+                                  checked={isSelected}
+                                  onChange={() => toggleLeaveSelect(request._id)}
+                                  disabled={!canSelectForBulkApproval || bulkReviewingLeave || leaveLoading || isReviewing}
+                                  title={!canSelectForBulkApproval ? "Đơn đi công vụ cần bổ sung ảnh minh chứng trước khi duyệt" : "Chọn đơn để duyệt hàng loạt"}
+                                  aria-label={`Chọn đơn của ${request.userName || "nhân viên"}`}
+                                  className="h-4 w-4 rounded border-slate-300 accent-violet-600 disabled:cursor-not-allowed disabled:opacity-35"
+                                />
+                              )}
                               <span className="text-sm font-bold text-slate-800">{request.userName || "-"}</span>
                               {request.employeeCode && <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-semibold text-slate-500">{request.employeeCode}</span>}
                               {request.teamId && <span className="text-xs text-slate-400">{request.teamId}</span>}

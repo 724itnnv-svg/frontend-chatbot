@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import UserForm from "./UserForm";
 import defaultAvatar from "../assets/default-avatar.png";
 import { useAuth } from "../context/AuthContext";
-import { Clock, Download, FileSpreadsheet, Link as LinkIcon, MapPin, QrCode, RefreshCcw, Search, Upload, Users, Sparkles, X } from "lucide-react";
+import { Clock, Download, Eye, FileSpreadsheet, Link as LinkIcon, MapPin, Plus, QrCode, RefreshCcw, Search, Upload, Users, X } from "lucide-react";
 import * as XLSX from "xlsx";
 import QRCode from "qrcode";
 import JSZip from "jszip";
@@ -31,9 +31,9 @@ export default function UsersPage() {
 
   const [showForm, setShowForm] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
+  const [avatarViewer, setAvatarViewer] = useState(null);
 
   const [actionLoadingId, setActionLoadingId] = useState(null);
-  const [revokeLoadingId, setRevokeLoadingId] = useState(null);
 
   const [pages, setPages] = useState([]);
   const [loadingPages, setLoadingPages] = useState(false);
@@ -41,6 +41,8 @@ export default function UsersPage() {
   const [showImportModal, setShowImportModal] = useState(false);
   const [importDragActive, setImportDragActive] = useState(false);
   const [linkLoadingId, setLinkLoadingId] = useState(null);
+  // Kept for the intentionally hidden bulk-QR toolbar action below.
+  // eslint-disable-next-line no-unused-vars
   const [bulkQrLoading, setBulkQrLoading] = useState(false);
   const [workLocations, setWorkLocations] = useState([]);
   const [ccLinkModal, setCcLinkModal] = useState(null);
@@ -161,6 +163,15 @@ export default function UsersPage() {
     return () => clearTimeout(timer);
   }, [fetchUsers, filters.search]);
 
+  useEffect(() => {
+    if (!avatarViewer) return undefined;
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape") setAvatarViewer(null);
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [avatarViewer]);
+
   const handleAdd = () => {
     setEditingUser(null);
     setShowForm(true);
@@ -230,42 +241,15 @@ export default function UsersPage() {
     }
   };
 
-  const handleRevokeQrToken = async (user) => {
-    const ok = window.confirm(
-      `Thu hồi link đăng nhập của "${user.fullName}"? Link cũ sẽ không còn dùng được.`
-    );
-    if (!ok) return;
-
-    try {
-      setRevokeLoadingId(user._id);
-
-      const res = await fetch(`/api/user/${user._id}/qr-login-token`, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
-      const data = await res.json();
-      if (!res.ok) {
-        alert(data.message || "Thu hồi token thất bại");
-        return;
-      }
-
-      alert("Đã thu hồi link đăng nhập");
-      await fetchUsers();
-    } catch (err) {
-      console.error("Lỗi thu hồi token:", err);
-      alert("Không kết nối được server");
-    } finally {
-      setRevokeLoadingId(null);
-    }
-  };
-
   const getAvatarSrc = (user) => {
     const src = String(user?.avatarUrl || "").trim();
     if (!src) return defaultAvatar;
     if (src.includes("fbcdn.net") || src.includes("scontent.")) return defaultAvatar;
     return src;
   };
+
+  const getAvatarViewerSrc = (user) =>
+    String(user?.avatarUrl || "").trim() || defaultAvatar;
 
   const getUserPageNames = (user) => {
     const raw = user.pageId ?? user.pageIds ?? [];
@@ -560,6 +544,7 @@ export default function UsersPage() {
     }
   };
 
+  // eslint-disable-next-line no-unused-vars
   const handleExportQrBulk = async () => {
     const selectedUsers = filteredUsers;
     if (!selectedUsers.length) {
@@ -644,79 +629,33 @@ export default function UsersPage() {
     XLSX.writeFile(workbook, "mau_import_user.xlsx");
   };
 
-  const pageBg = "bg-gradient-to-b from-cyan-50 via-white to-sky-50 text-slate-800";
-  const cardBg = "bg-white/85 border-cyan-100";
+  const pageBg = "bg-[#F4FAFF] text-slate-800";
+  const cardBg = "bg-white border-sky-100";
   const softText = "text-slate-500";
 
   return (
-    <div className={`relative min-h-screen ${pageBg} overflow-hidden`}>
-      {/* Ice blue ambience */}
-      <style>
-        {`
-          @keyframes iceFall {
-            0% { transform: translateY(-12vh) translateX(0) rotate(0deg); opacity: 0; }
-            8% { opacity: 1; }
-            100% { transform: translateY(112vh) translateX(50px) rotate(360deg); opacity: 0; }
-          }
-          .ice-fall {
-            position: absolute;
-            top: -12vh;
-            animation: iceFall linear infinite;
-            pointer-events: none;
-            user-select: none;
-            filter: drop-shadow(0 8px 14px rgba(6,182,212,0.18));
-          }
-        `}
-      </style>
+    <div className={`relative min-h-screen overflow-hidden ${pageBg}`}>
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-80 bg-[radial-gradient(circle_at_18%_0%,rgba(125,211,252,0.22),transparent_40%),radial-gradient(circle_at_88%_8%,rgba(186,230,253,0.32),transparent_34%)]" />
 
-      <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden">
-        {Array.from({ length: 20 }).map((_, i) => (
-          <div
-            key={i}
-            className="ice-fall"
-            style={{
-              left: `${Math.random() * 100}%`,
-              fontSize: `${14 + Math.random() * 18}px`,
-              animationDuration: `${10 + Math.random() * 14}s`,
-              animationDelay: `${Math.random() * 10}s`,
-              opacity: 0.9,
-            }}
-          >
-            {Math.random() > 0.55 ? "✦" : "◇"}
-          </div>
-        ))}
-      </div>
-
-      {/* Glow nền */}
-      <div className="pointer-events-none absolute -top-24 left-1/2 -translate-x-1/2 w-[980px] h-[320px] rounded-full blur-3xl opacity-45 bg-gradient-to-r from-cyan-200 via-sky-200 to-teal-200" />
-
-      <div className="relative z-10 p-4 md:p-6 w-full max-w-none">
+      <div className="relative z-10 w-full p-4 md:p-6">
         {/* Header */}
-        <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between mb-4">
-          <div className="flex items-start gap-3">
-            <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-cyan-500 via-sky-400 to-teal-300 flex items-center justify-center text-white shadow-[0_12px_30px_rgba(6,182,212,0.28)] border border-white/50">
-              <Users size={22} />
-            </div>
+        <div className="mb-5 flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+          <div>
+            <p className="text-sm font-semibold text-sky-600">Quản trị hệ thống</p>
             <div>
-              <div className="flex flex-wrap items-center gap-2">
-                <h1 className="text-lg md:text-xl font-semibold">Quản lý User</h1>
-                <span className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-full border bg-cyan-50 border-cyan-200 text-cyan-700">
-                  <Sparkles size={14} />
-                  Ice Blue
-                </span>
-              </div>
-              <p className={`text-xs mt-1 ${softText}`}>
-                Thêm / sửa / xóa và duyệt tài khoản đăng nhập hệ thống với giao diện xanh băng hiện đại.
+              <h1 className="mt-1 text-2xl font-bold tracking-tight text-slate-900 md:text-3xl">Quản lý người dùng</h1>
+              <p className={`mt-1 text-sm ${softText}`}>
+                Quản lý tài khoản, phân quyền truy cập và trạng thái hoạt động.
               </p>
             </div>
           </div>
 
-          <div className="flex flex-col sm:flex-row gap-2">
+          <div className="flex flex-wrap gap-2">
             <button
               type="button"
               onClick={fetchUsers}
               disabled={loadingList}
-              className="inline-flex items-center justify-center gap-2 rounded-xl border border-cyan-100 bg-white/90 px-4 py-2 text-sm font-semibold text-cyan-800 shadow-sm transition hover:bg-cyan-50 disabled:opacity-60"
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-sky-100 bg-white px-3.5 text-sm font-semibold text-slate-600 shadow-sm transition hover:border-sky-200 hover:bg-sky-50 hover:text-sky-700 disabled:opacity-60"
               title="Tải lại danh sách user"
             >
               <RefreshCcw size={16} className={loadingList ? "animate-spin" : ""} />
@@ -735,7 +674,7 @@ export default function UsersPage() {
             <button
               type="button"
               onClick={handleExportFilteredUsers}
-              className="inline-flex items-center justify-center gap-2 rounded-xl border border-cyan-100 bg-white/90 px-4 py-2 text-sm font-semibold text-cyan-800 shadow-sm transition hover:bg-cyan-50"
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-sky-100 bg-white px-3.5 text-sm font-semibold text-slate-600 shadow-sm transition hover:border-sky-200 hover:bg-sky-50 hover:text-sky-700"
             >
               <Download size={16} />
               Xuất Excel
@@ -743,50 +682,51 @@ export default function UsersPage() {
             <button
               type="button"
               onClick={() => setShowImportModal(true)}
-              className="inline-flex items-center justify-center gap-2 rounded-xl border border-cyan-100 bg-white/90 px-4 py-2 text-sm font-semibold text-cyan-800 shadow-sm transition hover:bg-cyan-50"
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-sky-100 bg-white px-3.5 text-sm font-semibold text-slate-600 shadow-sm transition hover:border-sky-200 hover:bg-sky-50 hover:text-sky-700"
             >
               <Upload size={16} />
               Import user
             </button>
             <button
               onClick={handleAdd}
-              className="px-4 py-2 text-sm rounded-xl font-semibold text-white border transition shadow-[0_12px_30px_rgba(6,182,212,0.28)] bg-gradient-to-r from-cyan-500 via-sky-400 to-teal-300 border-cyan-200 hover:from-cyan-400 hover:via-sky-300 hover:to-teal-200"
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-sky-500 px-4 text-sm font-semibold text-white shadow-[0_8px_20px_-10px_rgba(14,165,233,0.8)] transition hover:bg-sky-600 active:scale-[0.98]"
             >
-              + Thêm User
+              <Plus size={16} /> Thêm người dùng
             </button>
           </div>
         </div>
 
-        <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-5">
+        <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-5">
           {[
-            ["Tổng user", userStats.total],
-            ["Đã duyệt", userStats.approved],
-            ["Chờ duyệt", userStats.pending],
-            ["Có mã NV", userStats.hasCode],
-            ["Có SĐT", userStats.hasPhone],
-          ].map(([label, value]) => (
-            <div key={label} className="rounded-2xl border border-cyan-100 bg-white/85 px-4 py-3 shadow-[0_10px_26px_rgba(8,145,178,0.08)]">
-              <div className="text-[11px] font-semibold uppercase tracking-wide text-cyan-700">{label}</div>
-              <div className="mt-1 text-2xl font-bold text-slate-800">{value}</div>
+            ["Tổng người dùng", userStats.total, "bg-sky-500"],
+            ["Đã duyệt", userStats.approved, "bg-emerald-500"],
+            ["Chờ duyệt", userStats.pending, "bg-amber-400"],
+            ["Có mã nhân viên", userStats.hasCode, "bg-blue-500"],
+            ["Có số điện thoại", userStats.hasPhone, "bg-cyan-500"],
+          ].map(([label, value, tone]) => (
+            <div key={label} className="relative overflow-hidden rounded-[18px] border border-sky-100 bg-white px-4 py-3.5 shadow-[0_12px_32px_-26px_rgba(14,116,144,0.4)]">
+              <span className={`absolute inset-y-3 left-0 w-1 rounded-r-full ${tone}`} />
+              <div className="text-xs font-semibold text-slate-500">{label}</div>
+              <div className="mt-1 text-2xl font-bold tracking-tight text-slate-900">{value}</div>
             </div>
           ))}
         </div>
 
-        <div className={`mb-4 rounded-3xl border ${cardBg} p-3 shadow-sm`}>
+        <div className={`mb-5 rounded-[20px] border ${cardBg} p-4 shadow-[0_12px_32px_-26px_rgba(14,116,144,0.4)]`}>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-6">
             <div className="relative md:col-span-2 xl:col-span-2">
-              <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-cyan-500" />
+              <Search size={16} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-sky-500" />
               <input
                 value={filters.search}
                 onChange={(event) => updateFilter("search", event.target.value)}
                 placeholder="Tìm tên, email, SĐT, mã NV..."
-                className="w-full rounded-2xl border border-cyan-100 bg-white px-9 py-2.5 text-sm outline-none transition focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100"
+                className="w-full rounded-xl border border-sky-100 bg-white px-10 py-2.5 text-sm outline-none transition hover:border-sky-200 focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
               />
             </div>
             <select
               value={filters.role}
               onChange={(event) => updateFilter("role", event.target.value)}
-              className="rounded-2xl border border-cyan-100 bg-white px-3 py-2.5 text-sm outline-none focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100"
+              className="rounded-xl border border-sky-100 bg-white px-3 py-2.5 text-sm outline-none transition hover:border-sky-200 focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
             >
               <option value="all">Tất cả quyền</option>
               {uniqueRoles.map((role) => (
@@ -796,7 +736,7 @@ export default function UsersPage() {
             <select
               value={filters.companyCode}
               onChange={(event) => updateFilter("companyCode", event.target.value)}
-              className="rounded-2xl border border-cyan-100 bg-white px-3 py-2.5 text-sm outline-none focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100"
+              className="rounded-xl border border-sky-100 bg-white px-3 py-2.5 text-sm outline-none transition hover:border-sky-200 focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
             >
               <option value="all">Tất cả công ty</option>
               {uniqueCompanies.map((companyCode) => (
@@ -806,7 +746,7 @@ export default function UsersPage() {
             <select
               value={filters.approveStatus}
               onChange={(event) => updateFilter("approveStatus", event.target.value)}
-              className="rounded-2xl border border-cyan-100 bg-white px-3 py-2.5 text-sm outline-none focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100"
+              className="rounded-xl border border-sky-100 bg-white px-3 py-2.5 text-sm outline-none transition hover:border-sky-200 focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
             >
               <option value="all">Tất cả trạng thái</option>
               <option value="1">Đã duyệt</option>
@@ -815,7 +755,7 @@ export default function UsersPage() {
             <select
               value={filters.codeStatus}
               onChange={(event) => updateFilter("codeStatus", event.target.value)}
-              className="rounded-2xl border border-cyan-100 bg-white px-3 py-2.5 text-sm outline-none focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100"
+              className="rounded-xl border border-sky-100 bg-white px-3 py-2.5 text-sm outline-none transition hover:border-sky-200 focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
             >
               <option value="all">Tất cả mã NV</option>
               <option value="hasCode">Có mã NV</option>
@@ -831,13 +771,13 @@ export default function UsersPage() {
                 {"–"}
                 {Math.min(pagination.page * pagination.limit, pagination.total)}
               </b>
-              /<b className="text-slate-800">{pagination.total}</b> user phù hợp.
+              /<b className="text-slate-800">{pagination.total}</b> người dùng phù hợp.
             </div>
             <div className="flex flex-col gap-2 sm:flex-row">
               <select
                 value={filters.sortBy}
                 onChange={(event) => updateFilter("sortBy", event.target.value)}
-                className="rounded-2xl border border-cyan-100 bg-white px-3 py-2 text-sm outline-none focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100"
+                className="rounded-xl border border-sky-100 bg-white px-3 py-2 text-sm outline-none transition hover:border-sky-200 focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
               >
                 <option value="newest">Mới nhất</option>
                 <option value="oldest">Cũ nhất</option>
@@ -849,7 +789,7 @@ export default function UsersPage() {
                 type="button"
                 onClick={resetFilters}
                 disabled={!hasActiveFilters}
-                className="rounded-2xl border border-cyan-100 bg-white px-3 py-2 text-sm font-semibold text-cyan-700 transition hover:bg-cyan-50 disabled:cursor-not-allowed disabled:opacity-50"
+                className="rounded-xl border border-sky-100 bg-white px-3 py-2 text-sm font-semibold text-sky-700 transition hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 Xóa lọc
               </button>
@@ -881,16 +821,16 @@ export default function UsersPage() {
         )}
 
         {/* Table Card */}
-        <div className={`rounded-3xl border ${cardBg} backdrop-blur-xl shadow-[0_18px_50px_rgba(8,145,178,0.12)] overflow-hidden`}>
+        <div className={`overflow-hidden rounded-[20px] border ${cardBg} shadow-[0_16px_40px_-28px_rgba(14,116,144,0.42)]`}>
           {loadingList ? (
             <div className={`p-4 text-sm ${softText}`}>Đang tải danh sách...</div>
           ) : users.length === 0 ? (
             <div className={`p-4 text-sm ${softText}`}>
-              Chưa có user nào. Nhấn &quot;Thêm User&quot; để tạo mới.
+              Chưa có người dùng nào. Nhấn &quot;Thêm người dùng&quot; để tạo mới.
             </div>
           ) : filteredUsers.length === 0 ? (
             <div className={`p-4 text-sm ${softText}`}>
-              Không có user nào khớp bộ lọc hiện tại.
+              Không có người dùng nào khớp bộ lọc hiện tại.
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -906,9 +846,9 @@ export default function UsersPage() {
                   <col className="hidden xl:table-column xl:w-[220px]" />
                   <col className="w-[144px]" />
                 </colgroup>
-                <thead className="bg-cyan-50/70">
-                  <tr className="text-xs text-slate-600">
-                    <th className="px-2 py-3 text-left">Avatar</th>
+                <thead className="border-b border-sky-100 bg-sky-50/70">
+                  <tr className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    <th className="px-2 py-3 text-left">Ảnh</th>
                     <th className="px-3 py-3 text-left">Họ tên</th>
                     <th className="px-2 py-3 text-left">Mã NV</th>
                     <th className="px-3 py-3 text-left">Email</th>
@@ -931,7 +871,6 @@ export default function UsersPage() {
                   {filteredUsers.map((u) => {
                     const isProcessing = actionLoadingId === u._id;
                     const isLinkLoading = linkLoadingId === u._id;
-                    const isRevokeLoading = revokeLoadingId === u._id;
                     const approved = u.approveStatus === 1;
                     const pageNames = getUserPageNames(u);
                     const isMaster = u.email?.toLowerCase() === MASTER_EMAIL;
@@ -939,15 +878,21 @@ export default function UsersPage() {
                     return (
                       <tr
                         key={u._id}
-                        className="border-t border-cyan-50 hover:bg-cyan-50/50"
+                        className="border-t border-sky-50 transition-colors hover:bg-sky-50/50"
                       >
                         {/* Avatar */}
                         <td className="px-2 py-3">
-                          <div className="relative inline-block">
+                          <button
+                            type="button"
+                            onClick={() => setAvatarViewer(u)}
+                            className="group relative inline-block rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 focus-visible:ring-offset-2"
+                            aria-label={`Xem ảnh của ${u.fullName || u.email}`}
+                            title="Nhấn để xem ảnh"
+                          >
                             <img
                               src={getAvatarSrc(u)}
                               alt={u.fullName}
-                              className="w-10 h-10 rounded-2xl object-cover border border-cyan-100"
+                              className="h-10 w-10 rounded-xl border border-sky-100 object-cover transition group-hover:brightness-75"
                               loading="lazy"
                               referrerPolicy="no-referrer"
                               onError={(e) => {
@@ -955,12 +900,15 @@ export default function UsersPage() {
                                 e.currentTarget.src = defaultAvatar;
                               }}
                             />
+                            <span className="pointer-events-none absolute inset-0 grid place-items-center rounded-xl bg-slate-900/0 text-white opacity-0 transition group-hover:bg-slate-900/30 group-hover:opacity-100">
+                              <Eye size={15} />
+                            </span>
                             {isMaster && (
                               <span className="absolute -top-4 -left-2 text-lg rotate-[-20deg] pointer-events-none" title="Tài khoản đặc biệt">
                                 👑
                               </span>
                             )}
-                          </div>
+                          </button>
                         </td>
 
                         {/* Họ tên */}
@@ -968,6 +916,9 @@ export default function UsersPage() {
                           <div className={"truncate font-semibold " + (isMaster ? "text-cyan-700" : "text-slate-800")} title={u.fullName}>
                             {u.fullName}
                           </div>
+                          <span className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${approved ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>
+                            {approved ? "Đã duyệt" : "Chờ duyệt"}
+                          </span>
                         </td>
 
                         <td className="px-2 py-3 text-slate-700">
@@ -1094,7 +1045,7 @@ export default function UsersPage() {
           )}
         </div>
 
-        <div className="mt-4 flex flex-col gap-3 rounded-2xl border border-cyan-100 bg-white/80 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="mt-4 flex flex-col gap-3 rounded-[18px] border border-sky-100 bg-white px-4 py-3 shadow-[0_12px_32px_-26px_rgba(14,116,144,0.4)] sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-2 text-sm text-slate-600">
             <span>Số dòng:</span>
             <select
@@ -1106,7 +1057,7 @@ export default function UsersPage() {
                   limit: Number(event.target.value),
                 }))
               }
-              className="rounded-xl border border-cyan-100 bg-white px-2 py-1.5 outline-none focus:border-cyan-300"
+              className="rounded-xl border border-sky-100 bg-white px-2 py-1.5 outline-none focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
             >
               <option value={10}>10</option>
               <option value={20}>20</option>
@@ -1123,7 +1074,7 @@ export default function UsersPage() {
                   page: Math.max(1, previous.page - 1),
                 }))
               }
-              className="rounded-xl border border-cyan-100 bg-white px-3 py-1.5 text-sm font-semibold text-cyan-700 disabled:cursor-not-allowed disabled:opacity-40"
+              className="rounded-xl border border-sky-100 bg-white px-3 py-1.5 text-sm font-semibold text-sky-700 transition hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-40"
             >
               Trước
             </button>
@@ -1139,7 +1090,7 @@ export default function UsersPage() {
                   page: Math.min(previous.totalPages, previous.page + 1),
                 }))
               }
-              className="rounded-xl border border-cyan-100 bg-white px-3 py-1.5 text-sm font-semibold text-cyan-700 disabled:cursor-not-allowed disabled:opacity-40"
+              className="rounded-xl border border-sky-100 bg-white px-3 py-1.5 text-sm font-semibold text-sky-700 transition hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-40"
             >
               Sau
             </button>
@@ -1156,6 +1107,62 @@ export default function UsersPage() {
         )}
       </div>
 
+      {/* Trình xem ảnh người dùng */}
+      {avatarViewer && (
+        <div
+          className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/65 p-4 backdrop-blur-sm"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) setAvatarViewer(null);
+          }}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="avatar-viewer-title"
+        >
+          <div className="w-full max-w-2xl overflow-hidden rounded-[20px] border border-white/20 bg-white shadow-2xl">
+            <div className="flex items-center justify-between gap-4 border-b border-sky-100 px-4 py-3.5 sm:px-5">
+              <div className="min-w-0">
+                <h2 id="avatar-viewer-title" className="truncate font-bold text-slate-900">
+                  {avatarViewer.fullName || "Ảnh người dùng"}
+                </h2>
+                <p className="truncate text-xs text-slate-500">{avatarViewer.email || "Không có email"}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setAvatarViewer(null)}
+                className="grid h-9 w-9 shrink-0 place-items-center rounded-xl text-slate-400 transition hover:bg-sky-50 hover:text-sky-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
+                aria-label="Đóng trình xem ảnh"
+              >
+                <X size={19} />
+              </button>
+            </div>
+
+            <div className="grid min-h-[320px] place-items-center bg-[#F4FAFF] p-4 sm:p-6">
+              <img
+                src={getAvatarViewerSrc(avatarViewer)}
+                alt={`Ảnh của ${avatarViewer.fullName || avatarViewer.email || "người dùng"}`}
+                className="max-h-[68vh] max-w-full rounded-2xl object-contain shadow-[0_18px_50px_-24px_rgba(15,23,42,0.45)]"
+                referrerPolicy="no-referrer"
+                onError={(event) => {
+                  event.currentTarget.onerror = null;
+                  event.currentTarget.src = defaultAvatar;
+                }}
+              />
+            </div>
+
+            <div className="flex items-center justify-between gap-3 border-t border-sky-100 px-4 py-3 sm:px-5">
+              <p className="text-xs text-slate-400">Nhấn ESC hoặc vùng tối để đóng</p>
+              <button
+                type="button"
+                onClick={() => setAvatarViewer(null)}
+                className="rounded-xl bg-sky-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-sky-600"
+              >
+                Đóng
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Modal import user */}
       {showImportModal && (
         <div
@@ -1164,10 +1171,10 @@ export default function UsersPage() {
             if (event.target === event.currentTarget && !importingCodes) setShowImportModal(false);
           }}
         >
-          <div className="w-full max-w-lg rounded-3xl border border-cyan-100 bg-white p-6 shadow-[0_24px_70px_rgba(8,145,178,0.22)]">
+          <div className="w-full max-w-lg rounded-[20px] border border-sky-100 bg-white p-6 shadow-2xl">
             <div className="mb-5 flex items-start justify-between gap-4">
               <div className="flex items-center gap-3">
-                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-cyan-500 to-sky-400 text-white shadow-sm">
+                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-sky-500 text-white shadow-sm">
                   <Upload size={20} />
                 </span>
                 <div>
@@ -1198,16 +1205,16 @@ export default function UsersPage() {
               }}
               onDrop={handleImportDrop}
               className={`rounded-2xl border-2 border-dashed px-6 py-10 text-center transition ${importDragActive
-                ? "border-cyan-400 bg-cyan-50"
-                : "border-cyan-200 bg-gradient-to-b from-cyan-50/70 to-white"
+                ? "border-sky-400 bg-sky-50"
+                : "border-sky-200 bg-[#F4FAFF]"
                 } ${importingCodes ? "cursor-wait opacity-70" : ""}`}
             >
-              <FileSpreadsheet size={38} className="mx-auto mb-3 text-cyan-500" />
+              <FileSpreadsheet size={38} className="mx-auto mb-3 text-sky-500" />
               <p className="text-sm font-bold text-slate-700">
                 {importingCodes ? "Đang xử lý file..." : "Kéo và thả file vào đây"}
               </p>
               <p className="my-3 text-xs text-slate-400">hoặc</p>
-              <label className={`inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-cyan-500 to-sky-500 px-4 py-2.5 text-sm font-bold text-white shadow-sm transition hover:from-cyan-400 hover:to-sky-400 ${importingCodes ? "cursor-not-allowed opacity-60" : "cursor-pointer"}`}>
+              <label className={`inline-flex items-center justify-center gap-2 rounded-xl bg-sky-500 px-4 py-2.5 text-sm font-bold text-white shadow-sm transition hover:bg-sky-600 ${importingCodes ? "cursor-not-allowed opacity-60" : "cursor-pointer"}`}>
                 <Upload size={16} />
                 Chọn file
                 <input
@@ -1226,7 +1233,7 @@ export default function UsersPage() {
                 type="button"
                 onClick={handleDownloadImportTemplate}
                 disabled={importingCodes}
-                className="inline-flex items-center justify-center gap-2 rounded-xl border border-cyan-200 bg-cyan-50 px-4 py-2.5 text-sm font-semibold text-cyan-700 transition hover:bg-cyan-100 disabled:opacity-50"
+                className="inline-flex items-center justify-center gap-2 rounded-xl border border-sky-200 bg-sky-50 px-4 py-2.5 text-sm font-semibold text-sky-700 transition hover:bg-sky-100 disabled:opacity-50"
               >
                 <Download size={16} />
                 Tải mẫu import
@@ -1247,11 +1254,11 @@ export default function UsersPage() {
       {/* Modal tạo link chấm công QR */}
       {ccLinkModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
-          <div className="w-full max-w-sm rounded-2xl bg-white border border-cyan-100 shadow-[0_24px_60px_rgba(8,145,178,0.18)] p-6">
+          <div className="w-full max-w-sm rounded-[20px] border border-sky-100 bg-white p-6 shadow-2xl">
             {/* Header */}
             <div className="flex items-start justify-between mb-4">
               <div className="flex items-center gap-2">
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-teal-500 to-cyan-400 text-white shadow">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-sky-500 text-white shadow-sm">
                   <Clock size={17} />
                 </span>
                 <div>
@@ -1280,7 +1287,7 @@ export default function UsersPage() {
                 <select
                   value={ccLinkLocationId}
                   onChange={(e) => setCcLinkLocationId(e.target.value)}
-                  className="w-full rounded-xl border border-cyan-100 bg-white px-3 py-2.5 text-sm outline-none focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100 mb-4"
+                  className="mb-4 w-full rounded-xl border border-sky-100 bg-white px-3 py-2.5 text-sm outline-none focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
                 >
                   {workLocations.length > 1 && <option value="">-- Chọn vị trí --</option>}
                   {workLocations.map((loc) => (
@@ -1296,7 +1303,7 @@ export default function UsersPage() {
                 <button
                   onClick={handleGetAttendanceLinkForUser}
                   disabled={!ccLinkLocationId || ccLinkLoading}
-                  className="w-full rounded-xl bg-gradient-to-r from-teal-500 to-cyan-500 px-4 py-2.5 text-sm font-bold text-white shadow-sm hover:from-teal-400 hover:to-cyan-400 disabled:opacity-60 transition mb-2"
+                  className="mb-2 w-full rounded-xl bg-sky-500 px-4 py-2.5 text-sm font-bold text-white shadow-sm transition hover:bg-sky-600 disabled:opacity-60"
                 >
                   {ccLinkLoading ? "Đang tạo link..." : "Tạo link & Copy"}
                 </button>
@@ -1305,7 +1312,7 @@ export default function UsersPage() {
 
             <button
               onClick={() => { setCcLinkModal(null); setCcLinkLocationId(""); }}
-              className="w-full rounded-xl border border-cyan-100 bg-white px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50 transition"
+              className="w-full rounded-xl border border-sky-100 bg-white px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-sky-50"
             >
               Đóng
             </button>
