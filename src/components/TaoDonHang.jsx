@@ -994,6 +994,12 @@ function getCustomerTypeLabel(customerType = "") {
   return customerType === "dai_ly" ? "Đại lý" : "Khách lẻ";
 }
 
+function normalizeTaxCode(value = "") {
+  return String(value || "")
+    .replace(/[^a-z0-9]/giu, "")
+    .toUpperCase();
+}
+
 async function buildExistingCustomerAddressUpdatePayload({
   customer,
   parsed,
@@ -1230,25 +1236,61 @@ function getProductPriceBook(product, customerType) {
     if (matched) return matched;
   }
 
+  if (normalizedCustomerType === "dai_ly") {
+    const matched = priceBooks.find((item) => {
+      const priceBookName = normalizeLookupText(
+        item?.priceBookName ||
+          item?.PriceBookName ||
+          item?.name ||
+          item?.Name ||
+          "",
+      )
+        .replace(/\s+/g, " ")
+        .trim();
+      return (
+        (priceBookName === "bang gia chung" ||
+          priceBookName.startsWith("bang gia chung ")) &&
+        item?.isActive !== false &&
+        item?.IsActive !== false
+      );
+    });
+    if (matched) return matched;
+  }
+
   return null;
 }
 
 function getProductUnitPrice(product, item, customerType) {
   const priceBook = getProductPriceBook(product, customerType);
-  const customerLePriceBook = getProductPriceBook(product, "khach_le");
   const outsidePrice =
     Number(product?.price ?? product?.basePrice ?? item?.price ?? 0) || 0;
 
   if (String(customerType || "").toLowerCase() === "khach_le") {
+    const customerLePriceBook = getProductPriceBook(product, "khach_le");
     return (
       Number(priceBook?.price ?? customerLePriceBook?.price ?? outsidePrice) ||
       0
     );
   }
 
-  return outsidePrice > 0
-    ? outsidePrice
-    : Number(customerLePriceBook?.price ?? 0) || 0;
+  if (String(customerType || "").toLowerCase() === "dai_ly") {
+    const commonPrice = Number(
+      priceBook?.price ?? priceBook?.Price ?? priceBook?.value ?? 0,
+    );
+    if (Number.isFinite(commonPrice) && commonPrice > 0) return commonPrice;
+    if (outsidePrice > 0) return outsidePrice;
+    return null;
+  }
+
+  return outsidePrice;
+}
+
+function hasAgencyPrice(product, item = {}) {
+  return getProductUnitPrice(product, item, "dai_ly") != null;
+}
+
+function hasValidRetailPrice(product, item = {}) {
+  return Number(getProductUnitPrice(product, item, "khach_le")) > 0;
 }
 
 function getProductTaxInfo(product) {
@@ -1953,6 +1995,22 @@ function buildInvoiceDetailLine({ item, product, customerType }) {
     product?.id ?? item?.masterProductId ?? item?.productId ?? null;
   const priceBook = getProductPriceBook(product, customerType);
   const selectedUnitPrice = getProductUnitPrice(product, item, customerType);
+  if (
+    String(customerType || "").toLowerCase() === "dai_ly" &&
+    selectedUnitPrice == null
+  ) {
+    throw new Error(
+      `Sản phẩm ${productCode || productName || "không xác định"} không có bảng giá dành cho đại lý.`,
+    );
+  }
+  if (
+    String(customerType || "").toLowerCase() === "khach_le" &&
+    Number(selectedUnitPrice) <= 0
+  ) {
+    throw new Error(
+      `Sản phẩm ${productCode || productName || "không xác định"} có giá khách lẻ bằng 0đ.`,
+    );
+  }
   const baseAmount = roundMoney(selectedUnitPrice * quantity);
   const { taxId, taxName, taxRate } = getProductTaxInfo(product);
   const lineTax = roundMoney((baseAmount * taxRate) / 100);
@@ -3703,7 +3761,14 @@ export default function TaoDonHang() {
   const customerTypeWillChange = Boolean(
     existingCustomerType &&
     selectedCustomerType &&
-    existingCustomerType !== selectedCustomerType,
+      existingCustomerType !== selectedCustomerType,
+  );
+  const agencyTaxCodeWillUpdate = Boolean(
+    customerType === "dai_ly" &&
+      orderPreparation.customerRecord &&
+      normalizeTaxCode(agencyTaxCode) &&
+      normalizeTaxCode(agencyTaxCode) !==
+        normalizeTaxCode(orderPreparation.customerRecord?.TaxCode),
   );
   const enteredNewAddress = normalizeDisplayText(parsed.newAddress);
   const predictedNewAddress =
@@ -4057,6 +4122,54 @@ export default function TaoDonHang() {
     orderPreparation.status === "ready" &&
     orderPreparation.key === orderPreparationKey &&
     Boolean(String(parsed.phoneNumber || "").trim());
+  const agencyProductsWithoutPrice = useMemo(() => {
+    if (
+      customerType !== "dai_ly" ||
+      orderPreparation.status !== "ready" ||
+      orderPreparation.key !== orderPreparationKey
+    ) {
+      return [];
+    }
+
+    return parsed.items.filter((item) => {
+      const productCode = String(item?.sku || "").trim();
+      const product = orderPreparation.productMap.get(productCode);
+      return product && !hasAgencyPrice(product, item);
+    });
+  }, [
+    customerType,
+    orderPreparation.key,
+    orderPreparation.productMap,
+    orderPreparation.status,
+    orderPreparationKey,
+    parsed.items,
+  ]);
+  const hasMissingAgencyPrices = agencyProductsWithoutPrice.length > 0;
+  const retailProductsWithZeroPrice = useMemo(() => {
+    if (
+      customerType !== "khach_le" ||
+      orderPreparation.status !== "ready" ||
+      orderPreparation.key !== orderPreparationKey
+    ) {
+      return [];
+    }
+
+    return parsed.items.filter((item) => {
+      const productCode = String(item?.sku || "").trim();
+      const product = orderPreparation.productMap.get(productCode);
+      return product && !hasValidRetailPrice(product, item);
+    });
+  }, [
+    customerType,
+    orderPreparation.key,
+    orderPreparation.productMap,
+    orderPreparation.status,
+    orderPreparationKey,
+    parsed.items,
+  ]);
+  const hasZeroRetailPrices = retailProductsWithZeroPrice.length > 0;
+  const hasInvalidProductPrices =
+    hasMissingAgencyPrices || hasZeroRetailPrices;
   const orderPreparationMessage = tokenLoading
     ? "Đang lấy token để chuẩn bị dữ liệu..."
     : orderPreparation.status === "waiting"
@@ -4108,6 +4221,7 @@ export default function TaoDonHang() {
 
     if (
       !isOrderPreparationReady ||
+      hasInvalidProductPrices ||
       !promotionSelectionsAreComplete ||
       !accessPrivateToken ||
       !accessToken ||
@@ -4252,6 +4366,7 @@ export default function TaoDonHang() {
     customerType,
     effectiveParsed,
     isOrderPreparationReady,
+    hasInvalidProductPrices,
     matchedKiotUser,
     orderPreparation,
     parsed.items,
@@ -4385,6 +4500,28 @@ export default function TaoDonHang() {
 
     if (!isOrderPreparationReady) {
       console.warn("Order data is not prepared yet.");
+      return;
+    }
+
+    if (hasMissingAgencyPrices) {
+      const productCodes = agencyProductsWithoutPrice
+        .map((item) => String(item?.sku || "").trim())
+        .filter(Boolean)
+        .join(", ");
+      setCreateOrderError(
+        `Không thể tạo đơn: sản phẩm ${productCodes || "đã chọn"} không có bảng giá dành cho đại lý.`,
+      );
+      return;
+    }
+
+    if (hasZeroRetailPrices) {
+      const productCodes = retailProductsWithZeroPrice
+        .map((item) => String(item?.sku || "").trim())
+        .filter(Boolean)
+        .join(", ");
+      setCreateOrderError(
+        `Không thể tạo đơn: sản phẩm ${productCodes || "đã chọn"} có giá khách lẻ bằng 0đ.`,
+      );
       return;
     }
 
@@ -4578,6 +4715,99 @@ export default function TaoDonHang() {
             `Đã chuyển khách hàng sang ${getCustomerTypeLabel(
               selectedCustomerType,
             )} và cập nhật mã ${updatePayload.Code}.`,
+          );
+        } else if (
+          selectedCustomerType === "dai_ly" &&
+          normalizeTaxCode(agencyTaxCode) &&
+          normalizeTaxCode(agencyTaxCode) !==
+            normalizeTaxCode(customerRecord?.TaxCode)
+        ) {
+          const normalizedTaxCode = String(agencyTaxCode).trim();
+          updateCreateOrderProgress(
+            "customer",
+            "loading",
+            customerRecord?.TaxCode
+              ? `MST đã thay đổi từ ${customerRecord.TaxCode} sang ${normalizedTaxCode}, đang cập nhật thông tin đại lý...`
+              : `Khách chưa có MST, đang bổ sung MST ${normalizedTaxCode} và thông tin đại lý...`,
+          );
+
+          let updatedTaxCompanyInfo = null;
+          if (
+            agencyTaxInfo.status === "success" &&
+            normalizeTaxCode(agencyTaxInfo.taxCode) ===
+              normalizeTaxCode(normalizedTaxCode) &&
+            agencyTaxInfo.data
+          ) {
+            updatedTaxCompanyInfo = agencyTaxInfo.data;
+          } else {
+            const taxResponse =
+              await getTaxCodeCompanyInfo(normalizedTaxCode);
+            if (
+              String(taxResponse?.code || "") === "00" &&
+              taxResponse?.data
+            ) {
+              updatedTaxCompanyInfo = taxResponse.data;
+            }
+          }
+
+          if (!updatedTaxCompanyInfo) {
+            throw new Error(
+              `Không lấy được thông tin hợp lệ cho mã số thuế ${normalizedTaxCode}.`,
+            );
+          }
+
+          const taxAddress = normalizeDisplayText(
+            updatedTaxCompanyInfo.address,
+          );
+          if (!taxAddress) {
+            throw new Error(
+              `Thông tin mã số thuế ${normalizedTaxCode} không có địa chỉ đăng ký.`,
+            );
+          }
+
+          const updatePayload =
+            await buildExistingCustomerAddressUpdatePayload({
+              customer: customerRecord,
+              parsed: { ...effectiveParsed, newAddress: taxAddress },
+              customerType: "dai_ly",
+              retailer: selectedRetailerId,
+              accessPrivateToken,
+            });
+          const organization = normalizeDisplayText(
+            updatedTaxCompanyInfo.name || customerRecord?.Organization,
+          );
+          Object.assign(updatePayload, {
+            Type: 1,
+            CustomerType: "Công ty",
+            TaxCode: normalizedTaxCode,
+            Organization: organization,
+          });
+          await updateCustomerAddress(
+            selectedRetailerId,
+            accessPrivateToken,
+            accessToken,
+            updatePayload,
+            "Công ty",
+            organization,
+          );
+          const refreshedCustomerResponse = await getCustomerByPhoneNumber(
+            selectedRetailerId,
+            accessPrivateToken,
+            phoneNumber,
+          );
+          customerRecord = extractCustomerRecord(
+            refreshedCustomerResponse,
+            customerRecord,
+          );
+          setOrderPreparation((current) =>
+            current.key === orderPreparationKey
+              ? { ...current, customerRecord }
+              : current,
+          );
+          updateCreateOrderProgress(
+            "customer",
+            "success",
+            `Đã cập nhật MST ${normalizedTaxCode}, tên pháp lý, địa chỉ và ID hành chính của đại lý.`,
           );
         } else if (hasProvinceChanged && updateCustomerWhenProvinceChanges) {
           updateCreateOrderProgress(
@@ -5164,6 +5394,14 @@ export default function TaoDonHang() {
                               value={agencyTaxInfo.data?.address}
                             />
                           </div>
+                          {agencyTaxCodeWillUpdate ? (
+                            <div className="sm:col-span-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs leading-5 text-amber-800">
+                              MST này khác MST hiện tại của khách hàng hoặc
+                              khách chưa có MST. Khi tạo đơn, hệ thống sẽ cập
+                              nhật tên pháp lý, MST, địa chỉ và ID hành chính
+                              theo thông tin phía trên.
+                            </div>
+                          ) : null}
                         </div>
                       ) : agencyTaxInfo.status === "error" ? (
                         <div className="mt-2 flex items-start gap-2 text-sm text-rose-700">
@@ -5290,6 +5528,47 @@ export default function TaoDonHang() {
                 </div>
               </div>
 
+              {hasMissingAgencyPrices ? (
+                <div className="flex items-start gap-2 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                  <XCircle className="mt-0.5 h-5 w-5 shrink-0" />
+                  <div>
+                    <div className="font-bold">Không thể tạo đơn đại lý</div>
+                    <div className="mt-1 leading-5">
+                      Các sản phẩm sau không có Bảng giá chung:{" "}
+                      <span className="font-mono font-bold">
+                        {agencyProductsWithoutPrice
+                          .map((item) => String(item?.sku || "").trim())
+                          .filter(Boolean)
+                          .join(", ") || "Chưa xác định"}
+                      </span>
+                      . Vui lòng bổ sung bảng giá dành cho đại lý trước khi tạo
+                      đơn.
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
+              {hasZeroRetailPrices ? (
+                <div className="flex items-start gap-2 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                  <XCircle className="mt-0.5 h-5 w-5 shrink-0" />
+                  <div>
+                    <div className="font-bold">
+                      Không thể tạo đơn khách lẻ
+                    </div>
+                    <div className="mt-1 leading-5">
+                      Các sản phẩm sau đang có giá khách lẻ bằng 0đ:{" "}
+                      <span className="font-mono font-bold">
+                        {retailProductsWithZeroPrice
+                          .map((item) => String(item?.sku || "").trim())
+                          .filter(Boolean)
+                          .join(", ") || "Chưa xác định"}
+                      </span>
+                      . Vui lòng cập nhật Bảng giá Khách lẻ trước khi tạo đơn.
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
               <div className="flex flex-wrap gap-2">
                 <button
                   type="button"
@@ -5314,6 +5593,7 @@ export default function TaoDonHang() {
                   onClick={handleCreateOrder}
                   disabled={
                     !isOrderPreparationReady ||
+                    hasInvalidProductPrices ||
                     !promotionSelectionsAreComplete ||
                     !matchedKiotUser ||
                     isCreatingOrder
@@ -5633,6 +5913,42 @@ export default function TaoDonHang() {
                                       {productCode || "trống"}
                                     </span>{" "}
                                     trên KiotViet.
+                                  </div>
+                                </div>
+                              </div>
+                            ) : customerType === "dai_ly" &&
+                              !hasAgencyPrice(product, item) ? (
+                              <div className="mt-3 flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-xs text-rose-700">
+                                <XCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                                <div>
+                                  <div className="font-bold">
+                                    Không có bảng giá dành cho đại lý
+                                  </div>
+                                  <div className="mt-0.5 leading-5">
+                                    Sản phẩm mã{" "}
+                                    <span className="font-mono font-bold">
+                                      {displayProductCode || productCode}
+                                    </span>{" "}
+                                    chưa có giá trong Bảng giá chung. Không thể
+                                    tạo đơn đại lý với sản phẩm này.
+                                  </div>
+                                </div>
+                              </div>
+                            ) : customerType === "khach_le" &&
+                              !hasValidRetailPrice(product, item) ? (
+                              <div className="mt-3 flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-xs text-rose-700">
+                                <XCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                                <div>
+                                  <div className="font-bold">
+                                    Sản phẩm đang có giá khách lẻ bằng 0đ
+                                  </div>
+                                  <div className="mt-0.5 leading-5">
+                                    Sản phẩm mã{" "}
+                                    <span className="font-mono font-bold">
+                                      {displayProductCode || productCode}
+                                    </span>{" "}
+                                    chưa có giá hợp lệ trong Bảng giá Khách lẻ
+                                    nên không thể tạo đơn.
                                   </div>
                                 </div>
                               </div>

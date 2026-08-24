@@ -263,8 +263,8 @@ const RETAILER_CONFIG = {
     BranchTakingAddressId: null,
     BranchTakingAddressStr:
       "Ấp Công Thiện Hùng, Xã Long Đức, Thành phố Trà Vinh, Trà Vinh - 0915283068",
-    Token_GHN: "3045642b-906e-11f1-839d-6a7d77a6dad6",
-    ShopId_GHN: 6510616,
+    Token_GHN: "b124eb06-2a43-11f1-b85d-fab563a1e61d",
+    ShopId_GHN: 5822099,
   },
   vietnhattv: {
     branchId: 1000016463,
