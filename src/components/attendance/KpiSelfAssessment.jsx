@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import { getApiBaseUrl } from "../../api/baseUrl";
+import { resolveScoreCap, standardPointScore } from "../../utils/kpiScoring";
 import { EvidenceThumbnail, KpiEvidenceViewer } from "./KpiEvidenceViewer";
 
 function currentPeriod() {
@@ -37,36 +38,25 @@ const STATUS = {
 const isEditable = (status) =>
   ["ASSIGNED", "DRAFT", "REVISION_REQUESTED"].includes(status);
 
+function thresholdRuleText(item) {
+  if (item.scoringType !== "threshold") return "";
+  const symbol = ({ LTE: "≤", GTE: "≥", LT: "<", GT: ">" })[item.comparison] || "≥";
+  const passScore = item.passScore ?? item.standardScore ?? item.weight ?? 0;
+  const failScore = item.failScore ?? 0;
+  return `Kết quả ${symbol} ${item.thresholdValue}: ${passScore} điểm; không đạt: ${failScore} điểm`;
+}
+
+function scoreCapText(item) {
+  if (item.scoringMethod !== "standard_points") return "";
+  const cap = resolveScoreCap(item);
+  if (cap.mode === "unlimited") return "Điểm thực tế không giới hạn";
+  if (cap.mode === "fixed_score") return `Điểm tối đa: ${cap.maxScore}`;
+  return `Điểm tối đa bằng điểm chuẩn: ${cap.maxScore}`;
+}
+
 function scorePreview(item) {
   if (item.scoringMethod === "standard_points") {
-    const parseNumber = (value) => {
-      const match = String(value ?? "").replace(/,/g, ".").match(/-?\d+(?:\.\d+)?/);
-      return match ? Number(match[0]) : Number.NaN;
-    };
-    const actual = parseNumber(item.employeeActualText);
-    const target = parseNumber(item.standardQuantity);
-    const base = Number(item.standardScore || item.weight || 0);
-    if (!String(item.standardQuantity || "").trim() || !Number.isFinite(target)) {
-      return String(item.employeeActualText ?? "").trim() ? base : 0;
-    }
-    if (!Number.isFinite(actual)) return 0;
-    const note = String(item.criteriaNote || "");
-    const penaltyRule = note.replace(/,/g, ".").match(/(?:mỗi\s*)?(\d+(?:\.\d+)?)\s*(?:sự\s*cố|lỗi|lần|vi\s*phạm|trường\s*hợp)[\s\S]{0,160}?(?:bị|trừ|=)\s*-?\s*(\d+(?:\.\d+)?)\s*điểm/i);
-    if (penaltyRule) {
-      const excess = Math.max(0, actual - target);
-      return Math.max(0, Math.min(300, base - excess * Number(penaltyRule[2]) / Number(penaltyRule[1])));
-    }
-    if (target === 0) return base;
-    const lowerIsBetter = /(không\s*quá|tối\s*đa|≤|<=|nhỏ\s*hơn)/i.test(item.standardQuantity);
-    const rateRule = note.replace(/,/g, ".").match(/[±+-]\s*(\d+(?:\.\d+)?)\s*%?\s*(?:tương\s*đương|=)\s*\+?\s*(\d+(?:\.\d+)?)\s*điểm/i);
-    if (rateRule) {
-      const direction = lowerIsBetter ? -1 : 1;
-      return Math.max(0, Math.min(300, base + direction * (actual - target) * Number(rateRule[2]) / Number(rateRule[1])));
-    }
-    const bonusRule = note.replace(/,/g, ".").match(/thêm\s*(\d+(?:\.\d+)?)[^+\d]*\+\s*(\d+(?:\.\d+)?)\s*điểm/i);
-    if (bonusRule) return Math.max(0, Math.min(300, base + (actual - target) * Number(bonusRule[2]) / Number(bonusRule[1])));
-    if (lowerIsBetter) return actual <= target ? base : Math.max(0, base * target / actual);
-    return Math.max(0, Math.min(300, actual / target * base));
+    return standardPointScore(item);
   }
   const max = Number(item.maxAchievementPercent || 150);
   if (
@@ -387,6 +377,16 @@ export default function KpiSelfAssessment() {
                       {item.criteriaNote && (
                         <p className="mt-1 text-sm text-slate-500">
                           Ghi chú: {item.criteriaNote}
+                        </p>
+                      )}
+                      {thresholdRuleText(item) && (
+                        <p className="mt-1 text-sm font-semibold text-violet-700">
+                          Quy tắc: {thresholdRuleText(item)}
+                        </p>
+                      )}
+                      {scoreCapText(item) && (
+                        <p className="mt-1 text-sm font-semibold text-emerald-700">
+                          {scoreCapText(item)}
                         </p>
                       )}
                     </div>

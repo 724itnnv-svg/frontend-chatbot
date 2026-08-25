@@ -46,17 +46,15 @@ export default function StandaloneAttendance() {
             <span className="hidden text-sm font-medium text-slate-700 sm:block">{displayName}</span>
           </div>
 
-          {/* Nút vào Admin (nếu có quyền) */}
-          {!isUser && (
-            <button
-              onClick={() => navigate("/admin")}
-              title="Về trang quản trị"
-              className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100"
-            >
-              <LayoutDashboard size={13} />
-              <span className="hidden sm:inline">Admin</span>
-            </button>
-          )}
+
+          <button
+            onClick={() => navigate("/admin")}
+            title="Về trang quản trị"
+            className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100"
+          >
+            <LayoutDashboard size={13} />
+            <span className="hidden sm:inline">Admin</span>
+          </button>
 
           {/* Logout */}
           <button
