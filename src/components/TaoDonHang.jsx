@@ -364,6 +364,144 @@ function getAdministrativeAreaDisplayName(
   return `Tỉnh ${displayName}`;
 }
 
+function buildProvinceLookupCandidates(value = "") {
+  const provinceName = normalizeDisplayText(value)
+    .replace(/^(Tỉnh|Thành phố|TP\.?)\s+/iu, "")
+    .trim();
+  if (!provinceName) return [];
+
+  return [
+    provinceName,
+    `Tỉnh ${provinceName}`,
+    `Thành phố ${provinceName}`,
+    `TP ${provinceName}`,
+  ].filter((candidate, index, candidates) => {
+    const normalizedCandidate = normalizeLookupText(candidate);
+    return (
+      candidates.findIndex(
+        (item) => normalizeLookupText(item) === normalizedCandidate,
+      ) === index
+    );
+  });
+}
+
+function hasAdministrativeLookupResults(response) {
+  const rows = Array.isArray(response)
+    ? response
+    : Array.isArray(response?.Data)
+      ? response.Data
+      : Array.isArray(response?.data)
+        ? response.data
+        : Array.isArray(response?.data?.Data)
+          ? response.data.Data
+          : [];
+
+  return rows.length > 0;
+}
+
+async function lookupProvinceIdWithFallback({
+  lookup,
+  retailer,
+  accessPrivateToken,
+  provinceName,
+}) {
+  const candidates = buildProvinceLookupCandidates(provinceName);
+  let lastResponse = [];
+
+  for (const candidate of candidates) {
+    const response = await lookup(
+      retailer,
+      accessPrivateToken,
+      candidate,
+      1,
+    );
+    lastResponse = response;
+    if (hasAdministrativeLookupResults(response)) return response;
+  }
+
+  return lastResponse;
+}
+
+function buildLevelTwoLookupCandidates(value = "") {
+  const areaName = normalizeDisplayText(value)
+    .replace(
+      /^(Xã|Phường|Thị trấn|Quận|Huyện|Thị xã|Thành phố|TP\.?)\s+/iu,
+      "",
+    )
+    .trim();
+  if (!areaName) return [];
+
+  return [
+    areaName,
+    `Xã ${areaName}`,
+    `Phường ${areaName}`,
+    `Quận ${areaName}`,
+    `Huyện ${areaName}`,
+    `Thị xã ${areaName}`,
+    `Thị trấn ${areaName}`,
+    `Thành phố ${areaName}`,
+    `TP ${areaName}`,
+  ].filter((candidate, index, candidates) => {
+    const normalizedCandidate = normalizeLookupText(candidate);
+    return (
+      candidates.findIndex(
+        (item) => normalizeLookupText(item) === normalizedCandidate,
+      ) === index
+    );
+  });
+}
+
+async function lookupLevelTwoIdWithFallback({
+  lookup,
+  retailer,
+  accessPrivateToken,
+  areaName,
+  provinceName,
+}) {
+  const candidates = buildLevelTwoLookupCandidates(areaName);
+  let lastResponse = [];
+
+  for (const candidate of candidates) {
+    const response = await lookup(
+      retailer,
+      accessPrivateToken,
+      candidate,
+      2,
+      provinceName,
+    );
+    lastResponse = response;
+    if (hasAdministrativeLookupResults(response)) return response;
+  }
+
+  return lastResponse;
+}
+
+async function lookupWardIdWithFallback({
+  retailer,
+  accessPrivateToken,
+  wardName,
+  locationName,
+  locationId,
+}) {
+  const candidates = buildLevelTwoLookupCandidates(wardName);
+  let lastResponse = [];
+
+  for (const candidate of candidates) {
+    const response = await getIdWards(
+      retailer,
+      accessPrivateToken,
+      candidate,
+      2,
+      locationName,
+      locationId,
+    );
+    lastResponse = response;
+    if (hasAdministrativeLookupResults(response)) return response;
+  }
+
+  return lastResponse;
+}
+
 function normalizeNameForCompare(value = "") {
   return normalizeDisplayText(value)
     .toLowerCase()
@@ -519,39 +657,38 @@ async function resolveAdministrativeAreaDetails({
   let wardRows = [];
 
   if (provinceName) {
-    const provinceResponse = await getIdLocations(
+    const provinceResponse = await lookupProvinceIdWithFallback({
+      lookup: getIdLocations,
       retailer,
       accessPrivateToken,
       provinceName,
-      1,
-    );
+    });
     provinceRows = Array.isArray(provinceResponse)
       ? provinceResponse
       : provinceResponse?.Data || provinceResponse?.data || [];
   }
 
   if (provinceName && districtName) {
-    const districtResponse = await getIdLocations(
+    const districtResponse = await lookupLevelTwoIdWithFallback({
+      lookup: getIdLocations,
       retailer,
       accessPrivateToken,
-      districtName,
-      2,
+      areaName: districtName,
       provinceName,
-    );
+    });
     districtRows = Array.isArray(districtResponse)
       ? districtResponse
       : districtResponse?.Data || districtResponse?.data || [];
   }
 
   if (wardName) {
-    const wardResponse = await getIdWards(
+    const wardResponse = await lookupWardIdWithFallback({
       retailer,
       accessPrivateToken,
       wardName,
-      2,
-      locationName || `${provinceName} - ${districtName}`,
-      provinceRows[0]?.Id ?? null,
-    );
+      locationName: locationName || `${provinceName} - ${districtName}`,
+      locationId: provinceRows[0]?.Id ?? null,
+    });
     wardRows = Array.isArray(wardResponse)
       ? wardResponse
       : wardResponse?.Data || wardResponse?.data || [];
@@ -796,12 +933,12 @@ async function buildNewCustomerPayloadV2({
       "",
   ).trim();
   const provinceIds = provinceName
-    ? await getIdAdministrativearea(
+    ? await lookupProvinceIdWithFallback({
+        lookup: getIdAdministrativearea,
         retailer,
         accessPrivateToken,
         provinceName,
-        1,
-      )
+      })
     : [];
   const provinceRecord =
     provinceIds?.[0] || invoiceAddressDetails?.provinceRows?.[0] || null;
@@ -811,13 +948,13 @@ async function buildNewCustomerPayloadV2({
   );
   const wardIds =
     provinceDisplayName && districtName
-      ? await getIdAdministrativearea(
+      ? await lookupLevelTwoIdWithFallback({
+          lookup: getIdAdministrativearea,
           retailer,
           accessPrivateToken,
-          districtName,
-          2,
-          provinceDisplayName,
-        )
+          areaName: districtName,
+          provinceName: provinceDisplayName,
+        })
       : [];
   const wardRecord =
     wardIds?.[0] || invoiceAddressDetails?.districtRows?.[0] || null;
@@ -1012,12 +1149,12 @@ async function buildExistingCustomerAddressUpdatePayload({
   );
   const addressParts = parseVietnamAddressParts(newAddress);
   const provinceIds = addressParts.province
-    ? await getIdAdministrativearea(
+    ? await lookupProvinceIdWithFallback({
+        lookup: getIdAdministrativearea,
         retailer,
         accessPrivateToken,
-        addressParts.province,
-        1,
-      )
+        provinceName: addressParts.province,
+      })
     : [];
   const provinceRecord = provinceIds?.[0] || null;
   const provinceDisplayName = getAdministrativeAreaDisplayName(
@@ -1028,13 +1165,13 @@ async function buildExistingCustomerAddressUpdatePayload({
   const districtName = addressParts.district || addressParts.ward;
   const wardIds =
     provinceDisplayName && districtName
-      ? await getIdAdministrativearea(
+      ? await lookupLevelTwoIdWithFallback({
+          lookup: getIdAdministrativearea,
           retailer,
           accessPrivateToken,
-          districtName,
-          2,
-          provinceDisplayName,
-        )
+          areaName: districtName,
+          provinceName: provinceDisplayName,
+        })
       : [];
   const wardRecord = wardIds?.[0] || null;
   if (!provinceRecord || (districtName && !wardRecord)) {
