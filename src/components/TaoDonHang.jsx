@@ -375,6 +375,7 @@ function buildProvinceLookupCandidates(value = "") {
     `Tỉnh ${provinceName}`,
     `Thành phố ${provinceName}`,
     `TP ${provinceName}`,
+    `Thủ đô ${provinceName}`,
   ].filter((candidate, index, candidates) => {
     const normalizedCandidate = normalizeLookupText(candidate);
     return (
@@ -409,12 +410,7 @@ async function lookupProvinceIdWithFallback({
   let lastResponse = [];
 
   for (const candidate of candidates) {
-    const response = await lookup(
-      retailer,
-      accessPrivateToken,
-      candidate,
-      1,
-    );
+    const response = await lookup(retailer, accessPrivateToken, candidate, 1);
     lastResponse = response;
     if (hasAdministrativeLookupResults(response)) return response;
   }
@@ -424,10 +420,7 @@ async function lookupProvinceIdWithFallback({
 
 function buildLevelTwoLookupCandidates(value = "") {
   const areaName = normalizeDisplayText(value)
-    .replace(
-      /^(Xã|Phường|Thị trấn|Quận|Huyện|Thị xã|Thành phố|TP\.?)\s+/iu,
-      "",
-    )
+    .replace(/^(Xã|Phường|Thị trấn|Quận|Huyện|Thị xã|Thành phố|TP\.?)\s+/iu, "")
     .trim();
   if (!areaName) return [];
 
@@ -3442,15 +3435,28 @@ function parseRawOrder(rawText = "") {
       .replace(/\s+/g, " ")
       .trim();
     const keyMatch = line.match(
-      /^(Khách hàng|SĐT|Số điện thoại|Địa chỉ cũ|Địa chỉ mới|Địa chỉ|ĐC CŨ|ĐC MỚI|ĐC|DC|NVC)\s*:\s*(.+)$/iu,
+      /^(Khách hàng|KH|Khách|Tên KH|Tên khách hàng|Họ tên|SĐT|Số điện thoại|Số ĐT|Số DT|Địa chỉ cũ|Địa chỉ mới|Địa chỉ|ĐC CŨ|ĐC MỚI|ĐC|DC|NVC)\s*:\s*(.+)$/iu,
     );
 
     if (keyMatch) {
       const key = keyMatch[1].toLowerCase();
       const value = keyMatch[2].trim();
 
-      if (key === "khách hàng") result.customerName = value;
-      if (key === "sđt" || key === "số điện thoại") result.phoneNumber = value;
+      if (
+        key === "khách hàng" ||
+        key === "kh" ||
+        key === "tên kh" ||
+        key === "tên khách hàng" ||
+        key === "họ tên"
+      )
+        result.customerName = value;
+      if (
+        key === "sđt" ||
+        key === "số điện thoại" ||
+        key === "số đt" ||
+        key === "số dt"
+      )
+        result.phoneNumber = value;
       if (
         key === "địa chỉ cũ" ||
         key === "địa chỉ" ||
@@ -3898,14 +3904,14 @@ export default function TaoDonHang() {
   const customerTypeWillChange = Boolean(
     existingCustomerType &&
     selectedCustomerType &&
-      existingCustomerType !== selectedCustomerType,
+    existingCustomerType !== selectedCustomerType,
   );
   const agencyTaxCodeWillUpdate = Boolean(
     customerType === "dai_ly" &&
-      orderPreparation.customerRecord &&
-      normalizeTaxCode(agencyTaxCode) &&
-      normalizeTaxCode(agencyTaxCode) !==
-        normalizeTaxCode(orderPreparation.customerRecord?.TaxCode),
+    orderPreparation.customerRecord &&
+    normalizeTaxCode(agencyTaxCode) &&
+    normalizeTaxCode(agencyTaxCode) !==
+      normalizeTaxCode(orderPreparation.customerRecord?.TaxCode),
   );
   const enteredNewAddress = normalizeDisplayText(parsed.newAddress);
   const predictedNewAddress =
@@ -4305,8 +4311,7 @@ export default function TaoDonHang() {
     parsed.items,
   ]);
   const hasZeroRetailPrices = retailProductsWithZeroPrice.length > 0;
-  const hasInvalidProductPrices =
-    hasMissingAgencyPrices || hasZeroRetailPrices;
+  const hasInvalidProductPrices = hasMissingAgencyPrices || hasZeroRetailPrices;
   const orderPreparationMessage = tokenLoading
     ? "Đang lấy token để chuẩn bị dữ liệu..."
     : orderPreparation.status === "waiting"
@@ -4877,12 +4882,8 @@ export default function TaoDonHang() {
           ) {
             updatedTaxCompanyInfo = agencyTaxInfo.data;
           } else {
-            const taxResponse =
-              await getTaxCodeCompanyInfo(normalizedTaxCode);
-            if (
-              String(taxResponse?.code || "") === "00" &&
-              taxResponse?.data
-            ) {
+            const taxResponse = await getTaxCodeCompanyInfo(normalizedTaxCode);
+            if (String(taxResponse?.code || "") === "00" && taxResponse?.data) {
               updatedTaxCompanyInfo = taxResponse.data;
             }
           }
@@ -4902,14 +4903,15 @@ export default function TaoDonHang() {
             );
           }
 
-          const updatePayload =
-            await buildExistingCustomerAddressUpdatePayload({
+          const updatePayload = await buildExistingCustomerAddressUpdatePayload(
+            {
               customer: customerRecord,
               parsed: { ...effectiveParsed, newAddress: taxAddress },
               customerType: "dai_ly",
               retailer: selectedRetailerId,
               accessPrivateToken,
-            });
+            },
+          );
           const organization = normalizeDisplayText(
             updatedTaxCompanyInfo.name || customerRecord?.Organization,
           );
@@ -5689,9 +5691,7 @@ export default function TaoDonHang() {
                 <div className="flex items-start gap-2 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
                   <XCircle className="mt-0.5 h-5 w-5 shrink-0" />
                   <div>
-                    <div className="font-bold">
-                      Không thể tạo đơn khách lẻ
-                    </div>
+                    <div className="font-bold">Không thể tạo đơn khách lẻ</div>
                     <div className="mt-1 leading-5">
                       Các sản phẩm sau đang có giá khách lẻ bằng 0đ:{" "}
                       <span className="font-mono font-bold">
