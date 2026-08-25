@@ -49,6 +49,10 @@ const SHIPPING_PARTNERS = [
   { id: "VTPFW", label: "Viettel Post FW (VTPFW)" },
 ];
 
+function getDefaultShippingPartner(retailerId) {
+  return String(retailerId || "").toLowerCase() === "abctv" ? "GHN" : "VTPFW";
+}
+
 const DEFAULT_GHN_REQUIRED_NOTE = "CHOXEMHANGKHONGTHU";
 
 const GHN_REQUIRED_NOTE_OPTIONS = [
@@ -112,8 +116,8 @@ const VTP_DEFAULT_SERVICE_EXTRA = [
   },
 ];
 
-const SAMPLE_TEXT = `Khách hàng: Trần Minh Phúc
-SĐT: 0388041242
+const SAMPLE_TEXT = `Khách hàng: Tín thành
+SĐT: 0964294979
 ĐC CŨ: Ấp Rạch Nghệ, Xã Thông Hòa, Huyện Cầu Kè, Tỉnh Trà Vinh
 ĐC MỚI: Ấp Rạch Nghệ, Xã Tam Ngãi, Vĩnh Long
 1 xô Đạm organic xô 22kg - OKF74
@@ -261,6 +265,8 @@ function getProductDisplayName(product = {}) {
 function normalizePlainText(value = "") {
   return String(value || "")
     .trim()
+    .replace(/[ĐÐ]/g, "D")
+    .replace(/đ/g, "d")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[^a-zA-Z0-9\s,-]/g, " ")
@@ -364,6 +370,255 @@ function getAdministrativeAreaDisplayName(
   return `Tỉnh ${displayName}`;
 }
 
+function buildProvinceLookupCandidates(value = "") {
+  const provinceName = normalizeDisplayText(value)
+    .replace(/^(Tỉnh|Thành phố|TP\.?)\s+/iu, "")
+    .trim();
+  if (!provinceName) return [];
+
+  return [
+    provinceName,
+    `Tỉnh ${provinceName}`,
+    `Thành phố ${provinceName}`,
+    `TP ${provinceName}`,
+    `Thủ đô ${provinceName}`,
+  ].filter((candidate, index, candidates) => {
+    const normalizedCandidate = normalizeLookupText(candidate);
+    return (
+      candidates.findIndex(
+        (item) => normalizeLookupText(item) === normalizedCandidate,
+      ) === index
+    );
+  });
+}
+
+function hasAdministrativeLookupResults(response) {
+  const rows = Array.isArray(response)
+    ? response
+    : Array.isArray(response?.Data)
+      ? response.Data
+      : Array.isArray(response?.data)
+        ? response.data
+        : Array.isArray(response?.data?.Data)
+          ? response.data.Data
+          : [];
+
+  return rows.length > 0;
+}
+
+async function lookupProvinceIdWithFallback({
+  lookup,
+  retailer,
+  accessPrivateToken,
+  provinceName,
+}) {
+  const candidates = buildProvinceLookupCandidates(provinceName);
+  let lastResponse = [];
+
+  for (const candidate of candidates) {
+    const response = await lookup(retailer, accessPrivateToken, candidate, 1);
+    lastResponse = response;
+    if (hasAdministrativeLookupResults(response)) return response;
+  }
+
+  return lastResponse;
+}
+
+function buildLevelTwoLookupCandidates(value = "") {
+  const areaName = normalizeDisplayText(value)
+    .replace(/^(Xã|Phường|Thị trấn|Quận|Huyện|Thị xã|Thành phố|TP\.?)\s+/iu, "")
+    .trim();
+  if (!areaName) return [];
+
+  return [
+    areaName,
+    `Xã ${areaName}`,
+    `Phường ${areaName}`,
+    `Quận ${areaName}`,
+    `Huyện ${areaName}`,
+    `Thị xã ${areaName}`,
+    `Thị trấn ${areaName}`,
+    `Thành phố ${areaName}`,
+    `TP ${areaName}`,
+  ].filter((candidate, index, candidates) => {
+    const normalizedCandidate = normalizeLookupText(candidate);
+    return (
+      candidates.findIndex(
+        (item) => normalizeLookupText(item) === normalizedCandidate,
+      ) === index
+    );
+  });
+}
+
+async function lookupLevelTwoIdWithFallback({
+  lookup,
+  retailer,
+  accessPrivateToken,
+  areaName,
+  provinceName,
+}) {
+  const candidates = buildLevelTwoLookupCandidates(areaName);
+  let lastResponse = [];
+
+  for (const candidate of candidates) {
+    const response = await lookup(
+      retailer,
+      accessPrivateToken,
+      candidate,
+      2,
+      provinceName,
+    );
+    lastResponse = response;
+    if (hasAdministrativeLookupResults(response)) return response;
+  }
+
+  return lastResponse;
+}
+
+async function lookupWardIdWithFallback({
+  retailer,
+  accessPrivateToken,
+  wardName,
+  locationName,
+  locationId,
+}) {
+  const candidates = buildLevelTwoLookupCandidates(wardName);
+  let lastResponse = [];
+
+  for (const candidate of candidates) {
+    const response = await getIdWards(
+      retailer,
+      accessPrivateToken,
+      candidate,
+      2,
+      locationName,
+      locationId,
+    );
+    lastResponse = response;
+    if (hasAdministrativeLookupResults(response)) return response;
+  }
+
+  return lastResponse;
+}
+
+function buildVtpReceiverLocationCandidates(
+  provinceName = "",
+  districtName = "",
+) {
+  const province = stripProvincePrefix(provinceName);
+  const district = normalizeDisplayText(districtName)
+    .replace(/^(Xã|Phường|Thị trấn|Quận|Huyện|Thị xã|Thành phố|TP\.?)\s+/iu, "")
+    .trim();
+  if (!province || !district) return [];
+
+  return [
+    `${province} - ${district}`,
+    `${province} - Huyện ${district}`,
+    `${province} - Thành phố ${district}`,
+    `${province} - TP ${district}`,
+    `${province} - Quận ${district}`,
+    `${province} - Thị Xã ${district}`,
+    `${province} - Phường ${district}`,
+  ].filter((candidate, index, candidates) => {
+    const normalizedCandidate = normalizeLookupText(candidate);
+    return (
+      candidates.findIndex(
+        (item) => normalizeLookupText(item) === normalizedCandidate,
+      ) === index
+    );
+  });
+}
+
+async function lookupVtpReceiverLocationIdWithFallback({
+  retailer,
+  accessPrivateToken,
+  provinceName,
+  districtName,
+}) {
+  const normalizedProvinceName = stripProvincePrefix(provinceName);
+  const locationCandidates = buildVtpReceiverLocationCandidates(
+    normalizedProvinceName,
+    districtName,
+  );
+  const response = await getIdLocations(
+    retailer,
+    accessPrivateToken,
+    normalizedProvinceName,
+    1,
+  );
+  const rows = Array.isArray(response)
+    ? response
+    : response?.Data || response?.data || [];
+
+  for (const locationCandidate of locationCandidates) {
+    const normalizedCandidate = normalizeLookupText(locationCandidate);
+    const matchedLocation = rows.find(
+      (row) =>
+        normalizeLookupText(
+          row?.Name || row?.FullName || row?.CompareName || row?.NormalName,
+        ) === normalizedCandidate,
+    );
+    const receiverLocationId =
+      matchedLocation?.Id ?? matchedLocation?.id ?? null;
+    if (receiverLocationId == null) continue;
+
+    return {
+      receiverLocationId,
+      locationName:
+        normalizeDisplayText(
+          matchedLocation?.Name ||
+            matchedLocation?.FullName ||
+            matchedLocation?.CompareName,
+        ) || locationCandidate,
+    };
+  }
+
+  return { receiverLocationId: null, locationName: "" };
+}
+
+async function lookupVtpReceiverWardIdWithFallback({
+  retailer,
+  accessPrivateToken,
+  wardName,
+  provinceName,
+  districtName,
+  locationId,
+  preferredLocationName = "",
+}) {
+  const locationCandidates = [
+    preferredLocationName,
+    ...buildVtpReceiverLocationCandidates(provinceName, districtName),
+  ]
+    .filter(Boolean)
+    .filter((candidate, index, candidates) => {
+      const normalizedCandidate = normalizeLookupText(candidate);
+      return (
+        candidates.findIndex(
+          (item) => normalizeLookupText(item) === normalizedCandidate,
+        ) === index
+      );
+    });
+
+  for (const locationName of locationCandidates) {
+    const response = await lookupWardIdWithFallback({
+      retailer,
+      accessPrivateToken,
+      wardName,
+      locationName,
+      locationId,
+    });
+    const rows = Array.isArray(response)
+      ? response
+      : response?.Data || response?.data || [];
+    const receiverWardId = rows[0]?.Id ?? rows[0]?.id ?? null;
+    if (receiverWardId != null) {
+      return { receiverWardId, locationName };
+    }
+  }
+
+  return { receiverWardId: null, locationName: "" };
+}
+
 function normalizeNameForCompare(value = "") {
   return normalizeDisplayText(value)
     .toLowerCase()
@@ -409,6 +664,19 @@ function getKiotUserDisplayName(kiotUser = {}) {
     kiotUser?.Name ||
     ""
   );
+}
+
+function buildNewCustomerAssigneeFields(kiotUser = null) {
+  const userId = kiotUser?.Id ?? kiotUser?.UserId ?? null;
+  const userName = normalizeDisplayText(getKiotUserDisplayName(kiotUser));
+
+  return {
+    ...(userId != null && { CreatedBy: userId }),
+    ...(userName && { CreatedName: userName }),
+    EmployeeInChargeIds: userId != null ? [userId] : [],
+    EmployeeInChargeNames: userName ? [userName] : [],
+    EmployeeInCharges: userName ? [userName] : [],
+  };
 }
 
 function findMatchingKiotUser(kiotUsers = [], userName = "") {
@@ -519,39 +787,38 @@ async function resolveAdministrativeAreaDetails({
   let wardRows = [];
 
   if (provinceName) {
-    const provinceResponse = await getIdLocations(
+    const provinceResponse = await lookupProvinceIdWithFallback({
+      lookup: getIdLocations,
       retailer,
       accessPrivateToken,
       provinceName,
-      1,
-    );
+    });
     provinceRows = Array.isArray(provinceResponse)
       ? provinceResponse
       : provinceResponse?.Data || provinceResponse?.data || [];
   }
 
   if (provinceName && districtName) {
-    const districtResponse = await getIdLocations(
+    const districtResponse = await lookupLevelTwoIdWithFallback({
+      lookup: getIdLocations,
       retailer,
       accessPrivateToken,
-      districtName,
-      2,
+      areaName: districtName,
       provinceName,
-    );
+    });
     districtRows = Array.isArray(districtResponse)
       ? districtResponse
       : districtResponse?.Data || districtResponse?.data || [];
   }
 
   if (wardName) {
-    const wardResponse = await getIdWards(
+    const wardResponse = await lookupWardIdWithFallback({
       retailer,
       accessPrivateToken,
       wardName,
-      2,
-      locationName || `${provinceName} - ${districtName}`,
-      provinceRows[0]?.Id ?? null,
-    );
+      locationName: locationName || `${provinceName} - ${districtName}`,
+      locationId: provinceRows[0]?.Id ?? null,
+    });
     wardRows = Array.isArray(wardResponse)
       ? wardResponse
       : wardResponse?.Data || wardResponse?.data || [];
@@ -700,21 +967,12 @@ function buildNewCustomerPayload({
       LocationId: null,
       LastLocation: "",
       WardId: null,
-      ...(matchedKiotUser && {
-        CreatedName:
-          matchedKiotUser.CompareGivenName || matchedKiotUser.GivenName,
-
-        CreatedBy: matchedKiotUser.Id,
-      }),
+      ...buildNewCustomerAssigneeFields(matchedKiotUser),
       NameEInvoice: invoiceName,
       AddressEInvoice: resolvedAddress || address,
       AdministrativeAreaIdEInvoice: null,
       AdministrativeAreaId: null,
       RetailerId: null,
-      EmployeeInChargeIds: matchedKiotUser ? [matchedKiotUser.Id] : [],
-      EmployeeInChargeNames: matchedKiotUser
-        ? [matchedKiotUser.CompareGivenName || matchedKiotUser.GivenName]
-        : [],
       CustomerGroupDetails: selectedGroupId
         ? [{ GroupId: selectedGroupId }]
         : [],
@@ -796,12 +1054,12 @@ async function buildNewCustomerPayloadV2({
       "",
   ).trim();
   const provinceIds = provinceName
-    ? await getIdAdministrativearea(
+    ? await lookupProvinceIdWithFallback({
+        lookup: getIdAdministrativearea,
         retailer,
         accessPrivateToken,
         provinceName,
-        1,
-      )
+      })
     : [];
   const provinceRecord =
     provinceIds?.[0] || invoiceAddressDetails?.provinceRows?.[0] || null;
@@ -811,13 +1069,13 @@ async function buildNewCustomerPayloadV2({
   );
   const wardIds =
     provinceDisplayName && districtName
-      ? await getIdAdministrativearea(
+      ? await lookupLevelTwoIdWithFallback({
+          lookup: getIdAdministrativearea,
           retailer,
           accessPrivateToken,
-          districtName,
-          2,
-          provinceDisplayName,
-        )
+          areaName: districtName,
+          provinceName: provinceDisplayName,
+        })
       : [];
   const wardRecord =
     wardIds?.[0] || invoiceAddressDetails?.districtRows?.[0] || null;
@@ -903,16 +1161,7 @@ async function buildNewCustomerPayloadV2({
 
       CustomerType: isAgency ? "Công ty" : "Cá nhân",
       RetailerId: retailerId,
-      ...(matchedKiotUser && {
-        CreatedName:
-          matchedKiotUser.CompareGivenName || matchedKiotUser.GivenName,
-
-        CreatedBy: matchedKiotUser.Id,
-      }),
-      EmployeeInChargeIds: matchedKiotUser ? [matchedKiotUser.Id] : [],
-      EmployeeInChargeNames: matchedKiotUser
-        ? [matchedKiotUser.CompareGivenName || matchedKiotUser.GivenName]
-        : [],
+      ...buildNewCustomerAssigneeFields(matchedKiotUser),
       ContactNumberEInvoice: phoneNumber,
       LocationItemsEInvoice: {
         1: provinceSuggestion,
@@ -994,6 +1243,44 @@ function getCustomerTypeLabel(customerType = "") {
   return customerType === "dai_ly" ? "Đại lý" : "Khách lẻ";
 }
 
+function getCustomerGroupName(customer = {}) {
+  const groupNames = Array.isArray(customer?.CustomerGroupNames)
+    ? customer.CustomerGroupNames
+    : [];
+  return normalizeDisplayText(
+    groupNames.find((name) => normalizeDisplayText(name)) || customer?.Groups,
+  );
+}
+
+function formatCustomerGroupName(groupName, customerType, isAbcRetailer) {
+  const normalizedGroupName =
+    normalizeDisplayText(groupName) || "Chưa có nhóm khách hàng";
+  if (!isAbcRetailer) return normalizedGroupName;
+
+  return `${normalizedGroupName} - ${getCustomerTypeLabel(customerType)}`;
+}
+
+function findCustomerGroupOptionValue(customer, customerTypeOptions = []) {
+  const customerGroupNames = [
+    ...(Array.isArray(customer?.CustomerGroupNames)
+      ? customer.CustomerGroupNames
+      : []),
+    customer?.Groups,
+  ]
+    .map(normalizeLookupText)
+    .filter(Boolean);
+
+  return (
+    customerTypeOptions.find((option) => {
+      const optionName = normalizeLookupText(option?.label);
+      return customerGroupNames.some(
+        (groupName) =>
+          groupName === optionName || groupName.includes(optionName),
+      );
+    })?.value || ""
+  );
+}
+
 function normalizeTaxCode(value = "") {
   return String(value || "")
     .replace(/[^a-z0-9]/giu, "")
@@ -1012,12 +1299,12 @@ async function buildExistingCustomerAddressUpdatePayload({
   );
   const addressParts = parseVietnamAddressParts(newAddress);
   const provinceIds = addressParts.province
-    ? await getIdAdministrativearea(
+    ? await lookupProvinceIdWithFallback({
+        lookup: getIdAdministrativearea,
         retailer,
         accessPrivateToken,
-        addressParts.province,
-        1,
-      )
+        provinceName: addressParts.province,
+      })
     : [];
   const provinceRecord = provinceIds?.[0] || null;
   const provinceDisplayName = getAdministrativeAreaDisplayName(
@@ -1028,13 +1315,13 @@ async function buildExistingCustomerAddressUpdatePayload({
   const districtName = addressParts.district || addressParts.ward;
   const wardIds =
     provinceDisplayName && districtName
-      ? await getIdAdministrativearea(
+      ? await lookupLevelTwoIdWithFallback({
+          lookup: getIdAdministrativearea,
           retailer,
           accessPrivateToken,
-          districtName,
-          2,
-          provinceDisplayName,
-        )
+          areaName: districtName,
+          provinceName: provinceDisplayName,
+        })
       : [];
   const wardRecord = wardIds?.[0] || null;
   if (!provinceRecord || (districtName && !wardRecord)) {
@@ -2841,7 +3128,45 @@ async function buildDeliveryDetailPayload({
   const provinceName = resolvedAddress?.provinceName || "";
   const districtName = resolvedAddress?.districtName || "";
   const wardName = resolvedAddress?.wardName || "";
-  const receiverWardId = wardId ?? VTP_PRICE_CHECK_DEFAULT.RECEIVER_WARD_ID;
+  let vtpReceiverLocationId = resolvedAddress?.districtId ?? null;
+  let vtpReceiverWardId = wardId;
+
+  if (isViettelPost && provinceName && districtName) {
+    const vtpLocationResult = await lookupVtpReceiverLocationIdWithFallback({
+      retailer,
+      accessPrivateToken,
+      provinceName,
+      districtName,
+    });
+    const vtpWardResult = await lookupVtpReceiverWardIdWithFallback({
+      retailer,
+      accessPrivateToken,
+      wardName: wardName || districtName,
+      provinceName,
+      districtName,
+      locationId: vtpLocationResult.receiverLocationId ?? locationId,
+      preferredLocationName: vtpLocationResult.locationName,
+    });
+    vtpReceiverLocationId =
+      vtpLocationResult.receiverLocationId ?? vtpReceiverLocationId;
+    vtpReceiverWardId = vtpWardResult.receiverWardId ?? vtpReceiverWardId;
+
+    if (vtpLocationResult.receiverLocationId != null) {
+      console.log("TaoDonHang VTP ReceiverLocationId fallback matched", {
+        locationName: vtpLocationResult.locationName,
+        receiverLocationId: vtpLocationResult.receiverLocationId,
+      });
+    }
+    if (vtpWardResult.receiverWardId != null) {
+      console.log("TaoDonHang VTP ReceiverWardId fallback matched", {
+        locationName: vtpWardResult.locationName,
+        receiverWardId: vtpWardResult.receiverWardId,
+      });
+    }
+  }
+
+  const receiverWardId =
+    vtpReceiverWardId ?? VTP_PRICE_CHECK_DEFAULT.RECEIVER_WARD_ID;
   const locationName = buildLocationNameFromParts({
     province: provinceName,
     district: districtName,
@@ -2981,7 +3306,7 @@ async function buildDeliveryDetailPayload({
     "";
   const selectedVtpServiceAdd = JSON.stringify(VTP_DEFAULT_SERVICE_EXTRA);
   const receiverLocationId =
-    locationId ?? VTP_PRICE_CHECK_DEFAULT.RECEIVER_LOCATION_ID;
+    vtpReceiverLocationId ?? VTP_PRICE_CHECK_DEFAULT.RECEIVER_LOCATION_ID;
   const receiverAddress = VTP_PRICE_CHECK_DEFAULT.RECEIVER_ADDRESS;
   const receiverStreet = String(
     deliveryParts.street || receiverAddress || "",
@@ -3305,15 +3630,28 @@ function parseRawOrder(rawText = "") {
       .replace(/\s+/g, " ")
       .trim();
     const keyMatch = line.match(
-      /^(Khách hàng|SĐT|Số điện thoại|Địa chỉ cũ|Địa chỉ mới|Địa chỉ|ĐC CŨ|ĐC MỚI|ĐC|DC|NVC)\s*:\s*(.+)$/iu,
+      /^(Khách hàng|KH|Khách|Tên KH|Tên khách hàng|Họ tên|SĐT|Số điện thoại|Số ĐT|Số DT|Địa chỉ cũ|Địa chỉ mới|Địa chỉ|ĐC CŨ|ĐC MỚI|ĐC|DC|NVC)\s*:\s*(.+)$/iu,
     );
 
     if (keyMatch) {
       const key = keyMatch[1].toLowerCase();
       const value = keyMatch[2].trim();
 
-      if (key === "khách hàng") result.customerName = value;
-      if (key === "sđt" || key === "số điện thoại") result.phoneNumber = value;
+      if (
+        key === "khách hàng" ||
+        key === "kh" ||
+        key === "tên kh" ||
+        key === "tên khách hàng" ||
+        key === "họ tên"
+      )
+        result.customerName = value;
+      if (
+        key === "sđt" ||
+        key === "số điện thoại" ||
+        key === "số đt" ||
+        key === "số dt"
+      )
+        result.phoneNumber = value;
       if (
         key === "địa chỉ cũ" ||
         key === "địa chỉ" ||
@@ -3542,15 +3880,18 @@ function CreateOrderProgressPanel({ steps = [], error = "", isCreating }) {
 export default function TaoDonHang() {
   const { user } = useAuth() || {};
   const hasMappedUserRetailerRef = useRef(false);
+  const customerSelectionSyncRef = useRef("");
   const [selectedRetailerId, setSelectedRetailerId] = useState(() =>
     mapTeamIdToRetailerId(user?.teamId),
   );
-  const [selectedShippingPartner, setSelectedShippingPartner] =
-    useState("VTPFW");
+  const [selectedShippingPartner, setSelectedShippingPartner] = useState(() =>
+    getDefaultShippingPartner(mapTeamIdToRetailerId(user?.teamId)),
+  );
   const [ghnRequiredNote, setGhnRequiredNote] = useState(
     DEFAULT_GHN_REQUIRED_NOTE,
   );
   const [customerType, setCustomerType] = useState("khach_le");
+  const [isAbcAgency, setIsAbcAgency] = useState(false);
   const [
     updateCustomerWhenProvinceChanges,
     setUpdateCustomerWhenProvinceChanges,
@@ -3615,6 +3956,15 @@ export default function TaoDonHang() {
     () => getCustomerTypeOptions(selectedRetailerId),
     [selectedRetailerId],
   );
+  const isAbcRetailer =
+    String(selectedRetailerId || "").toLowerCase() === "abctv";
+  const effectiveCustomerType = isAbcRetailer
+    ? isAbcAgency
+      ? "dai_ly"
+      : "khach_le"
+    : customerType;
+  const pricingCustomerType =
+    isAbcRetailer && !isAbcAgency ? customerType : effectiveCustomerType;
   const shippingLabel =
     SHIPPING_PARTNERS.find((item) => item.id === selectedShippingPartner)
       ?.label || selectedShippingPartner;
@@ -3625,6 +3975,10 @@ export default function TaoDonHang() {
     setSelectedRetailerId(mapTeamIdToRetailerId(user.teamId));
     hasMappedUserRetailerRef.current = true;
   }, [user?.teamId]);
+
+  useEffect(() => {
+    setSelectedShippingPartner(getDefaultShippingPartner(selectedRetailerId));
+  }, [selectedRetailerId]);
 
   const updateCreateOrderProgress = (id, status, message) => {
     setCreateOrderProgress((current) =>
@@ -3644,11 +3998,18 @@ export default function TaoDonHang() {
   }, [customerType, customerTypeOptions]);
 
   useEffect(() => {
+    if (!isAbcRetailer && isAbcAgency) {
+      setIsAbcAgency(false);
+      setAgencyTaxCode("");
+    }
+  }, [isAbcAgency, isAbcRetailer]);
+
+  useEffect(() => {
     let active = true;
     let timerId = null;
     const taxCode = String(agencyTaxCode || "").trim();
 
-    if (customerType !== "dai_ly" || !taxCode) {
+    if (effectiveCustomerType !== "dai_ly" || !taxCode) {
       setAgencyTaxInfo({
         status: "idle",
         taxCode: "",
@@ -3714,12 +4075,25 @@ export default function TaoDonHang() {
       active = false;
       if (timerId !== null) window.clearTimeout(timerId);
     };
-  }, [agencyTaxCode, customerType]);
+  }, [agencyTaxCode, effectiveCustomerType]);
 
   const parsed = useMemo(() => parseRawOrder(rawText), [rawText]);
   const orderPreparationKey = useMemo(
-    () => JSON.stringify([selectedRetailerId, customerType, rawText]),
-    [selectedRetailerId, customerType, rawText],
+    () =>
+      JSON.stringify([
+        selectedRetailerId,
+        customerType,
+        effectiveCustomerType,
+        pricingCustomerType,
+        rawText,
+      ]),
+    [
+      effectiveCustomerType,
+      pricingCustomerType,
+      selectedRetailerId,
+      customerType,
+      rawText,
+    ],
   );
   const effectiveParsed = useMemo(() => {
     const enteredNewAddress = String(parsed.newAddress || "").trim();
@@ -3732,12 +4106,19 @@ export default function TaoDonHang() {
     return { ...parsed, newAddress: convertedNewAddress };
   }, [orderPreparation, orderPreparationKey, parsed]);
   const estimatedCustomerPreview = useMemo(
-    () => buildEstimatedCustomerPreview(effectiveParsed, customerType),
-    [customerType, effectiveParsed],
+    () => buildEstimatedCustomerPreview(effectiveParsed, effectiveCustomerType),
+    [effectiveCustomerType, effectiveParsed],
+  );
+  const estimatedCustomerGroupName = formatCustomerGroupName(
+    pickCustomerGroupName(customerType),
+    effectiveCustomerType,
+    isAbcRetailer,
   );
   const existingCustomerPreview = useMemo(() => {
     const customer = orderPreparation.customerRecord;
     if (!customer) return null;
+
+    const customerTypeKey = getCustomerTypeKey(customer);
 
     return {
       code: normalizeDisplayText(
@@ -3750,25 +4131,28 @@ export default function TaoDonHang() {
         customer?.ContactNumber || customer?.CustomerContactNumber,
       ),
       address: getCustomerCurrentAddress(customer),
+      groupName: formatCustomerGroupName(
+        getCustomerGroupName(customer) || pickCustomerGroupName(customerType),
+        customerTypeKey,
+        isAbcRetailer,
+      ),
     };
-  }, [orderPreparation.customerRecord]);
+  }, [customerType, isAbcRetailer, orderPreparation.customerRecord]);
   const existingCustomerType = orderPreparation.customerRecord
     ? getCustomerTypeKey(orderPreparation.customerRecord)
     : "";
-  const selectedCustomerType = ["dai_ly", "khach_le"].includes(customerType)
-    ? customerType
-    : "";
+  const selectedCustomerType = effectiveCustomerType;
   const customerTypeWillChange = Boolean(
     existingCustomerType &&
     selectedCustomerType &&
-      existingCustomerType !== selectedCustomerType,
+    existingCustomerType !== selectedCustomerType,
   );
   const agencyTaxCodeWillUpdate = Boolean(
-    customerType === "dai_ly" &&
-      orderPreparation.customerRecord &&
-      normalizeTaxCode(agencyTaxCode) &&
-      normalizeTaxCode(agencyTaxCode) !==
-        normalizeTaxCode(orderPreparation.customerRecord?.TaxCode),
+    effectiveCustomerType === "dai_ly" &&
+    orderPreparation.customerRecord &&
+    normalizeTaxCode(agencyTaxCode) &&
+    normalizeTaxCode(agencyTaxCode) !==
+      normalizeTaxCode(orderPreparation.customerRecord?.TaxCode),
   );
   const enteredNewAddress = normalizeDisplayText(parsed.newAddress);
   const predictedNewAddress =
@@ -4122,9 +4506,62 @@ export default function TaoDonHang() {
     orderPreparation.status === "ready" &&
     orderPreparation.key === orderPreparationKey &&
     Boolean(String(parsed.phoneNumber || "").trim());
+
+  useEffect(() => {
+    if (!isOrderPreparationReady) return;
+
+    const customer = orderPreparation.customerRecord;
+    const customerIdentity = JSON.stringify([
+      String(selectedRetailerId || "").toLowerCase(),
+      String(parsed.phoneNumber || "").trim(),
+      customer?.Id ??
+        customer?.CustomerId ??
+        customer?.Code ??
+        customer?.CustomerCode ??
+        "not-found",
+    ]);
+    if (customerSelectionSyncRef.current === customerIdentity) return;
+    customerSelectionSyncRef.current = customerIdentity;
+
+    if (!customer) return;
+
+    if (isAbcRetailer) {
+      const matchedGroupValue = findCustomerGroupOptionValue(
+        customer,
+        customerTypeOptions,
+      );
+      if (matchedGroupValue) {
+        setCustomerType((current) =>
+          current === matchedGroupValue ? current : matchedGroupValue,
+        );
+      }
+      const customerIsAgency = getCustomerTypeKey(customer) === "dai_ly";
+      setIsAbcAgency((current) =>
+        current === customerIsAgency ? current : customerIsAgency,
+      );
+      return;
+    }
+
+    const customerTypeKey = getCustomerTypeKey(customer);
+    if (
+      customerTypeOptions.some((option) => option.value === customerTypeKey)
+    ) {
+      setCustomerType((current) =>
+        current === customerTypeKey ? current : customerTypeKey,
+      );
+    }
+  }, [
+    customerTypeOptions,
+    isAbcRetailer,
+    isOrderPreparationReady,
+    orderPreparation.customerRecord,
+    parsed.phoneNumber,
+    selectedRetailerId,
+  ]);
+
   const agencyProductsWithoutPrice = useMemo(() => {
     if (
-      customerType !== "dai_ly" ||
+      pricingCustomerType !== "dai_ly" ||
       orderPreparation.status !== "ready" ||
       orderPreparation.key !== orderPreparationKey
     ) {
@@ -4137,7 +4574,7 @@ export default function TaoDonHang() {
       return product && !hasAgencyPrice(product, item);
     });
   }, [
-    customerType,
+    pricingCustomerType,
     orderPreparation.key,
     orderPreparation.productMap,
     orderPreparation.status,
@@ -4147,7 +4584,7 @@ export default function TaoDonHang() {
   const hasMissingAgencyPrices = agencyProductsWithoutPrice.length > 0;
   const retailProductsWithZeroPrice = useMemo(() => {
     if (
-      customerType !== "khach_le" ||
+      pricingCustomerType !== "khach_le" ||
       orderPreparation.status !== "ready" ||
       orderPreparation.key !== orderPreparationKey
     ) {
@@ -4160,7 +4597,7 @@ export default function TaoDonHang() {
       return product && !hasValidRetailPrice(product, item);
     });
   }, [
-    customerType,
+    pricingCustomerType,
     orderPreparation.key,
     orderPreparation.productMap,
     orderPreparation.status,
@@ -4168,8 +4605,7 @@ export default function TaoDonHang() {
     parsed.items,
   ]);
   const hasZeroRetailPrices = retailProductsWithZeroPrice.length > 0;
-  const hasInvalidProductPrices =
-    hasMissingAgencyPrices || hasZeroRetailPrices;
+  const hasInvalidProductPrices = hasMissingAgencyPrices || hasZeroRetailPrices;
   const orderPreparationMessage = tokenLoading
     ? "Đang lấy token để chuẩn bị dữ liệu..."
     : orderPreparation.status === "waiting"
@@ -4254,7 +4690,7 @@ export default function TaoDonHang() {
             retailer: selectedRetailerId,
             accessPrivateToken,
             accessToken,
-            customerType,
+            customerType: pricingCustomerType,
             productMap: orderPreparation.productMap,
           },
         );
@@ -4265,7 +4701,7 @@ export default function TaoDonHang() {
           productCampaignMap: orderPreparation.productCampaignMap,
           promotionProductMap: orderPreparation.promotionProductMap,
           promotionSelections,
-          customerType,
+          customerType: pricingCustomerType,
           totalTax: invoiceDetailsResult.totalTax || 0,
           totalAfterTax: invoiceDetailsResult.totalAfterTax || 0,
         });
@@ -4363,7 +4799,7 @@ export default function TaoDonHang() {
   }, [
     accessPrivateToken,
     accessToken,
-    customerType,
+    pricingCustomerType,
     effectiveParsed,
     isOrderPreparationReady,
     hasInvalidProductPrices,
@@ -4450,9 +4886,11 @@ export default function TaoDonHang() {
   };
 
   const handleReset = () => {
-    setSelectedShippingPartner("VTPFW");
+    customerSelectionSyncRef.current = "";
+    setSelectedShippingPartner(getDefaultShippingPartner(selectedRetailerId));
     setGhnRequiredNote(DEFAULT_GHN_REQUIRED_NOTE);
     setCustomerType("dai_ly");
+    setIsAbcAgency(false);
     setUpdateCustomerWhenProvinceChanges(false);
     setAgencyTaxCode("");
     setAgencyDescription("");
@@ -4540,9 +4978,7 @@ export default function TaoDonHang() {
     const foundCustomerType = orderPreparation.customerRecord
       ? getCustomerTypeKey(orderPreparation.customerRecord)
       : "";
-    const selectedCustomerType = ["dai_ly", "khach_le"].includes(customerType)
-      ? customerType
-      : "";
+    const selectedCustomerType = effectiveCustomerType;
     const willChangeCustomerType = Boolean(
       foundCustomerType &&
       selectedCustomerType &&
@@ -4740,12 +5176,8 @@ export default function TaoDonHang() {
           ) {
             updatedTaxCompanyInfo = agencyTaxInfo.data;
           } else {
-            const taxResponse =
-              await getTaxCodeCompanyInfo(normalizedTaxCode);
-            if (
-              String(taxResponse?.code || "") === "00" &&
-              taxResponse?.data
-            ) {
+            const taxResponse = await getTaxCodeCompanyInfo(normalizedTaxCode);
+            if (String(taxResponse?.code || "") === "00" && taxResponse?.data) {
               updatedTaxCompanyInfo = taxResponse.data;
             }
           }
@@ -4765,14 +5197,15 @@ export default function TaoDonHang() {
             );
           }
 
-          const updatePayload =
-            await buildExistingCustomerAddressUpdatePayload({
+          const updatePayload = await buildExistingCustomerAddressUpdatePayload(
+            {
               customer: customerRecord,
               parsed: { ...effectiveParsed, newAddress: taxAddress },
               customerType: "dai_ly",
               retailer: selectedRetailerId,
               accessPrivateToken,
-            });
+            },
+          );
           const organization = normalizeDisplayText(
             updatedTaxCompanyInfo.name || customerRecord?.Organization,
           );
@@ -4819,7 +5252,7 @@ export default function TaoDonHang() {
             {
               customer: customerRecord,
               parsed: effectiveParsed,
-              customerType,
+              customerType: effectiveCustomerType,
               retailer: selectedRetailerId,
               accessPrivateToken,
             },
@@ -4830,7 +5263,7 @@ export default function TaoDonHang() {
             accessToken,
             updatePayload,
             customerRecord?.CustomerType ||
-              (customerType === "dai_ly" ? "Công ty" : "Cá nhân"),
+              (effectiveCustomerType === "dai_ly" ? "Công ty" : "Cá nhân"),
             customerRecord?.Organization || "",
           );
           const refreshedCustomerResponse = await getCustomerByPhoneNumber(
@@ -4873,7 +5306,7 @@ export default function TaoDonHang() {
         );
         let taxCompanyInfo = null;
         if (
-          String(customerType || "").toLowerCase() === "dai_ly" &&
+          effectiveCustomerType === "dai_ly" &&
           String(agencyTaxCode || "").trim()
         ) {
           const normalizedTaxCode = String(agencyTaxCode).trim();
@@ -4911,7 +5344,7 @@ export default function TaoDonHang() {
         const payload = await buildNewCustomerPayloadV2({
           parsed: effectiveParsed,
           selectedGroupId: targetGroup?.Id || targetGroup?.GroupId || null,
-          customerType,
+          customerType: effectiveCustomerType,
           retailer: selectedRetailerId,
           accessPrivateToken,
           matchedKiotUser,
@@ -4975,7 +5408,7 @@ export default function TaoDonHang() {
         selectedShippingPartner,
         partnerDeliveries,
         accessToken,
-        customerType,
+        customerType: pricingCustomerType,
         accessPrivateToken,
         description: agencyDescription,
         productMap: orderPreparation.productMap,
@@ -5003,7 +5436,7 @@ export default function TaoDonHang() {
         const ghnOrderPayloads = buildGhnCreateOrderPayloads({
           invoicePayload,
           ghnShipping,
-          customerType,
+          customerType: pricingCustomerType,
           requiredNote: ghnRequiredNote,
           senderName:
             getKiotUserDisplayName(matchedKiotUser) ||
@@ -5289,6 +5722,29 @@ export default function TaoDonHang() {
                 </label>
               </div>
 
+              {isAbcRetailer ? (
+                <label className="flex cursor-pointer items-start justify-between gap-4 rounded-2xl border border-amber-200 bg-amber-50/70 px-4 py-3">
+                  <div>
+                    <div className="text-sm font-bold text-amber-900">
+                      Khách hàng là đại lý
+                    </div>
+                    <div className="mt-1 text-xs leading-5 text-amber-700">
+                      Bật để nhập MST và dùng thông tin đại lý. Nhóm khách hàng
+                      vẫn giữ nguyên là {pickCustomerGroupName(customerType)}.
+                    </div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={isAbcAgency}
+                    onChange={(event) => {
+                      setIsAbcAgency(event.target.checked);
+                      if (!event.target.checked) setAgencyTaxCode("");
+                    }}
+                    className="mt-1 h-5 w-5 shrink-0 cursor-pointer rounded border-amber-300 text-amber-600 focus:ring-amber-300"
+                  />
+                </label>
+              ) : null}
+
               <label className="flex cursor-pointer items-start justify-between gap-4 rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-3">
                 <div>
                   <div className="text-sm font-bold text-slate-800">
@@ -5336,7 +5792,7 @@ export default function TaoDonHang() {
                 </label>
               ) : null}
 
-              {customerType === "dai_ly" ? (
+              {effectiveCustomerType === "dai_ly" ? (
                 <div className="space-y-3">
                   <label className="block space-y-2">
                     <span className="text-xs font-semibold text-slate-600">
@@ -5552,9 +6008,7 @@ export default function TaoDonHang() {
                 <div className="flex items-start gap-2 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
                   <XCircle className="mt-0.5 h-5 w-5 shrink-0" />
                   <div>
-                    <div className="font-bold">
-                      Không thể tạo đơn khách lẻ
-                    </div>
+                    <div className="font-bold">Không thể tạo đơn khách lẻ</div>
                     <div className="mt-1 leading-5">
                       Các sản phẩm sau đang có giá khách lẻ bằng 0đ:{" "}
                       <span className="font-mono font-bold">
@@ -5664,7 +6118,7 @@ export default function TaoDonHang() {
                   label={newAddressPreviewLabel}
                   value={newAddressPreview}
                 />
-                <FieldCard label="NVC" value={parsed.nvc} />
+                {/* <FieldCard label="NVC" value={parsed.nvc} /> */}
               </div>
 
               <div
@@ -5717,6 +6171,12 @@ export default function TaoDonHang() {
                       />
                       <div className="sm:col-span-2">
                         <FieldCard
+                          label="Nhóm khách hàng"
+                          value={existingCustomerPreview.groupName}
+                        />
+                      </div>
+                      <div className="sm:col-span-2">
+                        <FieldCard
                           label="Địa chỉ hiện tại"
                           value={
                             existingCustomerPreview.address || "Chưa có địa chỉ"
@@ -5756,6 +6216,10 @@ export default function TaoDonHang() {
                       <FieldCard
                         label="SĐT dự kiến"
                         value={estimatedCustomerPreview.phoneNumber}
+                      />
+                      <FieldCard
+                        label="Nhóm khách hàng dự kiến"
+                        value={estimatedCustomerGroupName}
                       />
                       <div className="sm:col-span-2">
                         <FieldCard
@@ -5846,7 +6310,11 @@ export default function TaoDonHang() {
                         : productCode;
                       const displayProductUnit = product?.unit || "Chưa có";
                       const displayProductPrice = product
-                        ? getProductUnitPrice(product, item, customerType)
+                        ? getProductUnitPrice(
+                            product,
+                            item,
+                            pricingCustomerType,
+                          )
                         : null;
                       const displayProductWeight = product
                         ? getProductWeightFromProduct(product)
@@ -5916,7 +6384,7 @@ export default function TaoDonHang() {
                                   </div>
                                 </div>
                               </div>
-                            ) : customerType === "dai_ly" &&
+                            ) : pricingCustomerType === "dai_ly" &&
                               !hasAgencyPrice(product, item) ? (
                               <div className="mt-3 flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-xs text-rose-700">
                                 <XCircle className="mt-0.5 h-4 w-4 shrink-0" />
@@ -5934,7 +6402,7 @@ export default function TaoDonHang() {
                                   </div>
                                 </div>
                               </div>
-                            ) : customerType === "khach_le" &&
+                            ) : pricingCustomerType === "khach_le" &&
                               !hasValidRetailPrice(product, item) ? (
                               <div className="mt-3 flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-xs text-rose-700">
                                 <XCircle className="mt-0.5 h-4 w-4 shrink-0" />
