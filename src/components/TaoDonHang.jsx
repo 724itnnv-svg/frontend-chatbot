@@ -1514,12 +1514,21 @@ function getProductPriceBook(product, customerType) {
   const normalizedCustomerType = String(customerType || "").toLowerCase();
 
   if (normalizedCustomerType === "khach_le") {
-    const targetName = normalizeDisplayText("Bảng giá Khách lẻ").toLowerCase();
-    const matched = priceBooks.find(
-      (item) =>
-        normalizeDisplayText(item?.priceBookName).toLowerCase() ===
-          targetName && item?.isActive !== false,
-    );
+    const targetName = normalizeLookupText("Bảng giá Khách lẻ");
+    const matched = priceBooks.find((item) => {
+      const priceBookName = normalizeLookupText(
+        item?.priceBookName ||
+          item?.PriceBookName ||
+          item?.name ||
+          item?.Name ||
+          "",
+      );
+      return (
+        priceBookName === targetName &&
+        item?.isActive !== false &&
+        item?.IsActive !== false
+      );
+    });
     if (matched) return matched;
   }
 
@@ -1554,10 +1563,18 @@ function getProductUnitPrice(product, item, customerType) {
 
   if (String(customerType || "").toLowerCase() === "khach_le") {
     const customerLePriceBook = getProductPriceBook(product, "khach_le");
-    return (
-      Number(priceBook?.price ?? customerLePriceBook?.price ?? outsidePrice) ||
-      0
+    const retailPrice = Number(
+      priceBook?.price ??
+        priceBook?.Price ??
+        priceBook?.value ??
+        priceBook?.Value ??
+        customerLePriceBook?.price ??
+        customerLePriceBook?.Price ??
+        customerLePriceBook?.value ??
+        customerLePriceBook?.Value ??
+        outsidePrice,
     );
+    return Number.isFinite(retailPrice) ? retailPrice : 0;
   }
 
   if (String(customerType || "").toLowerCase() === "dai_ly") {
@@ -3963,8 +3980,7 @@ export default function TaoDonHang() {
       ? "dai_ly"
       : "khach_le"
     : customerType;
-  const pricingCustomerType =
-    isAbcRetailer && !isAbcAgency ? customerType : effectiveCustomerType;
+  const pricingCustomerType = effectiveCustomerType;
   const shippingLabel =
     SHIPPING_PARTNERS.find((item) => item.id === selectedShippingPartner)
       ?.label || selectedShippingPartner;
