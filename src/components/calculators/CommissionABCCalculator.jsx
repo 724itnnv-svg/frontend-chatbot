@@ -181,8 +181,17 @@ const DEFAULT_SPECIAL_GIFT_PRICES = [
 const STORAGE_PREFIX_ABC = "commission-abc";
 const CASHFLOW_NOTE_OVERRIDES_STORAGE_KEY = `${STORAGE_PREFIX_ABC}:cashflow-note-overrides`;
 const AD_COST_OVERRIDES_STORAGE_KEY = `${STORAGE_PREFIX_ABC}:ad-cost-overrides`;
+const EMPLOYEE_TYPES_STORAGE_KEY = `${STORAGE_PREFIX_ABC}:employee-types`;
+const GIFT_DEDUCTION_OVERRIDES_STORAGE_KEY = `${STORAGE_PREFIX_ABC}:gift-deduction-overrides`;
 
 const DEFAULT_AD_COST_TYPE = "PB";
+
+const CASHFLOW_VOUCHER_HEADERS = [
+  "Mã phiếu",
+  "Mã phiếu thu/chi",
+  "Mã chứng từ",
+  "Số phiếu",
+];
 
 const AD_COST_TYPE_OPTIONS = [
   { value: "PB", label: "Phân bón" },
@@ -228,6 +237,26 @@ const normalizeNote = (v) =>
 
 const normalizeNotePlain = (v) =>
   normalizeText(v).toUpperCase().replace(/\s+/g, " ");
+
+const hasCTDBMarker = (value) =>
+  /\bCT(?:D|Đ)B\b/u.test(normalizeNote(value).normalize("NFC"));
+
+const extractInvoiceId = (value) => {
+  const text = normalizeText(value).toUpperCase().normalize("NFC");
+  const match = text.match(/HD[\s_-]*\d+/u);
+  return match ? match[0].replace(/[\s_-]+/g, "") : "";
+};
+
+const getCashflowVoucher = (row, headerMap) => {
+  for (const header of CASHFLOW_VOUCHER_HEADERS) {
+    const value = getCell(row, headerMap, header);
+    if (normalizeText(value)) return value;
+  }
+  return "";
+};
+
+const formatCommissionRate = (rate) =>
+  `${Number(((rate || 0) * 100).toFixed(2))}%`;
 
 const parseNoteValue = (note) => {
   const text = normalizeNote(note);
@@ -313,7 +342,7 @@ const exportResultsXLSX = (summaryRows, logRows, detailsByEmployee) => {
     rows.push([]);
     const pushSection = createSectionPusher(rows);
     pushSection(
-      "Trừ hàng tặng PB",
+      "Trừ hàng tặng PB thường",
       [
         "Mã hóa đơn",
         "Mã hàng",
@@ -327,6 +356,38 @@ const exportResultsXLSX = (summaryRows, logRows, detailsByEmployee) => {
         "Ghi chú",
       ],
       details.giftPB || [],
+    );
+    pushSection(
+      "Trừ hàng tặng PB-CTDB",
+      [
+        "Mã hóa đơn",
+        "Mã hàng",
+        "Tên hàng",
+        "ĐVT",
+        "Số lượng",
+        "Đơn giá",
+        "Giá bán",
+        "Số tiền trừ",
+        "Loại khách",
+        "Ghi chú",
+      ],
+      details.giftPBCTDB || [],
+    );
+    pushSection(
+      "Trừ hàng tặng CG",
+      [
+        "Mã hóa đơn",
+        "Mã hàng",
+        "Tên hàng",
+        "ĐVT",
+        "Số lượng",
+        "Đơn giá",
+        "Giá bán",
+        "Số tiền trừ",
+        "Loại khách",
+        "Ghi chú",
+      ],
+      details.giftCG || [],
     );
     pushSection(
       "Trừ hàng tặng DSCP1 1,200,000",
@@ -485,7 +546,7 @@ const classifyCashflowNote = (note) => {
 
   if (text.startsWith("PB")) {
     const isAgency = /\bDL\b/.test(text);
-    const isCTDB = /\bCTDB\b/.test(text);
+    const isCTDB = hasCTDBMarker(text);
     return {
       group: "PB",
       customer: isAgency ? "agency" : "retail",
@@ -521,7 +582,7 @@ const classifyCashflowNote = (note) => {
   }
 
   if (text.startsWith("CG")) {
-    const isCTDB = /\bCTDB\b/.test(text);
+    const isCTDB = hasCTDBMarker(text);
     return { group: "CG", program: isCTDB ? "CTDB" : "normal" };
   }
 
@@ -615,7 +676,7 @@ const classifyReturnGroup = (
     normalizedUnit === "CAY" ||
     CG_SKUS.has(sku)
   ) {
-    const isCTDB = /\bCTDB\b/.test(normalizedNote);
+    const isCTDB = hasCTDBMarker(normalizedNote);
     return {
       group: "CG",
       program: isCTDB ? "CTDB" : "normal",
@@ -641,11 +702,20 @@ const classifyReturnGroup = (
   }
 
   const isAgency = customer.startsWith("DL");
+  const isCTDB = hasCTDBMarker(normalizedNote);
+  const customerType = isAgency ? "agency" : "retail";
   return {
     group: "PB",
-    customer: isAgency ? "agency" : "retail",
-    label: isAgency ? "PB Đại lý" : "PB Khách lẻ",
-    priceKey: `${sku}__${isAgency ? "agency" : "retail"}`,
+    customer: customerType,
+    program: isCTDB ? "CTDB" : "normal",
+    label: isCTDB
+      ? isAgency
+        ? "PB Đại lý CTDB"
+        : "PB Lẻ CTDB"
+      : isAgency
+        ? "PB Đại lý"
+        : "PB Lẻ",
+    priceKey: `${sku}__${customerType}__${isCTDB ? "ctdb" : "normal"}`,
   };
 };
 
@@ -754,9 +824,10 @@ const applyNoCommission = (stats, cls, value) => {
 };
 
 const calculatePBCommission = (pb = {}, employeeType = "online") => {
-  const pbRetailTotal = (pb.retailNormal || 0) + (pb.retailCTDB || 0);
-  const pbAgencyTotal = (pb.agencyNormal || 0) + (pb.agencyCTDB || 0);
-  const pbTotal = pbRetailTotal + pbAgencyTotal;
+  const pbRetailTotal = pb.retailNormal || 0;
+  const pbRetailCTDBTotal = pb.retailCTDB || 0;
+  const pbAgencyTotal = pb.agencyNormal || 0;
+  const pbAgencyCTDBTotal = pb.agencyCTDB || 0;
   const pbRetailCommissionableNormal = Math.max(
     0,
     (pb.retailNormal || 0) - (pb.retailNoCommNormal || 0),
@@ -765,41 +836,69 @@ const calculatePBCommission = (pb = {}, employeeType = "online") => {
     0,
     (pb.retailCTDB || 0) - (pb.retailNoCommCTDB || 0),
   );
-  const pbAgencyCommissionableNormal =
-    (pb.agencyNormal || 0) - (pb.agencyNoCommNormal || 0);
-  const pbAgencyCommissionableCTDB =
-    (pb.agencyCTDB || 0) - (pb.agencyNoCommCTDB || 0);
+  const pbAgencyCommissionableNormal = Math.max(
+    0,
+    (pb.agencyNormal || 0) - (pb.agencyNoCommNormal || 0),
+  );
+  const pbAgencyCommissionableCTDB = Math.max(
+    0,
+    (pb.agencyCTDB || 0) - (pb.agencyNoCommCTDB || 0),
+  );
 
   let pbRetailRate = pbRetailTotal < 100000000 ? 0.07 : 0.1;
   let pbAgencyRate = pbAgencyTotal < 30000000 ? 0.01 : 0.03;
+  let pbRetailCTDBRate =
+    (pbRetailCTDBTotal < 100000000 ? 0.07 : 0.1) * 0.5;
+  let pbAgencyCTDBRate =
+    (pbAgencyCTDBTotal < 30000000 ? 0.01 : 0.03) * 0.5;
   let pbRetailCommission = 0;
   let pbAgencyCommission = 0;
+  let pbRetailCTDBCommission = 0;
+  let pbAgencyCTDBCommission = 0;
 
   if (employeeType === "admin") {
     pbRetailRate = 0;
     pbAgencyRate = 0.03;
-    pbAgencyCommission = pbTotal * pbAgencyRate;
+    pbRetailCTDBRate = 0;
+    pbAgencyCTDBRate = 0.015;
+    pbAgencyCommission =
+      (pbRetailTotal + pbAgencyTotal) * pbAgencyRate;
+    pbAgencyCTDBCommission =
+      (pbRetailCTDBTotal + pbAgencyCTDBTotal) * pbAgencyCTDBRate;
   } else {
     if (employeeType === "mkt") {
       pbRetailRate = 0.05;
       pbAgencyRate = pbAgencyTotal >= 30000000 ? 0.015 : 0.005;
+      pbRetailCTDBRate = 0.025;
+      pbAgencyCTDBRate =
+        (pbAgencyCTDBTotal >= 30000000 ? 0.015 : 0.005) * 0.5;
     }
-    pbRetailCommission =
-      pbRetailCommissionableNormal * pbRetailRate +
-      pbRetailCommissionableCTDB * pbRetailRate * 0.5;
-    pbAgencyCommission =
-      pbAgencyCommissionableNormal * pbAgencyRate +
-      pbAgencyCommissionableCTDB * pbAgencyRate * 0.5;
+    pbRetailCommission = pbRetailCommissionableNormal * pbRetailRate;
+    pbRetailCTDBCommission =
+      pbRetailCommissionableCTDB * pbRetailCTDBRate;
+    pbAgencyCommission = pbAgencyCommissionableNormal * pbAgencyRate;
+    pbAgencyCTDBCommission =
+      pbAgencyCommissionableCTDB * pbAgencyCTDBRate;
   }
 
   return {
     pbRetailTotal,
+    pbRetailCTDBTotal,
     pbAgencyTotal,
+    pbAgencyCTDBTotal,
     pbRetailRate,
+    pbRetailCTDBRate,
     pbAgencyRate,
+    pbAgencyCTDBRate,
     pbRetailCommission,
+    pbRetailCTDBCommission,
     pbAgencyCommission,
-    pbTotalCommission: pbRetailCommission + pbAgencyCommission,
+    pbAgencyCTDBCommission,
+    pbTotalCommission:
+      pbRetailCommission +
+      pbRetailCTDBCommission +
+      pbAgencyCommission +
+      pbAgencyCTDBCommission,
   };
 };
 
@@ -893,6 +992,9 @@ export default function CommissionABCCalculator() {
       readStoredObject(CASHFLOW_NOTE_OVERRIDES_STORAGE_KEY),
     );
     setAdCostOverrides(readStoredObject(AD_COST_OVERRIDES_STORAGE_KEY));
+    setGiftDeductionOverrides(
+      readStoredObject(GIFT_DEDUCTION_OVERRIDES_STORAGE_KEY),
+    );
   }, []);
 
   const allFilesReady = ["cashflow", "returns", "invoice"].every(
@@ -923,11 +1025,17 @@ export default function CommissionABCCalculator() {
     return results.map((r) => {
       const {
         pbRetailTotal,
+        pbRetailCTDBTotal,
         pbAgencyTotal,
+        pbAgencyCTDBTotal,
         pbRetailRate,
+        pbRetailCTDBRate,
         pbAgencyRate,
+        pbAgencyCTDBRate,
         pbRetailCommission,
+        pbRetailCTDBCommission,
         pbAgencyCommission,
+        pbAgencyCTDBCommission,
       } = calculatePBCommission(r.PB, r.employeeType || "online");
 
       const {
@@ -943,7 +1051,9 @@ export default function CommissionABCCalculator() {
 
       const totalCommission =
         pbRetailCommission +
+        pbRetailCTDBCommission +
         pbAgencyCommission +
+        pbAgencyCTDBCommission +
         dscp1_100_comm +
         dscp1_120_comm +
         dscp2_120_comm +
@@ -957,11 +1067,17 @@ export default function CommissionABCCalculator() {
         name: r.name,
         employeeType: r.employeeType || "online",
         pbRetailTotal,
+        pbRetailCTDBTotal,
         pbAgencyTotal,
+        pbAgencyCTDBTotal,
         pbRetailRate,
+        pbRetailCTDBRate,
         pbAgencyRate,
+        pbAgencyCTDBRate,
         pbRetailCommission,
+        pbRetailCTDBCommission,
         pbAgencyCommission,
+        pbAgencyCTDBCommission,
         dscp1_100_comm,
         dscp1_120_comm,
         dscp2_120_comm,
@@ -1015,11 +1131,17 @@ export default function CommissionABCCalculator() {
     );
     const {
       pbRetailTotal,
+      pbRetailCTDBTotal,
       pbAgencyTotal,
+      pbAgencyCTDBTotal,
       pbRetailRate,
+      pbRetailCTDBRate,
       pbAgencyRate,
+      pbAgencyCTDBRate,
       pbRetailCommission,
+      pbRetailCTDBCommission,
       pbAgencyCommission,
+      pbAgencyCTDBCommission,
     } = calculatePBCommission(
       {
         retailNormal: pbRetailNormal,
@@ -1077,7 +1199,9 @@ export default function CommissionABCCalculator() {
     const dst_comm = Math.max(0, dst_total - dst_no_comm) * 0.05;
     const totalCommission =
       pbRetailCommission +
+      pbRetailCTDBCommission +
       pbAgencyCommission +
+      pbAgencyCTDBCommission +
       dscp1_100_comm +
       dscp1_120_comm +
       dscp2_120_comm +
@@ -1088,10 +1212,14 @@ export default function CommissionABCCalculator() {
       dst_comm;
     return {
       pbRetailRate,
+      pbRetailCTDBRate,
       pbAgencyRate,
+      pbAgencyCTDBRate,
       employeeType: groupEmployeeType,
       pbRetailTotal,
+      pbRetailCTDBTotal,
       pbAgencyTotal,
+      pbAgencyCTDBTotal,
       pbRetailNormal,
       pbRetailCTDB,
       pbAgencyNormal,
@@ -1105,7 +1233,9 @@ export default function CommissionABCCalculator() {
       dg_total,
       dst_total,
       pbRetailCommission,
+      pbRetailCTDBCommission,
       pbAgencyCommission,
+      pbAgencyCTDBCommission,
       dscp1_100_comm,
       dscp1_120_comm,
       dscp2_120_comm,
@@ -1124,30 +1254,36 @@ export default function CommissionABCCalculator() {
       .filter((r) => groupSelected.includes(r.name))
       .map((r) => {
         let pbRetailCommission = 0;
+        let pbRetailCTDBCommission = 0;
         let pbAgencyCommission = 0;
+        let pbAgencyCTDBCommission = 0;
         if (groupSummary.employeeType === "admin") {
           pbAgencyCommission =
-            (r.PB.retailNormal +
-              r.PB.retailCTDB +
-              r.PB.agencyNormal +
-              r.PB.agencyCTDB) *
+            (r.PB.retailNormal + r.PB.agencyNormal) *
             groupSummary.pbAgencyRate;
+          pbAgencyCTDBCommission =
+            (r.PB.retailCTDB + r.PB.agencyCTDB) *
+            groupSummary.pbAgencyCTDBRate;
         } else {
           pbRetailCommission =
             Math.max(
               0,
               r.PB.retailNormal - (r.PB.retailNoCommNormal || 0),
             ) *
-            groupSummary.pbRetailRate +
+            groupSummary.pbRetailRate;
+          pbRetailCTDBCommission =
             Math.max(0, r.PB.retailCTDB - (r.PB.retailNoCommCTDB || 0)) *
-            groupSummary.pbRetailRate *
-            0.5;
+            groupSummary.pbRetailCTDBRate;
           pbAgencyCommission =
-            (r.PB.agencyNormal - (r.PB.agencyNoCommNormal || 0)) *
-            groupSummary.pbAgencyRate +
-            (r.PB.agencyCTDB - (r.PB.agencyNoCommCTDB || 0)) *
-            groupSummary.pbAgencyRate *
-            0.5;
+            Math.max(
+              0,
+              r.PB.agencyNormal - (r.PB.agencyNoCommNormal || 0),
+            ) * groupSummary.pbAgencyRate;
+          pbAgencyCTDBCommission =
+            Math.max(
+              0,
+              r.PB.agencyCTDB - (r.PB.agencyNoCommCTDB || 0),
+            ) * groupSummary.pbAgencyCTDBRate;
         }
         const dscp1_100_comm =
           Math.max(0, r.DSCP1.tier1000000 - (r.DSCP1.noCommTier1000000 || 0)) *
@@ -1167,7 +1303,9 @@ export default function CommissionABCCalculator() {
         const dst_comm = Math.max(0, r.DST - (r.DSTNoComm || 0)) * 0.05;
         const totalCommission =
           pbRetailCommission +
+          pbRetailCTDBCommission +
           pbAgencyCommission +
+          pbAgencyCTDBCommission +
           dscp1_100_comm +
           dscp1_120_comm +
           dscp2_120_comm +
@@ -1178,12 +1316,18 @@ export default function CommissionABCCalculator() {
           dst_comm;
         return {
           name: r.name,
-          pbRetailTotal: r.PB.retailNormal + r.PB.retailCTDB,
-          pbAgencyTotal: r.PB.agencyNormal + r.PB.agencyCTDB,
+          pbRetailTotal: r.PB.retailNormal,
+          pbRetailCTDBTotal: r.PB.retailCTDB,
+          pbAgencyTotal: r.PB.agencyNormal,
+          pbAgencyCTDBTotal: r.PB.agencyCTDB,
           pbRetailRate: groupSummary.pbRetailRate,
+          pbRetailCTDBRate: groupSummary.pbRetailCTDBRate,
           pbAgencyRate: groupSummary.pbAgencyRate,
+          pbAgencyCTDBRate: groupSummary.pbAgencyCTDBRate,
           pbRetailCommission,
+          pbRetailCTDBCommission,
           pbAgencyCommission,
+          pbAgencyCTDBCommission,
           dscp1_100_comm,
           dscp1_120_comm,
           dscp2_120_comm,
@@ -1218,12 +1362,23 @@ export default function CommissionABCCalculator() {
         CG: r.CG.normal,
         "CG CTDB": r.CG.CTDB,
         DG: r.DG?.normal || 0,
-        "PB Lẻ Rate": c ? (c.pbRetailRate * 100).toFixed(0) + "%" : "",
-        "PB Đại lý Rate": c ? (c.pbAgencyRate * 100).toFixed(0) + "%" : "",
+        "PB Lẻ Rate": c ? formatCommissionRate(c.pbRetailRate) : "",
+        "PB Lẻ CTDB Rate": c
+          ? formatCommissionRate(c.pbRetailCTDBRate)
+          : "",
+        "PB Đại lý Rate": c ? formatCommissionRate(c.pbAgencyRate) : "",
+        "PB Đại lý CTDB Rate": c
+          ? formatCommissionRate(c.pbAgencyCTDBRate)
+          : "",
         "HH PB Lẻ": c ? c.pbRetailCommission : 0,
+        "HH PB Lẻ CTDB": c ? c.pbRetailCTDBCommission : 0,
         "HH PB Đại lý": c ? c.pbAgencyCommission : 0,
+        "HH PB Đại lý CTDB": c ? c.pbAgencyCTDBCommission : 0,
         "Tổng HH PB-DL": c
-          ? c.pbRetailCommission + c.pbAgencyCommission
+          ? c.pbRetailCommission +
+            c.pbRetailCTDBCommission +
+            c.pbAgencyCommission +
+            c.pbAgencyCTDBCommission
           : 0,
         "HH DSCP1 1,000,000": c ? c.dscp1_100_comm : 0,
         "HH DSCP1 1,200,000": c ? c.dscp1_120_comm : 0,
@@ -1247,9 +1402,9 @@ export default function CommissionABCCalculator() {
           (t) => t.value === (groupSummary.employeeType || "online"),
         )?.label || "Online",
       "PB Lẻ": r.pbRetailTotal,
-      "PB Lẻ CTDB": "",
+      "PB Lẻ CTDB": r.pbRetailCTDBTotal,
       "PB Đại lý": r.pbAgencyTotal,
-      "PB Đại lý CTDB": "",
+      "PB Đại lý CTDB": r.pbAgencyCTDBTotal,
       "DSCP1 1,000,000": "",
       "DSCP1 1,200,000": "",
       "DSCP2 1,200,000": "",
@@ -1258,11 +1413,19 @@ export default function CommissionABCCalculator() {
       CG: "",
       "CG CTDB": "",
       DG: "",
-      "PB Lẻ Rate": (r.pbRetailRate * 100).toFixed(0) + "%",
-      "PB Đại lý Rate": (r.pbAgencyRate * 100).toFixed(0) + "%",
+      "PB Lẻ Rate": formatCommissionRate(r.pbRetailRate),
+      "PB Lẻ CTDB Rate": formatCommissionRate(r.pbRetailCTDBRate),
+      "PB Đại lý Rate": formatCommissionRate(r.pbAgencyRate),
+      "PB Đại lý CTDB Rate": formatCommissionRate(r.pbAgencyCTDBRate),
       "HH PB Lẻ": r.pbRetailCommission,
+      "HH PB Lẻ CTDB": r.pbRetailCTDBCommission,
       "HH PB Đại lý": r.pbAgencyCommission,
-      "Tổng HH PB-DL": r.pbRetailCommission + r.pbAgencyCommission,
+      "HH PB Đại lý CTDB": r.pbAgencyCTDBCommission,
+      "Tổng HH PB-DL":
+        r.pbRetailCommission +
+        r.pbRetailCTDBCommission +
+        r.pbAgencyCommission +
+        r.pbAgencyCTDBCommission,
       "HH DSCP1 1,000,000": r.dscp1_100_comm,
       "HH DSCP1 1,200,000": r.dscp1_120_comm,
       "HH DSCP2 1,200,000": r.dscp2_120_comm,
@@ -1291,12 +1454,21 @@ export default function CommissionABCCalculator() {
       CG: groupSummary.cg_total,
       "CG CTDB": groupSummary.cg_ctdb_total,
       DG: groupSummary.dg_total,
-      "PB Lẻ Rate": (groupSummary.pbRetailRate * 100).toFixed(0) + "%",
-      "PB Đại lý Rate": (groupSummary.pbAgencyRate * 100).toFixed(0) + "%",
+      "PB Lẻ Rate": formatCommissionRate(groupSummary.pbRetailRate),
+      "PB Lẻ CTDB Rate": formatCommissionRate(groupSummary.pbRetailCTDBRate),
+      "PB Đại lý Rate": formatCommissionRate(groupSummary.pbAgencyRate),
+      "PB Đại lý CTDB Rate": formatCommissionRate(
+        groupSummary.pbAgencyCTDBRate,
+      ),
       "HH PB Lẻ": groupSummary.pbRetailCommission,
+      "HH PB Lẻ CTDB": groupSummary.pbRetailCTDBCommission,
       "HH PB Đại lý": groupSummary.pbAgencyCommission,
+      "HH PB Đại lý CTDB": groupSummary.pbAgencyCTDBCommission,
       "Tổng HH PB-DL":
-        groupSummary.pbRetailCommission + groupSummary.pbAgencyCommission,
+        groupSummary.pbRetailCommission +
+        groupSummary.pbRetailCTDBCommission +
+        groupSummary.pbAgencyCommission +
+        groupSummary.pbAgencyCTDBCommission,
       "HH DSCP1 1,000,000": groupSummary.dscp1_100_comm,
       "HH DSCP1 1,200,000": groupSummary.dscp1_120_comm,
       "HH DSCP2 1,200,000": groupSummary.dscp2_120_comm,
@@ -1477,9 +1649,13 @@ export default function CommissionABCCalculator() {
       const list = Array.from(set).sort((a, b) => a.localeCompare(b));
       setCashflowEmployees(list);
       setSelectedEmployees(list);
+      const storedEmployeeTypes = readStoredObject(EMPLOYEE_TYPES_STORAGE_KEY);
+      const validEmployeeTypes = new Set(EMPLOYEE_TYPES.map((type) => type.value));
       const types = {};
       list.forEach((name) => {
-        types[name] = "online";
+        types[name] = validEmployeeTypes.has(storedEmployeeTypes[name])
+          ? storedEmployeeTypes[name]
+          : "online";
       });
       setEmployeeTypes(types);
     } catch (err) {
@@ -1516,7 +1692,9 @@ export default function CommissionABCCalculator() {
     setAdCostOverrides(readStoredObject(AD_COST_OVERRIDES_STORAGE_KEY));
     setGiftDeductionModalOpen(false);
     setPendingGiftDeductions([]);
-    setGiftDeductionOverrides(null);
+    setGiftDeductionOverrides(
+      readStoredObject(GIFT_DEDUCTION_OVERRIDES_STORAGE_KEY),
+    );
     setCashflowEmployees([]);
     setSelectedEmployees([]);
     setEmployeeTypes({});
@@ -1562,6 +1740,7 @@ export default function CommissionABCCalculator() {
       reviewCashflowNotes = false,
       reviewReturnPrices = false,
       reviewAdCosts = false,
+      reviewGiftDeductions = false,
       forceModal = false,
     } = options;
 
@@ -1578,6 +1757,8 @@ export default function CommissionABCCalculator() {
     const pendingGiftDeductionRows = [];
     const pendingCgShipFeeMap = new Map();
     const cgShipFeeKeyCounter = new Map();
+    const ctdbInvoiceIds = new Set();
+    const unmatchedCTDBVouchers = new Set();
 
     const shouldProcess = makeShouldProcess(selectedEmployees);
     const getEmployeeType = makeGetEmployeeType(employeeTypes);
@@ -1601,6 +1782,8 @@ export default function CommissionABCCalculator() {
         if (!perEmployeeDetails.has(name)) {
           perEmployeeDetails.set(name, {
             giftPB: [],
+            giftPBCTDB: [],
+            giftCG: [],
             giftDSCP1: [],
             giftDSCP2: [],
             shipFees: [],
@@ -1633,6 +1816,8 @@ export default function CommissionABCCalculator() {
             },
             deduct: {
               giftPB: 0,
+              giftPBCTDB: 0,
+              giftCG: 0,
               giftDSCP1: 0,
               giftDSCP2: 0,
               shipFee: 0,
@@ -1661,6 +1846,15 @@ export default function CommissionABCCalculator() {
         const { headerMap, missing } = ensureHeaders(headers, def.headers);
         if (missing.length) {
           newErrors.push(`${def.label}: Thiếu cột ${missing.join(", ")}.`);
+          continue;
+        }
+        const hasVoucherHeader = CASHFLOW_VOUCHER_HEADERS.some((header) =>
+          headerMap.has(normalizeHeader(header)),
+        );
+        if (!hasVoucherHeader) {
+          newErrors.push(
+            `${def.label}: Thiếu cột Mã phiếu để đối chiếu hóa đơn CTDB.`,
+          );
           continue;
         }
 
@@ -1711,6 +1905,20 @@ export default function CommissionABCCalculator() {
           }
           if (!overrideClass && cls.group === "PB" && empType === "admin") {
             cls.customer = "agency";
+          }
+
+          if (cls.program === "CTDB") {
+            const voucherRaw = normalizeText(
+              getCashflowVoucher(row, headerMap),
+            );
+            const linkedInvoiceId = extractInvoiceId(voucherRaw);
+            if (linkedInvoiceId) {
+              ctdbInvoiceIds.add(linkedInvoiceId);
+            } else {
+              unmatchedCTDBVouchers.add(
+                `${employee}: ${voucherRaw || "(trống)"}`,
+              );
+            }
           }
 
           if (cls.group === "PB") {
@@ -1792,6 +2000,16 @@ export default function CommissionABCCalculator() {
         });
       }
 
+      if (unmatchedCTDBVouchers.size > 0) {
+        newWarnings.push(
+          `Có ${unmatchedCTDBVouchers.size} phiếu CTDB không lấy được mã hóa đơn HD: ${Array.from(
+            unmatchedCTDBVouchers,
+          )
+            .slice(0, 5)
+            .join(", ")}${unmatchedCTDBVouchers.size > 5 ? ", ..." : ""}.`,
+        );
+      }
+
       if (pendingCashflowNoteMap.size > 0) {
         setPendingCashflowNotes(
           Array.from(pendingCashflowNoteMap.values()).sort(
@@ -1868,7 +2086,9 @@ export default function CommissionABCCalculator() {
             getCellAlt(row, headerMap, "Ghi chú", "Ghi chú hàng hóa"),
           );
           const noteNormalized = normalizeNote(note);
-          const isCTDB = noteNormalized.includes("CTDB");
+          const invoiceIdKey = extractInvoiceId(invoiceId);
+          const isCTDB =
+            Boolean(invoiceIdKey) && ctdbInvoiceIds.has(invoiceIdKey);
           const isCG = CG_SKUS.has(itemCode);
           const normalizedPriceList = priceList.replace(/\s+/g, " ").trim();
           const isAgency =
@@ -1940,7 +2160,10 @@ export default function CommissionABCCalculator() {
             }
             const giftValue = overridePrice * qty;
             if (giftValue > 0) {
-              if (note && !hasGiftDeductionOverride) {
+              if (
+                note &&
+                (reviewGiftDeductions || !hasGiftDeductionOverride)
+              ) {
                 pendingGiftDeductionRows.push({
                   key: giftDeductionKey,
                   employee,
@@ -1952,7 +2175,9 @@ export default function CommissionABCCalculator() {
                   unitPrice: overridePrice,
                   giftValue,
                   note,
-                  selected: true,
+                  selected: hasGiftDeductionOverride
+                    ? overrideGiftDeductions[giftDeductionKey] !== false
+                    : true,
                 });
                 return;
               }
@@ -2023,7 +2248,10 @@ export default function CommissionABCCalculator() {
                 ? parseBaoValue(itemName) * (qty || 1)
                 : effectiveUnitPrice * qty;
             if (giftValue) {
-              if (note && !hasGiftDeductionOverride) {
+              if (
+                note &&
+                (reviewGiftDeductions || !hasGiftDeductionOverride)
+              ) {
                 pendingGiftDeductionRows.push({
                   key: giftDeductionKey,
                   employee,
@@ -2035,7 +2263,9 @@ export default function CommissionABCCalculator() {
                   unitPrice: effectiveUnitPrice,
                   giftValue,
                   note,
-                  selected: true,
+                  selected: hasGiftDeductionOverride
+                    ? overrideGiftDeductions[giftDeductionKey] !== false
+                    : true,
                 });
                 return;
               }
@@ -2065,7 +2295,7 @@ export default function CommissionABCCalculator() {
               } else {
                 log.pbRetail += giftValue;
               }
-              details.giftPB.push([
+              const giftDetailRow = [
                 invoiceId,
                 itemCode,
                 itemName,
@@ -2076,9 +2306,18 @@ export default function CommissionABCCalculator() {
                 giftValue,
                 normalKey === "agency" ? "Đại lý" : "Khách lẻ",
                 note,
-              ]);
+              ];
               const summary = getSummary(employee);
-              summary.deduct.giftPB += giftValue;
+              if (isCG) {
+                details.giftCG.push(giftDetailRow);
+                summary.deduct.giftCG += giftValue;
+              } else if (isCTDB) {
+                details.giftPBCTDB.push(giftDetailRow);
+                summary.deduct.giftPBCTDB += giftValue;
+              } else {
+                details.giftPB.push(giftDetailRow);
+                summary.deduct.giftPB += giftValue;
+              }
             }
 
           }
@@ -2305,8 +2544,8 @@ export default function CommissionABCCalculator() {
           const cls = classifyReturnGroup(sku, customer, note, basePrice, unit);
           if (getEmployeeType(employee) === "admin" && cls.group === "PB") {
             cls.customer = "agency";
-            cls.label = "PB Đại lý";
-            cls.priceKey = `${sku}__agency`;
+            cls.label = getClassLabel(cls);
+            cls.priceKey = `${sku}__agency__${cls.program === "CTDB" ? "ctdb" : "normal"}`;
           }
 
           const overrideKey = `${cls.priceKey}__normal`;
@@ -2366,8 +2605,8 @@ export default function CommissionABCCalculator() {
             );
             if (getEmployeeType(employee) === "admin" && pricedCls.group === "PB") {
               pricedCls.customer = "agency";
-              pricedCls.label = "PB Đại lý";
-              pricedCls.priceKey = `${sku}__agency`;
+              pricedCls.label = getClassLabel(pricedCls);
+              pricedCls.priceKey = `${sku}__agency__${pricedCls.program === "CTDB" ? "ctdb" : "normal"}`;
             }
             if (pricedCls.group === "unknown") {
               missingReturnsLocal.push({
@@ -2387,7 +2626,11 @@ export default function CommissionABCCalculator() {
               return;
             }
             const lineValue = qty * effectiveBasePrice * 1.05;
-            const deduction = lineValue * 0.1;
+            const returnDeductionRate =
+              pricedCls.group === "PB" && pricedCls.program === "CTDB"
+                ? 0.05
+                : 0.1;
+            const deduction = lineValue * returnDeductionRate;
             applyDelta(stats, pricedCls, -deduction);
             const log = getReturnLog(employee);
             log.normalDeduct += deduction;
@@ -2446,8 +2689,8 @@ export default function CommissionABCCalculator() {
           );
           if (getEmployeeType(employee) === "admin" && pricedCls.group === "PB") {
             pricedCls.customer = "agency";
-            pricedCls.label = "PB Đại lý";
-            pricedCls.priceKey = `${sku}__agency`;
+            pricedCls.label = getClassLabel(pricedCls);
+            pricedCls.priceKey = `${sku}__agency__${pricedCls.program === "CTDB" ? "ctdb" : "normal"}`;
           }
           if (pricedCls.group === "unknown") {
             missingReturnsLocal.push({
@@ -2786,7 +3029,9 @@ export default function CommissionABCCalculator() {
             "Sổ quỹ CG": summary.cashflow.cg,
             "Sổ quỹ CG CTDB": summary.cashflow.cgCTDB,
             "Sổ quỹ DG": summary.cashflow.dg,
-            "Trừ hàng tặng PB": summary.deduct.giftPB,
+            "Trừ hàng tặng PB thường": summary.deduct.giftPB,
+            "Trừ hàng tặng PB-CTDB": summary.deduct.giftPBCTDB,
+            "Trừ hàng tặng CG": summary.deduct.giftCG,
             "Trừ hàng tặng DSCP1 1,200,000": summary.deduct.giftDSCP1,
             "Trừ hàng tặng DSCP2 1,500,000": summary.deduct.giftDSCP2,
             "Trừ phí xe công ty": summary.deduct.shipFee,
@@ -2845,9 +3090,12 @@ export default function CommissionABCCalculator() {
       CASHFLOW_NOTE_OVERRIDES_STORAGE_KEY,
     );
     const storedAdCostOverrides = readStoredObject(AD_COST_OVERRIDES_STORAGE_KEY);
+    const storedGiftDeductionOverrides = readStoredObject(
+      GIFT_DEDUCTION_OVERRIDES_STORAGE_KEY,
+    );
     setCashflowNoteOverrides(storedCashflowNoteOverrides);
     setAdCostOverrides(storedAdCostOverrides);
-    setGiftDeductionOverrides(null);
+    setGiftDeductionOverrides(storedGiftDeductionOverrides);
     if (invoiceGiftRows.length > 0) {
       setMissingReturns([]);
       setMissingGifts(invoiceGiftRows.map((item) => ({ ...item })));
@@ -2860,11 +3108,12 @@ export default function CommissionABCCalculator() {
       overrideGiftPrices: buildOverrideGiftPriceMap(),
       overrideCashflowNotes: storedCashflowNoteOverrides,
       overrideAdCosts: storedAdCostOverrides,
-      overrideGiftDeductions: null,
+      overrideGiftDeductions: storedGiftDeductionOverrides,
       reviewCgShipFees: true,
       reviewCashflowNotes: true,
       reviewReturnPrices: true,
       reviewAdCosts: true,
+      reviewGiftDeductions: true,
     });
   };
 
@@ -2901,6 +3150,7 @@ export default function CommissionABCCalculator() {
       reviewCgShipFees: true,
       reviewReturnPrices: true,
       reviewAdCosts: true,
+      reviewGiftDeductions: true,
     });
   };
 
@@ -2956,10 +3206,14 @@ export default function CommissionABCCalculator() {
   };
 
   const handleConfirmGiftDeductions = () => {
-    const overrides = {};
+    const overrides = {
+      ...readStoredObject(GIFT_DEDUCTION_OVERRIDES_STORAGE_KEY),
+      ...(giftDeductionOverrides || {}),
+    };
     pendingGiftDeductions.forEach((item) => {
       overrides[item.key] = item.selected !== false;
     });
+    saveStoredObject(GIFT_DEDUCTION_OVERRIDES_STORAGE_KEY, overrides);
     setGiftDeductionOverrides(overrides);
     setGiftDeductionModalOpen(false);
     runClassification({
@@ -3095,6 +3349,7 @@ export default function CommissionABCCalculator() {
         reviewCashflowNotes: true,
         reviewReturnPrices: true,
         reviewAdCosts: true,
+        reviewGiftDeductions: true,
       });
       return;
     }
@@ -3299,10 +3554,14 @@ export default function CommissionABCCalculator() {
                         value={typeValue}
                         onChange={(e) => {
                           const value = e.target.value;
-                          setEmployeeTypes((prev) => ({
-                            ...prev,
-                            [name]: value,
-                          }));
+                          setEmployeeTypes((prev) => {
+                            const next = { ...prev, [name]: value };
+                            saveStoredObject(EMPLOYEE_TYPES_STORAGE_KEY, {
+                              ...readStoredObject(EMPLOYEE_TYPES_STORAGE_KEY),
+                              [name]: value,
+                            });
+                            return next;
+                          });
                         }}
                         className="rounded-full border bg-white px-2 py-1 text-xs"
                       >
@@ -3375,7 +3634,7 @@ export default function CommissionABCCalculator() {
             </div>
 
             <div className="mt-6 overflow-x-auto">
-              <table className="min-w-[1220px] w-full table-auto text-xs">
+              <table className="min-w-[1720px] w-full table-auto text-xs">
                 <thead className="text-[11px] uppercase text-slate-500">
                   <tr className="border-b border-slate-100">
                     <th className="px-3 py-2 text-left">Nhân viên</th>
@@ -3383,9 +3642,15 @@ export default function CommissionABCCalculator() {
                     <th className="px-3 py-2 text-right">PB Lẻ DS</th>
                     <th className="px-3 py-2 text-right">PB Lẻ Rate</th>
                     <th className="px-3 py-2 text-right">HH PB Lẻ</th>
+                    <th className="px-3 py-2 text-right">PB Lẻ CTDB DS</th>
+                    <th className="px-3 py-2 text-right">PB Lẻ CTDB Rate</th>
+                    <th className="px-3 py-2 text-right">HH PB Lẻ CTDB</th>
                     <th className="px-3 py-2 text-right">PB ĐL DS</th>
                     <th className="px-3 py-2 text-right">PB ĐL Rate</th>
                     <th className="px-3 py-2 text-right">HH PB ĐL</th>
+                    <th className="px-3 py-2 text-right">PB ĐL CTDB DS</th>
+                    <th className="px-3 py-2 text-right">PB ĐL CTDB Rate</th>
+                    <th className="px-3 py-2 text-right">HH PB ĐL CTDB</th>
                     <th className="px-3 py-2 text-right">HH DSCP1 1,000,000</th>
                     <th className="px-3 py-2 text-right">HH DSCP1 1,200,000</th>
                     <th className="px-3 py-2 text-right">HH DSCP2 1,200,000</th>
@@ -3415,19 +3680,37 @@ export default function CommissionABCCalculator() {
                         {formatMoney(r.pbRetailTotal)}
                       </td>
                       <td className="px-3 py-2 text-right">
-                        {(r.pbRetailRate * 100).toFixed(0)}%
+                        {formatCommissionRate(r.pbRetailRate)}
                       </td>
                       <td className="px-3 py-2 text-right">
                         {formatMoney(r.pbRetailCommission)}
                       </td>
                       <td className="px-3 py-2 text-right">
+                        {formatMoney(r.pbRetailCTDBTotal)}
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        {formatCommissionRate(r.pbRetailCTDBRate)}
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        {formatMoney(r.pbRetailCTDBCommission)}
+                      </td>
+                      <td className="px-3 py-2 text-right">
                         {formatMoney(r.pbAgencyTotal)}
                       </td>
                       <td className="px-3 py-2 text-right">
-                        {(r.pbAgencyRate * 100).toFixed(0)}%
+                        {formatCommissionRate(r.pbAgencyRate)}
                       </td>
                       <td className="px-3 py-2 text-right">
                         {formatMoney(r.pbAgencyCommission)}
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        {formatMoney(r.pbAgencyCTDBTotal)}
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        {formatCommissionRate(r.pbAgencyCTDBRate)}
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        {formatMoney(r.pbAgencyCTDBCommission)}
                       </td>
                       <td className="px-3 py-2 text-right">
                         {formatMoney(r.dscp1_100_comm)}
@@ -3522,14 +3805,18 @@ export default function CommissionABCCalculator() {
                 <div className="mb-2 text-sm font-semibold text-slate-800">
                   Hoa hồng theo mốc gộp doanh số
                 </div>
-                <table className="min-w-[1060px] w-full table-auto text-xs">
+                <table className="min-w-[1420px] w-full table-auto text-xs">
                   <thead className="text-[11px] uppercase text-slate-500">
                     <tr className="border-b border-slate-100">
                       <th className="px-3 py-2 text-left">Nhân viên</th>
                       <th className="px-3 py-2 text-right">PB Lẻ Rate</th>
+                      <th className="px-3 py-2 text-right">PB Lẻ CTDB Rate</th>
                       <th className="px-3 py-2 text-right">PB ĐL Rate</th>
+                      <th className="px-3 py-2 text-right">PB ĐL CTDB Rate</th>
                       <th className="px-3 py-2 text-right">HH PB Lẻ</th>
+                      <th className="px-3 py-2 text-right">HH PB Lẻ CTDB</th>
                       <th className="px-3 py-2 text-right">HH PB ĐL</th>
+                      <th className="px-3 py-2 text-right">HH PB ĐL CTDB</th>
                       <th className="px-3 py-2 text-right">
                         HH DSCP1 1,000,000
                       </th>
@@ -3559,16 +3846,28 @@ export default function CommissionABCCalculator() {
                           {r.name}
                         </td>
                         <td className="px-3 py-2 text-right">
-                          {(r.pbRetailRate * 100).toFixed(0)}%
+                          {formatCommissionRate(r.pbRetailRate)}
                         </td>
                         <td className="px-3 py-2 text-right">
-                          {(r.pbAgencyRate * 100).toFixed(0)}%
+                          {formatCommissionRate(r.pbRetailCTDBRate)}
+                        </td>
+                        <td className="px-3 py-2 text-right">
+                          {formatCommissionRate(r.pbAgencyRate)}
+                        </td>
+                        <td className="px-3 py-2 text-right">
+                          {formatCommissionRate(r.pbAgencyCTDBRate)}
                         </td>
                         <td className="px-3 py-2 text-right">
                           {formatMoney(r.pbRetailCommission)}
                         </td>
                         <td className="px-3 py-2 text-right">
+                          {formatMoney(r.pbRetailCTDBCommission)}
+                        </td>
+                        <td className="px-3 py-2 text-right">
                           {formatMoney(r.pbAgencyCommission)}
+                        </td>
+                        <td className="px-3 py-2 text-right">
+                          {formatMoney(r.pbAgencyCTDBCommission)}
                         </td>
                         <td className="px-3 py-2 text-right">
                           {formatMoney(r.dscp1_100_comm)}

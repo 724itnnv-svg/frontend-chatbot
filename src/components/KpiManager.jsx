@@ -25,6 +25,7 @@ import {
 import { useAuth } from "../context/AuthContext";
 import { getApiBaseUrl } from "../api/baseUrl";
 import { hasFullAccess } from "../utils/screenAccess";
+import { resolveScoreCap, standardPointScore } from "../utils/kpiScoring";
 import { EvidenceThumbnail, KpiEvidenceViewer } from "./attendance/KpiEvidenceViewer";
 
 const nowPeriod = () => {
@@ -50,6 +51,15 @@ const emptyItem = () => ({
   scoringMethod: "standard_points",
   standardQuantity: "",
   standardScore: "",
+  scoringType: "proportional",
+  isScoreUnlimited: false,
+  scoreCapMode: "standard_score",
+  maxScore: "",
+  comparison: "GTE",
+  thresholdValue: "",
+  unit: "%",
+  passScore: "",
+  failScore: 0,
   criteriaNote: "",
 });
 const STATUS = {
@@ -77,6 +87,14 @@ const IMPORT_HEADERS = [
   "KHỐI LƯỢNG HOÀN THÀNH (NHÂN VIÊN TỰ NHẬP)",
   "ĐIỂM THỰC TẾ (HỆ THỐNG TỰ TÍNH)",
   "GHI CHÚ",
+  "CÁCH TÍNH",
+  "PHÉP SO SÁNH",
+  "NGƯỠNG",
+  "ĐIỂM ĐẠT",
+  "ĐIỂM KHÔNG ĐẠT",
+  "KHÔNG GIỚI HẠN ĐIỂM",
+  "GIỚI HẠN ĐIỂM",
+  "ĐIỂM TỐI ĐA",
 ];
 
 function importValue(row, names) {
@@ -224,14 +242,26 @@ export default function KpiManager() {
     setAssignment({
       employeeCode: row.employeeCode,
       dueDate: dueDateForPeriod(row.period || period),
-      items: row.items.map((item) => ({
-        code: item.code || "",
-        name: item.name || "",
-        scoringMethod: "standard_points",
-        standardQuantity: item.standardQuantity || String(item.target ?? ""),
-        standardScore: item.standardScore || item.weight || "",
-        criteriaNote: item.criteriaNote || item.description || "",
-      })),
+      items: row.items.map((item) => {
+        const cap = resolveScoreCap(item);
+        return {
+          code: item.code || "",
+          name: item.name || "",
+          scoringMethod: "standard_points",
+          standardQuantity: item.standardQuantity || String(item.target ?? ""),
+          standardScore: item.standardScore || item.weight || "",
+          scoringType: item.scoringType || "proportional",
+          isScoreUnlimited: cap.mode === "unlimited",
+          scoreCapMode: cap.mode,
+          maxScore: cap.mode === "fixed_score" ? cap.maxScore : "",
+          comparison: item.comparison || "GTE",
+          thresholdValue: item.thresholdValue ?? "",
+          unit: item.unit || (String(item.standardQuantity || "").includes("%") ? "%" : ""),
+          passScore: item.passScore ?? "",
+          failScore: item.failScore ?? 0,
+          criteriaNote: item.criteriaNote || item.description || "",
+        };
+      }),
     });
     setShowAssign(true);
   }
@@ -295,7 +325,15 @@ export default function KpiManager() {
     setReviewing((current) => ({
       ...current,
       items: current.items.map((item, i) =>
-        i === index ? { ...item, [field]: value } : item,
+        i === index
+          ? {
+              ...item,
+              [field]: value,
+              ...(field === "approvedActualText" && item.scoringMethod === "standard_points"
+                ? { approvedScore: standardPointScore(item, value) }
+                : {}),
+            }
+          : item,
       ),
     }));
   }
@@ -431,7 +469,7 @@ export default function KpiManager() {
     sheet.columns = IMPORT_HEADERS.map((header, index) => ({
       header,
       key: `c${index}`,
-      width: [16, 42, 24, 20, 28, 25, 45][index],
+      width: [16, 42, 24, 20, 28, 25, 45, 22, 20, 16, 16, 20, 24, 22, 18][index],
     }));
     sheet.addRows([
       [
@@ -442,15 +480,31 @@ export default function KpiManager() {
         "",
         "",
         "",
+        "proportional",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "standard_score",
+        "",
       ],
       [
         "NV001",
         "Tỷ lệ nhiễm theo từng giai đoạn",
-        "Không quá 10%",
+        "≤10%",
         30,
         "",
         "",
-        "±1% tương đương 5 điểm",
+        ">10%: 0 điểm",
+        "threshold",
+        "LTE",
+        10,
+        30,
+        0,
+        "",
+        "standard_score",
+        "",
       ],
       [
         "NV001",
@@ -460,6 +514,14 @@ export default function KpiManager() {
         "",
         "",
         "Thêm 1 quy trình + 10 điểm",
+        "proportional",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "fixed_score",
+        300,
       ],
     ]);
     const header = sheet.getRow(1);
@@ -475,7 +537,7 @@ export default function KpiManager() {
       horizontal: "center",
       wrapText: true,
     };
-    sheet.autoFilter = { from: "A1", to: "G1" };
+    sheet.autoFilter = { from: "A1", to: "O1" };
     for (let row = 2; row <= 1001; row += 1) {
       sheet.getCell(`D${row}`).dataValidation = {
         type: "decimal",
@@ -531,6 +593,14 @@ export default function KpiManager() {
           standardScore: importValue(row, ["ĐIỂM TIÊU CHUẨN", "Điểm tiêu chuẩn", "standardScore"]),
           employeeActualText: String(importValue(row, ["KHỐI LƯỢNG HOÀN THÀNH (NHÂN VIÊN TỰ NHẬP)", "Khối lượng hoàn thành", "employeeActualText"])).trim(),
           criteriaNote: String(importValue(row, ["GHI CHÚ", "Ghi chú", "criteriaNote"])).trim(),
+          scoringType: String(importValue(row, ["CÁCH TÍNH", "Cach tinh", "scoringType"])).trim().toLowerCase() === "threshold" ? "threshold" : "proportional",
+          comparison: String(importValue(row, ["PHÉP SO SÁNH", "Phep so sanh", "comparison"])).trim().toUpperCase(),
+          thresholdValue: importValue(row, ["NGƯỠNG", "Nguong", "thresholdValue"]),
+          passScore: importValue(row, ["ĐIỂM ĐẠT", "Diem dat", "passScore"]),
+          failScore: importValue(row, ["ĐIỂM KHÔNG ĐẠT", "Diem khong dat", "failScore"]),
+          isScoreUnlimited: importValue(row, ["KHÔNG GIỚI HẠN ĐIỂM", "Khong gioi han diem", "isScoreUnlimited"]),
+          scoreCapMode: String(importValue(row, ["GIỚI HẠN ĐIỂM", "Gioi han diem", "scoreCapMode"])).trim().toLowerCase(),
+          maxScore: importValue(row, ["ĐIỂM TỐI ĐA", "Diem toi da", "maxScore"]),
         };})
         .filter((row) => row.employeeCode || row.indicator);
       setImportRows(rows);
@@ -1113,18 +1183,87 @@ export default function KpiManager() {
                       placeholder="Tên tiêu chí"
                       className="rounded-lg border px-3 py-2"
                     />
-                    <input
-                      value={item.standardQuantity}
+                    <select
+                      value={item.scoringType || "proportional"}
                       onChange={(event) =>
-                        changeAssignmentItem(
-                          index,
-                          "standardQuantity",
-                          event.target.value,
-                        )
+                        changeAssignmentItem(index, "scoringType", event.target.value)
                       }
-                      placeholder="Khối lượng tiêu chuẩn, ví dụ 100%"
                       className="rounded-lg border px-3 py-2"
-                    />
+                    >
+                      <option value="proportional">Tính theo tỷ lệ / công thức ghi chú</option>
+                      <option value="threshold">Đạt hoặc không đạt theo ngưỡng</option>
+                    </select>
+                    <select
+                      value={item.scoreCapMode || "standard_score"}
+                      onChange={(event) => {
+                        const mode = event.target.value;
+                        changeAssignmentItem(index, "scoreCapMode", mode);
+                        changeAssignmentItem(index, "isScoreUnlimited", mode === "unlimited");
+                      }}
+                      className="rounded-lg border px-3 py-2"
+                    >
+                      <option value="standard_score">Điểm tối đa bằng điểm chuẩn</option>
+                      <option value="fixed_score">Giới hạn điểm tùy chỉnh</option>
+                      <option value="unlimited">Không giới hạn điểm</option>
+                    </select>
+                    {item.scoreCapMode === "fixed_score" && (
+                      <input
+                        required
+                        type="number"
+                        min="0"
+                        step="any"
+                        value={item.maxScore}
+                        onChange={(event) =>
+                          changeAssignmentItem(index, "maxScore", event.target.value)
+                        }
+                        placeholder="Điểm tối đa"
+                        className="rounded-lg border px-3 py-2"
+                      />
+                    )}
+                    {item.scoringType === "threshold" ? (
+                      <>
+                        <select
+                          value={item.comparison || "GTE"}
+                          onChange={(event) =>
+                            changeAssignmentItem(index, "comparison", event.target.value)
+                          }
+                          className="rounded-lg border px-3 py-2"
+                        >
+                          <option value="GTE">Kết quả ≥ ngưỡng</option>
+                          <option value="GT">Kết quả &gt; ngưỡng</option>
+                          <option value="LTE">Kết quả ≤ ngưỡng</option>
+                          <option value="LT">Kết quả &lt; ngưỡng</option>
+                        </select>
+                        <input
+                          required
+                          type="number"
+                          step="any"
+                          value={item.thresholdValue}
+                          onChange={(event) =>
+                            changeAssignmentItem(index, "thresholdValue", event.target.value)
+                          }
+                          placeholder="Giá trị ngưỡng, ví dụ 5"
+                          className="rounded-lg border px-3 py-2"
+                        />
+                        <input
+                          value={item.unit || ""}
+                          onChange={(event) =>
+                            changeAssignmentItem(index, "unit", event.target.value)
+                          }
+                          placeholder="Đơn vị, ví dụ % hoặc lần"
+                          className="rounded-lg border px-3 py-2"
+                        />
+                      </>
+                    ) : (
+                      <input
+                        value={item.standardQuantity}
+                        onChange={(event) =>
+                          changeAssignmentItem(index, "standardQuantity", event.target.value)
+                        }
+                        placeholder="Khối lượng tiêu chuẩn, ví dụ 100%"
+                        className="rounded-lg border px-3 py-2 sm:col-span-2"
+                      />
+                    )}
                     <input
                       required
                       type="number"
@@ -1142,6 +1281,34 @@ export default function KpiManager() {
                       placeholder="Điểm tiêu chuẩn"
                       className="rounded-lg border px-3 py-2"
                     />
+                    {item.scoringType === "threshold" && (
+                      <>
+                        <input
+                          type="number"
+                          min="0"
+                          max={item.scoreCapMode === "unlimited" ? undefined : item.scoreCapMode === "fixed_score" ? item.maxScore || undefined : item.standardScore || undefined}
+                          step="any"
+                          value={item.passScore}
+                          onChange={(event) =>
+                            changeAssignmentItem(index, "passScore", event.target.value)
+                          }
+                          placeholder="Điểm đạt (mặc định = điểm chuẩn)"
+                          className="rounded-lg border px-3 py-2"
+                        />
+                        <input
+                          type="number"
+                          min="0"
+                          max={item.scoreCapMode === "unlimited" ? undefined : item.scoreCapMode === "fixed_score" ? item.maxScore || undefined : item.standardScore || undefined}
+                          step="any"
+                          value={item.failScore}
+                          onChange={(event) =>
+                            changeAssignmentItem(index, "failScore", event.target.value)
+                          }
+                          placeholder="Điểm không đạt (mặc định 0)"
+                          className="rounded-lg border px-3 py-2"
+                        />
+                      </>
+                    )}
                     <textarea
                       value={item.criteriaNote}
                       onChange={(event) =>
@@ -1293,7 +1460,11 @@ export default function KpiManager() {
                         disabled={item.scoringMethod === "standard_points" || !canReview || reviewing.status !== "SUBMITTED"}
                         type="number"
                         min="0"
-                        max={item.maxAchievementPercent || 150}
+                        max={item.scoringMethod === "standard_points" && resolveScoreCap(item).mode === "unlimited"
+                          ? undefined
+                          : item.scoringMethod === "standard_points"
+                            ? resolveScoreCap(item).maxScore
+                            : item.maxAchievementPercent || 150}
                         value={item.approvedScore ?? ""}
                         onChange={(event) =>
                           changeReviewItem(

@@ -5,7 +5,6 @@ import {
   ChevronLeft,
   ChevronRight,
   FileCheck2,
-  Filter,
   ImagePlus,
   Loader2,
   RotateCcw,
@@ -54,12 +53,9 @@ function todayLocal() {
   return [date.getFullYear(), String(date.getMonth() + 1).padStart(2, "0"), String(date.getDate()).padStart(2, "0")].join("-");
 }
 
-function firstDayOfMonth() {
-  return `${todayLocal().slice(0, 7)}-01`;
-}
-
 function createFilters() {
-  return { from: firstDayOfMonth(), to: todayLocal(), search: "", teamId: "", leaveType: "" };
+  const today = todayLocal();
+  return { from: today, to: today, search: "", teamId: "", leaveType: "" };
 }
 
 function shortDate(value) {
@@ -137,20 +133,9 @@ export default function ApprovedLeaveViewer() {
   }, [api, appliedFilters, page]);
 
   function updateFilter(key, value) {
+    setPage(1);
     setFilters((current) => ({ ...current, [key]: value }));
-  }
-
-  function applyFilters(event) {
-    event.preventDefault();
-    setPage(1);
-    setAppliedFilters({ ...filters });
-  }
-
-  function resetFilters() {
-    const next = createFilters();
-    setFilters(next);
-    setPage(1);
-    setAppliedFilters(next);
+    setAppliedFilters((current) => ({ ...current, [key]: value }));
   }
 
   function openEvidence(evidence, employeeName) {
@@ -279,7 +264,7 @@ export default function ApprovedLeaveViewer() {
           </div>
         </header>
 
-        <form onSubmit={applyFilters} className={`${cardClass} p-4 sm:p-5`}>
+        <div className={`${cardClass} p-4 sm:p-5`}>
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
             <label className="space-y-1.5 text-xs font-semibold text-slate-500">
               <span>Từ ngày</span>
@@ -303,7 +288,13 @@ export default function ApprovedLeaveViewer() {
             {mayViewAll && (
               <label className="space-y-1.5 text-xs font-semibold text-slate-500">
                 <span>Team</span>
-                <input value={filters.teamId} onChange={(event) => updateFilter("teamId", event.target.value.toUpperCase())} placeholder="Tất cả team" className={filterControlClass} />
+                <select value={filters.teamId} onChange={(event) => updateFilter("teamId", event.target.value)} className={filterControlClass}>
+                  <option value="">Tất cả team</option>
+                  <option value="NNV">NNV</option>
+                  <option value="ABC">ABC</option>
+                  <option value="VN">VN</option>
+                  <option value="KF">KF</option>
+                </select>
               </label>
             )}
             <label className={`space-y-1.5 text-xs font-semibold text-slate-500 ${mayViewAll ? "xl:col-span-2" : "xl:col-span-3"}`}>
@@ -314,11 +305,7 @@ export default function ApprovedLeaveViewer() {
               </div>
             </label>
           </div>
-          <div className="mt-4 flex flex-wrap justify-end gap-2 border-t border-sky-50 pt-4">
-            <button type="button" onClick={resetFilters} className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-sky-100 bg-white px-3.5 text-sm font-semibold text-slate-600 transition hover:bg-sky-50 hover:text-sky-700"><RotateCcw size={14} /> Đặt lại</button>
-            <button type="submit" className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-sky-500 px-4 text-sm font-semibold text-white shadow-[0_8px_20px_-10px_rgba(14,165,233,0.8)] transition hover:bg-sky-600 active:scale-[0.98]"><Filter size={14} /> Áp dụng</button>
-          </div>
-        </form>
+        </div>
 
         <section className={cardClass}>
           <div className="flex items-center justify-between border-b border-sky-100 px-4 py-4 sm:px-5">
