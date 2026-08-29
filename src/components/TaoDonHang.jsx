@@ -2538,10 +2538,133 @@ function buildGiftPromotionLine({
   };
 }
 
-function getPromotionSelectionDetails({ item, product, campaign, selection }) {
+function getPromotionAggregationKey(campaign, promotion) {
+  const promotionType = Number(
+    promotion?.PromotionType ?? campaign?.PromotionType ?? 0,
+  );
+  const receivedProductIds = getPromotionReceivedProductIds(promotion)
+    .sort((left, right) => left - right)
+    .join(",");
+
+  return [
+    campaign?.Id ?? campaign?.Code ?? "",
+    promotionType,
+    Number(promotion?.PrereqQuantity || 0),
+    Number(promotion?.ReceivedQuantity || 0),
+    receivedProductIds,
+    promotionType === 6 ? "grouped" : (promotion?.Id ?? ""),
+  ].join(":");
+}
+
+function getPromotionAggregateContext({
+  item,
+  product,
+  campaign,
+  promotion,
+  parsedItems = [],
+  productMap,
+  productCampaignMap,
+}) {
+  const promotionType = Number(
+    promotion?.PromotionType ?? campaign?.PromotionType ?? 0,
+  );
+  const fallbackItem = {
+    item,
+    product,
+    productCode: String(item?.sku || "").trim(),
+    quantity: Number(item?.quantity || 0),
+  };
+  if (promotionType !== 6) {
+    return {
+      promotionGroupKey: getPromotionAggregationKey(campaign, promotion),
+      purchasedQuantity: fallbackItem.quantity,
+      qualifyingItems: [fallbackItem],
+    };
+  }
+
+  const promotionGroupKey = getPromotionAggregationKey(campaign, promotion);
+  const qualifyingItems = parsedItems
+    .map((candidateItem) => {
+      const productCode = String(candidateItem?.sku || "").trim();
+      const candidateProduct = productMap?.get(productCode);
+      const candidateCampaign = (
+        productCampaignMap?.get(productCode) || []
+      ).find(
+        (itemCampaign) => String(itemCampaign?.Id) === String(campaign?.Id),
+      );
+      const candidatePromotion = getCampaignPromotionForProduct(
+        candidateCampaign,
+        candidateProduct,
+      );
+      if (
+        !candidateCampaign ||
+        !candidatePromotion ||
+        getPromotionAggregationKey(candidateCampaign, candidatePromotion) !==
+          promotionGroupKey
+      ) {
+        return null;
+      }
+
+      return {
+        item: candidateItem,
+        product: candidateProduct,
+        productCode,
+        quantity: Number(candidateItem?.quantity || 0),
+      };
+    })
+    .filter(Boolean);
+
+  return {
+    promotionGroupKey,
+    purchasedQuantity: qualifyingItems.reduce(
+      (sum, candidate) => sum + candidate.quantity,
+      0,
+    ),
+    qualifyingItems:
+      qualifyingItems.length > 0 ? qualifyingItems : [fallbackItem],
+  };
+}
+
+function getPromotionSelectionDetails({
+  item,
+  product,
+  campaign,
+  selection,
+  parsedItems = [],
+  productMap,
+  productCampaignMap,
+  consumedQuantities = {},
+  availableQuantities = null,
+}) {
   const promotion = getCampaignPromotionForProduct(campaign, product);
   const prerequisiteQuantity = Number(promotion?.PrereqQuantity || 0);
-  const purchasedQuantity = Number(item?.quantity || 0);
+  const aggregateContext = getPromotionAggregateContext({
+    item,
+    product,
+    campaign,
+    promotion,
+    parsedItems,
+    productMap,
+    productCampaignMap,
+  });
+  const qualifyingItems = aggregateContext.qualifyingItems.map((candidate) => ({
+    ...candidate,
+    quantity:
+      availableQuantities !== null
+        ? Math.max(
+            0,
+            Number(availableQuantities[candidate.productCode] || 0),
+          )
+        : Math.max(
+            0,
+            Number(candidate.quantity || 0) -
+              Number(consumedQuantities[candidate.productCode] || 0),
+          ),
+  }));
+  const purchasedQuantity = qualifyingItems.reduce(
+    (sum, candidate) => sum + candidate.quantity,
+    0,
+  );
   const applicationCount =
     prerequisiteQuantity > 0
       ? Math.floor(purchasedQuantity / prerequisiteQuantity)
@@ -2569,13 +2692,115 @@ function getPromotionSelectionDetails({ item, product, campaign, selection }) {
     expectedGiftQuantity,
     selectedGiftQuantity,
     isComplete,
+    purchasedQuantity,
+    prerequisiteQuantity,
+    promotionGroupKey: aggregateContext.promotionGroupKey,
+    qualifyingItems,
   };
 }
 
-function getSinglePromotionSelection(productSelections = {}) {
-  return Object.values(productSelections || {}).find(
-    (selection) => selection?.campaignId != null,
-  );
+function getConsumedPromotionQuantities(
+  promotionSelections = {},
+  excludedPromotionGroupKey = "",
+) {
+  const consumedQuantities = {};
+
+  Object.values(promotionSelections).forEach((campaignSelections) => {
+    Object.values(campaignSelections || {}).forEach((selection) => {
+      if (
+        excludedPromotionGroupKey &&
+        selection?.promotionGroupKey === excludedPromotionGroupKey
+      ) {
+        return;
+      }
+      Object.entries(selection?.consumedQuantities || {}).forEach(
+        ([productCode, quantity]) => {
+          consumedQuantities[productCode] =
+            Number(consumedQuantities[productCode] || 0) +
+            Number(quantity || 0);
+        },
+      );
+    });
+  });
+
+  return consumedQuantities;
+}
+
+function allocatePromotionQuantities(qualifyingItems = [], requiredQuantity = 0) {
+  let remainingQuantity = Math.max(0, Number(requiredQuantity || 0));
+  const consumedQuantities = {};
+
+  qualifyingItems.forEach((candidate) => {
+    if (remainingQuantity <= 0) return;
+    const productCode = String(candidate?.productCode || "").trim();
+    const availableQuantity = Math.max(0, Number(candidate?.quantity || 0));
+    const consumedQuantity = Math.min(availableQuantity, remainingQuantity);
+    if (productCode && consumedQuantity > 0) {
+      consumedQuantities[productCode] = consumedQuantity;
+      remainingQuantity -= consumedQuantity;
+    }
+  });
+
+  return consumedQuantities;
+}
+
+function buildPromotionDisplayGroups({
+  parsedItems = [],
+  productMap,
+  productCampaignMap,
+}) {
+  const groups = new Map();
+
+  parsedItems.forEach((item) => {
+    const productCode = String(item?.sku || "").trim();
+    const product = productMap?.get(productCode);
+    if (!product) return;
+
+    (productCampaignMap?.get(productCode) || []).forEach((campaign) => {
+      const promotion = getCampaignPromotionForProduct(campaign, product);
+      if (!promotion) return;
+      const promotionType = Number(
+        promotion?.PromotionType ?? campaign?.PromotionType ?? 0,
+      );
+      const aggregationKey = getPromotionAggregationKey(campaign, promotion);
+      const displayKey =
+        promotionType === 6
+          ? aggregationKey
+          : `${aggregationKey}:${productCode}`;
+      if (groups.has(displayKey)) return;
+
+      groups.set(displayKey, {
+        key: displayKey,
+        promotionGroupKey: displayKey,
+        productCode,
+        item,
+        product,
+        campaign,
+        promotion,
+      });
+    });
+  });
+
+  return [...groups.values()];
+}
+
+function findPromotionGroupSelection(
+  promotionSelections = {},
+  promotionGroupKey = "",
+) {
+  for (const [productCode, campaignSelections] of Object.entries(
+    promotionSelections,
+  )) {
+    for (const [campaignId, selection] of Object.entries(
+      campaignSelections || {},
+    )) {
+      if (selection?.promotionGroupKey === promotionGroupKey) {
+        return { productCode, campaignId, selection };
+      }
+    }
+  }
+
+  return null;
 }
 
 function mergeInvoicePromotionsByCampaign(promotions = []) {
@@ -2584,6 +2809,12 @@ function mergeInvoicePromotionsByCampaign(promotions = []) {
   promotions.forEach((promotion) => {
     const key = `${promotion?.PromotionId ?? ""}:${promotion?.SalePromotionId ?? ""}`;
     const current = mergedPromotions.get(key);
+    const relatedProductIds = String(
+      promotion?.RelatedProductIds || promotion?.RelatedProductId || "",
+    )
+      .split(",")
+      .map((id) => id.trim())
+      .filter(Boolean);
 
     if (!current) {
       mergedPromotions.set(key, {
@@ -2594,12 +2825,12 @@ function mergeInvoicePromotionsByCampaign(promotions = []) {
             .map((id) => id.trim())
             .filter(Boolean),
         ),
-        __relatedProductQuantities: new Map([
-          [
-            String(promotion?.RelatedProductId || ""),
-            Number(promotion?.RelatedProductQty || 0),
-          ],
-        ]),
+        __relatedProductQuantities: new Map(
+          relatedProductIds.map((id, index) => [
+            id,
+            index === 0 ? Number(promotion?.RelatedProductQty || 0) : 0,
+          ]),
+        ),
         __promotionInfos: new Set([promotion?.PromotionInfo].filter(Boolean)),
         __printPromotionInfos: new Set(
           [promotion?.PrintPromotionInfo].filter(Boolean),
@@ -2614,15 +2845,16 @@ function mergeInvoicePromotionsByCampaign(promotions = []) {
       .filter(Boolean)
       .forEach((id) => current.__productIds.add(id));
 
-    const relatedProductId = String(promotion?.RelatedProductId || "");
     const relatedProductQuantity = Number(promotion?.RelatedProductQty || 0);
-    current.__relatedProductQuantities.set(
-      relatedProductId,
-      Math.max(
-        current.__relatedProductQuantities.get(relatedProductId) || 0,
-        relatedProductQuantity,
-      ),
-    );
+    relatedProductIds.forEach((relatedProductId, index) => {
+      current.__relatedProductQuantities.set(
+        relatedProductId,
+        Math.max(
+          current.__relatedProductQuantities.get(relatedProductId) || 0,
+          index === 0 ? relatedProductQuantity : 0,
+        ),
+      );
+    });
     current.ProductQty =
       Number(current.ProductQty || 0) + Number(promotion?.ProductQty || 0);
     if (promotion?.PromotionInfo) {
@@ -2681,178 +2913,231 @@ function applySelectedPromotions({
   let nextTotalTax = Number(totalTax || 0);
   let nextTotalAfterTax = Number(totalAfterTax || 0);
   let productDiscount = 0;
+  const processedPromotionGroups = new Set();
 
   parsedItems.forEach((item) => {
     const productCode = String(item?.sku || "").trim();
-    const selection = getSinglePromotionSelection(
+    const selections = Object.values(
       promotionSelections[productCode] || {},
-    );
-    if (!selection) return;
+    ).filter((selection) => selection?.campaignId != null);
+    if (selections.length === 0) return;
     const parentProduct = productMap?.get(productCode);
-    const campaign = (productCampaignMap?.get(productCode) || []).find(
-      (candidate) => String(candidate?.Id) === String(selection.campaignId),
-    );
-    const promotion = getCampaignPromotionForProduct(campaign, parentProduct);
-    if (!campaign || !promotion) return;
 
+    selections.forEach((selection) => {
+      const campaign = (productCampaignMap?.get(productCode) || []).find(
+        (candidate) => String(candidate?.Id) === String(selection.campaignId),
+      );
+      const promotion = getCampaignPromotionForProduct(campaign, parentProduct);
+      if (!campaign || !promotion) return;
+
+      const promotionType = Number(
+        promotion?.PromotionType ?? campaign?.PromotionType ?? 0,
+      );
+      const aggregateContext = getPromotionAggregateContext({
+        item,
+        product: parentProduct,
+        campaign,
+        promotion,
+        parsedItems,
+        productMap,
+        productCampaignMap,
+      });
     const prerequisiteQuantity = Number(promotion?.PrereqQuantity || 0);
-    const purchasedQuantity = Number(item?.quantity || 0);
+    const reservedQuantities = selection?.consumedQuantities || {};
+    const hasReservedQuantities = Object.keys(reservedQuantities).length > 0;
+    const qualifyingItems = hasReservedQuantities
+      ? aggregateContext.qualifyingItems
+          .map((candidate) => ({
+            ...candidate,
+            quantity: Number(
+              reservedQuantities[candidate.productCode] || 0,
+            ),
+          }))
+          .filter((candidate) => candidate.quantity > 0)
+      : aggregateContext.qualifyingItems;
+    const purchasedQuantity = qualifyingItems.reduce(
+      (sum, candidate) => sum + Number(candidate.quantity || 0),
+      0,
+    );
     const applicationCount =
       prerequisiteQuantity > 0
         ? Math.floor(purchasedQuantity / prerequisiteQuantity)
         : 0;
     if (applicationCount < 1) return;
 
-    const parentLineIndex = nextLines.findIndex(
-      (line) => String(line?.ProductCode || "").trim() === productCode,
-    );
-    if (parentLineIndex < 0) return;
+      const parentLineIndex = nextLines.findIndex(
+        (line) => String(line?.ProductCode || "").trim() === productCode,
+      );
+      if (parentLineIndex < 0) return;
 
-    const parentLine = nextLines[parentLineIndex];
-    const parentProductId =
-      parentLine?.ProductId ?? parentProduct?.id ?? parentProduct?.Id;
-    const promotionType = Number(
-      promotion?.PromotionType ?? campaign?.PromotionType ?? 0,
-    );
+      const parentLine = nextLines[parentLineIndex];
+      const parentProductId =
+        parentLine?.ProductId ?? parentProduct?.id ?? parentProduct?.Id;
+    const relatedProductEntries = qualifyingItems
+        .map((candidate) => {
+          const candidateLine = nextLines.find(
+            (line) =>
+              String(line?.ProductCode || "").trim() === candidate.productCode,
+          );
+          const productId =
+            candidateLine?.ProductId ??
+            candidate.product?.id ??
+            candidate.product?.Id;
+          return productId != null
+            ? { productId, quantity: candidate.quantity }
+            : null;
+        })
+        .filter(Boolean);
+      const relatedProductIds = [
+        ...new Set(relatedProductEntries.map(({ productId }) => productId)),
+      ];
 
     if (promotionType === 8 && Number(promotion?.ProductPrice || 0) > 0) {
       const promotionPrice = Number(promotion.ProductPrice);
-      const originalPrice = Number(parentLine.Price || 0);
-      const quantity = Number(parentLine.Quantity || 0);
-      const taxRate = Number(parentLine.DetailTaxIds?.[0]?.Value || 0);
-      const originalTax = Number(
-        parentLine.InvoiceDetailTaxs?.[0]?.DetailTax || 0,
-      );
-      const promotedBaseAmount = roundMoney(promotionPrice * quantity);
-      const promotedTax = roundMoney((promotedBaseAmount * taxRate) / 100);
-      const promotedAfterTax = roundMoney(promotedBaseAmount + promotedTax);
-      const originalAfterTax = Number(parentLine.PriceAfterTax || 0);
-      const discountBeforeTax = roundMoney(
-        Math.max(0, (originalPrice - promotionPrice) * quantity),
-      );
-      const discountAfterTax = roundMoney(
-        Math.max(0, originalAfterTax - promotedAfterTax),
-      );
+        const originalPrice = Number(parentLine.Price || 0);
+        const quantity = Number(parentLine.Quantity || 0);
+        const taxRate = Number(parentLine.DetailTaxIds?.[0]?.Value || 0);
+        const originalTax = Number(
+          parentLine.InvoiceDetailTaxs?.[0]?.DetailTax || 0,
+        );
+        const promotedBaseAmount = roundMoney(promotionPrice * quantity);
+        const promotedTax = roundMoney((promotedBaseAmount * taxRate) / 100);
+        const promotedAfterTax = roundMoney(promotedBaseAmount + promotedTax);
+        const originalAfterTax = Number(parentLine.PriceAfterTax || 0);
+        const discountBeforeTax = roundMoney(
+          Math.max(0, (originalPrice - promotionPrice) * quantity),
+        );
+        const discountAfterTax = roundMoney(
+          Math.max(0, originalAfterTax - promotedAfterTax),
+        );
 
-      nextLines[parentLineIndex] = {
-        ...parentLine,
-        Price: promotionPrice,
-        PriceAfterTax: promotedAfterTax,
-        SalePromotionId: promotion.Id,
-        OriginPrice: originalPrice,
-        PriceByPromotion: promotionPrice,
-        DiscountByPromotionAfterTax: discountAfterTax,
-        InvoiceDetailTaxs: (parentLine.InvoiceDetailTaxs || []).map((tax) => ({
-          ...tax,
-          DetailTax: promotedTax,
-          OldDetailTax: originalTax,
+        nextLines[parentLineIndex] = {
+          ...parentLine,
+          Price: promotionPrice,
           PriceAfterTax: promotedAfterTax,
+          SalePromotionId: promotion.Id,
+          OriginPrice: originalPrice,
+          PriceByPromotion: promotionPrice,
           DiscountByPromotionAfterTax: discountAfterTax,
-        })),
-      };
-      nextTotalTax = roundMoney(nextTotalTax - originalTax + promotedTax);
-      nextTotalAfterTax = roundMoney(
-        nextTotalAfterTax - originalAfterTax + promotedAfterTax,
+          InvoiceDetailTaxs: (parentLine.InvoiceDetailTaxs || []).map(
+            (tax) => ({
+              ...tax,
+              DetailTax: promotedTax,
+              OldDetailTax: originalTax,
+              PriceAfterTax: promotedAfterTax,
+              DiscountByPromotionAfterTax: discountAfterTax,
+            }),
+          ),
+        };
+        nextTotalTax = roundMoney(nextTotalTax - originalTax + promotedTax);
+        nextTotalAfterTax = roundMoney(
+          nextTotalAfterTax - originalAfterTax + promotedAfterTax,
+        );
+        productDiscount = roundMoney(productDiscount + discountBeforeTax);
+        invoicePromotions.push({
+          Type: promotionType,
+          TargetType: promotion.Type ?? 1,
+          SalePromotionId: promotion.Id,
+          PromotionId: campaign.Id,
+          ProductId: parentProductId,
+          RelatedProductId: parentProductId,
+          RelatedProductQty: purchasedQuantity,
+          ProductQty: purchasedQuantity,
+          IsFixedQuantity: campaign.IsFixedQuantity ?? false,
+          LimitPromotionUsage: campaign.LimitPromotionUsage ?? false,
+          LimitPromotionUsageType: campaign.LimitPromotionUsageType ?? 2,
+          PromotionInfo: buildPromotionInfo({
+            campaign,
+            promotion,
+            parentProduct,
+          }),
+          ProductIds: String(parentProductId || ""),
+          RelatedProductIds: String(parentProductId || ""),
+          RelatedCategoryIds: "",
+          BackupSelectedSerials: {},
+        });
+        return;
+      }
+
+      if (promotionType !== 6) return;
+
+      if (processedPromotionGroups.has(aggregateContext.promotionGroupKey)) {
+        return;
+      }
+
+      const expectedGiftQuantity =
+        applicationCount * Number(promotion?.ReceivedQuantity || 0);
+      const selectedGiftEntries = Object.entries(selection.giftQuantities || {})
+        .map(([id, quantity]) => [Number(id), Number(quantity || 0)])
+        .filter(([id, quantity]) => Number.isFinite(id) && quantity > 0);
+      const selectedGiftQuantity = selectedGiftEntries.reduce(
+        (sum, [, quantity]) => sum + quantity,
+        0,
       );
-      productDiscount = roundMoney(productDiscount + discountBeforeTax);
-      invoicePromotions.push({
-        Type: promotionType,
-        TargetType: promotion.Type ?? 1,
-        SalePromotionId: promotion.Id,
-        PromotionId: campaign.Id,
-        ProductId: parentProductId,
-        RelatedProductId: parentProductId,
-        RelatedProductQty: purchasedQuantity,
-        ProductQty: purchasedQuantity,
-        IsFixedQuantity: campaign.IsFixedQuantity ?? false,
-        LimitPromotionUsage: campaign.LimitPromotionUsage ?? false,
-        LimitPromotionUsageType: campaign.LimitPromotionUsageType ?? 2,
-        PromotionInfo: buildPromotionInfo({
-          campaign,
-          promotion,
-          parentProduct,
-        }),
-        ProductIds: String(parentProductId || ""),
-        RelatedProductIds: String(parentProductId || ""),
-        RelatedCategoryIds: "",
-        BackupSelectedSerials: {},
-      });
-      return;
-    }
-
-    if (promotionType !== 6) return;
-
-    const expectedGiftQuantity =
-      applicationCount * Number(promotion?.ReceivedQuantity || 0);
-    const selectedGiftEntries = Object.entries(selection.giftQuantities || {})
-      .map(([id, quantity]) => [Number(id), Number(quantity || 0)])
-      .filter(([id, quantity]) => Number.isFinite(id) && quantity > 0);
-    const selectedGiftQuantity = selectedGiftEntries.reduce(
-      (sum, [, quantity]) => sum + quantity,
-      0,
-    );
-    const allowedReceivedProductIds = new Set(
-      getPromotionReceivedProductIds(promotion),
-    );
-    const selectedGiftProductsAreValid = selectedGiftEntries.every(
-      ([id]) =>
-        allowedReceivedProductIds.has(id) &&
-        Boolean(promotionProductMap?.get(id)),
-    );
-    if (
-      expectedGiftQuantity <= 0 ||
-      selectedGiftQuantity !== expectedGiftQuantity ||
-      !selectedGiftProductsAreValid
-    ) {
-      return;
-    }
-
-    selectedGiftEntries.forEach(([receivedProductId, quantity]) => {
-      const receivedProduct = promotionProductMap?.get(receivedProductId);
-      if (!receivedProduct) return;
-
-      const giftLine = buildGiftPromotionLine({
-        product: receivedProduct,
-        quantity,
-        customerType,
-        salePromotionId: promotion.Id,
-        parentProductId,
-      });
-      nextLines.push(giftLine);
-      productDiscount = roundMoney(
-        productDiscount +
-          Number(giftLine.Discount || 0) * Number(giftLine.Quantity || 0),
+      const allowedReceivedProductIds = new Set(
+        getPromotionReceivedProductIds(promotion),
       );
-      invoicePromotions.push({
-        Type: promotionType,
-        TargetType: promotion.Type ?? 1,
-        SalePromotionId: promotion.Id,
-        PromotionId: campaign.Id,
-        ProductId: receivedProductId,
-        RelatedProductId: parentProductId,
-        RelatedProductQty: prerequisiteQuantity * applicationCount,
-        ProductQty: quantity,
-        IsFixedQuantity: campaign.IsFixedQuantity ?? false,
-        LimitPromotionUsage: campaign.LimitPromotionUsage ?? false,
-        LimitPromotionUsageType: campaign.LimitPromotionUsageType ?? 2,
-        PromotionInfo: buildPromotionInfo({
-          campaign,
-          promotion,
-          parentProduct,
-          receivedProduct,
-          receivedQuantity: quantity,
-        }),
-        PrintPromotionInfo: buildPromotionInfo({
-          campaign,
-          promotion,
-          parentProduct,
-          receivedProduct,
-          receivedQuantity: quantity,
-        }),
-        ProductIds: String(receivedProductId),
-        RelatedProductIds: String(parentProductId || ""),
-        RelatedCategoryIds: "",
-        BackupSelectedSerials: {},
+      const selectedGiftProductsAreValid = selectedGiftEntries.every(
+        ([id]) =>
+          allowedReceivedProductIds.has(id) &&
+          Boolean(promotionProductMap?.get(id)),
+      );
+      if (
+        expectedGiftQuantity <= 0 ||
+        selectedGiftQuantity !== expectedGiftQuantity ||
+        !selectedGiftProductsAreValid
+      ) {
+        return;
+      }
+    processedPromotionGroups.add(aggregateContext.promotionGroupKey);
+
+      selectedGiftEntries.forEach(([receivedProductId, quantity]) => {
+        const receivedProduct = promotionProductMap?.get(receivedProductId);
+        if (!receivedProduct) return;
+
+        const giftLine = buildGiftPromotionLine({
+          product: receivedProduct,
+          quantity,
+          customerType,
+          salePromotionId: promotion.Id,
+          parentProductId,
+        });
+        nextLines.push(giftLine);
+        productDiscount = roundMoney(
+          productDiscount +
+            Number(giftLine.Discount || 0) * Number(giftLine.Quantity || 0),
+        );
+        invoicePromotions.push({
+          Type: promotionType,
+          TargetType: promotion.Type ?? 1,
+          SalePromotionId: promotion.Id,
+          PromotionId: campaign.Id,
+          ProductId: receivedProductId,
+          RelatedProductId: relatedProductIds[0] ?? parentProductId,
+          RelatedProductQty: prerequisiteQuantity * applicationCount,
+          ProductQty: quantity,
+          IsFixedQuantity: campaign.IsFixedQuantity ?? false,
+          LimitPromotionUsage: campaign.LimitPromotionUsage ?? false,
+          LimitPromotionUsageType: campaign.LimitPromotionUsageType ?? 2,
+          PromotionInfo: buildPromotionInfo({
+            campaign,
+            promotion,
+            parentProduct,
+            receivedProduct,
+            receivedQuantity: quantity,
+          }),
+          PrintPromotionInfo: buildPromotionInfo({
+            campaign,
+            promotion,
+            parentProduct,
+            receivedProduct,
+            receivedQuantity: quantity,
+          }),
+          ProductIds: String(receivedProductId),
+          RelatedProductIds: relatedProductIds.join(","),
+          RelatedCategoryIds: "",
+          BackupSelectedSerials: {},
+        });
       });
     });
   });
@@ -4622,6 +4907,75 @@ export default function TaoDonHang() {
   ]);
   const hasZeroRetailPrices = retailProductsWithZeroPrice.length > 0;
   const hasInvalidProductPrices = hasMissingAgencyPrices || hasZeroRetailPrices;
+  const promotionDisplayGroups = useMemo(
+    () =>
+      buildPromotionDisplayGroups({
+        parsedItems: parsed.items,
+        productMap: orderPreparation.productMap,
+        productCampaignMap: orderPreparation.productCampaignMap,
+      }),
+    [
+      orderPreparation.productCampaignMap,
+      orderPreparation.productMap,
+      parsed.items,
+    ],
+  );
+  const productLineDisplayGroups = useMemo(() => {
+    const promotedItemIndexes = new Set();
+    const groups = promotionDisplayGroups
+      .map((promotionGroup) => {
+        const aggregateContext = getPromotionAggregateContext({
+          item: promotionGroup.item,
+          product: promotionGroup.product,
+          campaign: promotionGroup.campaign,
+          promotion: promotionGroup.promotion,
+          parsedItems: parsed.items,
+          productMap: orderPreparation.productMap,
+          productCampaignMap: orderPreparation.productCampaignMap,
+        });
+        const items = aggregateContext.qualifyingItems
+          .map((candidate) => {
+            const index = parsed.items.indexOf(candidate.item);
+            if (index < 0) return null;
+            promotedItemIndexes.add(index);
+            return { item: candidate.item, index };
+          })
+          .filter(Boolean);
+
+        return {
+          key: `promotion-products-${promotionGroup.key}`,
+          label:
+            promotionGroup.campaign?.Name ||
+            promotionGroup.campaign?.Code ||
+            "Khuyến mãi",
+          code: promotionGroup.campaign?.Code || "",
+          isPromotionGroup: true,
+          promotionGroup,
+          items,
+        };
+      })
+      .filter((group) => group.items.length > 0);
+    const remainingItems = parsed.items
+      .map((item, index) => ({ item, index }))
+      .filter(({ index }) => !promotedItemIndexes.has(index));
+
+    if (remainingItems.length > 0) {
+      groups.push({
+        key: "products-without-promotion",
+        label: "Sản phẩm không có khuyến mãi",
+        code: "",
+        isPromotionGroup: false,
+        items: remainingItems,
+      });
+    }
+
+    return groups;
+  }, [
+    orderPreparation.productCampaignMap,
+    orderPreparation.productMap,
+    parsed.items,
+    promotionDisplayGroups,
+  ]);
   const orderPreparationMessage = tokenLoading
     ? "Đang lấy token để chuẩn bị dữ liệu..."
     : orderPreparation.status === "waiting"
@@ -4654,6 +5008,14 @@ export default function TaoDonHang() {
         product,
         campaign,
         selection,
+        parsedItems: parsed.items,
+        productMap: orderPreparation.productMap,
+        productCampaignMap: orderPreparation.productCampaignMap,
+        consumedQuantities: getConsumedPromotionQuantities(
+          promotionSelections,
+          selection.promotionGroupKey,
+        ),
+        availableQuantities: selection.consumedQuantities || null,
       });
       const selectedGiftProductsLoaded = Object.entries(
         selection.giftQuantities || {},
@@ -4834,6 +5196,7 @@ export default function TaoDonHang() {
     campaignId,
     item,
     checked,
+    promotionGroupKeyOverride = "",
   ) => {
     const product = orderPreparation.productMap.get(productCode);
     const campaigns =
@@ -4841,31 +5204,76 @@ export default function TaoDonHang() {
     const campaign = campaigns.find(
       (candidate) => String(candidate?.Id) === String(campaignId),
     );
-    const details = getPromotionSelectionDetails({
+    const baseDetails = getPromotionSelectionDetails({
       item,
       product,
       campaign,
       selection: null,
+      parsedItems: parsed.items,
+      productMap: orderPreparation.productMap,
+      productCampaignMap: orderPreparation.productCampaignMap,
     });
-    const receivedProductIds = getPromotionReceivedProductIds(
-      details.promotion,
-    );
-    const giftQuantities =
-      details.promotionType === 6 && receivedProductIds.length === 1
-        ? { [receivedProductIds[0]]: details.expectedGiftQuantity }
-        : {};
+    const promotionGroupKey =
+      promotionGroupKeyOverride || baseDetails.promotionGroupKey;
 
     setPromotionSelections((current) => {
       const next = { ...current };
       if (checked) {
+        Object.entries(next).forEach(
+          ([currentProductCode, currentCampaignSelections]) => {
+            const remainingSelections = Object.fromEntries(
+              Object.entries(currentCampaignSelections || {}).filter(
+                ([, currentSelection]) =>
+                  currentSelection?.promotionGroupKey !== promotionGroupKey,
+              ),
+            );
+            if (Object.keys(remainingSelections).length > 0) {
+              next[currentProductCode] = remainingSelections;
+            } else {
+              delete next[currentProductCode];
+            }
+          },
+        );
+        const consumedQuantities = getConsumedPromotionQuantities(next);
+        const details = getPromotionSelectionDetails({
+          item,
+          product,
+          campaign,
+          selection: null,
+          parsedItems: parsed.items,
+          productMap: orderPreparation.productMap,
+          productCampaignMap: orderPreparation.productCampaignMap,
+          consumedQuantities,
+        });
+        if (details.applicationCount < 1) return current;
+        const receivedProductIds = getPromotionReceivedProductIds(
+          details.promotion,
+        );
+        const giftQuantities =
+          details.promotionType === 6 && receivedProductIds.length === 1
+            ? { [receivedProductIds[0]]: details.expectedGiftQuantity }
+            : {};
+        const reservedQuantities = allocatePromotionQuantities(
+          details.qualifyingItems,
+          details.prerequisiteQuantity * details.applicationCount,
+        );
         next[productCode] = {
+          ...(next[productCode] || {}),
           [campaignId]: {
             campaignId,
             giftQuantities,
+            promotionGroupKey,
+            consumedQuantities: reservedQuantities,
           },
         };
       } else {
-        delete next[productCode];
+        const remainingSelections = { ...(next[productCode] || {}) };
+        delete remainingSelections[campaignId];
+        if (Object.keys(remainingSelections).length > 0) {
+          next[productCode] = remainingSelections;
+        } else {
+          delete next[productCode];
+        }
       }
       return next;
     });
@@ -4875,6 +5283,26 @@ export default function TaoDonHang() {
     setPromotionSelections((current) => {
       const next = { ...current };
       delete next[productCode];
+      return next;
+    });
+  };
+
+  const handlePromotionGroupClear = (promotionGroupKey) => {
+    setPromotionSelections((current) => {
+      const next = { ...current };
+      Object.entries(next).forEach(([productCode, campaignSelections]) => {
+        const remainingSelections = Object.fromEntries(
+          Object.entries(campaignSelections || {}).filter(
+            ([, selection]) =>
+              selection?.promotionGroupKey !== promotionGroupKey,
+          ),
+        );
+        if (Object.keys(remainingSelections).length > 0) {
+          next[productCode] = remainingSelections;
+        } else {
+          delete next[productCode];
+        }
+      });
       return next;
     });
   };
@@ -4899,6 +5327,161 @@ export default function TaoDonHang() {
         },
       },
     }));
+  };
+
+  const renderPromotionGroupControl = (group) => {
+    if (!group) return null;
+
+    const selectionMatch = findPromotionGroupSelection(
+      promotionSelections,
+      group.promotionGroupKey,
+    );
+    const selection = selectionMatch?.selection || null;
+    const details = getPromotionSelectionDetails({
+      item: group.item,
+      product: group.product,
+      campaign: group.campaign,
+      selection,
+      parsedItems: parsed.items,
+      productMap: orderPreparation.productMap,
+      productCampaignMap: orderPreparation.productCampaignMap,
+      consumedQuantities: getConsumedPromotionQuantities(
+        promotionSelections,
+        group.promotionGroupKey,
+      ),
+      availableQuantities: selection?.consumedQuantities || null,
+    });
+    const campaignId = String(group.campaign?.Id || "");
+    const selectionProductCode =
+      selectionMatch?.productCode || group.productCode;
+    const selectionCampaignId = selectionMatch?.campaignId || campaignId;
+    const receivedProductIds = getPromotionReceivedProductIds(
+      details.promotion,
+    );
+    const isSelected = Boolean(selection);
+
+    return (
+      <div
+        className={`mt-3 rounded-xl border px-3 py-3 ${
+          isSelected
+            ? "border-emerald-300 bg-white shadow-sm"
+            : "border-emerald-200 bg-white/75"
+        }`}
+      >
+        <label className="flex cursor-pointer items-start gap-3">
+          <input
+            type="checkbox"
+            checked={isSelected}
+            disabled={details.applicationCount < 1}
+            onChange={(event) => {
+              if (event.target.checked) {
+                handlePromotionCampaignToggle(
+                  group.productCode,
+                  campaignId,
+                  group.item,
+                  true,
+                  group.promotionGroupKey,
+                );
+              } else {
+                handlePromotionGroupClear(group.promotionGroupKey);
+              }
+            }}
+            className="mt-1 h-4 w-4 accent-emerald-600"
+          />
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="text-sm font-bold text-emerald-950">
+                Áp dụng chương trình khuyến mãi
+              </div>
+              <div
+                className={`rounded-full px-2.5 py-1 text-xs font-bold ${
+                  details.applicationCount > 0
+                    ? "bg-emerald-100 text-emerald-800"
+                    : "bg-amber-100 text-amber-800"
+                }`}
+              >
+                Tổng {details.purchasedQuantity}/{details.prerequisiteQuantity}
+                {details.applicationCount > 0
+                  ? ` · ${details.applicationCount} suất`
+                  : " · Chưa đủ"}
+              </div>
+            </div>
+            <div className="mt-1 text-xs text-emerald-800/80">
+              {formatPromotionRule(group.campaign, group.product)}
+            </div>
+            <div className="mt-1 text-[11px] text-slate-500">
+              Số lượng đã dùng cho chương trình khác sẽ được trừ trước khi xét
+              điều kiện chương trình này.
+            </div>
+          </div>
+        </label>
+
+        {isSelected && details.promotionType === 6 ? (
+          <div className="mt-3 space-y-2 border-t border-emerald-100 pt-3">
+            <div className="text-xs font-semibold text-emerald-900">
+              Chọn sản phẩm tặng: đã chọn {details.selectedGiftQuantity}/
+              {details.expectedGiftQuantity}
+            </div>
+            {receivedProductIds.map((productId) => {
+              const receivedProduct =
+                orderPreparation.promotionProductMap.get(productId);
+              const quantity = Number(
+                selection?.giftQuantities?.[productId] || 0,
+              );
+
+              return (
+                <label
+                  key={productId}
+                  className="flex items-center gap-3 rounded-xl border border-emerald-100 bg-emerald-50/60 px-3 py-2"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="text-xs font-semibold text-slate-800">
+                      {receivedProduct
+                        ? getProductDisplayName(receivedProduct)
+                        : `Sản phẩm #${productId}`}
+                    </div>
+                    <div className="text-[11px] text-slate-500">
+                      {receivedProduct
+                        ? getProductDisplayCode(receivedProduct)
+                        : "Không tải được thông tin"}
+                    </div>
+                  </div>
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={quantity}
+                    disabled={!receivedProduct}
+                    onChange={(event) =>
+                      handlePromotionGiftQuantityChange(
+                        selectionProductCode,
+                        selectionCampaignId,
+                        productId,
+                        event.target.value,
+                      )
+                    }
+                    className="w-14 rounded-lg border border-slate-200 bg-white px-1 py-1.5 text-center text-sm outline-none focus:border-emerald-300"
+                  />
+                </label>
+              );
+            })}
+            <div
+              className={`text-xs font-medium ${
+                details.isComplete ? "text-emerald-700" : "text-amber-700"
+              }`}
+            >
+              {details.isComplete
+                ? "Đã đủ quà, chương trình sẽ được thêm vào hóa đơn."
+                : "Phân bổ đủ số lượng quà để áp chương trình."}
+            </div>
+          </div>
+        ) : isSelected && details.promotionType === 8 ? (
+          <div className="mt-3 border-t border-emerald-100 pt-3 text-xs font-medium text-emerald-800">
+            Giá khuyến mãi sẽ được áp vào dòng sản phẩm khi tạo đơn.
+          </div>
+        ) : null}
+      </div>
+    );
   };
 
   const handleReset = () => {
@@ -6314,312 +6897,380 @@ export default function TaoDonHang() {
                 </div>
                 <div className="mt-2 space-y-3">
                   {parsed.items.length > 0 ? (
-                    parsed.items.map((item, index) => {
-                      const productCode = String(item.sku || "").trim();
-                      const product =
-                        orderPreparation.productMap.get(productCode);
-                      const displayProductName = product
-                        ? getProductDisplayName(product)
-                        : "";
-                      const displayProductCode = product
-                        ? getProductDisplayCode(product) || productCode
-                        : productCode;
-                      const displayProductUnit = product?.unit || "Chưa có";
-                      const displayProductPrice = product
-                        ? getProductUnitPrice(
-                            product,
-                            item,
-                            pricingCustomerType,
-                          )
-                        : null;
-                      const displayProductWeight = product
-                        ? getProductWeightFromProduct(product)
-                        : null;
-                      const productCampaigns =
-                        orderPreparation.productCampaignMap.get(productCode) ||
-                        [];
-                      const campaignSelections =
-                        promotionSelections[productCode] || {};
-
-                      return (
-                        <div
-                          key={`${item.sku}-${index}`}
-                          className="rounded-2xl border border-white bg-white px-3 py-3 shadow-sm"
-                        >
-                          {product ? (
-                            <>
-                              <div className="text-sm font-semibold text-slate-900">
-                                {item.quantity} x {displayProductName}
-                              </div>
-                              <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500">
-                                <span>SKU: {displayProductCode}</span>
-                                <span>Đơn vị: {displayProductUnit}</span>
-                                <span>
-                                  Giá:{" "}
-                                  {typeof displayProductPrice === "number"
-                                    ? displayProductPrice.toLocaleString(
-                                        "vi-VN",
-                                      )
-                                    : "Chưa có"}
-                                </span>
-                                {displayProductWeight != null ? (
-                                  <span>
-                                    Trọng lượng:{" "}
-                                    {displayProductWeight.toLocaleString(
-                                      "vi-VN",
-                                    )}
-                                    g
-                                  </span>
-                                ) : null}
-                              </div>
-                            </>
-                          ) : orderPreparation.status !== "ready" ? (
-                            <div className="text-xs font-medium text-slate-500">
-                              Đang kiểm tra sản phẩm mã{" "}
-                              <span className="font-mono font-bold text-slate-700">
-                                {productCode || "trống"}
-                              </span>
-                              ...
+                    productLineDisplayGroups.map((productGroup) => (
+                      <div
+                        key={productGroup.key}
+                        className={`rounded-2xl border p-3 ${
+                          productGroup.isPromotionGroup
+                            ? "border-emerald-200 bg-emerald-50/60"
+                            : "border-slate-200 bg-white/60"
+                        }`}
+                      >
+                        <div className="flex flex-wrap items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <div
+                              className={`text-[10px] font-bold uppercase tracking-[0.16em] ${
+                                productGroup.isPromotionGroup
+                                  ? "text-emerald-700"
+                                  : "text-slate-500"
+                              }`}
+                            >
+                              {productGroup.isPromotionGroup
+                                ? "Chương trình khuyến mãi"
+                                : "Nhóm sản phẩm"}
                             </div>
-                          ) : null}
+                            <div className="mt-1 text-sm font-bold text-slate-900">
+                              {productGroup.label}
+                            </div>
+                            {productGroup.code ? (
+                              <div className="mt-0.5 text-xs text-slate-500">
+                                Mã chương trình: {productGroup.code}
+                              </div>
+                            ) : null}
+                          </div>
+                          <div
+                            className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-bold ${
+                              productGroup.isPromotionGroup
+                                ? "bg-white text-emerald-700"
+                                : "bg-slate-100 text-slate-600"
+                            }`}
+                          >
+                            {productGroup.items.length} sản phẩm
+                          </div>
+                        </div>
 
-                          {orderPreparation.status === "ready" ? (
-                            !product ? (
-                              <div className="mt-3 flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-xs text-rose-700">
-                                <XCircle className="mt-0.5 h-4 w-4 shrink-0" />
-                                <div>
-                                  <div className="font-bold">
-                                    Không tìm thấy sản phẩm
-                                  </div>
-                                  <div className="mt-0.5 leading-5">
-                                    Không có sản phẩm nào khớp với mã{" "}
-                                    <span className="font-mono font-bold">
+                        <div className="mt-3 space-y-2">
+                          {productGroup.items.map(({ item, index }) => {
+                            const productCode = String(item.sku || "").trim();
+                            const product =
+                              orderPreparation.productMap.get(productCode);
+                            const displayProductName = product
+                              ? getProductDisplayName(product)
+                              : "";
+                            const displayProductCode = product
+                              ? getProductDisplayCode(product) || productCode
+                              : productCode;
+                            const displayProductUnit =
+                              product?.unit || "Chưa có";
+                            const displayProductPrice = product
+                              ? getProductUnitPrice(
+                                  product,
+                                  item,
+                                  pricingCustomerType,
+                                )
+                              : null;
+                            const displayProductWeight = product
+                              ? getProductWeightFromProduct(product)
+                              : null;
+                            const productCampaigns =
+                              orderPreparation.productCampaignMap.get(
+                                productCode,
+                              ) || [];
+                            const campaignSelections =
+                              promotionSelections[productCode] || {};
+
+                            return (
+                              <div
+                                key={`${item.sku}-${index}`}
+                                className="rounded-2xl border border-white bg-white px-3 py-3 shadow-sm"
+                              >
+                                {product ? (
+                                  <>
+                                    <div className="text-sm font-semibold text-slate-900">
+                                      {item.quantity} x {displayProductName}
+                                    </div>
+                                    <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500">
+                                      <span>SKU: {displayProductCode}</span>
+                                      <span>Đơn vị: {displayProductUnit}</span>
+                                      <span>
+                                        Giá:{" "}
+                                        {typeof displayProductPrice === "number"
+                                          ? displayProductPrice.toLocaleString(
+                                              "vi-VN",
+                                            )
+                                          : "Chưa có"}
+                                      </span>
+                                      {displayProductWeight != null ? (
+                                        <span>
+                                          Trọng lượng:{" "}
+                                          {displayProductWeight.toLocaleString(
+                                            "vi-VN",
+                                          )}
+                                          g
+                                        </span>
+                                      ) : null}
+                                    </div>
+                                  </>
+                                ) : orderPreparation.status !== "ready" ? (
+                                  <div className="text-xs font-medium text-slate-500">
+                                    Đang kiểm tra sản phẩm mã{" "}
+                                    <span className="font-mono font-bold text-slate-700">
                                       {productCode || "trống"}
-                                    </span>{" "}
-                                    trên KiotViet.
+                                    </span>
+                                    ...
                                   </div>
-                                </div>
-                              </div>
-                            ) : pricingCustomerType === "dai_ly" &&
-                              !hasAgencyPrice(product, item) ? (
-                              <div className="mt-3 flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-xs text-rose-700">
-                                <XCircle className="mt-0.5 h-4 w-4 shrink-0" />
-                                <div>
-                                  <div className="font-bold">
-                                    Không có bảng giá dành cho đại lý
-                                  </div>
-                                  <div className="mt-0.5 leading-5">
-                                    Sản phẩm mã{" "}
-                                    <span className="font-mono font-bold">
-                                      {displayProductCode || productCode}
-                                    </span>{" "}
-                                    chưa có giá trong Bảng giá chung. Không thể
-                                    tạo đơn đại lý với sản phẩm này.
-                                  </div>
-                                </div>
-                              </div>
-                            ) : pricingCustomerType === "khach_le" &&
-                              !hasValidRetailPrice(product, item) ? (
-                              <div className="mt-3 flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-xs text-rose-700">
-                                <XCircle className="mt-0.5 h-4 w-4 shrink-0" />
-                                <div>
-                                  <div className="font-bold">
-                                    Sản phẩm đang có giá khách lẻ bằng 0đ
-                                  </div>
-                                  <div className="mt-0.5 leading-5">
-                                    Sản phẩm mã{" "}
-                                    <span className="font-mono font-bold">
-                                      {displayProductCode || productCode}
-                                    </span>{" "}
-                                    chưa có giá hợp lệ trong Bảng giá Khách lẻ
-                                    nên không thể tạo đơn.
-                                  </div>
-                                </div>
-                              </div>
-                            ) : productCampaigns.length > 0 ? (
-                              <div className="mt-3 space-y-2 rounded-xl border border-emerald-200 bg-emerald-50/80 px-3 py-2.5">
-                                <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-emerald-700">
-                                  Chọn 1 trong {productCampaigns.length} chương
-                                  trình khuyến mãi
-                                </div>
-                                <label className="flex cursor-pointer items-center gap-2.5 rounded-xl border border-emerald-100 bg-white px-3 py-2 text-sm font-medium text-slate-600">
-                                  <input
-                                    type="radio"
-                                    name={`promotion-${productCode}-${index}`}
-                                    checked={
-                                      Object.keys(campaignSelections).length ===
-                                      0
-                                    }
-                                    onChange={() =>
-                                      handlePromotionClear(productCode)
-                                    }
-                                    className="h-4 w-4 accent-emerald-600"
-                                  />
-                                  Không áp dụng khuyến mãi
-                                </label>
-                                {productCampaigns.map((campaign) => {
-                                  const campaignId = String(campaign.Id);
-                                  const selection =
-                                    campaignSelections[campaignId];
-                                  const details = getPromotionSelectionDetails({
-                                    item,
-                                    product,
-                                    campaign,
-                                    selection,
-                                  });
-                                  const receivedProductIds =
-                                    getPromotionReceivedProductIds(
-                                      details.promotion,
-                                    );
-                                  const isSelected = Boolean(selection);
+                                ) : null}
 
-                                  return (
-                                    <div
-                                      key={campaign.Id || campaign.Code}
-                                      className={`rounded-xl border px-3 py-2.5 ${
-                                        isSelected
-                                          ? "border-emerald-300 bg-white"
-                                          : "border-emerald-100 bg-emerald-50/40"
-                                      }`}
-                                    >
-                                      <label className="flex cursor-pointer items-start gap-2.5">
+                                {orderPreparation.status === "ready" ? (
+                                  !product ? (
+                                    <div className="mt-3 flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-xs text-rose-700">
+                                      <XCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                                      <div>
+                                        <div className="font-bold">
+                                          Không tìm thấy sản phẩm
+                                        </div>
+                                        <div className="mt-0.5 leading-5">
+                                          Không có sản phẩm nào khớp với mã{" "}
+                                          <span className="font-mono font-bold">
+                                            {productCode || "trống"}
+                                          </span>{" "}
+                                          trên KiotViet.
+                                        </div>
+                                      </div>
+                                    </div>
+                                  ) : pricingCustomerType === "dai_ly" &&
+                                    !hasAgencyPrice(product, item) ? (
+                                    <div className="mt-3 flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-xs text-rose-700">
+                                      <XCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                                      <div>
+                                        <div className="font-bold">
+                                          Không có bảng giá dành cho đại lý
+                                        </div>
+                                        <div className="mt-0.5 leading-5">
+                                          Sản phẩm mã{" "}
+                                          <span className="font-mono font-bold">
+                                            {displayProductCode || productCode}
+                                          </span>{" "}
+                                          chưa có giá trong Bảng giá chung.
+                                          Không thể tạo đơn đại lý với sản phẩm
+                                          này.
+                                        </div>
+                                      </div>
+                                    </div>
+                                  ) : pricingCustomerType === "khach_le" &&
+                                    !hasValidRetailPrice(product, item) ? (
+                                    <div className="mt-3 flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-xs text-rose-700">
+                                      <XCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                                      <div>
+                                        <div className="font-bold">
+                                          Sản phẩm đang có giá khách lẻ bằng 0đ
+                                        </div>
+                                        <div className="mt-0.5 leading-5">
+                                          Sản phẩm mã{" "}
+                                          <span className="font-mono font-bold">
+                                            {displayProductCode || productCode}
+                                          </span>{" "}
+                                          chưa có giá hợp lệ trong Bảng giá
+                                          Khách lẻ nên không thể tạo đơn.
+                                        </div>
+                                      </div>
+                                    </div>
+                                  ) : promotionDisplayGroups.length === 0 &&
+                                    productCampaigns.length > 0 ? (
+                                    <div className="mt-3 space-y-2 rounded-xl border border-emerald-200 bg-emerald-50/80 px-3 py-2.5">
+                                      <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-emerald-700">
+                                        Chọn 1 trong {productCampaigns.length}{" "}
+                                        chương trình khuyến mãi
+                                      </div>
+                                      <label className="flex cursor-pointer items-center gap-2.5 rounded-xl border border-emerald-100 bg-white px-3 py-2 text-sm font-medium text-slate-600">
                                         <input
                                           type="radio"
                                           name={`promotion-${productCode}-${index}`}
-                                          checked={isSelected}
-                                          disabled={
-                                            details.applicationCount < 1
+                                          checked={
+                                            Object.keys(campaignSelections)
+                                              .length === 0
                                           }
-                                          onChange={(event) =>
-                                            handlePromotionCampaignToggle(
-                                              productCode,
-                                              campaignId,
-                                              item,
-                                              event.target.checked,
-                                            )
+                                          onChange={() =>
+                                            handlePromotionClear(productCode)
                                           }
-                                          className="mt-1 h-4 w-4 accent-emerald-600"
+                                          className="h-4 w-4 accent-emerald-600"
                                         />
-                                        <div className="min-w-0 flex-1">
-                                          <div className="text-sm font-semibold leading-5 text-emerald-950">
-                                            {campaign.Name || campaign.Code}
-                                          </div>
-                                          <div className="mt-1 text-xs text-emerald-800/80">
-                                            {[
-                                              campaign.Code,
-                                              formatPromotionRule(
-                                                campaign,
-                                                product,
-                                              ),
-                                              details.applicationCount < 1
-                                                ? "Chưa đủ số lượng"
-                                                : "",
-                                            ]
-                                              .filter(Boolean)
-                                              .join(" · ")}
-                                          </div>
-                                        </div>
+                                        Không áp dụng khuyến mãi
                                       </label>
+                                      {productCampaigns.map((campaign) => {
+                                        const campaignId = String(campaign.Id);
+                                        const selection =
+                                          campaignSelections[campaignId];
+                                        const details =
+                                          getPromotionSelectionDetails({
+                                            item,
+                                            product,
+                                            campaign,
+                                            selection,
+                                            parsedItems: parsed.items,
+                                            productMap:
+                                              orderPreparation.productMap,
+                                            productCampaignMap:
+                                              orderPreparation.productCampaignMap,
+                                          });
+                                        const receivedProductIds =
+                                          getPromotionReceivedProductIds(
+                                            details.promotion,
+                                          );
+                                        const isSelected = Boolean(selection);
 
-                                      {isSelected &&
-                                      details.promotionType === 6 ? (
-                                        <div className="mt-3 space-y-2 border-t border-emerald-100 pt-2">
-                                          <div className="text-xs font-semibold text-emerald-900">
-                                            Chọn sản phẩm tặng: đã chọn{" "}
-                                            {details.selectedGiftQuantity}/
-                                            {details.expectedGiftQuantity}
-                                          </div>
-                                          {receivedProductIds.map(
-                                            (productId) => {
-                                              const receivedProduct =
-                                                orderPreparation.promotionProductMap.get(
-                                                  productId,
-                                                );
-                                              const quantity = Number(
-                                                selection?.giftQuantities?.[
-                                                  productId
-                                                ] || 0,
-                                              );
-
-                                              return (
-                                                <label
-                                                  key={productId}
-                                                  className="flex items-start gap-2 rounded-xl border border-emerald-100 bg-white px-2.5 py-2"
-                                                >
-                                                  <div className="min-w-0 flex-1">
-                                                    <div className="break-words text-xs font-semibold leading-4 text-slate-800">
-                                                      {receivedProduct
-                                                        ? getProductDisplayName(
-                                                            receivedProduct,
-                                                          )
-                                                        : `Sản phẩm #${productId}`}
-                                                    </div>
-                                                    <div className="text-[11px] text-slate-500">
-                                                      {receivedProduct
-                                                        ? getProductDisplayCode(
-                                                            receivedProduct,
-                                                          )
-                                                        : "Không tải được thông tin"}
-                                                    </div>
-                                                  </div>
-                                                  <input
-                                                    type="number"
-                                                    min="0"
-                                                    step="1"
-                                                    value={quantity}
-                                                    disabled={!receivedProduct}
-                                                    onChange={(event) =>
-                                                      handlePromotionGiftQuantityChange(
-                                                        productCode,
-                                                        campaignId,
-                                                        productId,
-                                                        event.target.value,
-                                                      )
-                                                    }
-                                                    className="w-12 shrink-0 rounded-lg border border-slate-200 px-1 py-1.5 text-center text-sm outline-none focus:border-emerald-300"
-                                                  />
-                                                </label>
-                                              );
-                                            },
-                                          )}
+                                        return (
                                           <div
-                                            className={`text-xs font-medium ${
-                                              details.isComplete
-                                                ? "text-emerald-700"
-                                                : "text-amber-700"
+                                            key={campaign.Id || campaign.Code}
+                                            className={`rounded-xl border px-3 py-2.5 ${
+                                              isSelected
+                                                ? "border-emerald-300 bg-white"
+                                                : "border-emerald-100 bg-emerald-50/40"
                                             }`}
                                           >
-                                            {details.isComplete
-                                              ? "Đã đủ quà, chương trình sẽ được thêm vào payload."
-                                              : "Phân bổ đủ số lượng quà để áp chương trình."}
+                                            <label className="flex cursor-pointer items-start gap-2.5">
+                                              <input
+                                                type="radio"
+                                                name={`promotion-${productCode}-${index}`}
+                                                checked={isSelected}
+                                                disabled={
+                                                  details.applicationCount < 1
+                                                }
+                                                onChange={(event) =>
+                                                  handlePromotionCampaignToggle(
+                                                    productCode,
+                                                    campaignId,
+                                                    item,
+                                                    event.target.checked,
+                                                  )
+                                                }
+                                                className="mt-1 h-4 w-4 accent-emerald-600"
+                                              />
+                                              <div className="min-w-0 flex-1">
+                                                <div className="text-sm font-semibold leading-5 text-emerald-950">
+                                                  {campaign.Name ||
+                                                    campaign.Code}
+                                                </div>
+                                                <div className="mt-1 text-xs text-emerald-800/80">
+                                                  {[
+                                                    campaign.Code,
+                                                    formatPromotionRule(
+                                                      campaign,
+                                                      product,
+                                                    ),
+                                                    details.promotionType ===
+                                                      6 &&
+                                                    details.qualifyingItems
+                                                      .length > 1
+                                                      ? `Cộng dồn ${details.purchasedQuantity}/${details.prerequisiteQuantity} từ ${details.qualifyingItems.length} sản phẩm`
+                                                      : "",
+                                                    details.applicationCount < 1
+                                                      ? "Chưa đủ số lượng"
+                                                      : "",
+                                                  ]
+                                                    .filter(Boolean)
+                                                    .join(" · ")}
+                                                </div>
+                                              </div>
+                                            </label>
+
+                                            {isSelected &&
+                                            details.promotionType === 6 ? (
+                                              <div className="mt-3 space-y-2 border-t border-emerald-100 pt-2">
+                                                <div className="text-xs font-semibold text-emerald-900">
+                                                  Chọn sản phẩm tặng: đã chọn{" "}
+                                                  {details.selectedGiftQuantity}
+                                                  /
+                                                  {details.expectedGiftQuantity}
+                                                </div>
+                                                {receivedProductIds.map(
+                                                  (productId) => {
+                                                    const receivedProduct =
+                                                      orderPreparation.promotionProductMap.get(
+                                                        productId,
+                                                      );
+                                                    const quantity = Number(
+                                                      selection
+                                                        ?.giftQuantities?.[
+                                                        productId
+                                                      ] || 0,
+                                                    );
+
+                                                    return (
+                                                      <label
+                                                        key={productId}
+                                                        className="flex items-start gap-2 rounded-xl border border-emerald-100 bg-white px-2.5 py-2"
+                                                      >
+                                                        <div className="min-w-0 flex-1">
+                                                          <div className="break-words text-xs font-semibold leading-4 text-slate-800">
+                                                            {receivedProduct
+                                                              ? getProductDisplayName(
+                                                                  receivedProduct,
+                                                                )
+                                                              : `Sản phẩm #${productId}`}
+                                                          </div>
+                                                          <div className="text-[11px] text-slate-500">
+                                                            {receivedProduct
+                                                              ? getProductDisplayCode(
+                                                                  receivedProduct,
+                                                                )
+                                                              : "Không tải được thông tin"}
+                                                          </div>
+                                                        </div>
+                                                        <input
+                                                          type="number"
+                                                          min="0"
+                                                          step="1"
+                                                          value={quantity}
+                                                          disabled={
+                                                            !receivedProduct
+                                                          }
+                                                          onChange={(event) =>
+                                                            handlePromotionGiftQuantityChange(
+                                                              productCode,
+                                                              campaignId,
+                                                              productId,
+                                                              event.target
+                                                                .value,
+                                                            )
+                                                          }
+                                                          className="w-12 shrink-0 rounded-lg border border-slate-200 px-1 py-1.5 text-center text-sm outline-none focus:border-emerald-300"
+                                                        />
+                                                      </label>
+                                                    );
+                                                  },
+                                                )}
+                                                <div
+                                                  className={`text-xs font-medium ${
+                                                    details.isComplete
+                                                      ? "text-emerald-700"
+                                                      : "text-amber-700"
+                                                  }`}
+                                                >
+                                                  {details.isComplete
+                                                    ? "Đã đủ quà, chương trình sẽ được thêm vào payload."
+                                                    : "Phân bổ đủ số lượng quà để áp chương trình."}
+                                                </div>
+                                              </div>
+                                            ) : isSelected &&
+                                              details.promotionType === 8 ? (
+                                              <div className="mt-3 rounded-xl border border-emerald-100 bg-white px-3 py-2 text-xs font-medium text-emerald-800">
+                                                Giá khuyến mãi sẽ được áp vào
+                                                dòng sản phẩm khi tạo đơn.
+                                              </div>
+                                            ) : isSelected ? (
+                                              <div className="mt-3 text-xs text-amber-700">
+                                                Loại khuyến mãi này chưa được hỗ
+                                                trợ tự động.
+                                              </div>
+                                            ) : null}
                                           </div>
-                                        </div>
-                                      ) : isSelected &&
-                                        details.promotionType === 8 ? (
-                                        <div className="mt-3 rounded-xl border border-emerald-100 bg-white px-3 py-2 text-xs font-medium text-emerald-800">
-                                          Giá khuyến mãi sẽ được áp vào dòng sản
-                                          phẩm khi tạo đơn.
-                                        </div>
-                                      ) : isSelected ? (
-                                        <div className="mt-3 text-xs text-amber-700">
-                                          Loại khuyến mãi này chưa được hỗ trợ
-                                          tự động.
-                                        </div>
-                                      ) : null}
+                                        );
+                                      })}
                                     </div>
-                                  );
-                                })}
+                                  ) : null
+                                ) : null}
                               </div>
-                            ) : (
-                              <div className="mt-3 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2 text-xs text-slate-500">
-                                Sản phẩm không có chương trình khuyến mãi đang
-                                hoạt động.
-                              </div>
-                            )
-                          ) : null}
+                            );
+                          })}
                         </div>
-                      );
-                    })
+                        {productGroup.isPromotionGroup
+                          ? renderPromotionGroupControl(
+                              productGroup.promotionGroup,
+                            )
+                          : null}
+                      </div>
+                    ))
                   ) : (
                     <div className="text-sm text-slate-500">
                       Chưa tách được dòng sản phẩm nào.
