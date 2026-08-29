@@ -83,7 +83,7 @@ const SHIFT_WINDOWS = {
 const EMPTY_SHIFTS = [];
 const GPS_OPTIONS = { enableHighAccuracy: true, timeout: 10000 };
 const SHOW_ATTENDANCE_TASKBAR_RUNNER_DEFAULT = false;
-const RUNNER_GIF_SRC = "/attendance-runner.gif";
+const RUNNER_GIF_SRC = "/assets/attendance-runner.gif";
 const LEAVE_TYPE_LABELS = {
   regular: "Nghỉ phép thường",
   emergency: "Off đột xuất",

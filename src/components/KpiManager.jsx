@@ -7,6 +7,7 @@ import React, {
 } from "react";
 import {
   AlertCircle,
+  CalendarClock,
   CheckCircle2,
   ClipboardCheck,
   Download,
@@ -31,13 +32,6 @@ import { EvidenceThumbnail, KpiEvidenceViewer } from "./attendance/KpiEvidenceVi
 const nowPeriod = () => {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-};
-const dueDateForPeriod = (period) => {
-  const match = String(period || "").match(/^(\d{4})-(\d{2})$/);
-  if (!match) return "";
-  if (period < "2026-08") return `${period}-02`;
-  const date = new Date(Date.UTC(Number(match[1]), Number(match[2]), 1));
-  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-04`;
 };
 const payrollPeriodForKpi = (period) => {
   const match = String(period || "").match(/^(\d{4})-(\d{2})$/);
@@ -116,6 +110,8 @@ export default function KpiManager() {
   const canDelete = fullAccess || permissions.delete === true;
   const canReview = fullAccess || permissions.review_kpi === true || permissions.edit === true;
   const [period, setPeriod] = useState(nowPeriod);
+  const [periodDueDate, setPeriodDueDate] = useState("");
+  const [appliedPeriodDueDate, setAppliedPeriodDueDate] = useState("");
   const [status, setStatus] = useState("ALL");
   const [search, setSearch] = useState("");
   const [rows, setRows] = useState([]);
@@ -136,7 +132,7 @@ export default function KpiManager() {
   const importInputRef = useRef(null);
   const [assignment, setAssignment] = useState({
     employeeCode: "",
-    dueDate: dueDateForPeriod(period),
+    dueDate: "",
     items: [emptyItem()],
   });
 
@@ -148,6 +144,9 @@ export default function KpiManager() {
       const response = await api.get(`/kpi-evaluations?${params}`);
       const loadedRows = response.data?.data || [];
       setRows(loadedRows);
+      const loadedDueDate = loadedRows[0]?.dueDate || "";
+      setPeriodDueDate((current) => current || loadedDueDate);
+      setAppliedPeriodDueDate((current) => current || loadedDueDate);
       const selectableIds = new Set(loadedRows.filter((row) => row.status === "SUBMITTED").map((row) => row._id));
       setSelectedIds((current) => current.filter((id) => selectableIds.has(id)));
     } catch (error) {
@@ -229,10 +228,14 @@ export default function KpiManager() {
 
   function resetAssignment() {
     setEditingId(null);
-    setAssignment({ employeeCode: "", dueDate: dueDateForPeriod(period), items: [emptyItem()] });
+    setAssignment({ employeeCode: "", dueDate: periodDueDate, items: [emptyItem()] });
   }
 
   function openNewAssignment() {
+    if (!periodDueDate) {
+      setMessage({ ok: false, text: "Vui lòng chọn hạn nộp kỳ trước khi giao KPI" });
+      return;
+    }
     resetAssignment();
     setShowAssign(true);
   }
@@ -241,7 +244,7 @@ export default function KpiManager() {
     setEditingId(row._id);
     setAssignment({
       employeeCode: row.employeeCode,
-      dueDate: dueDateForPeriod(row.period || period),
+      dueDate: row.dueDate || "",
       items: row.items.map((item) => {
         const cap = resolveScoreCap(item);
         return {
@@ -293,6 +296,7 @@ export default function KpiManager() {
             period,
           });
       setMessage({ ok: true, text: response.data.message });
+      setPeriodDueDate(assignment.dueDate);
       setShowAssign(false);
       resetAssignment();
       await load();
@@ -399,7 +403,7 @@ export default function KpiManager() {
   }
 
   async function extendSubmission(row) {
-    const current = row.submissionExtensionUntil || row.dueDate || dueDateForPeriod(row.period);
+    const current = row.submissionExtensionUntil || row.dueDate || "";
     const extensionUntil = window.prompt(
       `Gia hạn nộp KPI tháng ${row.period} đến ngày (YYYY-MM-DD). Để trống để hủy gia hạn:`,
       current,
@@ -420,7 +424,94 @@ export default function KpiManager() {
     }
   }
 
+  async function extendAllSubmissions() {
+    const current = rows.find((row) => row.submissionExtensionUntil)
+      ?.submissionExtensionUntil || periodDueDate;
+    const extensionUntil = window.prompt(
+      `Gia hạn hạn nộp KPI tháng ${period} cho TẤT CẢ nhân viên đến ngày (YYYY-MM-DD). Thao tác áp dụng cho toàn bộ phiếu chưa duyệt trong kỳ, không phụ thuộc bộ lọc hiện tại:`,
+      current,
+    );
+    if (extensionUntil === null) return;
+    const normalizedDate = extensionUntil.trim();
+    if (!normalizedDate) {
+      setMessage({ ok: false, text: "Vui lòng nhập ngày gia hạn" });
+      return;
+    }
+    if (!window.confirm(
+      `Xác nhận gia hạn toàn bộ KPI tháng ${period} đến ngày ${normalizedDate.split("-").reverse().join("/")}?`,
+    )) return;
+
+    setBusy(true);
+    setMessage(null);
+    try {
+      const response = await api.patch("/kpi-evaluations/bulk-submission-extension", {
+        period,
+        extensionUntil: normalizedDate,
+      });
+      setMessage({ ok: true, text: response.data.message });
+      await load();
+    } catch (error) {
+      setMessage({
+        ok: false,
+        text: error.response?.data?.message || "Không thể gia hạn KPI hàng loạt",
+      });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function changePeriodDueDate(nextDueDate) {
+    if (!nextDueDate) {
+      setPeriodDueDate("");
+      return;
+    }
+    if (!canEdit) {
+      setPeriodDueDate(nextDueDate);
+      return;
+    }
+    const confirmed = window.confirm(
+      `Đổi hạn nộp KPI tháng ${period} thành ${nextDueDate.split("-").reverse().join("/")} cho TẤT CẢ nhân viên?\n\nCác gia hạn riêng trong kỳ sẽ được hủy để mọi nhân viên dùng cùng hạn mới.`,
+    );
+    if (!confirmed) {
+      setPeriodDueDate(appliedPeriodDueDate);
+      return;
+    }
+
+    setPeriodDueDate(nextDueDate);
+    setBusy(true);
+    setMessage(null);
+    try {
+      const response = await api.patch("/kpi-evaluations/bulk-due-date", {
+        period,
+        dueDate: nextDueDate,
+      });
+      setAppliedPeriodDueDate(nextDueDate);
+      setMessage({ ok: true, text: response.data.message });
+      await load();
+    } catch (error) {
+      if (error.response?.status === 404) {
+        setAppliedPeriodDueDate(nextDueDate);
+        setMessage({
+          ok: true,
+          text: `Đã chọn hạn nộp ${nextDueDate.split("-").reverse().join("/")} cho các KPI sẽ giao/import trong kỳ này`,
+        });
+      } else {
+        setPeriodDueDate(appliedPeriodDueDate);
+        setMessage({
+          ok: false,
+          text: error.response?.data?.message || "Không thể đổi hạn nộp KPI",
+        });
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function downloadImportTemplate() {
+    if (!periodDueDate) {
+      setMessage({ ok: false, text: "Vui lòng chọn hạn nộp kỳ trước khi tải file mẫu" });
+      return;
+    }
     const ExcelJS = (await import("exceljs")).default;
     const { saveAs } = await import("file-saver");
     const workbook = new ExcelJS.Workbook();
@@ -435,7 +526,7 @@ export default function KpiManager() {
         "Mỗi dòng là một tiêu chí KPI của một nhân viên.",
       ],
       ["Kỳ KPI", period],
-      ["Hạn nộp", `Ngày ${dueDateForPeriod(period).split("-").reverse().join("/")}. Điểm được tính vào bảng lương ${payrollPeriodForKpi(period)}.`],
+      ["Hạn nộp", `Ngày ${periodDueDate.split("-").reverse().join("/")}. Điểm được tính vào bảng lương ${payrollPeriodForKpi(period)}.`],
       [
         "Quy tắc",
         "Các dòng cùng MSNV sẽ được gom thành một phiếu. Tổng điểm tiêu chuẩn của mỗi nhân viên phải bằng 100.",
@@ -561,6 +652,11 @@ export default function KpiManager() {
 
   async function readImportFile(file) {
     if (!file) return;
+    if (!periodDueDate) {
+      setMessage({ ok: false, text: "Vui lòng chọn hạn nộp kỳ trước khi import" });
+      if (importInputRef.current) importInputRef.current.value = "";
+      return;
+    }
     setBusy(true);
     setMessage(null);
     try {
@@ -606,6 +702,7 @@ export default function KpiManager() {
       setImportRows(rows);
       const response = await api.post("/kpi-evaluations/bulk-import", {
         period,
+        dueDate: periodDueDate,
         rows,
         dryRun: true,
       });
@@ -634,6 +731,7 @@ export default function KpiManager() {
     try {
       const response = await api.post("/kpi-evaluations/bulk-import", {
         period,
+        dueDate: periodDueDate,
         rows: importRows,
         dryRun: false,
       });
@@ -744,9 +842,23 @@ export default function KpiManager() {
             <input
               type="month"
               value={period}
-              onChange={(event) => setPeriod(event.target.value)}
+              onChange={(event) => {
+                setPeriod(event.target.value);
+                setPeriodDueDate("");
+                setAppliedPeriodDueDate("");
+              }}
               className="rounded-xl border px-3 py-2 text-sm"
             />
+            <label className="flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600">
+              Hạn nộp kỳ
+              <input
+                type="date"
+                value={periodDueDate}
+                onChange={(event) => changePeriodDueDate(event.target.value)}
+                disabled={busy}
+                className="border-0 bg-transparent py-1 text-sm font-semibold text-slate-800 outline-none"
+              />
+            </label>
             <select
               value={status}
               onChange={(event) => setStatus(event.target.value)}
@@ -772,6 +884,18 @@ export default function KpiManager() {
               <RefreshCcw size={16} className={loading ? "animate-spin" : ""} />
               Tải lại
             </button>
+            {canEdit && (
+              <button
+                type="button"
+                onClick={extendAllSubmissions}
+                disabled={busy}
+                title={`Gia hạn hạn nộp cho tất cả nhân viên trong kỳ ${period}`}
+                className="inline-flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-bold text-amber-700 hover:bg-amber-100 disabled:opacity-50"
+              >
+                {busy ? <Loader2 size={16} className="animate-spin" /> : <CalendarClock size={16} />}
+                Gia hạn tất cả
+              </button>
+            )}
             {canReview && selectedIds.length > 0 && (
               <button
                 type="button"
@@ -1148,8 +1272,10 @@ export default function KpiManager() {
                   Hạn nộp
                   <input
                     type="date"
-                    value={dueDateForPeriod(period)}
+                    required
+                    value={assignment.dueDate}
                     disabled
+                    title="Thay đổi tại ô Hạn nộp kỳ trên danh sách để áp dụng cho tất cả nhân viên"
                     className="mt-1 w-full rounded-xl border bg-slate-100 px-3 py-2"
                   />
                 </label>

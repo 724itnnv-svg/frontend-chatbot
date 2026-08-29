@@ -38,6 +38,12 @@ const APP_PERMISSIONS = {
       screenIds: ["employee_profiles", "employee_assets", "users", "roles"],
     },
     {
+      id: "operations",
+      name: "Vận hành",
+      description: "Quản lý thời hạn hợp đồng dịch vụ, tiện ích và tài sản",
+      screenIds: ["operational_contracts"],
+    },
+    {
       id: "finance",
       name: "Tính toán",
       description: "Công cụ tính hoa hồng",
@@ -97,6 +103,7 @@ const APP_PERMISSIONS = {
     { id: "notifications", name: "Thông Báo Thiết Bị" },
     { id: "employee_profiles", name: "Hồ Sơ Nhân Sự" },
     { id: "employee_assets", name: "Kho Tài Sản & Vật Tư" },
+    { id: "operational_contracts", name: "Hợp Đồng Dịch Vụ & Tài Sản" },
     { id: "users", name: "Người Dùng" },
     { id: "roles", name: "Phân quyền" },
     { id: "commission_online", name: "Tính Hoa Hồng Online" },
