@@ -48,6 +48,7 @@ import {
   CircleDollarSign,
   Eye,
   FileCheck2,
+  Files,
   Target,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
@@ -135,6 +136,12 @@ const MENU_CONFIG = [
     path: "/admin/employee-assets",
     label: "Kho tài sản & vật tư",
     icon: PackageSearch,
+  },
+  {
+    id: "operational_contracts",
+    path: "/admin/operational-contracts",
+    label: "Hợp đồng dịch vụ & tài sản",
+    icon: Files,
   },
   { id: "users", path: "/admin/users", label: "Người dùng", icon: Users },
   { id: "roles", path: "/admin/roles", label: "Phân quyền", icon: Users },
@@ -341,6 +348,12 @@ const MENU_GROUPS = [
     label: "Nhân sự",
     icon: Users,
     items: ["employee_profiles", "employee_assets", "users", "roles"],
+  },
+  {
+    id: "operations",
+    label: "Vận hành",
+    icon: Files,
+    items: ["operational_contracts"],
   },
   {
     id: "finance",

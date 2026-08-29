@@ -1,5 +1,6 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
+  AlertCircle,
   Download,
   File,
   FileArchive,
@@ -55,6 +56,148 @@ function downloadUrl(url = "") {
   return `${url}${url.includes("?") ? "&" : "?"}download=1`;
 }
 
+function OfficeFilePreview({ evidence, kind }) {
+  const extension = extensionOf(evidence.name || evidence.originalName || evidence.filename);
+  const docxContainerRef = useRef(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [sheets, setSheets] = useState([]);
+  const [activeSheet, setActiveSheet] = useState(0);
+  const [plainText, setPlainText] = useState("");
+
+  useEffect(() => {
+    const controller = new AbortController();
+    async function renderFile() {
+      setLoading(true);
+      setError("");
+      setSheets([]);
+      setActiveSheet(0);
+      setPlainText("");
+      try {
+        const response = await fetch(evidence.url, {
+          credentials: "include",
+          signal: controller.signal,
+        });
+        if (!response.ok) throw new Error("Không thể tải nội dung tệp để xem trước");
+
+        if (extension === "docx") {
+          const container = docxContainerRef.current;
+          if (!container) throw new Error("Không thể khởi tạo vùng xem Word");
+          container.replaceChildren();
+          const { renderAsync } = await import("docx-preview");
+          await renderAsync(await response.arrayBuffer(), container, container, {
+            inWrapper: true,
+            breakPages: true,
+            ignoreWidth: false,
+            ignoreHeight: false,
+            renderHeaders: true,
+            renderFooters: true,
+            renderFootnotes: true,
+            renderEndnotes: true,
+            useBase64URL: true,
+          });
+        } else if (kind === "spreadsheet") {
+          const XLSX = await import("xlsx");
+          const workbook = XLSX.read(await response.arrayBuffer(), { type: "array" });
+          setSheets(workbook.SheetNames.map((name) => {
+            const allRows = XLSX.utils.sheet_to_json(workbook.Sheets[name], {
+              header: 1,
+              defval: "",
+              raw: false,
+            });
+            const maxColumns = Math.min(100, allRows.reduce(
+              (maximum, row) => Math.max(maximum, row.length),
+              0,
+            ));
+            return {
+              name,
+              rows: allRows.slice(0, 500).map((row) => row.slice(0, maxColumns)),
+              truncated: allRows.length > 500 || allRows.some((row) => row.length > 100),
+            };
+          }));
+        } else if (["txt", "csv"].includes(extension)) {
+          setPlainText(await response.text());
+        } else {
+          throw new Error("Định dạng Word này chưa hỗ trợ xem trực tiếp. Vui lòng dùng tệp .docx hoặc tải xuống để mở.");
+        }
+      } catch (requestError) {
+        if (requestError.name !== "AbortError") {
+          setError(requestError.message || "Không thể hiển thị tệp");
+        }
+      } finally {
+        if (!controller.signal.aborted) setLoading(false);
+      }
+    }
+    void renderFile();
+    return () => controller.abort();
+  }, [evidence.url, extension, kind]);
+
+  const sheet = sheets[activeSheet];
+  return (
+    <div className="relative h-[78vh] w-full overflow-auto rounded-lg bg-white">
+      {loading && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/90 text-sm font-semibold text-violet-700">
+          Đang dựng bản xem trước...
+        </div>
+      )}
+      {error && (
+        <div className="flex h-full items-center justify-center p-6">
+          <div className="max-w-lg rounded-2xl border border-amber-200 bg-amber-50 p-6 text-center text-amber-800">
+            <AlertCircle className="mx-auto mb-3" size={34} />
+            <p className="font-bold">Không thể xem trực tiếp tệp này</p>
+            <p className="mt-2 text-sm">{error}</p>
+          </div>
+        </div>
+      )}
+      {!error && extension === "docx" && (
+        <div ref={docxContainerRef} className="min-h-full bg-slate-200 py-4 [&_.docx-wrapper]:!bg-slate-200 [&_.docx-wrapper>section.docx]:!shadow-md" />
+      )}
+      {!error && plainText && (
+        <pre className="min-h-full whitespace-pre-wrap break-words p-5 font-mono text-sm text-slate-700">{plainText}</pre>
+      )}
+      {!error && sheets.length > 0 && (
+        <div className="flex min-h-full flex-col">
+          <div className="sticky left-0 top-0 z-20 flex gap-1 overflow-x-auto border-b bg-slate-100 p-2">
+            {sheets.map((entry, index) => (
+              <button
+                key={entry.name}
+                type="button"
+                onClick={() => setActiveSheet(index)}
+                className={`shrink-0 rounded-lg px-3 py-1.5 text-xs font-bold ${index === activeSheet ? "bg-emerald-600 text-white" : "bg-white text-slate-600 hover:bg-slate-200"}`}
+              >
+                {entry.name}
+              </button>
+            ))}
+          </div>
+          {sheet?.truncated && (
+            <p className="sticky left-0 border-b border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+              Bản xem trước giới hạn 500 dòng và 100 cột. Tải xuống để xem toàn bộ dữ liệu.
+            </p>
+          )}
+          <div className="overflow-auto">
+            <table className="border-collapse text-xs text-slate-700">
+              <tbody>
+                {(sheet?.rows || []).map((row, rowIndex) => (
+                  <tr key={rowIndex} className={rowIndex === 0 ? "bg-emerald-50 font-bold" : "bg-white"}>
+                    <th className="sticky left-0 border border-slate-200 bg-slate-100 px-2 py-1 text-right font-normal text-slate-400">
+                      {rowIndex + 1}
+                    </th>
+                    {row.map((cell, cellIndex) => (
+                      <td key={cellIndex} className="max-w-80 whitespace-pre-wrap border border-slate-200 px-2 py-1.5 align-top">
+                        {String(cell ?? "")}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function EvidenceThumbnail({ evidence, url, onOpen, className = "" }) {
   const name = evidence.originalName || evidence.filename || "Tệp minh chứng KPI";
   const preview = { ...evidence, url, name };
@@ -93,8 +236,10 @@ export function KpiEvidenceViewer({ evidence, onClose }) {
 
   if (!evidence) return null;
   const kind = evidenceKind(evidence);
+  const extension = extensionOf(evidence.name || evidence.originalName || evidence.filename);
   const size = formatFileSize(evidence.size);
-  const canPreview = ["image", "video", "audio", "pdf"].includes(kind);
+  const canPreviewOffice = kind === "spreadsheet" || ["docx", "txt"].includes(extension);
+  const canPreview = ["image", "video", "audio", "pdf"].includes(kind) || canPreviewOffice;
 
   return (
     <div
@@ -134,6 +279,7 @@ export function KpiEvidenceViewer({ evidence, onClose }) {
           {kind === "video" && <video src={evidence.url} controls className="max-h-[82vh] max-w-full" />}
           {kind === "audio" && <audio src={evidence.url} controls className="w-full max-w-xl" />}
           {kind === "pdf" && <iframe src={evidence.url} title={evidence.name} className="h-[78vh] w-full rounded-lg bg-white" />}
+          {canPreviewOffice && <OfficeFilePreview evidence={evidence} kind={kind} />}
           {!canPreview && (
             <div className="mx-auto flex max-w-md flex-col items-center rounded-2xl bg-white p-8 text-center shadow-sm">
               <span className="mb-4 rounded-2xl bg-violet-50 p-4 text-violet-600"><FileKindIcon kind={kind} size={48} /></span>

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertCircle,
   CheckCircle2,
+  ClipboardPaste,
   Loader2,
   RefreshCcw,
   Save,
@@ -9,6 +10,7 @@ import {
   Target,
   Trash2,
   Upload,
+  X,
 } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import { getApiBaseUrl } from "../../api/baseUrl";
@@ -37,6 +39,32 @@ const STATUS = {
 
 const isEditable = (status) =>
   ["ASSIGNED", "DRAFT", "REVISION_REQUESTED"].includes(status);
+
+const EMPLOYEE_DRAFT_FIELDS = [
+  "employeeActual",
+  "employeeActualText",
+  "employeeScore",
+  "employeeNote",
+];
+
+function mergeServerEvaluationPreservingDraft(current, serverEvaluation) {
+  if (!current || !serverEvaluation) return serverEvaluation || current;
+  const currentItems = new Map(
+    (current.items || []).map((item) => [String(item._id), item]),
+  );
+  return {
+    ...serverEvaluation,
+    employeeSummary: current.employeeSummary,
+    items: (serverEvaluation.items || []).map((serverItem) => {
+      const currentItem = currentItems.get(String(serverItem._id));
+      if (!currentItem) return serverItem;
+      return EMPLOYEE_DRAFT_FIELDS.reduce(
+        (merged, field) => ({ ...merged, [field]: currentItem[field] }),
+        { ...serverItem },
+      );
+    }),
+  };
+}
 
 function thresholdRuleText(item) {
   if (item.scoringType !== "threshold") return "";
@@ -83,6 +111,10 @@ export default function KpiSelfAssessment() {
   const [deletingEvidenceId, setDeletingEvidenceId] = useState("");
   const [message, setMessage] = useState(null);
   const [previewEvidence, setPreviewEvidence] = useState(null);
+  const [uploadTargetItem, setUploadTargetItem] = useState(null);
+  const [pendingEvidenceFiles, setPendingEvidenceFiles] = useState([]);
+  const [uploadModalError, setUploadModalError] = useState("");
+  const [isDraggingEvidence, setIsDraggingEvidence] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -191,11 +223,11 @@ export default function KpiSelfAssessment() {
 
   async function uploadEvidences(item, files) {
     const selected = Array.from(files || []);
-    if (!selected.length || !evaluation) return;
+    if (!selected.length || !evaluation) return false;
     const oversizedFile = selected.find((file) => file.size > 50 * 1024 * 1024);
     if (oversizedFile) {
       setMessage({ ok: false, text: `Tệp "${oversizedFile.name}" vượt quá giới hạn 50 MB.` });
-      return;
+      return false;
     }
     const remaining = 20 - (item.evidences?.length || 0);
     if (selected.length > remaining) {
@@ -203,27 +235,110 @@ export default function KpiSelfAssessment() {
         ok: false,
         text: `Tiêu chí này chỉ có thể tải thêm ${remaining} tệp.`,
       });
-      return;
+      return false;
     }
+    const savedEvaluation = await saveDraft(false);
+    if (!savedEvaluation) return false;
     const body = new FormData();
     selected.forEach((file) => body.append("evidence", file));
     setUploadingItemId(item._id);
     setMessage(null);
     try {
       const response = await api.post(
-        `/kpi-evaluations/my/${evaluation._id}/items/${item._id}/evidences`,
+        `/kpi-evaluations/my/${savedEvaluation._id}/items/${item._id}/evidences`,
         body,
       );
-      setEvaluation(response.data.data);
+      setEvaluation((current) =>
+        mergeServerEvaluationPreservingDraft(current, response.data.data));
       setMessage({ ok: true, text: response.data.message });
+      return true;
     } catch (error) {
       setMessage({
         ok: false,
         text: error.response?.data?.message || "Không thể tải tệp minh chứng",
       });
+      return false;
     } finally {
       setUploadingItemId("");
     }
+  }
+
+  function openEvidenceUpload(item) {
+    setUploadTargetItem(item);
+    setPendingEvidenceFiles([]);
+    setUploadModalError("");
+    setIsDraggingEvidence(false);
+  }
+
+  function closeEvidenceUpload() {
+    if (uploadingItemId) return;
+    setUploadTargetItem(null);
+    setPendingEvidenceFiles([]);
+    setUploadModalError("");
+    setIsDraggingEvidence(false);
+  }
+
+  function addPendingEvidenceFiles(files) {
+    if (!uploadTargetItem) return;
+    const selected = Array.from(files || []).filter(Boolean);
+    if (!selected.length) return;
+    const oversizedFile = selected.find((file) => file.size > 50 * 1024 * 1024);
+    if (oversizedFile) {
+      setUploadModalError(`Tệp "${oversizedFile.name}" vượt quá giới hạn 50 MB.`);
+      return;
+    }
+    const remaining = 20 - (uploadTargetItem.evidences?.length || 0);
+    setPendingEvidenceFiles((current) => {
+      const unique = selected.filter((file) => !current.some(
+        (existing) => existing.name === file.name
+          && existing.size === file.size
+          && existing.lastModified === file.lastModified,
+      ));
+      if (current.length + unique.length > remaining) {
+        setUploadModalError(`Tiêu chí này chỉ có thể tải thêm ${remaining} tệp.`);
+        return current;
+      }
+      setUploadModalError("");
+      return [...current, ...unique];
+    });
+  }
+
+  function pasteEvidenceImage(event) {
+    if (!isEditable(evaluation?.status)) return;
+    let pastedFiles = Array.from(event.clipboardData?.files || []).filter(
+      (file) => file.type?.startsWith("image/"),
+    );
+    if (!pastedFiles.length) {
+      pastedFiles = Array.from(event.clipboardData?.items || [])
+        .filter(
+          (clipboardItem) =>
+            clipboardItem.kind === "file" &&
+            clipboardItem.type?.startsWith("image/"),
+        )
+        .map((clipboardItem) => clipboardItem.getAsFile())
+        .filter(Boolean);
+    }
+    if (!pastedFiles.length) return;
+
+    event.preventDefault();
+    const capturedAt = Date.now();
+    const namedFiles = pastedFiles.map((file, index) => {
+      const extension = file.type === "image/jpeg"
+        ? "jpg"
+        : file.type?.split("/")[1]?.replace(/[^a-z0-9]/gi, "") || "png";
+      return new File(
+        [file],
+        `anh-chup-kpi-${capturedAt}-${index + 1}.${extension}`,
+        { type: file.type || "image/png", lastModified: capturedAt },
+      );
+    });
+    addPendingEvidenceFiles(namedFiles);
+  }
+
+  async function confirmEvidenceUpload() {
+    if (!uploadTargetItem || !pendingEvidenceFiles.length) return;
+    const uploaded = await uploadEvidences(uploadTargetItem, pendingEvidenceFiles);
+    if (uploaded) closeEvidenceUpload();
   }
 
   async function deleteEvidence(item, evidence) {
@@ -234,7 +349,8 @@ export default function KpiSelfAssessment() {
       const response = await api.delete(
         `/kpi-evaluations/my/${evaluation._id}/items/${item._id}/evidences/${evidence._id}`,
       );
-      setEvaluation(response.data.data);
+      setEvaluation((current) =>
+        mergeServerEvaluationPreservingDraft(current, response.data.data));
       setMessage({ ok: true, text: response.data.message });
     } catch (error) {
       setMessage({
@@ -511,26 +627,21 @@ export default function KpiSelfAssessment() {
                         </div>
                       )}
                       {canEdit && (item.evidences?.length || 0) < 20 && (
-                        <label className="mt-2 flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-violet-300 bg-violet-50 px-3 py-3 font-semibold text-violet-700 hover:bg-violet-100">
-                          <input
-                            type="file"
-                            multiple
-                            className="hidden"
-                            disabled={uploadingItemId === item._id}
-                            onChange={(event) => {
-                              uploadEvidences(item, event.target.files);
-                              event.target.value = "";
-                            }}
-                          />
+                        <button
+                          type="button"
+                          disabled={Boolean(uploadingItemId)}
+                          onClick={() => openEvidenceUpload(item)}
+                          className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-violet-300 bg-violet-50 px-3 py-3 font-semibold text-violet-700 hover:bg-violet-100 disabled:opacity-50"
+                        >
                           {uploadingItemId === item._id ? (
                             <Loader2 size={17} className="animate-spin" />
-                          ) : <Upload size={17} />}
+                          ) : (
+                            <Upload size={17} />
+                          )}
                           {uploadingItemId === item._id
                             ? "Đang tải tệp lên Drive..."
-                            : (item.evidences?.length || 0) > 0
-                              ? "Thêm tệp"
-                              : "Chọn tệp minh chứng (tối đa 50 MB/tệp)"}
-                        </label>
+                            : "Thêm minh chứng"}
+                        </button>
                       )}
                     </div>
                   </div>
@@ -587,6 +698,163 @@ export default function KpiSelfAssessment() {
             )}
           </div>
         </>
+      )}
+      {uploadTargetItem && (
+        <div
+          className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/50 p-3 sm:p-6"
+          onPaste={pasteEvidenceImage}
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) closeEvidenceUpload();
+          }}
+        >
+          <div className="w-full max-w-2xl overflow-hidden rounded-2xl bg-white shadow-2xl">
+            <div className="flex items-start justify-between gap-3 border-b px-5 py-4">
+              <div>
+                <h3 className="font-black text-slate-900">Thêm minh chứng KPI</h3>
+                <p className="mt-1 text-xs text-slate-500">
+                  {uploadTargetItem.name} · Đã có {uploadTargetItem.evidences?.length || 0}/20 tệp
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={closeEvidenceUpload}
+                disabled={Boolean(uploadingItemId)}
+                className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 disabled:opacity-50"
+                aria-label="Đóng form tải minh chứng"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="space-y-4 p-5">
+              <label
+                onDragEnter={(event) => {
+                  event.preventDefault();
+                  setIsDraggingEvidence(true);
+                }}
+                onDragOver={(event) => {
+                  event.preventDefault();
+                  event.dataTransfer.dropEffect = "copy";
+                  setIsDraggingEvidence(true);
+                }}
+                onDragLeave={(event) => {
+                  event.preventDefault();
+                  if (!event.currentTarget.contains(event.relatedTarget)) {
+                    setIsDraggingEvidence(false);
+                  }
+                }}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  setIsDraggingEvidence(false);
+                  addPendingEvidenceFiles(event.dataTransfer.files);
+                }}
+                className={`flex min-h-52 cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed px-5 py-8 text-center transition ${isDraggingEvidence ? "border-violet-500 bg-violet-100" : "border-violet-300 bg-violet-50 hover:bg-violet-100"}`}
+              >
+                <input
+                  type="file"
+                  multiple
+                  className="hidden"
+                  disabled={Boolean(uploadingItemId)}
+                  onChange={(event) => {
+                    addPendingEvidenceFiles(event.target.files);
+                    event.target.value = "";
+                  }}
+                />
+                <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white text-violet-600 shadow-sm">
+                  <Upload size={24} />
+                </span>
+                <p className="mt-3 font-bold text-slate-800">
+                  Kéo thả tệp vào đây hoặc bấm để chọn từ máy
+                </p>
+                <p className="mt-2 flex items-center gap-1.5 text-sm font-semibold text-sky-700">
+                  <ClipboardPaste size={16} />
+                  Có thể nhấn Ctrl + V để dán ảnh vừa chụp bằng Win + Shift + S
+                </p>
+                <p className="mt-2 text-xs text-slate-500">
+                  Tối đa 20 tệp cho mỗi tiêu chí, không quá 50 MB/tệp
+                </p>
+              </label>
+
+              {uploadModalError && (
+                <div className="flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                  <AlertCircle size={17} />
+                  {uploadModalError}
+                </div>
+              )}
+
+              {pendingEvidenceFiles.length > 0 && (
+                <div>
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <p className="text-sm font-bold text-slate-700">
+                      Tệp đã chọn ({pendingEvidenceFiles.length})
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setPendingEvidenceFiles([])}
+                      disabled={Boolean(uploadingItemId)}
+                      className="text-xs font-semibold text-rose-600 hover:underline disabled:opacity-50"
+                    >
+                      Bỏ chọn tất cả
+                    </button>
+                  </div>
+                  <div className="max-h-44 space-y-2 overflow-y-auto pr-1">
+                    {pendingEvidenceFiles.map((file, index) => (
+                      <div
+                        key={`${file.name}-${file.size}-${file.lastModified}-${index}`}
+                        className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2"
+                      >
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold text-slate-700">{file.name}</p>
+                          <p className="text-xs text-slate-400">
+                            {file.size < 1024 * 1024
+                              ? `${Math.max(1, Math.round(file.size / 1024))} KB`
+                              : `${(file.size / 1024 / 1024).toFixed(2)} MB`}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          disabled={Boolean(uploadingItemId)}
+                          onClick={() => setPendingEvidenceFiles((current) =>
+                            current.filter((_, fileIndex) => fileIndex !== index))}
+                          className="rounded-lg p-1.5 text-rose-600 hover:bg-rose-100 disabled:opacity-50"
+                          aria-label={`Bỏ tệp ${file.name}`}
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-2 border-t bg-slate-50 px-5 py-4">
+              <button
+                type="button"
+                onClick={closeEvidenceUpload}
+                disabled={Boolean(uploadingItemId)}
+                className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-100 disabled:opacity-50"
+              >
+                Hủy
+              </button>
+              <button
+                type="button"
+                onClick={confirmEvidenceUpload}
+                disabled={!pendingEvidenceFiles.length || Boolean(uploadingItemId)}
+                className="inline-flex items-center gap-2 rounded-xl bg-violet-600 px-4 py-2 text-sm font-bold text-white hover:bg-violet-700 disabled:opacity-50"
+              >
+                {uploadingItemId ? (
+                  <Loader2 size={17} className="animate-spin" />
+                ) : (
+                  <Upload size={17} />
+                )}
+                {uploadingItemId
+                  ? "Đang tải lên Drive..."
+                  : `Tải lên ${pendingEvidenceFiles.length || ""} tệp`}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
       <KpiEvidenceViewer evidence={previewEvidence} onClose={() => setPreviewEvidence(null)} />
     </section>
