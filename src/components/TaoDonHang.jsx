@@ -323,6 +323,77 @@ function normalizeDisplayText(value = "") {
     .trim();
 }
 
+const VIETNAM_PROVINCE_NAMES = [
+  "An Giang", "Bà Rịa - Vũng Tàu", "Bắc Giang", "Bắc Kạn", "Bạc Liêu",
+  "Bắc Ninh", "Bến Tre", "Bình Định", "Bình Dương", "Bình Phước",
+  "Bình Thuận", "Cà Mau", "Cần Thơ", "Cao Bằng", "Đà Nẵng", "Đắk Lắk",
+  "Đắk Nông", "Điện Biên", "Đồng Nai", "Đồng Tháp", "Gia Lai", "Hà Giang",
+  "Hà Nam", "Hà Nội", "Hà Tĩnh", "Hải Dương", "Hải Phòng", "Hậu Giang",
+  "Hòa Bình", "Hồ Chí Minh", "Hưng Yên", "Khánh Hòa", "Kiên Giang",
+  "Kon Tum", "Lai Châu", "Lâm Đồng", "Lạng Sơn", "Lào Cai", "Long An",
+  "Nam Định", "Nghệ An", "Ninh Bình", "Ninh Thuận", "Phú Thọ", "Phú Yên",
+  "Quảng Bình", "Quảng Nam", "Quảng Ngãi", "Quảng Ninh", "Quảng Trị",
+  "Sóc Trăng", "Sơn La", "Tây Ninh", "Thái Bình", "Thái Nguyên",
+  "Thanh Hóa", "Thừa Thiên Huế", "Huế", "Tiền Giang", "Trà Vinh",
+  "Tuyên Quang", "Vĩnh Long", "Vĩnh Phúc", "Yên Bái",
+];
+
+function findProvinceAtAddressEnd(value = "") {
+  const normalizedAddress = normalizeLookupText(value);
+  if (!normalizedAddress) return "";
+
+  return (
+    [...VIETNAM_PROVINCE_NAMES]
+      .sort((left, right) => right.length - left.length)
+      .find((provinceName) => {
+        const normalizedProvince = normalizeLookupText(provinceName);
+        return (
+          normalizedAddress === normalizedProvince ||
+          normalizedAddress.endsWith(` ${normalizedProvince}`)
+        );
+      }) || ""
+  );
+}
+
+function extractUnseparatedAdministrativeParts(value = "") {
+  const text = normalizeDisplayText(value);
+  const provinceName = findProvinceAtAddressEnd(text);
+  if (!provinceName) return null;
+
+  const normalizedAddress = normalizeLookupText(text);
+  const normalizedProvince = normalizeLookupText(provinceName);
+  const provincePrefix = normalizedAddress.endsWith(`tinh ${normalizedProvince}`)
+    ? "Tỉnh"
+    : normalizedAddress.endsWith(`thanh pho ${normalizedProvince}`) ||
+        normalizedAddress.endsWith(`tp ${normalizedProvince}`)
+      ? "Thành phố"
+      : "";
+  const province = [provincePrefix, provinceName].filter(Boolean).join(" ");
+  const districtMatch = text.match(
+    /(?:^|\s)(Quận|Huyện|Thị xã|Thành phố|TP\.?)\s+(.+?)(?=\s+(?:Tỉnh|Thành phố|TP\.?)\s+[^,]+$)/iu,
+  );
+  const wardMatch = districtMatch
+    ? text.match(
+        /(?:^|\s)(Phường|Xã|Thị trấn)\s+(.+?)(?=\s+(?:Quận|Huyện|Thị xã|Thành phố|TP\.?|Tỉnh)\s+)/iu,
+      )
+    : null;
+  const firstAdministrativePosition = [wardMatch?.index, districtMatch?.index]
+    .filter((index) => Number.isInteger(index) && index >= 0)
+    .sort((left, right) => left - right)[0];
+
+  return {
+    street:
+      firstAdministrativePosition != null
+        ? text.slice(0, firstAdministrativePosition).trim()
+        : text,
+    ward: wardMatch ? `${wardMatch[1]} ${wardMatch[2]}`.trim() : "",
+    district: districtMatch
+      ? `${districtMatch[1]} ${districtMatch[2]}`.trim()
+      : "",
+    province,
+  };
+}
+
 function getAdministrativeAreaDisplayName(
   value = "",
   record = null,
@@ -742,6 +813,11 @@ function parseVietnamAddressParts(value = "") {
     .map((part) => part.trim())
     .filter(Boolean);
 
+  if (parts.length === 1) {
+    const unseparatedParts = extractUnseparatedAdministrativeParts(text);
+    if (unseparatedParts) return unseparatedParts;
+  }
+
   const provinceIndex = parts.length - 1;
   const wardIndex = parts.findIndex((part) =>
     /^(Phường|Xã|Thị trấn)\s+/iu.test(part),
@@ -768,6 +844,49 @@ function parseVietnamAddressParts(value = "") {
   };
 }
 
+function getDistrictNameFromLocationRow(row = {}) {
+  const rowName = normalizeDisplayText(
+    row?.Name || row?.FullName || row?.CompareName || row?.NormalName || "",
+  );
+  const districtPart = rowName.split("-").pop()?.trim() || rowName;
+  return districtPart
+    .replace(/^(Quận|Huyện|Thị xã|Thành phố|TP\.?)\s+/iu, "")
+    .trim();
+}
+
+function findDistrictLocationRowInAddress(rows = [], address = "") {
+  const normalizedAddress = ` ${normalizeLookupText(address)} `;
+
+  return (
+    [...rows]
+      .map((row) => ({ row, districtName: getDistrictNameFromLocationRow(row) }))
+      .filter(({ districtName }) => districtName)
+      .sort((left, right) => right.districtName.length - left.districtName.length)
+      .find(({ districtName }) =>
+        normalizedAddress.includes(` ${normalizeLookupText(districtName)} `),
+      )?.row || null
+  );
+}
+
+function extractWardNameBeforeDistrict(value = "", districtName = "") {
+  const text = normalizeDisplayText(value);
+  const district = normalizeDisplayText(districtName).replace(
+    /^(Quận|Huyện|Thị xã|Thành phố|TP\.?)\s+/iu,
+    "",
+  );
+  if (!text || !district) return "";
+
+  const escapedDistrict = district.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = text.match(
+    new RegExp(
+      `(?:^|\\s)(Phường|Xã|Thị trấn)\\s+(.+?)(?=\\s+(?:(?:Quận|Huyện|Thị xã|Thành phố|TP\\.?)\\s+)?${escapedDistrict}(?:\\s|,|$))`,
+      "iu",
+    ),
+  );
+
+  return match ? `${match[1]} ${match[2]}`.trim() : "";
+}
+
 async function resolveAdministrativeAreaDetails({
   retailer,
   accessPrivateToken,
@@ -775,12 +894,9 @@ async function resolveAdministrativeAreaDetails({
 }) {
   const parts = parseVietnamAddressParts(address);
   const provinceName = stripProvincePrefix(parts.province || "");
-  const districtName = String(parts.district || parts.ward || "").trim();
-  const wardName = String(parts.ward || "").trim();
-  const locationName = buildLocationNameFromParts({
-    province: provinceName,
-    district: districtName,
-  });
+  let districtName = String(parts.district || parts.ward || "").trim();
+  let wardName = String(parts.ward || "").trim();
+  let streetName = String(parts.street || "").trim();
 
   let provinceRows = [];
   let districtRows = [];
@@ -796,9 +912,31 @@ async function resolveAdministrativeAreaDetails({
     provinceRows = Array.isArray(provinceResponse)
       ? provinceResponse
       : provinceResponse?.Data || provinceResponse?.data || [];
+
+    const matchedDistrictRow = findDistrictLocationRowInAddress(
+      provinceRows,
+      address,
+    );
+    if (matchedDistrictRow) {
+      districtName = getDistrictNameFromLocationRow(matchedDistrictRow);
+      districtRows = [matchedDistrictRow];
+      if (!wardName) {
+        wardName = extractWardNameBeforeDistrict(address, districtName);
+      }
+      if (wardName) {
+        const wardPosition = normalizeDisplayText(address).search(
+          /(?:^|\s)(Phường|Xã|Thị trấn)\s+/iu,
+        );
+        if (wardPosition >= 0) {
+          streetName = normalizeDisplayText(address)
+            .slice(0, wardPosition)
+            .trim();
+        }
+      }
+    }
   }
 
-  if (provinceName && districtName) {
+  if (provinceName && districtName && districtRows.length === 0) {
     const districtResponse = await lookupLevelTwoIdWithFallback({
       lookup: getIdLocations,
       retailer,
@@ -811,13 +949,18 @@ async function resolveAdministrativeAreaDetails({
       : districtResponse?.Data || districtResponse?.data || [];
   }
 
+  const locationName = buildLocationNameFromParts({
+    province: provinceName,
+    district: districtName,
+  });
+
   if (wardName) {
     const wardResponse = await lookupWardIdWithFallback({
       retailer,
       accessPrivateToken,
       wardName,
       locationName: locationName || `${provinceName} - ${districtName}`,
-      locationId: provinceRows[0]?.Id ?? null,
+      locationId: districtRows[0]?.Id ?? provinceRows[0]?.Id ?? null,
     });
     wardRows = Array.isArray(wardResponse)
       ? wardResponse
@@ -825,7 +968,12 @@ async function resolveAdministrativeAreaDetails({
   }
 
   return {
-    parts,
+    parts: {
+      ...parts,
+      street: streetName || parts.street,
+      ward: wardName || parts.ward,
+      district: districtName || parts.district,
+    },
     provinceName,
     districtName,
     wardName,
@@ -848,7 +996,11 @@ function getProvinceInitials(address = "") {
   const plain = normalizePlainText(address);
   if (!plain) return "";
 
+  const parsedProvince = normalizePlainText(
+    parseVietnamAddressParts(address).province,
+  );
   const lastSegment =
+    parsedProvince ||
     plain
       .split(",")
       .map((part) => part.trim())
@@ -1103,8 +1255,11 @@ async function buildNewCustomerPayloadV2({
   const locationSuggestName = [districtDisplayName, provinceDisplayName]
     .filter(Boolean)
     .join(" - ");
+  const invoiceStreetAddress = String(
+    invoiceAddressDetails?.parts?.street || invoiceAddressParts.street || "",
+  ).trim();
   const invoiceAddressCombine = [
-    invoiceAddressParts.street,
+    invoiceStreetAddress,
     districtDisplayName,
     provinceDisplayName,
   ]
@@ -1143,7 +1298,7 @@ async function buildNewCustomerPayloadV2({
         .join(" - "),
       WardId: wardId,
       NameEInvoice: invoiceName,
-      AddressEInvoice: customerAddressParts.street || invoiceAddress,
+      AddressEInvoice: invoiceStreetAddress || customerAddressParts.street || invoiceAddress,
       AddressEInvoiceCombine: invoiceAddressCombine || invoiceAddress,
       LocationIdEInvoice: wardId,
       AdministrativeAreaIdEInvoice: wardId,
