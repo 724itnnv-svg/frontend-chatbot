@@ -90,6 +90,7 @@ const GHN_PACKAGE_DEFAULT = {
   height: 30,
 };
 const GHN_LIGHT_MAX_WEIGHT = 20000;
+const GHN_MAX_INSURANCE_VALUE = 5000000;
 
 const VTP_PRICE_CHECK_DEFAULT = {
   ACTIVE_KSHIP: true,
@@ -324,18 +325,70 @@ function normalizeDisplayText(value = "") {
 }
 
 const VIETNAM_PROVINCE_NAMES = [
-  "An Giang", "Bà Rịa - Vũng Tàu", "Bắc Giang", "Bắc Kạn", "Bạc Liêu",
-  "Bắc Ninh", "Bến Tre", "Bình Định", "Bình Dương", "Bình Phước",
-  "Bình Thuận", "Cà Mau", "Cần Thơ", "Cao Bằng", "Đà Nẵng", "Đắk Lắk",
-  "Đắk Nông", "Điện Biên", "Đồng Nai", "Đồng Tháp", "Gia Lai", "Hà Giang",
-  "Hà Nam", "Hà Nội", "Hà Tĩnh", "Hải Dương", "Hải Phòng", "Hậu Giang",
-  "Hòa Bình", "Hồ Chí Minh", "Hưng Yên", "Khánh Hòa", "Kiên Giang",
-  "Kon Tum", "Lai Châu", "Lâm Đồng", "Lạng Sơn", "Lào Cai", "Long An",
-  "Nam Định", "Nghệ An", "Ninh Bình", "Ninh Thuận", "Phú Thọ", "Phú Yên",
-  "Quảng Bình", "Quảng Nam", "Quảng Ngãi", "Quảng Ninh", "Quảng Trị",
-  "Sóc Trăng", "Sơn La", "Tây Ninh", "Thái Bình", "Thái Nguyên",
-  "Thanh Hóa", "Thừa Thiên Huế", "Huế", "Tiền Giang", "Trà Vinh",
-  "Tuyên Quang", "Vĩnh Long", "Vĩnh Phúc", "Yên Bái",
+  "An Giang",
+  "Bà Rịa - Vũng Tàu",
+  "Bắc Giang",
+  "Bắc Kạn",
+  "Bạc Liêu",
+  "Bắc Ninh",
+  "Bến Tre",
+  "Bình Định",
+  "Bình Dương",
+  "Bình Phước",
+  "Bình Thuận",
+  "Cà Mau",
+  "Cần Thơ",
+  "Cao Bằng",
+  "Đà Nẵng",
+  "Đắk Lắk",
+  "Đắk Nông",
+  "Điện Biên",
+  "Đồng Nai",
+  "Đồng Tháp",
+  "Gia Lai",
+  "Hà Giang",
+  "Hà Nam",
+  "Hà Nội",
+  "Hà Tĩnh",
+  "Hải Dương",
+  "Hải Phòng",
+  "Hậu Giang",
+  "Hòa Bình",
+  "Hồ Chí Minh",
+  "Hưng Yên",
+  "Khánh Hòa",
+  "Kiên Giang",
+  "Kon Tum",
+  "Lai Châu",
+  "Lâm Đồng",
+  "Lạng Sơn",
+  "Lào Cai",
+  "Long An",
+  "Nam Định",
+  "Nghệ An",
+  "Ninh Bình",
+  "Ninh Thuận",
+  "Phú Thọ",
+  "Phú Yên",
+  "Quảng Bình",
+  "Quảng Nam",
+  "Quảng Ngãi",
+  "Quảng Ninh",
+  "Quảng Trị",
+  "Sóc Trăng",
+  "Sơn La",
+  "Tây Ninh",
+  "Thái Bình",
+  "Thái Nguyên",
+  "Thanh Hóa",
+  "Thừa Thiên Huế",
+  "Huế",
+  "Tiền Giang",
+  "Trà Vinh",
+  "Tuyên Quang",
+  "Vĩnh Long",
+  "Vĩnh Phúc",
+  "Yên Bái",
 ];
 
 function findProvinceAtAddressEnd(value = "") {
@@ -362,7 +415,9 @@ function extractUnseparatedAdministrativeParts(value = "") {
 
   const normalizedAddress = normalizeLookupText(text);
   const normalizedProvince = normalizeLookupText(provinceName);
-  const provincePrefix = normalizedAddress.endsWith(`tinh ${normalizedProvince}`)
+  const provincePrefix = normalizedAddress.endsWith(
+    `tinh ${normalizedProvince}`,
+  )
     ? "Tỉnh"
     : normalizedAddress.endsWith(`thanh pho ${normalizedProvince}`) ||
         normalizedAddress.endsWith(`tp ${normalizedProvince}`)
@@ -859,9 +914,14 @@ function findDistrictLocationRowInAddress(rows = [], address = "") {
 
   return (
     [...rows]
-      .map((row) => ({ row, districtName: getDistrictNameFromLocationRow(row) }))
+      .map((row) => ({
+        row,
+        districtName: getDistrictNameFromLocationRow(row),
+      }))
       .filter(({ districtName }) => districtName)
-      .sort((left, right) => right.districtName.length - left.districtName.length)
+      .sort(
+        (left, right) => right.districtName.length - left.districtName.length,
+      )
       .find(({ districtName }) =>
         normalizedAddress.includes(` ${normalizeLookupText(districtName)} `),
       )?.row || null
@@ -1005,7 +1065,8 @@ function getProvinceInitials(address = "") {
       .split(",")
       .map((part) => part.trim())
       .filter(Boolean)
-      .pop() || plain;
+      .pop() ||
+    plain;
 
   const cleaned = lastSegment
     .replace(/^tinh\s+/i, "")
@@ -1298,7 +1359,8 @@ async function buildNewCustomerPayloadV2({
         .join(" - "),
       WardId: wardId,
       NameEInvoice: invoiceName,
-      AddressEInvoice: invoiceStreetAddress || customerAddressParts.street || invoiceAddress,
+      AddressEInvoice:
+        invoiceStreetAddress || customerAddressParts.street || invoiceAddress,
       AddressEInvoiceCombine: invoiceAddressCombine || invoiceAddress,
       LocationIdEInvoice: wardId,
       AdministrativeAreaIdEInvoice: wardId,
@@ -2123,6 +2185,22 @@ function getGhnShippingFeeValue(response = {}) {
   return null;
 }
 
+function extractGhnCreatedOrderTotalFee(response = {}) {
+  const candidates = [
+    response?.data?.total_fee,
+    response?.Data?.TotalFee,
+    response?.total_fee,
+    response?.TotalFee,
+  ];
+
+  for (const candidate of candidates) {
+    const numeric = Number(candidate);
+    if (Number.isFinite(numeric) && numeric >= 0) return numeric;
+  }
+
+  return null;
+}
+
 async function getGhnShippingQuote({
   retailer,
   accessPrivateToken,
@@ -2130,8 +2208,18 @@ async function getGhnShippingQuote({
   branchTakingAddressStr,
   deliveryParts,
   invoiceDetails,
+  totalProductPrice,
   onProgress,
 }) {
+  const insuranceTotal = Math.max(
+    0,
+    Math.round(Number(totalProductPrice || 0)),
+  );
+  if (insuranceTotal > GHN_MAX_INSURANCE_VALUE) {
+    throw new Error(
+      "Giá trị đơn hàng cao hơn 5.000.000đ, chưa thể tạo đơn GHN.",
+    );
+  }
   const pricingPackages = buildGhnPricingPackages(invoiceDetails);
   if (pricingPackages.length === 0) {
     return {
@@ -2193,14 +2281,24 @@ async function getGhnShippingQuote({
   }
   onProgress?.("address", "success", "Lấy địa chỉ GHN thành công.");
 
-  const payloads = pricingPackages.map((item) => ({
+  const packageValues = pricingPackages.map((item) =>
+    item.items.reduce(
+      (sum, product) =>
+        sum +
+        Math.max(0, Number(product?.price || 0)) *
+          Math.max(0, Number(product?.quantity || 0)),
+      0,
+    ),
+  );
+  const insuranceValues = allocateGhnCodAmounts(insuranceTotal, packageValues);
+  const payloads = pricingPackages.map((item, index) => ({
     service_type_id: item.serviceTypeId,
     ...route,
     length: item.length,
     width: item.width,
     height: item.height,
     weight: item.weight,
-    insurance_value: 0,
+    insurance_value: insuranceValues[index] || 0,
     coupon: null,
     items: item.items.map(
       ({ name, quantity, length, width, height, weight }) => ({
@@ -2246,6 +2344,7 @@ async function getGhnShippingQuote({
       ...new Set(pricingPackages.map((item) => item.serviceTypeId)),
     ],
     pricingPackages,
+    insuranceValues,
     branchAddress,
     fromAddress,
     toAddress,
@@ -2302,6 +2401,13 @@ function buildGhnCreateOrderPayloads({
     ),
   );
   const codAmounts = allocateGhnCodAmounts(invoice?.Total, packageValues);
+  const invoiceTotal = Math.max(0, Math.round(Number(invoice?.Total || 0)));
+  if (invoiceTotal > GHN_MAX_INSURANCE_VALUE) {
+    throw new Error(
+      "Giá trị đơn hàng cao hơn 5.000.000đ, chưa thể tạo đơn GHN.",
+    );
+  }
+  const insuranceAmounts = allocateGhnCodAmounts(invoiceTotal, packageValues);
   const pickupTime = Math.floor(Date.now() / 1000) + 60 * 60;
   const fromPhone = normalizeGhnPhone(branchAddress?.senderMobile);
   const toPhone = normalizeGhnPhone(deliveryDetail?.ContactNumber);
@@ -2349,10 +2455,7 @@ function buildGhnCreateOrderPayloads({
     cod_failed_amount: 0,
     pick_station_id: null,
     deliver_station_id: null,
-    insurance_value: Math.min(
-      5000000,
-      Math.max(0, Math.round(packageValues[index] || 0)),
-    ),
+    insurance_value: insuranceAmounts[index] || 0,
     service_type_id: item.serviceTypeId,
     coupon: null,
     pickup_time: pickupTime,
@@ -2806,10 +2909,7 @@ function getPromotionSelectionDetails({
     ...candidate,
     quantity:
       availableQuantities !== null
-        ? Math.max(
-            0,
-            Number(availableQuantities[candidate.productCode] || 0),
-          )
+        ? Math.max(0, Number(availableQuantities[candidate.productCode] || 0))
         : Math.max(
             0,
             Number(candidate.quantity || 0) -
@@ -2881,7 +2981,10 @@ function getConsumedPromotionQuantities(
   return consumedQuantities;
 }
 
-function allocatePromotionQuantities(qualifyingItems = [], requiredQuantity = 0) {
+function allocatePromotionQuantities(
+  qualifyingItems = [],
+  requiredQuantity = 0,
+) {
   let remainingQuantity = Math.max(0, Number(requiredQuantity || 0));
   const consumedQuantities = {};
 
@@ -3097,28 +3200,26 @@ function applySelectedPromotions({
         productMap,
         productCampaignMap,
       });
-    const prerequisiteQuantity = Number(promotion?.PrereqQuantity || 0);
-    const reservedQuantities = selection?.consumedQuantities || {};
-    const hasReservedQuantities = Object.keys(reservedQuantities).length > 0;
-    const qualifyingItems = hasReservedQuantities
-      ? aggregateContext.qualifyingItems
-          .map((candidate) => ({
-            ...candidate,
-            quantity: Number(
-              reservedQuantities[candidate.productCode] || 0,
-            ),
-          }))
-          .filter((candidate) => candidate.quantity > 0)
-      : aggregateContext.qualifyingItems;
-    const purchasedQuantity = qualifyingItems.reduce(
-      (sum, candidate) => sum + Number(candidate.quantity || 0),
-      0,
-    );
-    const applicationCount =
-      prerequisiteQuantity > 0
-        ? Math.floor(purchasedQuantity / prerequisiteQuantity)
-        : 0;
-    if (applicationCount < 1) return;
+      const prerequisiteQuantity = Number(promotion?.PrereqQuantity || 0);
+      const reservedQuantities = selection?.consumedQuantities || {};
+      const hasReservedQuantities = Object.keys(reservedQuantities).length > 0;
+      const qualifyingItems = hasReservedQuantities
+        ? aggregateContext.qualifyingItems
+            .map((candidate) => ({
+              ...candidate,
+              quantity: Number(reservedQuantities[candidate.productCode] || 0),
+            }))
+            .filter((candidate) => candidate.quantity > 0)
+        : aggregateContext.qualifyingItems;
+      const purchasedQuantity = qualifyingItems.reduce(
+        (sum, candidate) => sum + Number(candidate.quantity || 0),
+        0,
+      );
+      const applicationCount =
+        prerequisiteQuantity > 0
+          ? Math.floor(purchasedQuantity / prerequisiteQuantity)
+          : 0;
+      if (applicationCount < 1) return;
 
       const parentLineIndex = nextLines.findIndex(
         (line) => String(line?.ProductCode || "").trim() === productCode,
@@ -3128,7 +3229,7 @@ function applySelectedPromotions({
       const parentLine = nextLines[parentLineIndex];
       const parentProductId =
         parentLine?.ProductId ?? parentProduct?.id ?? parentProduct?.Id;
-    const relatedProductEntries = qualifyingItems
+      const relatedProductEntries = qualifyingItems
         .map((candidate) => {
           const candidateLine = nextLines.find(
             (line) =>
@@ -3147,8 +3248,8 @@ function applySelectedPromotions({
         ...new Set(relatedProductEntries.map(({ productId }) => productId)),
       ];
 
-    if (promotionType === 8 && Number(promotion?.ProductPrice || 0) > 0) {
-      const promotionPrice = Number(promotion.ProductPrice);
+      if (promotionType === 8 && Number(promotion?.ProductPrice || 0) > 0) {
+        const promotionPrice = Number(promotion.ProductPrice);
         const originalPrice = Number(parentLine.Price || 0);
         const quantity = Number(parentLine.Quantity || 0);
         const taxRate = Number(parentLine.DetailTaxIds?.[0]?.Value || 0);
@@ -3244,7 +3345,7 @@ function applySelectedPromotions({
       ) {
         return;
       }
-    processedPromotionGroups.add(aggregateContext.promotionGroupKey);
+      processedPromotionGroups.add(aggregateContext.promotionGroupKey);
 
       selectedGiftEntries.forEach(([receivedProductId, quantity]) => {
         const receivedProduct = promotionProductMap?.get(receivedProductId);
@@ -3645,6 +3746,7 @@ async function buildDeliveryDetailPayload({
       branchTakingAddressStr,
       deliveryParts,
       invoiceDetails,
+      totalProductPrice,
       onProgress,
     });
     const ghnServiceText = ghnQuote.serviceTypeIds
@@ -5239,6 +5341,22 @@ export default function TaoDonHang() {
           totalAfterTax: invoiceDetailsResult.totalAfterTax || 0,
         });
         const invoiceDetails = promotionResult.invoiceDetails;
+        const previewProductTotal = Number(promotionResult.totalAfterTax || 0);
+        if (
+          selectedShippingPartner === "GHN" &&
+          previewProductTotal > GHN_MAX_INSURANCE_VALUE
+        ) {
+          if (!active) return;
+          setShippingQuotePreview({
+            status: "error",
+            fee: null,
+            productTotal: previewProductTotal,
+            serviceCode: "",
+            serviceName: "",
+            error: "Giá trị đơn hàng cao hơn 5.000.000đ, chưa thể tạo đơn GHN.",
+          });
+          return;
+        }
         const invoiceAddress = String(
           effectiveParsed.oldAddress || effectiveParsed.newAddress || "",
         ).trim();
@@ -5307,7 +5425,7 @@ export default function TaoDonHang() {
         setShippingQuotePreview({
           status: "success",
           fee: Number(deliveryDetail?.FeeShip || 0),
-          productTotal: Number(promotionResult.totalAfterTax || 0),
+          productTotal: previewProductTotal,
           serviceCode: String(deliveryDetail?.ServiceCode || ""),
           serviceName: String(deliveryDetail?.ServiceCodeText || ""),
           error: "",
@@ -5713,6 +5831,26 @@ export default function TaoDonHang() {
         .join(", ");
       setCreateOrderError(
         `Không thể tạo đơn: sản phẩm ${productCodes || "đã chọn"} có giá khách lẻ bằng 0đ.`,
+      );
+      return;
+    }
+
+    if (
+      selectedShippingPartner === "GHN" &&
+      Number(shippingQuotePreview.productTotal || 0) > GHN_MAX_INSURANCE_VALUE
+    ) {
+      setCreateOrderError(
+        "Không thể tạo đơn GHN: giá trị đơn hàng cao hơn 5.000.000đ.",
+      );
+      return;
+    }
+    if (
+      selectedShippingPartner === "GHN" &&
+      shippingQuotePreview.status !== "success"
+    ) {
+      setCreateOrderError(
+        shippingQuotePreview.error ||
+          "Chưa tính được phí GHN, vui lòng kiểm tra lại thông tin đơn hàng.",
       );
       return;
     }
@@ -6202,6 +6340,7 @@ export default function TaoDonHang() {
         }
 
         const ghnOrderCodes = [];
+        const ghnCreatedOrderFees = [];
         for (const ghnOrderPayload of ghnOrderPayloads) {
           console.log("createOrderGHN payload", ghnOrderPayload);
           const ghnOrderResponse = await createOrderGHN(
@@ -6217,13 +6356,29 @@ export default function TaoDonHang() {
             throw new Error("GHN không trả về mã vận đơn sau khi tạo đơn.");
           }
           ghnOrderCodes.push(orderCode);
+          const createdOrderFee =
+            extractGhnCreatedOrderTotalFee(ghnOrderResponse);
+          if (createdOrderFee != null) {
+            ghnCreatedOrderFees.push(createdOrderFee);
+          }
         }
+        const createdTotalFee =
+          ghnCreatedOrderFees.length === ghnOrderPayloads.length
+            ? ghnCreatedOrderFees.reduce((sum, fee) => sum + fee, 0)
+            : Number(invoicePayload?.Invoice?.DeliveryDetail?.FeeShip || 0);
 
         updateCreateOrderProgress(
           "shipping",
           "success",
-          `Tạo vận đơn GHN thành công: ${ghnOrderCodes.join(", ")}.`,
+          `Tạo vận đơn GHN thành công: ${ghnOrderCodes.join(", ")}. Phí chính thức: ${createdTotalFee.toLocaleString("vi-VN")}đ.`,
         );
+
+        setShippingQuotePreview((current) => ({
+          ...current,
+          status: "success",
+          fee: createdTotalFee,
+          error: "",
+        }));
 
         invoicePayload = {
           ...invoicePayload,
@@ -6232,6 +6387,9 @@ export default function TaoDonHang() {
             DeliveryDetail: {
               ...invoicePayload.Invoice.DeliveryDetail,
               DeliveryCode: ghnOrderCodes.join(", "),
+              Price: createdTotalFee,
+              FeeShip: createdTotalFee,
+              SenderPaymentFee: createdTotalFee,
             },
           },
         };
@@ -6804,6 +6962,11 @@ export default function TaoDonHang() {
                     hasInvalidProductPrices ||
                     !promotionSelectionsAreComplete ||
                     !matchedKiotUser ||
+                    (selectedShippingPartner === "GHN" &&
+                      Number(shippingQuotePreview.productTotal || 0) >
+                        GHN_MAX_INSURANCE_VALUE) ||
+                    (selectedShippingPartner === "GHN" &&
+                      shippingQuotePreview.status !== "success") ||
                     isCreatingOrder
                   }
                   className="inline-flex items-center gap-2 rounded-xl bg-cyan-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-cyan-700 disabled:cursor-not-allowed disabled:bg-slate-300"
