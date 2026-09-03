@@ -22,6 +22,19 @@ function currentPeriod() {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
 }
 
+function shiftPeriod(period, offset) {
+  const match = String(period || "").match(/^(\d{4})-(\d{2})$/);
+  if (!match) return "";
+  const shifted = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1 + offset, 1));
+  return `${shifted.getUTCFullYear()}-${String(shifted.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+function deadlineEndTimestamp(deadline) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(deadline || ""))) return null;
+  // 17:00 UTC is 00:00 of the following day in Asia/Ho_Chi_Minh.
+  return Date.parse(`${deadline}T17:00:00.000Z`);
+}
+
 const STATUS = {
   ASSIGNED: ["Đã giao", "bg-sky-50 text-sky-700 border-sky-200"],
   DRAFT: ["Đang nhập", "bg-slate-50 text-slate-700 border-slate-200"],
@@ -103,9 +116,10 @@ function scorePreview(item) {
 
 export default function KpiSelfAssessment() {
   const { api } = useAuth();
-  const [period, setPeriod] = useState(currentPeriod);
+  const [period, setPeriod] = useState("");
+  const [followsActivePeriod, setFollowsActivePeriod] = useState(true);
   const [evaluation, setEvaluation] = useState(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [uploadingItemId, setUploadingItemId] = useState("");
   const [deletingEvidenceId, setDeletingEvidenceId] = useState("");
@@ -117,6 +131,7 @@ export default function KpiSelfAssessment() {
   const [isDraggingEvidence, setIsDraggingEvidence] = useState(false);
 
   const load = useCallback(async () => {
+    if (!period) return;
     setLoading(true);
     setMessage(null);
     try {
@@ -135,13 +150,60 @@ export default function KpiSelfAssessment() {
   }, [api, period]);
 
   useEffect(() => {
-    load();
-  }, [load]);
+    let cancelled = false;
+
+    async function resolveActivePeriod() {
+      const thisPeriod = currentPeriod();
+      const previousPeriod = shiftPeriod(thisPeriod, -1);
+      try {
+        const response = await api.get(
+          `/kpi-evaluations/my?period=${encodeURIComponent(previousPeriod)}`,
+        );
+        const previousEvaluation = response.data?.data;
+        if (!cancelled) {
+          // Keep the previous KPI period selected through its entire due date.
+          // The API also accounts for configured due dates and submission extensions.
+          setPeriod(previousEvaluation && !previousEvaluation.isOverdue
+            ? previousPeriod
+            : thisPeriod);
+        }
+      } catch {
+        if (!cancelled) setPeriod(thisPeriod);
+      }
+    }
+
+    resolveActivePeriod();
+    return () => {
+      cancelled = true;
+    };
+  }, [api]);
+
+  useEffect(() => {
+    if (period) load();
+  }, [load, period]);
   useEffect(() => {
     const refresh = () => load();
     window.addEventListener("kpi:refresh", refresh);
     return () => window.removeEventListener("kpi:refresh", refresh);
   }, [load]);
+
+  useEffect(() => {
+    if (!followsActivePeriod || !evaluation || evaluation.period !== period) return undefined;
+    const switchAt = deadlineEndTimestamp(evaluation.effectiveDueDate || evaluation.dueDate);
+    if (!Number.isFinite(switchAt)) return undefined;
+
+    let timer;
+    const switchWhenExpired = () => {
+      const remaining = switchAt - Date.now();
+      if (remaining <= 0) {
+        setPeriod((current) => shiftPeriod(current, 1));
+        return;
+      }
+      timer = window.setTimeout(switchWhenExpired, Math.min(remaining, 2_147_483_647));
+    };
+    switchWhenExpired();
+    return () => window.clearTimeout(timer);
+  }, [evaluation, followsActivePeriod, period]);
 
   const previewTotal = useMemo(
     () =>
@@ -391,7 +453,10 @@ export default function KpiSelfAssessment() {
             <input
               type="month"
               value={period}
-              onChange={(event) => setPeriod(event.target.value)}
+              onChange={(event) => {
+                setFollowsActivePeriod(false);
+                setPeriod(event.target.value);
+              }}
               className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
             />
             <button
