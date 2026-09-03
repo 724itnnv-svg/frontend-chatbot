@@ -34,8 +34,15 @@ const APP_PERMISSIONS = {
       id: "people",
       name: "Nhân sự",
       description:
-        "Hồ sơ nhân sự, kho thiết bị, người dùng và vai trò phân quyền",
-      screenIds: ["employee_profiles", "employee_assets", "users", "roles"],
+        "Hồ sơ nhân sự, sức khỏe, vi phạm, kho thiết bị, người dùng và vai trò phân quyền",
+      screenIds: [
+        "employee_profiles",
+        "employee_health_records",
+        "employee_violations",
+        "employee_assets",
+        "users",
+        "roles",
+      ],
     },
     {
       id: "operations",
@@ -102,6 +109,8 @@ const APP_PERMISSIONS = {
     { id: "kpi_management", name: "Quản lý KPI" },
     { id: "notifications", name: "Thông Báo Thiết Bị" },
     { id: "employee_profiles", name: "Hồ Sơ Nhân Sự" },
+    { id: "employee_health_records", name: "Hồ Sơ Sức Khỏe Nhân Viên" },
+    { id: "employee_violations", name: "Vi Phạm Và Biên Bản Nhân Viên" },
     { id: "employee_assets", name: "Kho Tài Sản & Vật Tư" },
     { id: "operational_contracts", name: "Hợp Đồng Dịch Vụ & Tài Sản" },
     { id: "users", name: "Người Dùng" },
@@ -140,7 +149,7 @@ const APP_PERMISSIONS = {
       id: "create",
       name: "Thêm mới",
       color: "emerald",
-      excludeScreenIds: ["approved_leave"],
+      excludeScreenIds: ["approved_leave", "employee_violations"],
     },
     {
       id: "edit",
@@ -152,7 +161,7 @@ const APP_PERMISSIONS = {
       id: "delete",
       name: "Xóa",
       color: "red",
-      excludeScreenIds: ["approved_leave"],
+      excludeScreenIds: ["approved_leave", "employee_violations"],
     },
     {
       id: "export",
