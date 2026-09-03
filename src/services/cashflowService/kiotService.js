@@ -1108,6 +1108,70 @@ export async function getIdWards(
   }
 }
 
+export async function getAllLocationsByKeyword(
+  retailId,
+  input,
+  retailer = "kingfarm",
+  accessToken,
+  accessPrivateToken,
+  groupMerchant = "retail",
+) {
+  try {
+    const response = await kiotDirectApi.get(
+      "https://api-location.kiotviet.vn/v1/location/get-all-location-by-keyword",
+      {
+        params: {
+          retail_id: retailId,
+          input,
+          group_merchant: groupMerchant,
+        },
+        headers: {
+          Accept: "application/json, text/plain, */*",
+          Retailer: retailer,
+          Authorization: `Bearer ${accessPrivateToken}`,
+          requestfrom: "kv",
+        },
+      },
+    );
+    return response.data;
+  } catch (error) {
+    throw new Error(
+      `Không tìm được địa chỉ KiotViet theo từ khóa: ${error.response?.data?.message || error.message}`,
+    );
+  }
+}
+
+export async function getKvLocationByAddress({
+  fullAddress,
+  country = "Việt Nam",
+  province = "",
+  district = "",
+  ward = "",
+  retailer = "kingfarm",
+  accessToken,
+  accessPrivateToken,
+}) {
+  try {
+    const response = await kiotDirectApi.get(
+      "https://api-location.kiotviet.vn/v1/location/get-kv-location-by-address",
+      {
+        params: { fullAddress, country, province, district, ward },
+        headers: {
+          Accept: "application/json, text/plain, */*",
+          Retailer: retailer,
+          Authorization: `Bearer ${accessPrivateToken}`,
+          requestfrom: "kv",
+        },
+      },
+    );
+    return response.data;
+  } catch (error) {
+    throw new Error(
+      `Không lấy được ID địa chỉ KiotViet: ${error.response?.data?.message || error.message}`,
+    );
+  }
+}
+
 export async function getVtpProvinces() {
   try {
     const response = await kiotDirectApi.get(

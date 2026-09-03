@@ -31,6 +31,8 @@ import {
   getIdAdministrativearea,
   getIdLocations,
   getIdWards,
+  getAllLocationsByKeyword,
+  getKvLocationByAddress,
   getVtpProvinces,
   getVtpDistricts,
   getVtpWards,
@@ -58,6 +60,8 @@ function getDefaultShippingPartner(retailerId) {
 
 const DEFAULT_GHN_REQUIRED_NOTE = "CHOXEMHANGKHONGTHU";
 const GHN_MAX_INSURANCE_VALUE = 999999;
+const DEFAULT_FREE_SHIPPING_THRESHOLD = 160000;
+const ABC_SEEDLING_FREE_SHIPPING_THRESHOLD = 200000;
 
 function getGhnInsuranceValue(orderValue) {
   return Math.min(
@@ -126,6 +130,20 @@ const VTP_DEFAULT_SERVICE_EXTRA = [
     Name: "Người gửi trả phí",
   },
 ];
+
+function getVtpServiceExtra(recipientPaysShipping = false) {
+  return VTP_DEFAULT_SERVICE_EXTRA.map((item) =>
+    item.Code === "PaymentBy"
+      ? {
+          ...item,
+          Value: recipientPaysShipping ? "NGUOINHAN" : "NGUOIGUI",
+          Name: recipientPaysShipping
+            ? "Người nhận trả phí"
+            : "Người gửi trả phí",
+        }
+      : item,
+  );
+}
 
 const SAMPLE_TEXT = `Khách hàng: Tín thành
 SĐT: 0964294979
@@ -229,11 +247,13 @@ function isProductDiscontinued(product) {
 
   const activeValues = [product?.isActive, product?.IsActive];
   const isExplicitlyInactive = activeValues.some(
-    (value) => value === false || value === 0 || String(value).toLowerCase() === "false",
+    (value) =>
+      value === false || value === 0 || String(value).toLowerCase() === "false",
   );
   const deletedValues = [product?.isDeleted, product?.IsDeleted];
   const isDeleted = deletedValues.some(
-    (value) => value === true || value === 1 || String(value).toLowerCase() === "true",
+    (value) =>
+      value === true || value === 1 || String(value).toLowerCase() === "true",
   );
 
   return isExplicitlyInactive || isDeleted;
@@ -754,6 +774,87 @@ async function resolveVtpAdministrativeArea({
   return { province, district, ward };
 }
 
+function findBestKeywordLocation(rows = [], address = "") {
+  const normalizedAddress = normalizeNameForCompare(address);
+  const addressTokens = new Set(normalizedAddress.split(" ").filter(Boolean));
+
+  return (
+    [...rows]
+      .map((row) => {
+        const normalizedFullAddress = normalizeNameForCompare(row?.fullAddress);
+        const matchedTokenCount = normalizedFullAddress
+          .split(" ")
+          .filter((token) => addressTokens.has(token)).length;
+        const exactBonus = normalizedFullAddress === normalizedAddress ? 10000 : 0;
+        const containsBonus =
+          normalizedFullAddress.includes(normalizedAddress) ||
+          normalizedAddress.includes(normalizedFullAddress)
+            ? 1000
+            : 0;
+        return {
+          row,
+          score: exactBonus + containsBonus + matchedTokenCount,
+        };
+      })
+      .sort((left, right) => right.score - left.score)[0]?.row || null
+  );
+}
+
+async function resolveKiotLocationByKeyword({
+  retailer,
+  accessToken,
+  accessPrivateToken,
+  address,
+}) {
+  const retailId = getRetailerConfig(retailer)?.retailerId;
+  if (!retailId || !normalizeDisplayText(address)) return null;
+
+  const keywordResponse = await getAllLocationsByKeyword(
+    retailId,
+    address,
+    retailer,
+    accessToken,
+    accessPrivateToken,
+  );
+  const keywordRows = getVtpCategoryRows(keywordResponse);
+  const matchedAddress = findBestKeywordLocation(keywordRows, address);
+  if (!matchedAddress?.fullAddress) return null;
+
+  const mappingResponse = await getKvLocationByAddress({
+    fullAddress: matchedAddress.fullAddress,
+    country: matchedAddress.country || "Việt Nam",
+    province: matchedAddress.province || "",
+    district: matchedAddress.district || "",
+    ward: matchedAddress.ward || "",
+    retailer,
+    accessToken,
+    accessPrivateToken,
+  });
+  const mappingCandidate = mappingResponse?.data ?? mappingResponse?.Data ?? mappingResponse;
+  const mapping = Array.isArray(mappingCandidate)
+    ? mappingCandidate[0]
+    : mappingCandidate;
+  const receiverLocationId = Number(mapping?.districtKvId);
+  const receiverWardId = Number(mapping?.wardKvId);
+  if (
+    !Number.isFinite(receiverLocationId) ||
+    receiverLocationId <= 0 ||
+    !Number.isFinite(receiverWardId) ||
+    receiverWardId <= 0
+  ) {
+    return null;
+  }
+
+  return {
+    receiverLocationId,
+    receiverWardId,
+    provinceName: normalizeDisplayText(mapping?.province),
+    districtName: normalizeDisplayText(mapping?.district),
+    wardName: normalizeDisplayText(mapping?.ward),
+    fullAddress: normalizeDisplayText(mapping?.fullAddress),
+  };
+}
+
 function normalizeNameForCompare(value = "") {
   return normalizeDisplayText(value)
     .toLowerCase()
@@ -946,6 +1047,19 @@ function getDistrictNameFromLocationRow(row = {}) {
   return districtPart
     .replace(/^(Quận|Huyện|Thị xã|Thành phố|TP\.?)\s+/iu, "")
     .trim();
+}
+
+function getWardParentLocationId(row = {}) {
+  const candidate =
+    row?.LocationId ??
+    row?.locationId ??
+    row?.ParentId ??
+    row?.parentId ??
+    row?.DistrictId ??
+    row?.districtId ??
+    row?.DISTRICT_ID;
+  const numericId = Number(candidate);
+  return Number.isFinite(numericId) && numericId > 0 ? numericId : null;
 }
 
 function findDistrictLocationRowInAddress(
@@ -1183,6 +1297,7 @@ async function resolveAdministrativeAreaDetails({
     wardRows,
     locationId: provinceRows[0]?.Id ?? null,
     districtId: districtRows[0]?.Id ?? null,
+    wardLocationId: getWardParentLocationId(wardRows[0]),
     wardId: wardRows[0]?.Id ?? null,
   };
 }
@@ -2506,7 +2621,7 @@ function buildGhnCreateOrderPayloads({
   invoicePayload,
   ghnShipping,
   senderName,
-  customerType,
+  shippingFeeThreshold = DEFAULT_FREE_SHIPPING_THRESHOLD,
   requiredNote = DEFAULT_GHN_REQUIRED_NOTE,
 }) {
   const invoice = invoicePayload?.Invoice || {};
@@ -2535,7 +2650,7 @@ function buildGhnCreateOrderPayloads({
     ? requiredNote
     : DEFAULT_GHN_REQUIRED_NOTE;
   const paymentTypeId =
-    customerType === "khach_le" && Number(invoice?.Total || 0) < 160000 ? 2 : 1;
+    Number(invoice?.Total || 0) < Number(shippingFeeThreshold || 0) ? 2 : 1;
 
   return pricingPackages.map((item, index) => ({
     payment_type_id: paymentTypeId,
@@ -2595,12 +2710,14 @@ function buildInvoiceDeliveryPayload({
   invoicePayload,
   invoiceResponse,
   deliveryDetail,
+  vtpAddress,
   totalBeforeDiscount,
   totalProductPrice,
   totalWeight,
   branchTakingAddressId,
   branchTakingAddressStr,
   selectedVtpServiceCode,
+  shippingFeeThreshold = DEFAULT_FREE_SHIPPING_THRESHOLD,
 }) {
   const invoice = invoicePayload?.Invoice || {};
   const invoiceId = extractInvoiceIdFromResponse(invoiceResponse);
@@ -2615,13 +2732,17 @@ function buildInvoiceDeliveryPayload({
   const receiverAddress = String(deliveryDetail?.Address || "").trim();
   const receiverMobile = String(deliveryDetail?.ContactNumber || "").trim();
   const receiverFullName = String(deliveryDetail?.Receiver || "").trim();
-  const receiverLocationId = deliveryDetail?.LocationId ?? null;
-  const receiverWardId = deliveryDetail?.WardId ?? null;
+  const receiverLocationId =
+    vtpAddress?.receiverLocationId ?? deliveryDetail?.LocationId ?? null;
+  const receiverWardId =
+    vtpAddress?.receiverWardId ?? deliveryDetail?.WardId ?? null;
   const receiverWardName = String(deliveryDetail?.WardName || "").trim();
   const senderLocationId = VTP_PRICE_CHECK_DEFAULT.SENDER_LOCATION_ID;
   const senderWardId = VTP_PRICE_CHECK_DEFAULT.SENDER_WARD_ID;
+  const recipientPaysShipping =
+    Number(totalProductPrice || 0) < Number(shippingFeeThreshold || 0);
 
-  return {
+  const payload = {
     OrderRequest: {
       SenderLocationName:
         branchAddress.senderLocationName || branchTakingAddressStr || "",
@@ -2653,13 +2774,22 @@ function buildInvoiceDeliveryPayload({
       Note: "",
       OrderServiceAdd: "",
       ShipperNote: "KHONGCHOXEMHANG",
-      PaymentBy: "NGUOIGUI",
+      PaymentBy: recipientPaysShipping ? "NGUOINHAN" : "NGUOIGUI",
       Products: products,
     },
     InvoiceId: invoiceId,
     BranchTakingAddressId: branchTakingAddressId ?? null,
     BranchTakingAddressStr: branchTakingAddressStr || "",
   };
+
+  console.log("TaoDonHang VTP createorder address ids", {
+    receiverLocationId,
+    receiverWardId,
+    matchedDistrictName: vtpAddress?.districtName || "",
+    matchedWardName: vtpAddress?.wardName || receiverWardName,
+  });
+
+  return payload;
 }
 
 function buildInvoiceDetailLine({
@@ -3791,6 +3921,7 @@ function buildVtpCheckPricePayload({
   serviceCode,
   receiverLocationId,
   receiverWardId,
+  recipientPaysShipping = false,
 }) {
   const productQuantity = (parsed?.items || []).reduce(
     (sum, item) => sum + (Number(item?.quantity || 0) || 0),
@@ -3810,7 +3941,7 @@ function buildVtpCheckPricePayload({
     RECEIVER_WARD_ID: receiverWardId,
     UUID: invoiceUuid,
     SERVICES: [{ CODE: serviceCode }],
-    SERVICE_EXTRA: VTP_DEFAULT_SERVICE_EXTRA,
+    SERVICE_EXTRA: getVtpServiceExtra(recipientPaysShipping),
   };
 }
 
@@ -3835,6 +3966,7 @@ async function buildDeliveryDetailPayload({
   accessToken,
   retailer,
   invoiceUuid,
+  shippingFeeThreshold = DEFAULT_FREE_SHIPPING_THRESHOLD,
   resolvedAddressDetails = null,
   onProgress,
 }) {
@@ -3843,13 +3975,21 @@ async function buildDeliveryDetailPayload({
   const branchTakingAddressId = retailerConfig?.BranchTakingAddressId ?? null;
   const branchTakingAddressStr = retailerConfig?.BranchTakingAddressStr ?? "";
   onProgress?.("address", "loading", "Đang đối chiếu địa chỉ giao hàng...");
-  const resolvedAddress =
-    resolvedAddressDetails ??
-    (await resolveAdministrativeAreaDetails({
+  // Với Viettel Post luôn chạy lại autocomplete ngay trước lúc tính phí/tạo
+  // vận đơn. Snapshot trong bước chuẩn bị chỉ dùng cho các luồng còn lại vì
+  // địa chỉ có thể vừa được sale chỉnh và ID không được phép lấy từ cache cũ.
+  const resolvedAddress = isViettelPost
+    ? await resolveAdministrativeAreaDetails({
+        retailer,
+        accessPrivateToken,
+        address: invoiceAddress,
+      })
+    : resolvedAddressDetails ??
+      (await resolveAdministrativeAreaDetails({
       retailer,
       accessPrivateToken,
       address: invoiceAddress,
-    }));
+      }));
   const locationId = resolvedAddress?.locationId ?? null;
   const wardId = resolvedAddress?.wardId ?? null;
   let provinceName =
@@ -3860,32 +4000,68 @@ async function buildDeliveryDetailPayload({
     String(deliveryParts.district || "").trim();
   let wardName =
     resolvedAddress?.wardName || String(deliveryParts.ward || "").trim();
-  let vtpReceiverLocationId = null;
-  let vtpReceiverWardId = null;
+  let vtpReceiverLocationId =
+    resolvedAddress?.wardLocationId ??
+    resolvedAddress?.districtId ??
+    locationId;
+  let vtpReceiverWardId = wardId;
 
   if (isViettelPost) {
-    const vtpAddress = await resolveVtpAdministrativeArea({
-      address: invoiceAddress,
-      provinceName,
-      districtName,
-      wardName,
-    });
-    vtpReceiverLocationId = vtpAddress?.district?.DISTRICT_ID ?? null;
-    vtpReceiverWardId = vtpAddress?.ward?.WARDS_ID ?? null;
+    let addressSource = "autocomplete";
+    let fallbackVtpAddress = null;
 
-    if (vtpReceiverLocationId == null || vtpReceiverWardId == null) {
-      throw new Error(
-        `Không tìm thấy đầy đủ địa chỉ Viettel Post cho: ${invoiceAddress}`,
+    try {
+      const keywordAddress = await resolveKiotLocationByKeyword({
+        retailer,
+        accessToken,
+        accessPrivateToken,
+        address: invoiceAddress,
+      });
+      if (keywordAddress) {
+        addressSource = "kiot-location-keyword";
+        vtpReceiverLocationId = keywordAddress.receiverLocationId;
+        vtpReceiverWardId = keywordAddress.receiverWardId;
+        provinceName = keywordAddress.provinceName || provinceName;
+        districtName = keywordAddress.districtName || districtName;
+        wardName = keywordAddress.wardName || wardName;
+      }
+    } catch (keywordError) {
+      console.warn(
+        "TaoDonHang Kiot location keyword fallback error",
+        keywordError,
       );
     }
 
-    provinceName =
-      normalizeDisplayText(vtpAddress?.province?.PROVINCE_NAME) || provinceName;
-    districtName =
-      normalizeDisplayText(vtpAddress?.district?.DISTRICT_NAME) || districtName;
-    wardName = normalizeDisplayText(vtpAddress?.ward?.WARDS_NAME) || wardName;
+    if (vtpReceiverLocationId == null || vtpReceiverWardId == null) {
+      addressSource = "viettel-post-fallback";
+      fallbackVtpAddress = await resolveVtpAdministrativeArea({
+        address: invoiceAddress,
+        provinceName,
+        districtName,
+        wardName,
+      });
+      vtpReceiverLocationId = fallbackVtpAddress?.district?.DISTRICT_ID ?? null;
+      vtpReceiverWardId = fallbackVtpAddress?.ward?.WARDS_ID ?? null;
+
+      if (vtpReceiverLocationId == null || vtpReceiverWardId == null) {
+        throw new Error(
+          `Không tìm thấy đầy đủ địa chỉ Viettel Post cho: ${invoiceAddress}`,
+        );
+      }
+
+      provinceName =
+        normalizeDisplayText(fallbackVtpAddress?.province?.PROVINCE_NAME) ||
+        provinceName;
+      districtName =
+        normalizeDisplayText(fallbackVtpAddress?.district?.DISTRICT_NAME) ||
+        districtName;
+      wardName =
+        normalizeDisplayText(fallbackVtpAddress?.ward?.WARDS_NAME) || wardName;
+    }
+
     console.log("TaoDonHang VTP address matched", {
-      provinceId: vtpAddress?.province?.PROVINCE_ID,
+      source: addressSource,
+      provinceId: fallbackVtpAddress?.province?.PROVINCE_ID ?? null,
       receiverLocationId: vtpReceiverLocationId,
       receiverWardId: vtpReceiverWardId,
       provinceName,
@@ -3919,6 +4095,8 @@ async function buildDeliveryDetailPayload({
     district: districtName || deliveryParts.district,
     ward: wardName || deliveryParts.ward,
   };
+  const recipientPaysShipping =
+    Number(totalProductPrice || 0) < Number(shippingFeeThreshold || 0);
 
   if (!isViettelPost) {
     const ghnQuote = await getGhnShippingQuote({
@@ -3967,7 +4145,8 @@ async function buildDeliveryDetailPayload({
       PackageType: 0,
       Paymenter: 0,
       TotalProductPrice: totalProductPrice,
-      TotalReceiverPay: totalProductPrice,
+      TotalReceiverPay:
+        totalProductPrice + (recipientPaysShipping ? ghnQuote.totalFee : 0),
       UseDefaultPartner: false,
       UsingOfBilling: false,
       UsingPriceCod: 1,
@@ -3995,9 +4174,10 @@ async function buildDeliveryDetailPayload({
       Description: ghnServiceText || deliveryPartner?.Description || "",
       ServiceAddInfor: null,
       FeeShip: ghnQuote.totalFee,
-      SenderPaymentFee: ghnQuote.totalFee,
-      RecipientPaymentFee: 0,
-      TotalRecipientPayment: totalProductPrice,
+      SenderPaymentFee: recipientPaysShipping ? 0 : ghnQuote.totalFee,
+      RecipientPaymentFee: recipientPaysShipping ? ghnQuote.totalFee : 0,
+      TotalRecipientPayment:
+        totalProductPrice + (recipientPaysShipping ? ghnQuote.totalFee : 0),
     };
 
     return { deliveryDetail, ghnShipping: ghnQuote };
@@ -4015,6 +4195,7 @@ async function buildDeliveryDetailPayload({
     serviceCode: requestedVtpServiceCode,
     receiverLocationId,
     receiverWardId,
+    recipientPaysShipping,
   });
   console.log("TaoDonHang VTP check price payload", checkPricePayload);
   onProgress?.("price", "loading", "Đang tính phí vận chuyển Viettel Post...");
@@ -4047,14 +4228,15 @@ async function buildDeliveryDetailPayload({
     selectedVtpService?.msg ||
     deliveryPartner?.Description ||
     "";
-  const selectedVtpServiceAdd = JSON.stringify(VTP_DEFAULT_SERVICE_EXTRA);
+  const selectedVtpServiceExtra = getVtpServiceExtra(recipientPaysShipping);
+  const selectedVtpServiceAdd = JSON.stringify(selectedVtpServiceExtra);
   const receiverAddress = VTP_PRICE_CHECK_DEFAULT.RECEIVER_ADDRESS;
   const receiverStreet = String(
     deliveryParts.street || receiverAddress || "",
   ).trim();
   const receiverWardName = wardName || String(deliveryParts.ward || "").trim();
 
-  return {
+  const deliveryDetail = {
     Type: 0,
     TypeName: "",
     Status: 1,
@@ -4082,7 +4264,8 @@ async function buildDeliveryDetailPayload({
     PackageType: 0,
     Paymenter: 0,
     TotalProductPrice: totalProductPrice,
-    TotalReceiverPay: totalProductPrice,
+    TotalReceiverPay:
+      totalProductPrice + (recipientPaysShipping ? selectedVtpFee : 0),
     UseDefaultPartner: true,
     UsingOfBilling: false,
     UsingPriceCod: 1,
@@ -4130,24 +4313,37 @@ async function buildDeliveryDetailPayload({
       UseDefaultPartner: true,
       UsingPriceCod: 1,
       TotalProductPrice: totalProductPrice,
-      TotalReceiverPay: totalProductPrice,
+      TotalReceiverPay:
+        totalProductPrice + (recipientPaysShipping ? selectedVtpFee : 0),
       ServiceCodeText: selectedVtpServiceName,
       ServiceCode: selectedVtpServiceCode,
       ServiceAdd: selectedVtpServiceAdd,
       PartnerDeliveryImage: selectedVtpServiceImage,
       Description: selectedVtpServiceDescription,
-      ServiceAddInfor: VTP_DEFAULT_SERVICE_EXTRA,
+      ServiceAddInfor: selectedVtpServiceExtra,
     },
     ServiceCodeText: selectedVtpServiceName,
     ServiceCode: selectedVtpServiceCode,
     ServiceAdd: selectedVtpServiceAdd,
     PartnerDeliveryImage: selectedVtpServiceImage,
     Description: selectedVtpServiceDescription,
-    ServiceAddInfor: VTP_DEFAULT_SERVICE_EXTRA,
+    ServiceAddInfor: selectedVtpServiceExtra,
     FeeShip: selectedVtpFee,
-    SenderPaymentFee: selectedVtpFee,
-    RecipientPaymentFee: 0,
-    TotalRecipientPayment: totalProductPrice,
+    SenderPaymentFee: recipientPaysShipping ? 0 : selectedVtpFee,
+    RecipientPaymentFee: recipientPaysShipping ? selectedVtpFee : 0,
+    TotalRecipientPayment:
+      totalProductPrice + (recipientPaysShipping ? selectedVtpFee : 0),
+  };
+
+  return {
+    deliveryDetail,
+    vtpAddress: {
+      receiverLocationId,
+      receiverWardId,
+      provinceName,
+      districtName,
+      wardName: receiverWardName,
+    },
   };
 }
 
@@ -4167,6 +4363,7 @@ async function buildInvoicePayload({
   productCampaignMap = null,
   promotionProductMap = null,
   promotionSelections = {},
+  shippingFeeThreshold = DEFAULT_FREE_SHIPPING_THRESHOLD,
   deliveryAddressDetails = null,
   onProgress,
 }) {
@@ -4278,15 +4475,18 @@ async function buildInvoicePayload({
     accessToken,
     retailer,
     invoiceUuid,
+    shippingFeeThreshold,
     resolvedAddressDetails: deliveryAddressDetails,
     onProgress,
   });
   const deliveryDetail =
     deliveryBuildResult?.deliveryDetail || deliveryBuildResult;
   const ghnShipping = deliveryBuildResult?.ghnShipping || null;
+  const vtpAddress = deliveryBuildResult?.vtpAddress || null;
 
   return {
     ...(ghnShipping ? { __ghnShipping: ghnShipping } : {}),
+    ...(vtpAddress ? { __vtpAddress: vtpAddress } : {}),
     Invoice: {
       BranchId: branchId,
       RetailerId: retailerId,
@@ -4707,6 +4907,10 @@ export default function TaoDonHang() {
       : "khach_le"
     : customerType;
   const pricingCustomerType = effectiveCustomerType;
+  const shippingFeeThreshold =
+    isAbcRetailer && customerType === "cay_giong"
+      ? ABC_SEEDLING_FREE_SHIPPING_THRESHOLD
+      : DEFAULT_FREE_SHIPPING_THRESHOLD;
   const shippingLabel =
     SHIPPING_PARTNERS.find((item) => item.id === selectedShippingPartner)
       ?.label || selectedShippingPartner;
@@ -5648,6 +5852,7 @@ export default function TaoDonHang() {
           accessPrivateToken,
           accessToken,
           retailer: selectedRetailerId,
+          shippingFeeThreshold,
           invoiceUuid:
             globalThis?.crypto?.randomUUID?.() ||
             `quote-${Date.now()}-${Math.random().toString(16).slice(2)}`,
@@ -5699,6 +5904,7 @@ export default function TaoDonHang() {
     promotionSelectionsAreComplete,
     selectedRetailerId,
     selectedShippingPartner,
+    shippingFeeThreshold,
   ]);
 
   const handlePromotionCampaignToggle = (
@@ -5972,9 +6178,7 @@ export default function TaoDonHang() {
                     min="0"
                     step="1"
                     value={quantity}
-                    disabled={
-                      !receivedProduct || receivedProductDiscontinued
-                    }
+                    disabled={!receivedProduct || receivedProductDiscontinued}
                     onChange={(event) =>
                       handlePromotionGiftQuantityChange(
                         selectionProductCode,
@@ -6559,6 +6763,7 @@ export default function TaoDonHang() {
         productCampaignMap: orderPreparation.productCampaignMap,
         promotionProductMap: orderPreparation.promotionProductMap,
         promotionSelections,
+        shippingFeeThreshold,
         deliveryAddressDetails: orderPreparation.addressDetails.get(
           String(
             effectiveParsed.oldAddress || effectiveParsed.newAddress || "",
@@ -6567,8 +6772,11 @@ export default function TaoDonHang() {
         onProgress: updateCreateOrderProgress,
       });
 
-      const { __ghnShipping: ghnShipping, ...invoicePayloadWithoutMetadata } =
-        builtInvoicePayload;
+      const {
+        __ghnShipping: ghnShipping,
+        __vtpAddress: vtpAddress,
+        ...invoicePayloadWithoutMetadata
+      } = builtInvoicePayload;
       let invoicePayload = invoicePayloadWithoutMetadata;
 
       if (!isViettelPost) {
@@ -6580,7 +6788,7 @@ export default function TaoDonHang() {
         const ghnOrderPayloads = buildGhnCreateOrderPayloads({
           invoicePayload,
           ghnShipping,
-          customerType: pricingCustomerType,
+          shippingFeeThreshold,
           requiredNote: ghnRequiredNote,
           senderName:
             getKiotUserDisplayName(matchedKiotUser) ||
@@ -6618,6 +6826,8 @@ export default function TaoDonHang() {
           ghnCreatedOrderFees.length === ghnOrderPayloads.length
             ? ghnCreatedOrderFees.reduce((sum, fee) => sum + fee, 0)
             : Number(invoicePayload?.Invoice?.DeliveryDetail?.FeeShip || 0);
+        const recipientPaysShipping =
+          Number(invoicePayload?.Invoice?.Total || 0) < shippingFeeThreshold;
         updateCreateOrderProgress(
           "shipping",
           "success",
@@ -6641,7 +6851,14 @@ export default function TaoDonHang() {
               DeliveryCode: ghnOrderCodes.join(", "),
               Price: createdTotalFee,
               FeeShip: createdTotalFee,
-              SenderPaymentFee: createdTotalFee,
+              SenderPaymentFee: recipientPaysShipping ? 0 : createdTotalFee,
+              RecipientPaymentFee: recipientPaysShipping ? createdTotalFee : 0,
+              TotalReceiverPay:
+                Number(invoicePayload?.Invoice?.Total || 0) +
+                (recipientPaysShipping ? createdTotalFee : 0),
+              TotalRecipientPayment:
+                Number(invoicePayload?.Invoice?.Total || 0) +
+                (recipientPaysShipping ? createdTotalFee : 0),
             },
           },
         };
@@ -6688,6 +6905,7 @@ export default function TaoDonHang() {
           invoicePayload,
           invoiceResponse: createInvoiceResponse,
           deliveryDetail: invoicePayload?.Invoice?.DeliveryDetail || {},
+          vtpAddress,
           totalBeforeDiscount:
             invoicePayload?.Invoice?.TotalBeforeDiscount || 0,
           totalProductPrice: invoicePayload?.Invoice?.Total || 0,
@@ -6700,6 +6918,7 @@ export default function TaoDonHang() {
             "",
           selectedVtpServiceCode:
             invoicePayload?.Invoice?.DeliveryDetail?.ServiceCode || "ECOD",
+          shippingFeeThreshold,
         });
 
         console.log("createInvoicesDelivery payload", deliveryPayload);
@@ -7200,7 +7419,7 @@ export default function TaoDonHang() {
                       Không thể tạo đơn với sản phẩm ngừng kinh doanh
                     </div>
                     <div className="mt-1 leading-5">
-                      Các sản phẩm sau đã ngừng kinh doanh: {" "}
+                      Các sản phẩm sau đã ngừng kinh doanh:{" "}
                       <span className="font-mono font-bold">
                         {discontinuedProducts
                           .map((product) => getProductDisplayCode(product))
@@ -7668,7 +7887,7 @@ export default function TaoDonHang() {
                                           Sản phẩm đã ngừng kinh doanh
                                         </div>
                                         <div className="mt-0.5 leading-5">
-                                          Sản phẩm mã {" "}
+                                          Sản phẩm mã{" "}
                                           <span className="font-mono font-bold">
                                             {displayProductCode || productCode}
                                           </span>{" "}
@@ -7866,7 +8085,8 @@ export default function TaoDonHang() {
                                                           </div>
                                                           {receivedProductDiscontinued ? (
                                                             <div className="mt-0.5 text-[11px] font-semibold text-red-600">
-                                                              Sản phẩm đã ngừng kinh doanh
+                                                              Sản phẩm đã ngừng
+                                                              kinh doanh
                                                             </div>
                                                           ) : null}
                                                         </div>
