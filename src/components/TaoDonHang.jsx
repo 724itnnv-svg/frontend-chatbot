@@ -2647,7 +2647,12 @@ function buildInvoiceDeliveryPayload({
   };
 }
 
-function buildInvoiceDetailLine({ item, product, customerType }) {
+function buildInvoiceDetailLine({
+  item,
+  product,
+  customerType,
+  allowZeroPromotionPrice = false,
+}) {
   const quantity = Number(item?.quantity || 0) || 0;
   const productId = product?.id ?? item?.productId ?? null;
   const productCode = product?.code || item?.sku || "";
@@ -2659,8 +2664,15 @@ function buildInvoiceDetailLine({ item, product, customerType }) {
   const masterProductId =
     product?.id ?? item?.masterProductId ?? item?.productId ?? null;
   const priceBook = getProductPriceBook(product, customerType);
-  const selectedUnitPrice = getProductUnitPrice(product, item, customerType);
+  let selectedUnitPrice = getProductUnitPrice(product, item, customerType);
   if (
+    allowZeroPromotionPrice &&
+    (selectedUnitPrice == null || Number(selectedUnitPrice) <= 0)
+  ) {
+    selectedUnitPrice = 0;
+  }
+  if (
+    !allowZeroPromotionPrice &&
     String(customerType || "").toLowerCase() === "dai_ly" &&
     selectedUnitPrice == null
   ) {
@@ -2669,6 +2681,7 @@ function buildInvoiceDetailLine({ item, product, customerType }) {
     );
   }
   if (
+    !allowZeroPromotionPrice &&
     String(customerType || "").toLowerCase() === "khach_le" &&
     Number(selectedUnitPrice) <= 0
   ) {
@@ -2871,6 +2884,7 @@ function buildGiftPromotionLine({
     },
     product,
     customerType,
+    allowZeroPromotionPrice: true,
   });
   const { __meta: meta, ...giftLine } = line;
   void meta;
@@ -3055,6 +3069,39 @@ function getPromotionSelectionDetails({
     promotionGroupKey: aggregateContext.promotionGroupKey,
     qualifyingItems,
   };
+}
+
+function isProductCoveredBySelectedPromotion({
+  productCode = "",
+  product = {},
+  promotionSelections = {},
+  productCampaignMap,
+}) {
+  const productId = Number(product?.id ?? product?.Id ?? product?.ProductId);
+  const isSelectedGift = Object.values(promotionSelections).some(
+    (campaignSelections) =>
+      Object.values(campaignSelections || {}).some((selection) =>
+        Object.entries(selection?.giftQuantities || {}).some(
+          ([giftProductId, quantity]) =>
+            Number(giftProductId) === productId && Number(quantity || 0) > 0,
+        ),
+      ),
+  );
+  if (isSelectedGift) return true;
+
+  return Object.values(promotionSelections[productCode] || {}).some(
+    (selection) => {
+      const campaign = (productCampaignMap?.get(productCode) || []).find(
+        (candidate) => String(candidate?.Id) === String(selection?.campaignId),
+      );
+      const promotion = getCampaignPromotionForProduct(campaign, product);
+      const promotionType = Number(
+        promotion?.PromotionType ?? campaign?.PromotionType ?? 0,
+      );
+
+      return promotionType === 8 && Number(promotion?.ProductPrice || 0) > 0;
+    },
+  );
 }
 
 function getConsumedPromotionQuantities(
@@ -5251,15 +5298,23 @@ export default function TaoDonHang() {
     return parsed.items.filter((item) => {
       const productCode = String(item?.sku || "").trim();
       const product = orderPreparation.productMap.get(productCode);
-      return product && !hasAgencyPrice(product, item);
+      const isPromotionProduct = isProductCoveredBySelectedPromotion({
+        productCode,
+        product,
+        promotionSelections,
+        productCampaignMap: orderPreparation.productCampaignMap,
+      });
+      return product && !isPromotionProduct && !hasAgencyPrice(product, item);
     });
   }, [
     pricingCustomerType,
     orderPreparation.key,
+    orderPreparation.productCampaignMap,
     orderPreparation.productMap,
     orderPreparation.status,
     orderPreparationKey,
     parsed.items,
+    promotionSelections,
   ]);
   const hasMissingAgencyPrices = agencyProductsWithoutPrice.length > 0;
   const retailProductsWithZeroPrice = useMemo(() => {
@@ -5274,15 +5329,25 @@ export default function TaoDonHang() {
     return parsed.items.filter((item) => {
       const productCode = String(item?.sku || "").trim();
       const product = orderPreparation.productMap.get(productCode);
-      return product && !hasValidRetailPrice(product, item);
+      const isPromotionProduct = isProductCoveredBySelectedPromotion({
+        productCode,
+        product,
+        promotionSelections,
+        productCampaignMap: orderPreparation.productCampaignMap,
+      });
+      return (
+        product && !isPromotionProduct && !hasValidRetailPrice(product, item)
+      );
     });
   }, [
     pricingCustomerType,
     orderPreparation.key,
+    orderPreparation.productCampaignMap,
     orderPreparation.productMap,
     orderPreparation.status,
     orderPreparationKey,
     parsed.items,
+    promotionSelections,
   ]);
   const hasZeroRetailPrices = retailProductsWithZeroPrice.length > 0;
   const hasInvalidProductPrices = hasMissingAgencyPrices || hasZeroRetailPrices;
@@ -7419,6 +7484,14 @@ export default function TaoDonHang() {
                               ) || [];
                             const campaignSelections =
                               promotionSelections[productCode] || {};
+                            const isPromotionProduct =
+                              isProductCoveredBySelectedPromotion({
+                                productCode,
+                                product,
+                                promotionSelections,
+                                productCampaignMap:
+                                  orderPreparation.productCampaignMap,
+                              });
 
                             return (
                               <div
@@ -7480,6 +7553,7 @@ export default function TaoDonHang() {
                                       </div>
                                     </div>
                                   ) : pricingCustomerType === "dai_ly" &&
+                                    !isPromotionProduct &&
                                     !hasAgencyPrice(product, item) ? (
                                     <div className="mt-3 flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-xs text-rose-700">
                                       <XCircle className="mt-0.5 h-4 w-4 shrink-0" />
@@ -7499,6 +7573,7 @@ export default function TaoDonHang() {
                                       </div>
                                     </div>
                                   ) : pricingCustomerType === "khach_le" &&
+                                    !isPromotionProduct &&
                                     !hasValidRetailPrice(product, item) ? (
                                     <div className="mt-3 flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-xs text-rose-700">
                                       <XCircle className="mt-0.5 h-4 w-4 shrink-0" />
