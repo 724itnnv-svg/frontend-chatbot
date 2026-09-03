@@ -2279,7 +2279,7 @@ export default function PayrollManager() {
 
     if (
       !window.confirm(
-        `Bạn có chắc muốn nhân bản toàn bộ dữ liệu lương từ kỳ ${sourcePeriod} sang kỳ ${targetPeriod}? Dữ liệu của kỳ ${targetPeriod} (nếu có) sẽ bị ghi đè.`
+        `Bạn có chắc muốn nhân bản dữ liệu từ kỳ ${sourcePeriod} sang kỳ ${targetPeriod}? Lương căn bản và 5 khoản phụ cấp sẽ lấy mới nhất từ hồ sơ nhân sự.`
       )
     ) {
       return;
@@ -2297,7 +2297,7 @@ export default function PayrollManager() {
       if (!res.ok || data?.success === false) {
         throw new Error(data?.message || "Nhân bản thất bại");
       }
-      setMessage(`Đã nhân bản thành công ${data.clonedCount || 0} nhân viên sang kỳ ${targetPeriod}.`);
+      setMessage(`Đã tạo bảng lương kỳ ${targetPeriod} cho ${data.clonedCount || 0} nhân viên; đồng bộ lương và phụ cấp từ ${data.compensationSynced || 0} hồ sơ nhân sự.`);
       setPeriod(targetPeriod); // Chuyển view sang tháng mới
     } catch (error) {
       console.error(error);

@@ -79,6 +79,58 @@ const BASE_STATS = {
 
 const STORAGE_KEY_AMBIGUOUS = "commission_ambiguous_v1";
 
+const CASHFLOW_CLASSIFICATION_OPTIONS = [
+  { value: "retail_normal", label: "Khách lẻ thường" },
+  { value: "retail_ctdb", label: "Khách lẻ CTDB" },
+  { value: "agency_normal", label: "Đại lý thường" },
+  { value: "agency_ctdb", label: "Đại lý CTDB" },
+  { value: "excluded", label: "Không nhóm – không tính hoa hồng" },
+];
+
+const hasNoteMarker = (note, marker) =>
+  new RegExp(`(^|[^A-Z0-9])${marker}(?=$|[^A-Z0-9])`, "i").test(note);
+
+const analyzeCashflowNote = (note) => {
+  const normalized = normalizeText(note).toUpperCase();
+  const hasDL = hasNoteMarker(normalized, "DL");
+  const hasKL = hasNoteMarker(normalized, "KL");
+  const hasCTDB = hasNoteMarker(normalized, "CTDB");
+  const foreignGroups = Array.from(
+    new Set(
+      Array.from(
+        normalized.matchAll(/(^|[^A-Z0-9])(CG|DSCP\d*)(?=$|[^A-Z0-9])/gi),
+        (match) => match[2].toUpperCase()
+      )
+    )
+  );
+
+  let invalidReason = "";
+  if (foreignGroups.length > 0) {
+    invalidReason = `Có nhóm không dùng cho hoa hồng Online: ${foreignGroups.join(", ")}`;
+  } else if (hasDL && hasKL) {
+    invalidReason = "Ghi chú có đồng thời DL và KL";
+  }
+
+  return { normalized, hasDL, hasKL, hasCTDB, invalidReason };
+};
+
+const normalizeCashflowChoice = (choice, hasCTDB = false) => {
+  if (choice === true) return hasCTDB ? "agency_ctdb" : "agency_normal";
+  if (choice === false) return hasCTDB ? "retail_ctdb" : "retail_normal";
+  return CASHFLOW_CLASSIFICATION_OPTIONS.some((item) => item.value === choice)
+    ? choice
+    : undefined;
+};
+
+const classificationFromChoice = (choice) => {
+  if (choice === "excluded") return { excluded: true };
+  if (choice === "agency_normal") return { isAgency: true, isCTDB: false };
+  if (choice === "agency_ctdb") return { isAgency: true, isCTDB: true };
+  if (choice === "retail_ctdb") return { isAgency: false, isCTDB: true };
+  if (choice === "retail_normal") return { isAgency: false, isCTDB: false };
+  return null;
+};
+
 const loadStoredAmbiguous = () => {
   try { return JSON.parse(localStorage.getItem(STORAGE_KEY_AMBIGUOUS) || "{}"); }
   catch { return {}; }
@@ -302,6 +354,17 @@ export default function CommissionOnlineCalculator() {
       { totalCommission: 0, totalRetail: 0, totalAgency: 0 }
     );
   }, [results]);
+
+  const ambiguousChoicesComplete = useMemo(
+    () =>
+      ambiguousCashflowRows.every((item) =>
+        normalizeCashflowChoice(
+          ambiguousChoices[item.choiceKey],
+          analyzeCashflowNote(item.note).hasCTDB
+        )
+      ),
+    [ambiguousCashflowRows, ambiguousChoices]
+  );
 
   const groupSummary = useMemo(() => {
     if (groupSelected.length < 2 || groupSelected.length > 3) return null;
@@ -573,6 +636,9 @@ export default function CommissionOnlineCalculator() {
     setMissingPriceModalOpen(false);
     setMissingReturns([]);
     setMissingGifts([]);
+    setAmbiguousCashflowModalOpen(false);
+    setAmbiguousCashflowRows([]);
+    setAmbiguousChoices({});
     setExcludedGiftCodes([]);
     setNewGiftCode("");
     setExcludedReturnCodes([]);
@@ -706,7 +772,7 @@ export default function CommissionOnlineCalculator() {
           if (missing.length) {
             newErrors.push(`${def.label}: Thiếu cột ${missing.join(", ")}.`);
           } else {
-            for (const row of rows) {
+            for (const [rowIndex, row] of rows.entries()) {
               const employee = normalizeText(getCell(row, headerMap, "Nhân viên"));
               if (!employee) continue;
               if (!shouldProcess(employee)) continue;
@@ -718,25 +784,59 @@ export default function CommissionOnlineCalculator() {
               const payer = normalizeText(getCell(row, headerMap, "Người nộp/nhận")).toUpperCase();
               const voucherId = normalizeText(getCell(row, headerMap, "Mã phiếu"));
 
+              const noteAnalysis = analyzeCashflowNote(note);
+              const payerNeedsConfirmation =
+                empType !== "admin" &&
+                !noteAnalysis.hasDL &&
+                !noteAnalysis.hasKL &&
+                !noteAnalysis.hasCTDB &&
+                payer.startsWith("DL");
+              const needsManualClassification =
+                !!noteAnalysis.invalidReason || payerNeedsConfirmation;
+              const legacyChoiceKey = `${employee}-${note}-${payer}-${value}`;
+              const choiceKey = `${legacyChoiceKey}-${voucherId || rowIndex}`;
               let isAgency;
-              if (empType === "admin") {
-                isAgency = true;
-              } else if (note && note.startsWith("DL")) {
-                isAgency = true;
-              } else if (payer && payer.startsWith("DL")) {
-                const choiceKey = `${employee}-${note}-${payer}-${value}`;
-                if (options.ambiguousChoices?.[choiceKey] !== undefined) {
-                  // auto-apply only when coming back from modal confirm
-                  isAgency = !!options.ambiguousChoices[choiceKey];
-                } else {
-                  ambiguousCashflowLocal.push({ row, employee, value, note, payer, voucherId, choiceKey });
+              let isCTDB;
+
+              if (needsManualClassification) {
+                const selectedChoice = normalizeCashflowChoice(
+                  options.ambiguousChoices?.[choiceKey] ??
+                  options.ambiguousChoices?.[legacyChoiceKey],
+                  noteAnalysis.hasCTDB
+                );
+                const selectedClassification = classificationFromChoice(selectedChoice);
+                if (!selectedClassification) {
+                  ambiguousCashflowLocal.push({
+                    row,
+                    employee,
+                    value,
+                    note,
+                    payer,
+                    voucherId,
+                    choiceKey,
+                    legacyChoiceKey,
+                    reason:
+                      noteAnalysis.invalidReason ||
+                      "Người nộp/nhận là Đại lý nhưng ghi chú chưa xác định DL/KL",
+                  });
                   continue;
                 }
+                if (selectedClassification.excluded) continue;
+                isAgency = selectedClassification.isAgency;
+                isCTDB = selectedClassification.isCTDB;
+              } else if (empType === "admin") {
+                isAgency = true;
+                isCTDB = noteAnalysis.hasCTDB;
+              } else if (noteAnalysis.hasDL) {
+                isAgency = true;
+                isCTDB = noteAnalysis.hasCTDB;
               } else {
+                // KL, PB KL, CTDB/PB CTDB và các dòng không có dấu hiệu DL
+                // đều thuộc khách lẻ; PB chỉ là nhãn sản phẩm, không đổi nhóm tính.
                 isAgency = false;
+                isCTDB = noteAnalysis.hasCTDB;
               }
 
-              const isCTDB = note.includes("CTDB");
               const stats = getStats(employeeMap, effectiveName);
               const log = getLog(effectiveName);
               if (isAgency) {
@@ -1149,8 +1249,12 @@ export default function CommissionOnlineCalculator() {
         const stored = loadStoredAmbiguous();
         const prefilled = {};
         ambiguousCashflowLocal.forEach((item) => {
-          if (stored[item.choiceKey] !== undefined) {
-            prefilled[item.choiceKey] = stored[item.choiceKey];
+          const storedChoice = normalizeCashflowChoice(
+            stored[item.choiceKey] ?? stored[item.legacyChoiceKey],
+            analyzeCashflowNote(item.note).hasCTDB
+          );
+          if (storedChoice) {
+            prefilled[item.choiceKey] = storedChoice;
           }
         });
         setAmbiguousChoices(prefilled);
@@ -1374,11 +1478,15 @@ export default function CommissionOnlineCalculator() {
   };
 
   const handleConfirmAmbiguousCashflow = () => {
-    // Explicitly set unchecked rows to false (retail) so they're remembered and not asked again
     const fullChoices = {};
     ambiguousCashflowRows.forEach((item) => {
-      fullChoices[item.choiceKey] = !!ambiguousChoices[item.choiceKey];
+      const choice = normalizeCashflowChoice(
+        ambiguousChoices[item.choiceKey],
+        analyzeCashflowNote(item.note).hasCTDB
+      );
+      if (choice) fullChoices[item.choiceKey] = choice;
     });
+    if (Object.keys(fullChoices).length !== ambiguousCashflowRows.length) return;
     saveStoredAmbiguous(fullChoices);
     setAmbiguousCashflowModalOpen(false);
     runCalculation({
@@ -2218,14 +2326,14 @@ export default function CommissionOnlineCalculator() {
       <Modal
         open={ambiguousCashflowModalOpen}
         onClose={() => setAmbiguousCashflowModalOpen(false)}
-        title="Xác nhận doanh số Đại lý"
-        subtitle="Các dòng sau có 'Người nộp/nhận' là Đại lý nhưng 'Ghi chú' không có 'DL'. Vui lòng xác nhận."
+        title="Phân loại doanh số cần kiểm tra"
+        subtitle="Chọn nhóm tính hoa hồng cho từng dòng. Chọn “Không nhóm” để bỏ qua dòng đó."
         showClose={false}
       >
         <div className="space-y-6">
           <div>
             <div className="mt-3 max-h-96 overflow-auto rounded-2xl border bg-white/80">
-              <table className="w-full text-xs">
+              <table className="min-w-[1050px] w-full text-xs">
                 <thead className="bg-slate-50 text-slate-600">
                   <tr>
                     <th className="px-3 py-2 text-left">Nhân viên</th>
@@ -2233,7 +2341,8 @@ export default function CommissionOnlineCalculator() {
                     <th className="px-3 py-2 text-left">Người nộp/nhận</th>
                     <th className="px-3 py-2 text-left">Mã phiếu</th>
                     <th className="px-3 py-2 text-right">Giá trị</th>
-                    <th className="px-3 py-2 text-center">Tính là ĐL?</th>
+                    <th className="px-3 py-2 text-left">Lý do cần kiểm tra</th>
+                    <th className="px-3 py-2 text-left">Nhóm tính</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -2244,19 +2353,26 @@ export default function CommissionOnlineCalculator() {
                       <td className="px-3 py-2">{item.payer}</td>
                       <td className="px-3 py-2">{item.voucherId}</td>
                       <td className="px-3 py-2 text-right">{formatMoney(item.value)}</td>
-                      <td className="px-3 py-2 text-center">
-                        <input
-                          type="checkbox"
-                          className="h-4 w-4"
-                          checked={!!ambiguousChoices[item.choiceKey]}
+                      <td className="px-3 py-2 text-amber-700">{item.reason}</td>
+                      <td className="px-3 py-2">
+                        <select
+                          className="min-w-48 rounded-lg border bg-white px-2 py-1.5 text-xs"
+                          value={ambiguousChoices[item.choiceKey] || ""}
                           onChange={(e) => {
-                            const isChecked = e.target.checked;
+                            const choice = e.target.value;
                             setAmbiguousChoices((prev) => ({
                               ...prev,
-                              [item.choiceKey]: isChecked,
+                              [item.choiceKey]: choice,
                             }));
                           }}
-                        />
+                        >
+                          <option value="">Chọn nhóm...</option>
+                          {CASHFLOW_CLASSIFICATION_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
                       </td>
                     </tr>
                   ))}
@@ -2264,6 +2380,11 @@ export default function CommissionOnlineCalculator() {
               </table>
             </div>
           </div>
+          {!ambiguousChoicesComplete && (
+            <div className="text-xs text-amber-700">
+              Vui lòng chọn nhóm cho tất cả các dòng trước khi tiếp tục.
+            </div>
+          )}
           <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">
             <button
               type="button"
@@ -2275,7 +2396,8 @@ export default function CommissionOnlineCalculator() {
             <button
               type="button"
               onClick={handleConfirmAmbiguousCashflow}
-              className="inline-flex items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.98]"
+              disabled={!ambiguousChoicesComplete}
+              className="inline-flex items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
             >
               Xác nhận và Tiếp tục tính
             </button>
