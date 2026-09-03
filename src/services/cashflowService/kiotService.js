@@ -190,7 +190,17 @@ export async function updateCustomerEInvoiceAddress(
 const KIOT_RETRY_DELAY_MS = 1000;
 const KIOT_RETRY_LIMIT = 4;
 const KIOT_RETRY_STATUS_CODES = new Set([401, 500, 504, 520]);
-const SAFE_RETRY_POST_PATHS = new Set(["/token", "/login"]);
+const SAFE_RETRY_POST_PATHS = new Set([
+  "/token",
+  "/login",
+  "/partnerdelivery",
+  "/bankaccount",
+  "/orderdelivery",
+  "/list-order",
+  "/location-suggest",
+  "/getProductByCode",
+  "/getProductById",
+]);
 const KIOT_INVOICE_RATE_LIMIT_RETRIES = 3;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -303,10 +313,11 @@ export async function getEmployeesByRetailer(
   retailer = "kingfarm",
   accessToken,
 ) {
-  const response = await api.get("/user", {
-    params: { retailer, accessToken },
-    withCredentials: true,
-  });
+  const response = await api.post(
+    "/user",
+    { retailer, accessToken },
+    { withCredentials: true },
+  );
 
   const payload = response.data;
   if (Array.isArray(payload?.data)) {
@@ -396,11 +407,9 @@ export async function getPartnerDelivery(
   accessPrivateToken,
 ) {
   try {
-    const response = await cashflowApi.get("/partnerdelivery", {
-      params: {
-        retailer,
-        accessPrivateToken,
-      },
+    const response = await cashflowApi.post("/partnerdelivery", {
+      retailer,
+      accessPrivateToken,
     });
     return response.data;
   } catch (error) {
@@ -420,11 +429,9 @@ export async function getBankAccount(
   accessPrivateToken,
 ) {
   try {
-    const response = await cashflowApi.get("/bankaccount", {
-      params: {
-        retailer,
-        accessPrivateToken,
-      },
+    const response = await cashflowApi.post("/bankaccount", {
+      retailer,
+      accessPrivateToken,
     });
     return response.data;
   } catch (error) {
@@ -440,13 +447,11 @@ export async function getOrderDelivery(
 ) {
   // console.log("ahsdaskhdasd", accessToken);
   try {
-    const response = await cashflowApi.get("/orderdelivery", {
-      params: {
-        retailer,
-        accessPrivateToken,
-        deliveryCode,
-        accessToken,
-      },
+    const response = await cashflowApi.post("/orderdelivery", {
+      retailer,
+      accessPrivateToken,
+      deliveryCode,
+      accessToken,
     });
     return response.data;
   } catch (error) {
@@ -480,15 +485,13 @@ export async function getListOrder(
   queryParams = {},
 ) {
   try {
-    const response = await cashflowApi.get("/list-order", {
-      params: {
-        retailer,
-        accessPrivateToken,
-        accessToken,
-        timeRange,
-        EInvoiceStatus,
-        ...queryParams,
-      },
+    const response = await cashflowApi.post("/list-order", {
+      retailer,
+      accessPrivateToken,
+      accessToken,
+      timeRange,
+      EInvoiceStatus,
+      ...queryParams,
     });
     return response.data;
   } catch (error) {
@@ -505,15 +508,13 @@ export async function getLocationSuggest(
   wardName,
 ) {
   try {
-    const response = await cashflowApi.get("/location-suggest", {
-      params: {
-        retailer,
-        accessPrivateToken,
-        accessToken,
-        provinceName,
-        districtName,
-        wardName,
-      },
+    const response = await cashflowApi.post("/location-suggest", {
+      retailer,
+      accessPrivateToken,
+      accessToken,
+      provinceName,
+      districtName,
+      wardName,
     });
     return response.data;
   } catch (error) {
@@ -892,13 +893,11 @@ export async function getProductByCode(
   code,
 ) {
   try {
-    const response = await cashflowApi.get("/getProductByCode", {
-      params: {
-        retailer,
-        accessPrivateToken,
-        accessToken,
-        code,
-      },
+    const response = await cashflowApi.post("/getProductByCode", {
+      retailer,
+      accessPrivateToken,
+      accessToken,
+      code,
     });
 
     console.log("getProductByCode response:", response.data);
@@ -1106,6 +1105,62 @@ export async function getIdWards(
       error.message;
 
     throw new Error(`Failed to call administrative area API: ${message}`);
+  }
+}
+
+export async function getVtpProvinces() {
+  try {
+    const response = await kiotDirectApi.get(
+      "https://partner.viettelpost.vn/v2/categories/listProvince",
+      {
+        headers: {
+          Accept: "application/json, text/plain, */*",
+        },
+      },
+    );
+    return response.data;
+  } catch (error) {
+    throw new Error(
+      `Không lấy được danh sách tỉnh Viettel Post: ${error.response?.data?.message || error.message}`,
+    );
+  }
+}
+
+export async function getVtpDistricts(provinceId) {
+  try {
+    const response = await kiotDirectApi.get(
+      "https://partner.viettelpost.vn/v2/categories/listDistrict",
+      {
+        params: { provinceId },
+        headers: {
+          Accept: "application/json, text/plain, */*",
+        },
+      },
+    );
+    return response.data;
+  } catch (error) {
+    throw new Error(
+      `Không lấy được danh sách huyện Viettel Post: ${error.response?.data?.message || error.message}`,
+    );
+  }
+}
+
+export async function getVtpWards(districtId) {
+  try {
+    const response = await kiotDirectApi.get(
+      "https://partner.viettelpost.vn/v2/categories/listWards",
+      {
+        params: { districtId },
+        headers: {
+          Accept: "application/json, text/plain, */*",
+        },
+      },
+    );
+    return response.data;
+  } catch (error) {
+    throw new Error(
+      `Không lấy được danh sách xã Viettel Post: ${error.response?.data?.message || error.message}`,
+    );
   }
 }
 
@@ -1358,13 +1413,11 @@ export async function getProductById(
   id,
 ) {
   try {
-    const response = await cashflowApi.get("/getProductById", {
-      params: {
-        retailer,
-        accessPrivateToken,
-        accessToken,
-        id,
-      },
+    const response = await cashflowApi.post("/getProductById", {
+      retailer,
+      accessPrivateToken,
+      accessToken,
+      id,
     });
 
     console.log("getProductById response:", response.data);
