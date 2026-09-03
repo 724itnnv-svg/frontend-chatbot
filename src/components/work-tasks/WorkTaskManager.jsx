@@ -10,6 +10,7 @@ import {
   Download,
   FileSpreadsheet,
   Loader2,
+  Paperclip,
   Pencil,
   Plus,
   RefreshCw,
@@ -21,6 +22,7 @@ import {
 } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 import * as XLSX from "xlsx";
+import { getApiBaseUrl } from "../../api/baseUrl";
 import { useAuth } from "../../context/AuthContext";
 
 const STATUS_OPTIONS = [
@@ -88,6 +90,18 @@ function toLocalInput(value) {
   if (Number.isNaN(date.getTime())) return "";
   const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
   return local.toISOString().slice(0, 16);
+}
+
+function deadlineBoundaryIso(value, endOfDay = false) {
+  if (!value) return "";
+  const [year, month, day] = value.split("-").map(Number);
+  const date = new Date(year, month - 1, day, endOfDay ? 23 : 0, endOfDay ? 59 : 0, endOfDay ? 59 : 0, endOfDay ? 999 : 0);
+  return Number.isNaN(date.getTime()) ? "" : date.toISOString();
+}
+
+function evidenceFileUrl(task, evidence, download = false) {
+  const baseUrl = getApiBaseUrl();
+  return `${baseUrl}/work-tasks/${task._id}/evidences/${evidence._id}/file${download ? "?download=1" : ""}`;
 }
 
 function Badge({ children, className = "" }) {
@@ -390,8 +404,36 @@ function StatusDialog({ task, manager, onClose, onSave, saving }) {
     progressPercent: task.progressPercent || 0,
     employeeNote: task.employeeNote || "",
   });
+  const [evidenceFiles, setEvidenceFiles] = useState([]);
+  const [fileError, setFileError] = useState("");
+  const existingEvidenceCount = task.evidences?.length || 0;
+  const remainingEvidenceCount = Math.max(0, 10 - existingEvidenceCount);
+
+  const addEvidenceFiles = (fileList) => {
+    const selected = Array.from(fileList || []).filter(Boolean);
+    if (!selected.length) return;
+    const oversized = selected.find((file) => file.size > 25 * 1024 * 1024);
+    if (oversized) {
+      setFileError(`Tệp “${oversized.name}” vượt quá giới hạn 25 MB.`);
+      return;
+    }
+    setEvidenceFiles((current) => {
+      const unique = selected.filter((file) => !current.some(
+        (existing) => existing.name === file.name
+          && existing.size === file.size
+          && existing.lastModified === file.lastModified,
+      ));
+      if (current.length + unique.length > remainingEvidenceCount) {
+        setFileError(`Bạn chỉ có thể tải thêm ${remainingEvidenceCount} tệp minh chứng.`);
+        return current;
+      }
+      setFileError("");
+      return [...current, ...unique];
+    });
+  };
+
   return <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/45 p-4 backdrop-blur-sm">
-    <form onSubmit={(event) => { event.preventDefault(); onSave(form); }} className="w-full max-w-lg rounded-3xl bg-white p-6 shadow-2xl">
+    <form onSubmit={(event) => { event.preventDefault(); onSave({ ...form, evidenceFiles }); }} className="max-h-[92vh] w-full max-w-xl overflow-y-auto rounded-3xl bg-white p-6 shadow-2xl">
       <div className="flex items-start justify-between gap-4">
         <div><h2 className="text-lg font-black text-slate-900">Cập nhật tiến độ</h2><p className="mt-1 text-sm text-slate-500">{task.title}</p></div>
         <button type="button" onClick={onClose} className="rounded-xl p-2 text-slate-500 hover:bg-slate-100"><X size={20} /></button>
@@ -400,6 +442,15 @@ function StatusDialog({ task, manager, onClose, onSave, saving }) {
         <label className="block"><span className="mb-1 block text-xs font-bold uppercase text-slate-500">Trạng thái mới</span><select value={form.status} onChange={(e) => setForm((v) => ({ ...v, status: e.target.value }))} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5">{allowedStatuses.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
         {!['TODO', 'DONE', 'CANCELLED'].includes(form.status) && <label className="block"><span className="mb-1 block text-xs font-bold uppercase text-slate-500">Phần trăm hoàn thành</span><input type="number" min="0" max="99" value={form.progressPercent} onChange={(e) => setForm((v) => ({ ...v, progressPercent: e.target.value }))} className="w-full rounded-xl border border-slate-200 px-3 py-2.5" /></label>}
         <label className="block"><span className="mb-1 block text-xs font-bold uppercase text-slate-500">Ghi chú tiến độ{form.status === "BLOCKED" ? " *" : ""}</span><textarea required={form.status === "BLOCKED"} rows={3} maxLength={2000} value={form.employeeNote} onChange={(e) => setForm((v) => ({ ...v, employeeNote: e.target.value }))} className="w-full rounded-xl border border-slate-200 px-3 py-2.5" /></label>
+        {form.status === "DONE" && <div className="rounded-2xl border border-emerald-200 bg-emerald-50/60 p-4">
+          <div className="flex items-center justify-between gap-3"><div><p className="font-bold text-emerald-900">Minh chứng hoàn thành</p><p className="mt-1 text-xs text-emerald-700">Ảnh, PDF, Word, Excel, TXT hoặc video · tối đa 10 tệp · 25 MB/tệp</p></div><span className="shrink-0 text-xs font-bold text-emerald-700">{existingEvidenceCount + evidenceFiles.length}/10</span></div>
+          {remainingEvidenceCount > 0 && <label className="mt-3 flex cursor-pointer items-center justify-center gap-2 rounded-xl border-2 border-dashed border-emerald-300 bg-white px-4 py-5 font-semibold text-emerald-700 hover:bg-emerald-50">
+            <input type="file" multiple accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.mp4,.mov" className="hidden" disabled={saving} onChange={(event) => { addEvidenceFiles(event.target.files); event.target.value = ""; }} />
+            <Upload size={19} /> Chọn tệp minh chứng
+          </label>}
+          {fileError && <p className="mt-2 text-sm font-semibold text-rose-700">{fileError}</p>}
+          {evidenceFiles.length > 0 && <div className="mt-3 space-y-2">{evidenceFiles.map((file, index) => <div key={`${file.name}-${file.size}-${file.lastModified}`} className="flex items-center gap-2 rounded-xl border border-emerald-100 bg-white px-3 py-2"><Paperclip size={15} className="shrink-0 text-emerald-600" /><span className="min-w-0 flex-1 truncate text-sm font-semibold text-slate-700">{file.name}</span><span className="shrink-0 text-xs text-slate-400">{file.size < 1024 * 1024 ? `${Math.max(1, Math.round(file.size / 1024))} KB` : `${(file.size / 1024 / 1024).toFixed(1)} MB`}</span><button type="button" disabled={saving} onClick={() => setEvidenceFiles((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="rounded-lg p-1 text-rose-600 hover:bg-rose-50"><X size={15} /></button></div>)}</div>}
+        </div>}
       </div> : <p className="mt-5 rounded-xl bg-slate-50 p-4 text-sm text-slate-600">Công việc ở trạng thái này không còn bước cập nhật tiếp theo.</p>}
       <div className="mt-6 flex justify-end gap-3"><button type="button" onClick={onClose} className="rounded-xl border border-slate-200 px-4 py-2 font-bold">Đóng</button>{allowedStatuses.length > 0 && <button disabled={saving} className="rounded-xl bg-cyan-600 px-5 py-2 font-bold text-white disabled:opacity-60">{saving ? "Đang lưu..." : "Cập nhật"}</button>}</div>
     </form>
@@ -425,7 +476,7 @@ export default function WorkTaskManager() {
   const [rows, setRows] = useState([]);
   const [assignees, setAssignees] = useState([]);
   const [summary, setSummary] = useState({});
-  const [filters, setFilters] = useState({ search: "", status: "ALL", priority: "ALL", assigneeUserId: "", overdue: false });
+  const [filters, setFilters] = useState({ search: "", status: "ALL", priority: "ALL", assigneeUserId: "", deadlineFrom: "", deadlineTo: "", overdue: false });
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState(null);
   const [editor, setEditor] = useState(null);
@@ -442,6 +493,8 @@ export default function WorkTaskManager() {
       if (filters.status !== "ALL") params.set("status", filters.status);
       if (filters.priority !== "ALL") params.set("priority", filters.priority);
       if (filters.assigneeUserId) params.set("assigneeUserId", filters.assigneeUserId);
+      if (filters.deadlineFrom) params.set("deadlineFrom", deadlineBoundaryIso(filters.deadlineFrom));
+      if (filters.deadlineTo) params.set("deadlineTo", deadlineBoundaryIso(filters.deadlineTo, true));
       if (filters.overdue) params.set("overdue", "1");
       const [listResponse, summaryResponse] = await Promise.all([
         api.get(`/work-tasks?${params}`),
@@ -503,7 +556,13 @@ export default function WorkTaskManager() {
   async function updateStatus(form) {
     setSaving(true);
     try {
-      await api.patch(`/work-tasks/${statusTask._id}/status`, form);
+      const { evidenceFiles = [], ...statusPayload } = form;
+      if (statusPayload.status === "DONE" && evidenceFiles.length) {
+        const body = new FormData();
+        evidenceFiles.forEach((file) => body.append("evidence", file));
+        await api.post(`/work-tasks/${statusTask._id}/evidences`, body);
+      }
+      await api.patch(`/work-tasks/${statusTask._id}/status`, statusPayload);
       setStatusTask(null);
       setMessage({ ok: true, text: "Đã cập nhật trạng thái công việc." });
       await loadRows();
@@ -599,13 +658,18 @@ export default function WorkTaskManager() {
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">{cards.map(({ label, value, icon, className }) => <div key={label} className="flex items-center gap-3 rounded-2xl border border-slate-100 bg-white p-4 shadow-sm"><span className={`rounded-xl p-2.5 ${className}`}>{icon}</span><div><div className="text-2xl font-black text-slate-900">{value}</div><div className="text-xs font-bold uppercase tracking-wide text-slate-500">{label}</div></div></div>)}</div>
 
       <div className="rounded-3xl border border-slate-100 bg-white p-4 shadow-sm">
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
           <label className="relative xl:col-span-2"><Search size={17} className="absolute left-3 top-3 text-slate-400" /><input value={filters.search} onChange={(e) => setFilters((v) => ({ ...v, search: e.target.value }))} placeholder="Tìm tên việc, mô tả, nhân viên..." className="w-full rounded-xl border border-slate-200 py-2.5 pl-10 pr-3 outline-none focus:border-cyan-400" /></label>
           <select value={filters.status} onChange={(e) => setFilters((v) => ({ ...v, status: e.target.value }))} className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">{STATUS_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>
           <select value={filters.priority} onChange={(e) => setFilters((v) => ({ ...v, priority: e.target.value }))} className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">{PRIORITY_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>
           {canViewAll ? <UserSearchSelect users={assignees} value={filters.assigneeUserId} onChange={(value) => setFilters((v) => ({ ...v, assigneeUserId: value }))} allowEmpty emptyLabel="Tất cả nhân viên" placeholder="Tìm nhân viên để lọc..." /> : <label className="flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-600"><input type="checkbox" checked={filters.overdue} onChange={(e) => setFilters((v) => ({ ...v, overdue: e.target.checked }))} /> Chỉ việc quá hạn</label>}
         </div>
-        {canViewAll && <label className="mt-3 inline-flex items-center gap-2 text-sm font-semibold text-slate-600"><input type="checkbox" checked={filters.overdue} onChange={(e) => setFilters((v) => ({ ...v, overdue: e.target.checked }))} /> Chỉ hiển thị công việc quá hạn</label>}
+        <div className="mt-3 flex flex-wrap items-end gap-3">
+          <label className="min-w-44 text-xs font-bold uppercase tracking-wide text-slate-500"><span className="mb-1.5 block">Deadline từ ngày</span><input type="date" value={filters.deadlineFrom} max={filters.deadlineTo || undefined} onChange={(e) => setFilters((v) => ({ ...v, deadlineFrom: e.target.value }))} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-medium normal-case tracking-normal text-slate-700 outline-none focus:border-cyan-400" /></label>
+          <label className="min-w-44 text-xs font-bold uppercase tracking-wide text-slate-500"><span className="mb-1.5 block">Deadline đến ngày</span><input type="date" value={filters.deadlineTo} min={filters.deadlineFrom || undefined} onChange={(e) => setFilters((v) => ({ ...v, deadlineTo: e.target.value }))} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-medium normal-case tracking-normal text-slate-700 outline-none focus:border-cyan-400" /></label>
+          {canViewAll && <label className="mb-2.5 inline-flex items-center gap-2 text-sm font-semibold text-slate-600"><input type="checkbox" checked={filters.overdue} onChange={(e) => setFilters((v) => ({ ...v, overdue: e.target.checked }))} /> Chỉ hiển thị công việc quá hạn</label>}
+          {(filters.deadlineFrom || filters.deadlineTo) && <button type="button" onClick={() => setFilters((v) => ({ ...v, deadlineFrom: "", deadlineTo: "" }))} className="mb-0.5 rounded-xl px-3 py-2.5 text-sm font-bold text-cyan-700 hover:bg-cyan-50">Xóa lọc thời gian</button>}
+        </div>
       </div>
 
       <div className="overflow-hidden rounded-3xl border border-slate-100 bg-white shadow-sm">
@@ -619,7 +683,7 @@ export default function WorkTaskManager() {
                 const own = String(task.assigneeUserId?._id || task.assigneeUserId || "") === currentUserId;
                 const mayUpdate = canUpdateStatus && (manager || own);
                 return <tr key={task._id} className={`${task.isOverdue ? "bg-rose-50/40" : "hover:bg-slate-50/70"} ${highlightedId === task._id ? "ring-2 ring-inset ring-cyan-400" : ""}`}>
-                  <td className="max-w-md px-5 py-4"><div className="font-bold text-slate-900">{task.title}</div>{task.description && <div className="mt-1 line-clamp-2 text-xs text-slate-500">{task.description}</div>}<div className={`mt-2 text-xs font-bold ${priority.className}`}>Ưu tiên: {priority.label}</div></td>
+                  <td className="max-w-md px-5 py-4"><div className="font-bold text-slate-900">{task.title}</div>{task.description && <div className="mt-1 line-clamp-2 text-xs text-slate-500">{task.description}</div>}<div className={`mt-2 text-xs font-bold ${priority.className}`}>Ưu tiên: {priority.label}</div>{task.evidences?.length > 0 && <div className="mt-2 flex flex-wrap gap-1.5">{task.evidences.slice(0, 3).map((evidence) => <a key={evidence._id} href={evidenceFileUrl(task, evidence)} target="_blank" rel="noreferrer" title={evidence.originalName || evidence.filename} className="inline-flex max-w-36 items-center gap-1 rounded-lg border border-cyan-100 bg-cyan-50 px-2 py-1 text-xs font-semibold text-cyan-700 hover:bg-cyan-100"><Paperclip size={12} className="shrink-0" /><span className="truncate">{evidence.originalName || evidence.filename}</span></a>)}{task.evidences.length > 3 && <span className="rounded-lg bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-600">+{task.evidences.length - 3} tệp</span>}</div>}</td>
                   <td className="px-4 py-4"><div className="flex items-center gap-2"><span className="rounded-full bg-cyan-50 p-2 text-cyan-700"><UserRound size={15} /></span><div><div className="font-semibold text-slate-800">{task.assigneeName}</div><div className="text-xs text-slate-500">{task.assigneeEmployeeCode || task.companyCode || "-"}</div></div></div></td>
                   <td className="px-4 py-4"><Badge className={status.className}>{status.label}</Badge>{task.employeeNote && <div title={task.employeeNote} className="mt-2 max-w-40 truncate text-xs text-slate-500">{task.employeeNote}</div>}</td>
                   <td className="px-4 py-4"><div className="mb-1 flex justify-between text-xs font-bold text-slate-600"><span>{task.progressPercent || 0}%</span></div><div className="h-2 w-28 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-cyan-500" style={{ width: `${task.progressPercent || 0}%` }} /></div></td>
