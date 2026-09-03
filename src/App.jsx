@@ -58,6 +58,9 @@ const EmployeeAssetManager = lazy(
 const OperationalContractManager = lazy(
   () => import("./components/contracts/OperationalContractManager"),
 );
+const WorkTaskManager = lazy(
+  () => import("./components/work-tasks/WorkTaskManager"),
+);
 const RolePage = lazy(() => import("./components/role/RoleList"));
 const UserProfile = lazy(() => import("./components/UserProfile"));
 const AddressManager = lazy(() => import("./address/AddressManager"));
@@ -215,6 +218,7 @@ const ADMIN_ROUTE_BY_SCREEN = {
   employee_profiles: "/admin/employee-profiles",
   employee_assets: "/admin/employee-assets",
   operational_contracts: "/admin/operational-contracts",
+  work_tasks: "/admin/work-tasks",
   users: "/admin/users",
   roles: "/admin/roles",
   profile: "/admin/profile",
@@ -286,6 +290,11 @@ const adminRoutes = [
     path: "operational-contracts",
     screenId: "operational_contracts",
     element: <OperationalContractManager />,
+  },
+  {
+    path: "work-tasks",
+    screenId: "work_tasks",
+    element: <WorkTaskManager />,
   },
   { path: "users", screenId: "users", element: <UsersPage /> },
   { path: "roles", screenId: "roles", element: <RolePage /> },

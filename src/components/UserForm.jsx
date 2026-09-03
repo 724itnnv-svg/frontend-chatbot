@@ -29,6 +29,7 @@ import defaultAvatar from "../assets/default-avatar.png";
 export default function UserForm({ user, onClose, onSaved }) {
   const { token } = useAuth();
   const isEdit = !!user;
+  const hasLinkedEmployeeProfile = Boolean(user?.employeeProfileId);
 
   const [form, setForm] = useState({
     code: "",
@@ -288,12 +289,8 @@ export default function UserForm({ user, onClose, onSaved }) {
       const method = isEdit ? "PUT" : "POST";
 
       const body = {
-        code: form.code.trim(),
-        fullName: form.fullName,
         email: form.email,
-        phone: form.phone.trim(),
         role: form.role,
-        companyCode: form.companyCode,
         approveStatus: Number(form.approveStatus),
         avatarUrl: form.avatarUrl,
         pageId: form.pageIds, // gửi mảng pageId lên backend
@@ -303,6 +300,12 @@ export default function UserForm({ user, onClose, onSaved }) {
           userIds: form.managementScope === "restricted" ? form.managedUserIds : [],
         },
       };
+      if (!hasLinkedEmployeeProfile) {
+        body.code = form.code.trim();
+        body.fullName = form.fullName;
+        body.phone = form.phone.trim();
+        body.companyCode = form.companyCode;
+      }
 
       if (form.password.trim() !== "") {
         body.password = form.password;
@@ -446,18 +449,19 @@ export default function UserForm({ user, onClose, onSaved }) {
                 </div>
 
                 <div className="grid content-start gap-4 sm:grid-cols-2">
+                  {hasLinkedEmployeeProfile && <div className="sm:col-span-2 rounded-xl border border-cyan-200 bg-cyan-50 px-3 py-2 text-xs text-cyan-800">Tên, mã nhân viên, số điện thoại và công ty được quản lý tại hồ sơ nhân sự. Email đăng nhập và phân quyền vẫn có thể chỉnh tại đây.</div>}
                   <div>
                     <label className={labelClass} htmlFor="user-full-name">Họ và tên <span className="text-rose-500">*</span></label>
                     <div className="relative">
                       <UserRound className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-                      <input id="user-full-name" type="text" name="fullName" value={form.fullName} onChange={handleChange} required autoFocus className={`${inputClass} pl-10`} placeholder="Nhập họ và tên" />
+                      <input id="user-full-name" type="text" name="fullName" value={form.fullName} onChange={handleChange} required autoFocus disabled={hasLinkedEmployeeProfile} className={`${inputClass} pl-10 disabled:cursor-not-allowed disabled:bg-slate-100`} placeholder="Nhập họ và tên" />
                     </div>
                   </div>
                   <div>
                     <label className={labelClass} htmlFor="user-code">Mã nhân viên</label>
                     <div className="relative">
                       <BadgeCheck className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-                      <input id="user-code" type="text" name="code" value={form.code} onChange={handleChange} className={`${inputClass} pl-10 uppercase`} placeholder="VD: NV001" />
+                      <input id="user-code" type="text" name="code" value={form.code} onChange={handleChange} disabled={hasLinkedEmployeeProfile} className={`${inputClass} pl-10 uppercase disabled:cursor-not-allowed disabled:bg-slate-100`} placeholder="VD: NV001" />
                     </div>
                   </div>
                   <div>
@@ -471,7 +475,7 @@ export default function UserForm({ user, onClose, onSaved }) {
                     <label className={labelClass} htmlFor="user-phone">Số điện thoại</label>
                     <div className="relative">
                       <Phone className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-                      <input id="user-phone" type="tel" name="phone" value={form.phone} onChange={handleChange} className={`${inputClass} pl-10`} placeholder="VD: 0949 015 724" />
+                      <input id="user-phone" type="tel" name="phone" value={form.phone} onChange={handleChange} disabled={hasLinkedEmployeeProfile} className={`${inputClass} pl-10 disabled:cursor-not-allowed disabled:bg-slate-100`} placeholder="VD: 0949 015 724" />
                     </div>
                   </div>
                   <div className="sm:col-span-2">
@@ -522,7 +526,7 @@ export default function UserForm({ user, onClose, onSaved }) {
                   <label className={labelClass} htmlFor="user-company">Công ty của tài khoản</label>
                   <div className="relative">
                     <Building2 className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-                    <select id="user-company" name="companyCode" value={form.companyCode} onChange={handleChange} className={`${inputClass} appearance-none pl-10 pr-10`}>
+                    <select id="user-company" name="companyCode" value={form.companyCode} onChange={handleChange} disabled={hasLinkedEmployeeProfile} className={`${inputClass} appearance-none pl-10 pr-10 disabled:cursor-not-allowed disabled:bg-slate-100`}>
                       <option value="">Chưa chọn công ty</option>
                       <option value="NNV">Nông Nghiệp Việt (NNV)</option>
                       <option value="ABC">ABC</option>
