@@ -56,6 +56,7 @@ const TABS = [
   { id: "overview", label: "Tổng quan", icon: LayoutGrid },
   { id: "list", label: "Danh sách", icon: CalendarDays },
   { id: "auto", label: "Tự động", icon: Zap },
+  { id: "holidays", label: "Ngày lễ", icon: CalendarDays },
   { id: "pending", label: "Cần duyệt", icon: AlertCircle },
   { id: "leave", label: "Đơn từ", icon: FileText },
   { id: "report", label: "Báo cáo", icon: BarChart3 },
@@ -239,8 +240,18 @@ function isSundayDate(dateStr) {
   return date ? date.getDay() === 0 : false;
 }
 
-function getAttendanceDayStyle(record, date, today, approvedLeave = null) {
+function getAttendanceDayStyle(record, date, today, approvedLeave = null, holiday = null) {
   const isMissingAttendance = !record || !hasAttendancePunch(record);
+
+  if (isMissingAttendance && holiday) {
+    return {
+      border: "border-amber-300 ring-2 ring-amber-100 hover:border-amber-400",
+      bg: "bg-amber-50/90",
+      text: "text-amber-700",
+      label: `Nghỉ lễ · ${holiday.name}`,
+      dot: "bg-amber-500",
+    };
+  }
 
   if (isMissingAttendance && isSundayDate(date)) {
     return {
@@ -544,6 +555,20 @@ function createEmptyForm() {
   };
 }
 
+function createHolidayForm() {
+  return {
+    _id: "",
+    date: todayVN(),
+    name: "",
+    paidDays: 1,
+    type: "statutory",
+    scope: "global",
+    companyCodesText: "",
+    isActive: true,
+    note: "",
+  };
+}
+
 function createBulkStampForm() {
   return {
     locationId: "",
@@ -712,6 +737,7 @@ export default function AttendanceManager() {
   const visibleTabs = useMemo(
     () => TABS.filter((item) => {
       if (item.id === "auto") return canManageAttendance;
+      if (item.id === "holidays") return canManageAttendance;
       if (item.id === "pending") return canCreateAttendance || canEditAttendance;
       return true;
     }),
@@ -791,6 +817,10 @@ export default function AttendanceManager() {
   const [autoUserIds, setAutoUserIds] = useState(new Set());
   const [autoUserSearch, setAutoUserSearch] = useState("");
   const [autoForm, setAutoForm] = useState(createAutoAttendanceForm);
+  const [holidays, setHolidays] = useState([]);
+  const [holidayLoading, setHolidayLoading] = useState(false);
+  const [holidaySaving, setHolidaySaving] = useState(false);
+  const [holidayForm, setHolidayForm] = useState(createHolidayForm);
 
   useEffect(() => {
     if (!evidencePreview) return undefined;
@@ -1068,6 +1098,75 @@ export default function AttendanceManager() {
     }
   }, [api]);
 
+  const loadHolidays = useCallback(async () => {
+    setHolidayLoading(true);
+    try {
+      const res = await api.get("/holiday-calendar");
+      setHolidays(Array.isArray(res.data?.data) ? res.data.data : []);
+    } catch {
+      showFlash(false, "Không thể tải lịch ngày lễ.");
+    } finally {
+      setHolidayLoading(false);
+    }
+  }, [api]);
+
+  async function saveHoliday() {
+    if (!holidayForm.date || !holidayForm.name.trim()) {
+      showFlash(false, "Vui lòng nhập ngày và tên ngày lễ.");
+      return;
+    }
+    setHolidaySaving(true);
+    try {
+      const payload = {
+        date: holidayForm.date,
+        name: holidayForm.name.trim(),
+        paidDays: Number(holidayForm.paidDays),
+        type: holidayForm.type,
+        scope: holidayForm.scope,
+        companyCodes: holidayForm.scope === "company"
+          ? holidayForm.companyCodesText.split(/[,;\s]+/).map(normalizeTeam).filter(Boolean)
+          : [],
+        isActive: holidayForm.isActive,
+        note: holidayForm.note.trim(),
+      };
+      if (holidayForm._id) await api.put(`/holiday-calendar/${holidayForm._id}`, payload);
+      else await api.post("/holiday-calendar", payload);
+      setHolidayForm(createHolidayForm());
+      await loadHolidays();
+      showFlash(true, holidayForm._id ? "Đã cập nhật ngày lễ." : "Đã thêm ngày lễ.");
+    } catch (error) {
+      showFlash(false, error.response?.data?.message || "Không thể lưu ngày lễ.");
+    } finally {
+      setHolidaySaving(false);
+    }
+  }
+
+  function editHoliday(holiday) {
+    setHolidayForm({
+      _id: holiday._id,
+      date: holiday.date || todayVN(),
+      name: holiday.name || "",
+      paidDays: Number(holiday.paidDays ?? 1),
+      type: holiday.type || "statutory",
+      scope: holiday.scope || "global",
+      companyCodesText: (holiday.companyCodes || []).join(", "),
+      isActive: holiday.isActive !== false,
+      note: holiday.note || "",
+    });
+  }
+
+  async function deleteHoliday(holiday) {
+    if (!window.confirm(`Xóa ngày lễ ${holiday.name} (${fmtShortDate(holiday.date)})?`)) return;
+    try {
+      await api.delete(`/holiday-calendar/${holiday._id}`);
+      if (holidayForm._id === holiday._id) setHolidayForm(createHolidayForm());
+      await loadHolidays();
+      showFlash(true, "Đã xóa ngày lễ.");
+    } catch (error) {
+      showFlash(false, error.response?.data?.message || "Không thể xóa ngày lễ.");
+    }
+  }
+
   function toggleAutoUser(userId) {
     const id = String(userId);
     setAutoUserIds((current) => {
@@ -1234,6 +1333,7 @@ export default function AttendanceManager() {
   realtimeRefreshRef.current = {
     leavePage,
     loadLeaveRequests,
+    loadHolidays,
     loadOverview,
     loadPending,
     loadPendingCount,
@@ -1267,6 +1367,7 @@ export default function AttendanceManager() {
         if (payload.entity === "leave-request") {
           void refreshAttendanceLeavePendingTotal().catch(() => {});
         }
+        if (payload.entity === "holiday-calendar") refresh?.loadHolidays();
         if (refresh?.tab === "overview") refresh.loadOverview();
         if (refresh?.tab === "pending") refresh.loadPending(refresh.pendingPage);
         if (payload.entity === "leave-request" && refresh?.tab === "leave") {
@@ -1295,6 +1396,7 @@ export default function AttendanceManager() {
     if (tab === "overview") {
       loadOverview();
       loadAutoSettings();
+      loadHolidays();
     } else if (tab === "list") {
       setPage(1);
       loadList(1);
@@ -1304,6 +1406,8 @@ export default function AttendanceManager() {
       loadPending(1);
     } else if (tab === "auto") {
       loadAutoSettings();
+    } else if (tab === "holidays") {
+      loadHolidays();
     } else if (tab === "leave") {
       setLeavePage(1);
       setSelectedLeaveIds(new Set());
@@ -1311,16 +1415,17 @@ export default function AttendanceManager() {
     } else {
       loadReport();
     }
-  }, [tab, from, to, statusFilter, teamFilter, leaveStatusFilter, loadList, loadOverview, loadReport, loadPending, loadLeaveRequests, loadAutoSettings]);
+  }, [tab, from, to, statusFilter, teamFilter, leaveStatusFilter, loadList, loadOverview, loadReport, loadPending, loadLeaveRequests, loadAutoSettings, loadHolidays]);
 
   async function refreshCurrentTab({ listPage = page, pendingListPage = pendingPage } = {}) {
     if (tab === "overview") {
-      await Promise.all([loadOverview(), loadAutoSettings()]);
+      await Promise.all([loadOverview(), loadAutoSettings(), loadHolidays()]);
       return;
     }
     if (tab === "list") await loadList(listPage);
     if (tab === "pending") await loadPending(pendingListPage);
     if (tab === "auto") await loadAutoSettings();
+    if (tab === "holidays") await loadHolidays();
     if (tab === "leave") await loadLeaveRequests(leavePage);
     if (tab === "report") await loadReport();
   }
@@ -1986,6 +2091,23 @@ export default function AttendanceManager() {
     return map;
   }, [overviewLeaveRequests]);
 
+  const activeHolidaysByDate = useMemo(() => {
+    const map = new Map();
+    holidays.filter((holiday) => holiday.isActive !== false).forEach((holiday) => {
+      const rows = map.get(holiday.date) || [];
+      rows.push(holiday);
+      map.set(holiday.date, rows);
+    });
+    return map;
+  }, [holidays]);
+
+  const getHolidayForDate = useCallback((date, companyCode = "") => {
+    const normalizedCompany = normalizeTeam(companyCode);
+    return (activeHolidaysByDate.get(date) || []).find((holiday) =>
+      holiday.scope !== "company" || (holiday.companyCodes || []).map(normalizeTeam).includes(normalizedCompany)
+    ) || null;
+  }, [activeHolidaysByDate]);
+
   const autoSettingsByUser = useMemo(() => {
     const map = new Map();
     autoSettings.forEach((setting) => {
@@ -2042,13 +2164,14 @@ export default function AttendanceManager() {
       if (autoSetting && autoSetting.isEnabled !== false) autoEnabled += 1;
       overviewDates.forEach((date) => {
         if (isSundayDate(date)) return;
+        if (getHolidayForDate(date, employee.teamId)) return;
         const record = overviewByUserDate.get(`${employee.id}-${date}`) || overviewByUserDate.get(`${employee.name}-${date}`);
         const approvedLeave = overviewLeaveByUserDate.get(`${employee.id}-${date}`) || overviewLeaveByUserDate.get(`${employee.name}-${date}`);
         if (!approvedLeave && !hasAttendancePunch(record) && isPastAttendanceDate(date, today)) missingPast += 1;
       });
     });
     return { present, incomplete, invalid, missingPast, autoEnabled };
-  }, [autoSettingsByUser, overviewByUserDate, overviewDates, overviewEmployees, overviewLeaveByUserDate, overviewRecords]);
+  }, [autoSettingsByUser, getHolidayForDate, overviewByUserDate, overviewDates, overviewEmployees, overviewLeaveByUserDate, overviewRecords]);
 
   const teamOptions = useMemo(() => {
     const teams = new Set();
@@ -3086,9 +3209,10 @@ export default function AttendanceManager() {
                             {overviewDates.map((date) => {
                               const record = overviewByUserDate.get(`${employee.id}-${date}`) || overviewByUserDate.get(`${employee.name}-${date}`);
                               const approvedLeave = overviewLeaveByUserDate.get(`${employee.id}-${date}`) || overviewLeaveByUserDate.get(`${employee.name}-${date}`);
+                              const holiday = getHolidayForDate(date, employee.teamId);
                               const shifts = getRecordShifts(record);
                               const isToday = date === today;
-                              const dayStyle = getAttendanceDayStyle(record, date, today, approvedLeave);
+                              const dayStyle = getAttendanceDayStyle(record, date, today, approvedLeave, holiday);
 
                               return (
                                 <button
@@ -3124,6 +3248,7 @@ export default function AttendanceManager() {
                                       {dayStyle.label && (approvedLeave || record.status !== "present") && (
                                         <p className={`text-[11px] font-bold ${dayStyle.text}`}>{dayStyle.label}</p>
                                       )}
+                                      {holiday && <p className="text-[11px] font-bold text-amber-700">Lễ · {holiday.name}</p>}
                                       {record.workHours != null && <p className="text-[11px] font-bold text-emerald-700">Tổng {record.workHours}h</p>}
                                     </div>
                                   ) : (
@@ -3190,9 +3315,10 @@ export default function AttendanceManager() {
                           {overviewDates.map((date) => {
                             const record = overviewByUserDate.get(`${employee.id}-${date}`) || overviewByUserDate.get(`${employee.name}-${date}`);
                             const approvedLeave = overviewLeaveByUserDate.get(`${employee.id}-${date}`) || overviewLeaveByUserDate.get(`${employee.name}-${date}`);
+                            const holiday = getHolidayForDate(date, employee.teamId);
                             const shifts = getRecordShifts(record);
                             const isToday = date === today;
-                            const dayStyle = getAttendanceDayStyle(record, date, today, approvedLeave);
+                            const dayStyle = getAttendanceDayStyle(record, date, today, approvedLeave, holiday);
 
                             return (
                               <div key={`${employee.id}-${date}`} className={`border-r border-slate-100 p-2 last:border-r-0 ${isToday && !record ? "bg-violet-50/30" : ""}`}>
@@ -3225,6 +3351,7 @@ export default function AttendanceManager() {
                                       {dayStyle.label && (approvedLeave || record.status !== "present") && (
                                         <p className={`text-[11px] font-bold ${dayStyle.text}`}>{dayStyle.label}</p>
                                       )}
+                                      {holiday && <p className="text-[11px] font-bold text-amber-700">Lễ · {holiday.name}</p>}
                                       {record.workHours != null && <p className="text-[11px] font-bold text-emerald-700">Tổng {record.workHours}h</p>}
                                     </div>
                                   ) : (
@@ -3549,6 +3676,77 @@ export default function AttendanceManager() {
               )}
             </div>
           </div>
+        )}
+
+        {tab === "holidays" && (
+          <section className="space-y-4">
+            <div className="rounded-2xl border border-amber-200 bg-amber-50/60 p-4">
+              <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h2 className="font-bold text-slate-900">Lịch ngày lễ, Tết</h2>
+                  <p className="mt-1 text-sm text-slate-600">
+                    Nhân viên tự động sẽ không được chấm tự động trong các ngày này; chấm công thủ công vẫn được phép.
+                  </p>
+                </div>
+                <Badge tone="amber">{holidays.filter((item) => item.isActive !== false).length} ngày đang áp dụng</Badge>
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                <label className="text-sm font-semibold text-slate-700">Ngày
+                  <input type="date" value={holidayForm.date} onChange={(event) => setHolidayForm((prev) => ({ ...prev, date: event.target.value }))} className="mt-1 w-full rounded-xl border bg-white px-3 py-2 font-normal" />
+                </label>
+                <label className="text-sm font-semibold text-slate-700 xl:col-span-2">Tên ngày lễ
+                  <input value={holidayForm.name} onChange={(event) => setHolidayForm((prev) => ({ ...prev, name: event.target.value }))} placeholder="Ví dụ: Quốc khánh" className="mt-1 w-full rounded-xl border bg-white px-3 py-2 font-normal" />
+                </label>
+                <label className="text-sm font-semibold text-slate-700">Số ngày hưởng lương
+                  <select value={holidayForm.paidDays} onChange={(event) => setHolidayForm((prev) => ({ ...prev, paidDays: Number(event.target.value) }))} className="mt-1 w-full rounded-xl border bg-white px-3 py-2 font-normal">
+                    <option value={1}>1 ngày</option><option value={0.5}>0,5 ngày</option><option value={0}>Không hưởng lương</option>
+                  </select>
+                </label>
+                <label className="text-sm font-semibold text-slate-700">Loại ngày lễ
+                  <select value={holidayForm.type} onChange={(event) => setHolidayForm((prev) => ({ ...prev, type: event.target.value }))} className="mt-1 w-full rounded-xl border bg-white px-3 py-2 font-normal">
+                    <option value="statutory">Lễ theo quy định</option><option value="company">Nghỉ của công ty</option><option value="compensatory">Ngày nghỉ bù</option>
+                  </select>
+                </label>
+                <label className="text-sm font-semibold text-slate-700">Phạm vi
+                  <select value={holidayForm.scope} onChange={(event) => setHolidayForm((prev) => ({ ...prev, scope: event.target.value }))} className="mt-1 w-full rounded-xl border bg-white px-3 py-2 font-normal">
+                    <option value="global">Tất cả công ty</option><option value="company">Công ty được chọn</option>
+                  </select>
+                </label>
+                {holidayForm.scope === "company" && <label className="text-sm font-semibold text-slate-700 xl:col-span-2">Mã công ty
+                  <input value={holidayForm.companyCodesText} onChange={(event) => setHolidayForm((prev) => ({ ...prev, companyCodesText: event.target.value }))} placeholder="NNV, ABC, VN..." className="mt-1 w-full rounded-xl border bg-white px-3 py-2 font-normal" />
+                </label>}
+                <label className="text-sm font-semibold text-slate-700 xl:col-span-2">Ghi chú
+                  <input value={holidayForm.note} onChange={(event) => setHolidayForm((prev) => ({ ...prev, note: event.target.value }))} className="mt-1 w-full rounded-xl border bg-white px-3 py-2 font-normal" />
+                </label>
+                <label className="flex items-center gap-2 self-end rounded-xl border bg-white px-3 py-2 text-sm font-semibold text-slate-700">
+                  <input type="checkbox" checked={holidayForm.isActive} onChange={(event) => setHolidayForm((prev) => ({ ...prev, isActive: event.target.checked }))} /> Đang áp dụng
+                </label>
+              </div>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <button type="button" disabled={holidaySaving} onClick={saveHoliday} className="inline-flex items-center gap-2 rounded-xl bg-amber-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-50">
+                  {holidaySaving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />} {holidayForm._id ? "Cập nhật" : "Thêm ngày lễ"}
+                </button>
+                {holidayForm._id && <button type="button" onClick={() => setHolidayForm(createHolidayForm())} className="rounded-xl border bg-white px-4 py-2 text-sm font-semibold">Hủy sửa</button>}
+              </div>
+            </div>
+
+            <div className="overflow-hidden rounded-2xl border bg-white">
+              {holidayLoading ? <div className="flex justify-center py-12"><Loader2 className="animate-spin text-slate-400" /></div> : holidays.length === 0 ? <div className="py-12 text-center text-sm text-slate-500">Chưa có ngày lễ nào.</div> : (
+                <div className="overflow-x-auto"><table className="w-full text-left text-sm">
+                  <thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr><th className="px-4 py-3">Ngày</th><th className="px-4 py-3">Tên</th><th className="px-4 py-3">Hưởng lương</th><th className="px-4 py-3">Phạm vi</th><th className="px-4 py-3">Trạng thái</th><th className="px-4 py-3 text-right">Thao tác</th></tr></thead>
+                  <tbody>{holidays.map((holiday) => <tr key={holiday._id} className="border-t">
+                    <td className="whitespace-nowrap px-4 py-3 font-semibold">{fmtShortDate(holiday.date)}</td>
+                    <td className="px-4 py-3"><div className="font-semibold text-slate-800">{holiday.name}</div>{holiday.note && <div className="text-xs text-slate-500">{holiday.note}</div>}</td>
+                    <td className="px-4 py-3">{holiday.paidDays} ngày</td>
+                    <td className="px-4 py-3">{holiday.scope === "company" ? (holiday.companyCodes || []).join(", ") : "Tất cả"}</td>
+                    <td className="px-4 py-3"><Badge tone={holiday.isActive === false ? "slate" : "amber"}>{holiday.isActive === false ? "Tạm tắt" : "Áp dụng"}</Badge></td>
+                    <td className="px-4 py-3"><div className="flex justify-end gap-2"><button type="button" onClick={() => editHoliday(holiday)} className="rounded-lg border p-2 text-slate-600 hover:bg-slate-50" title="Sửa"><Pencil size={15} /></button><button type="button" onClick={() => deleteHoliday(holiday)} className="rounded-lg border border-rose-200 p-2 text-rose-600 hover:bg-rose-50" title="Xóa"><Trash2 size={15} /></button></div></td>
+                  </tr>)}</tbody>
+                </table></div>
+              )}
+            </div>
+          </section>
         )}
 
         {tab === "pending" && (

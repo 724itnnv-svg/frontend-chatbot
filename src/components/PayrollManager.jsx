@@ -51,6 +51,7 @@ const PAYROLL_COMPANY_NAMES = {
 };
 const ATTENDANCE_SYNC_COLUMNS = [
   { key: "ngayCong", label: "Ngày công" },
+  { key: "leTet", label: "Ngày lễ/Tết" },
   { key: "tongGioLam", label: "Tổng giờ làm" },
   { key: "tongGioDiMuon", label: "Tổng giờ đi muộn" },
   { key: "tongGioLamThem", label: "Tổng giờ làm thêm" },
@@ -3522,7 +3523,7 @@ export default function PayrollManager() {
               />
             </label>
             <div className="rounded-xl border bg-slate-50 px-3 py-2 text-sm text-slate-600">
-              Dữ liệu được lấy từ hệ thống chấm công theo mã nhân viên trong kỳ lương {period}. Tăng ca Chủ nhật được tách theo ngày Chủ nhật; tăng ca lễ/tết chỉ được tách khi backend nhận danh sách ngày lễ.
+              Dữ liệu được lấy từ hệ thống chấm công và lịch ngày lễ theo mã nhân viên trong kỳ lương {period}. Ngày lễ hưởng lương và giờ làm lễ được backend tự động tách theo lịch đã cấu hình.
             </div>
           </div>
 
@@ -3604,6 +3605,8 @@ export default function PayrollManager() {
                       <th className="px-3 py-2 text-right">Cơm TC</th>
                       <th className="px-3 py-2 text-right">Phép năm cũ</th>
                       <th className="px-3 py-2 text-right">Phép năm mới</th>
+                      <th className="px-3 py-2 text-right">Ngày lễ cũ</th>
+                      <th className="px-3 py-2 text-right">Ngày lễ mới</th>
                       <th className="px-3 py-2 text-right">Ngày công cũ</th>
                       <th className="px-3 py-2 text-right">Ngày công mới</th>
                       <th className="px-3 py-2">Trạng thái</th>
@@ -3623,6 +3626,8 @@ export default function PayrollManager() {
                         <td className="px-3 py-2 text-right">{formatPayrollNumber(row.comTangCa)}</td>
                         <td className="px-3 py-2 text-right">{formatPayrollNumber(row.oldPhepNam)}</td>
                         <td className="px-3 py-2 text-right font-semibold text-emerald-700">{formatPayrollNumber(row.phepNam)}</td>
+                        <td className="px-3 py-2 text-right">{formatPayrollNumber(row.oldLeTet)}</td>
+                        <td className="px-3 py-2 text-right font-semibold text-amber-700">{formatPayrollNumber(row.leTet)}</td>
                         <td className="px-3 py-2 text-right">{formatPayrollNumber(row.oldNgayCong)}</td>
                         <td className="px-3 py-2 text-right font-semibold">{formatPayrollNumber(row.ngayCong)}</td>
                         <td className="px-3 py-2">

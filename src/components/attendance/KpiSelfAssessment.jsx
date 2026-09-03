@@ -17,6 +17,9 @@ import { getApiBaseUrl } from "../../api/baseUrl";
 import { resolveScoreCap, standardPointScore } from "../../utils/kpiScoring";
 import { EvidenceThumbnail, KpiEvidenceViewer } from "./KpiEvidenceViewer";
 
+const MAX_EVIDENCE_FILE_SIZE_BYTES = 1024 * 1024 * 1024;
+const MAX_EVIDENCE_FILE_SIZE_LABEL = "1 GB";
+
 function currentPeriod() {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
@@ -85,6 +88,24 @@ function thresholdRuleText(item) {
   const passScore = item.passScore ?? item.standardScore ?? item.weight ?? 0;
   const failScore = item.failScore ?? 0;
   return `Kết quả ${symbol} ${item.thresholdValue}: ${passScore} điểm; không đạt: ${failScore} điểm`;
+}
+
+function structuredRuleText(item) {
+  if (item.scoringVersion !== "structured_v2") return "";
+  const unit = item.unit ? ` ${item.unit}` : "";
+  if (item.formulaType === "proportional") return `Tính theo tỷ lệ kết quả / ${item.targetValue}${unit}`;
+  if (item.formulaType === "unit_add") return `Vượt mốc ${item.targetValue}${unit}: mỗi ${item.stepValue}${unit} cộng ${item.pointsPerStep} điểm`;
+  if (item.formulaType === "unit_deduct") return `Vượt mốc ${item.targetValue}${unit}: mỗi ${item.stepValue}${unit} trừ ${item.pointsPerStep} điểm`;
+  if (item.formulaType === "signed_delta") return `Mỗi +${item.stepValue}${unit} cộng ${item.pointsPerStep} điểm; số âm trừ tương ứng`;
+  return thresholdRuleText(item);
+}
+
+function actualInputLabel(item) {
+  if (item.scoringVersion !== "structured_v2") return "Khối lượng hoàn thành";
+  if (item.formulaType === "signed_delta") return "Mức tăng/giảm";
+  if (item.metricType === "currency") return "Doanh thu thực tế (VND)";
+  if (item.metricType === "percentage") return "Tỷ lệ thực tế (%)";
+  return "Số lượng thực tế";
 }
 
 function scoreCapText(item) {
@@ -286,9 +307,9 @@ export default function KpiSelfAssessment() {
   async function uploadEvidences(item, files) {
     const selected = Array.from(files || []);
     if (!selected.length || !evaluation) return false;
-    const oversizedFile = selected.find((file) => file.size > 50 * 1024 * 1024);
+    const oversizedFile = selected.find((file) => file.size > MAX_EVIDENCE_FILE_SIZE_BYTES);
     if (oversizedFile) {
-      setMessage({ ok: false, text: `Tệp "${oversizedFile.name}" vượt quá giới hạn 50 MB.` });
+      setMessage({ ok: false, text: `Tệp "${oversizedFile.name}" vượt quá giới hạn ${MAX_EVIDENCE_FILE_SIZE_LABEL}.` });
       return false;
     }
     const remaining = 20 - (item.evidences?.length || 0);
@@ -344,9 +365,9 @@ export default function KpiSelfAssessment() {
     if (!uploadTargetItem) return;
     const selected = Array.from(files || []).filter(Boolean);
     if (!selected.length) return;
-    const oversizedFile = selected.find((file) => file.size > 50 * 1024 * 1024);
+    const oversizedFile = selected.find((file) => file.size > MAX_EVIDENCE_FILE_SIZE_BYTES);
     if (oversizedFile) {
-      setUploadModalError(`Tệp "${oversizedFile.name}" vượt quá giới hạn 50 MB.`);
+      setUploadModalError(`Tệp "${oversizedFile.name}" vượt quá giới hạn ${MAX_EVIDENCE_FILE_SIZE_LABEL}.`);
       return;
     }
     const remaining = 20 - (uploadTargetItem.evidences?.length || 0);
@@ -565,6 +586,11 @@ export default function KpiSelfAssessment() {
                           Quy tắc: {thresholdRuleText(item)}
                         </p>
                       )}
+                      {structuredRuleText(item) && item.formulaType !== "threshold" && (
+                        <p className="mt-1 text-sm font-semibold text-violet-700">
+                          Quy tắc: {structuredRuleText(item)}
+                        </p>
+                      )}
                       {scoreCapText(item) && (
                         <p className="mt-1 text-sm font-semibold text-emerald-700">
                           {scoreCapText(item)}
@@ -579,7 +605,7 @@ export default function KpiSelfAssessment() {
                   </div>
                   <div className="mt-4 grid gap-3 sm:grid-cols-3">
                     <div className="rounded-xl bg-slate-50 px-3 py-2">
-                      <p className="text-xs text-slate-500">Khối lượng tiêu chuẩn</p>
+                      <p className="text-xs text-slate-500">{item.scoringVersion === "structured_v2" ? "Mục tiêu/mốc" : "Khối lượng tiêu chuẩn"}</p>
                       <p className="font-bold text-slate-800">
                         {item.scoringMethod === "standard_points" ? (item.standardQuantity || "Không áp dụng") : (item.type === "boolean"
                           ? "Đạt / Không đạt"
@@ -587,13 +613,14 @@ export default function KpiSelfAssessment() {
                       </p>
                     </div>
                     <label className="text-sm text-slate-600">
-                      {item.scoringMethod === "standard_points"
-                        ? "Khối lượng hoàn thành"
+                        {item.scoringMethod === "standard_points"
+                          ? actualInputLabel(item)
                         : item.type === "manual"
                         ? "Điểm tự chấm (%)"
                         : "Kết quả thực tế"}
                       <input
-                        type={item.scoringMethod === "standard_points" ? "text" : "number"}
+                        type={item.scoringMethod === "standard_points" && item.scoringVersion !== "structured_v2" ? "text" : "number"}
+                        step={item.scoringMethod === "standard_points" && item.scoringVersion === "structured_v2" ? "any" : undefined}
                         min={item.scoringMethod === "standard_points" ? undefined : "0"}
                         disabled={!canEdit}
                         value={
@@ -836,7 +863,7 @@ export default function KpiSelfAssessment() {
                   Có thể nhấn Ctrl + V để dán ảnh vừa chụp bằng Win + Shift + S
                 </p>
                 <p className="mt-2 text-xs text-slate-500">
-                  Tối đa 20 tệp cho mỗi tiêu chí, không quá 50 MB/tệp
+                  Tối đa 20 tệp cho mỗi tiêu chí, không quá {MAX_EVIDENCE_FILE_SIZE_LABEL}/tệp
                 </p>
               </label>
 
@@ -871,9 +898,11 @@ export default function KpiSelfAssessment() {
                         <div className="min-w-0">
                           <p className="truncate text-sm font-semibold text-slate-700">{file.name}</p>
                           <p className="text-xs text-slate-400">
-                            {file.size < 1024 * 1024
-                              ? `${Math.max(1, Math.round(file.size / 1024))} KB`
-                              : `${(file.size / 1024 / 1024).toFixed(2)} MB`}
+                            {file.size >= 1024 * 1024 * 1024
+                              ? `${(file.size / 1024 / 1024 / 1024).toFixed(2)} GB`
+                              : file.size < 1024 * 1024
+                                ? `${Math.max(1, Math.round(file.size / 1024))} KB`
+                                : `${(file.size / 1024 / 1024).toFixed(2)} MB`}
                           </p>
                         </div>
                         <button

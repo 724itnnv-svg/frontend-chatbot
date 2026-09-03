@@ -9,6 +9,10 @@ function optionalNumber(value, fallback) {
   return Number.isFinite(number) ? number : fallback;
 }
 
+function roundScore(value) {
+  return Math.round((Number(value) || 0) * 100) / 100;
+}
+
 function comparisonMatches(actual, comparison, threshold) {
   if (comparison === "LTE") return actual <= threshold;
   if (comparison === "LT") return actual < threshold;
@@ -54,6 +58,41 @@ function boundScore(item, value, base) {
   return cap.mode === "unlimited" ? nonNegative : Math.min(cap.maxScore, nonNegative);
 }
 
+function structuredBoundScore(item, value, base) {
+  const minimum = Math.max(-1000000, optionalNumber(item.minimumScore, 0));
+  const score = Math.max(minimum, Number(value) || 0);
+  const cap = resolveScoreCap(item, base);
+  return cap.mode === "unlimited" ? score : Math.min(cap.maxScore, score);
+}
+
+function structuredPointScore(item, actualText) {
+  const actual = numberFromText(actualText);
+  if (!Number.isFinite(actual)) return 0;
+  const base = Number(item.standardScore || item.weight || 0);
+  const formulaType = String(item.formulaType || "proportional");
+  if (formulaType === "threshold") {
+    const threshold = optionalNumber(item.thresholdValue, Number.NaN);
+    if (!Number.isFinite(threshold)) return 0;
+    const passed = comparisonMatches(actual, item.comparison, threshold);
+    return roundScore(structuredBoundScore(
+      item,
+      passed ? optionalNumber(item.passScore, base) : optionalNumber(item.failScore, 0),
+      base,
+    ));
+  }
+  const target = optionalNumber(item.targetValue, 0);
+  if (formulaType === "proportional") {
+    return target > 0 ? roundScore(structuredBoundScore(item, actual / target * base, base)) : 0;
+  }
+  const step = optionalNumber(item.stepValue, 1);
+  const points = optionalNumber(item.pointsPerStep, 0);
+  if (!(step > 0) || points < 0) return 0;
+  if (formulaType === "unit_add") return roundScore(structuredBoundScore(item, base + Math.max(0, actual - target) * points / step, base));
+  if (formulaType === "unit_deduct") return roundScore(structuredBoundScore(item, base - Math.max(0, actual - target) * points / step, base));
+  if (formulaType === "signed_delta") return roundScore(structuredBoundScore(item, base + actual * points / step, base));
+  return 0;
+}
+
 function thresholdScore(item, actual, base) {
   const threshold = optionalNumber(item.thresholdValue, Number.NaN);
   if (!Number.isFinite(threshold)) return 0;
@@ -73,6 +112,7 @@ function legacyZeroScoreThreshold(item, actual, base) {
 }
 
 export function standardPointScore(item, actualText = item.employeeActualText) {
+  if (item.scoringVersion === "structured_v2") return structuredPointScore(item, actualText);
   const actual = numberFromText(actualText);
   const base = Number(item.standardScore || item.weight || 0);
 
