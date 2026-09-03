@@ -143,6 +143,12 @@ const MENU_CONFIG = [
     label: "Hợp đồng dịch vụ & tài sản",
     icon: Files,
   },
+  {
+    id: "work_tasks",
+    path: "/admin/work-tasks",
+    label: "Công việc & Deadline",
+    icon: ClipboardList,
+  },
   { id: "users", path: "/admin/users", label: "Người dùng", icon: Users },
   { id: "roles", path: "/admin/roles", label: "Phân quyền", icon: Users },
   {
@@ -329,9 +335,10 @@ const MENU_GROUPS = [
   },
   {
     id: "attendance",
-    label: "Chấm công",
+    label: "Nhân viên",
     icon: CalendarCheck,
     items: [
+      "work_tasks",
       "attendance_self",
       "attendance",
       "approved_leave",
@@ -347,13 +354,13 @@ const MENU_GROUPS = [
     id: "people",
     label: "Nhân sự",
     icon: Users,
-    items: ["employee_profiles", "employee_assets", "users", "roles"],
-  },
-  {
-    id: "operations",
-    label: "Vận hành",
-    icon: Files,
-    items: ["operational_contracts"],
+    items: [
+      "employee_profiles",
+      "employee_assets",
+      "operational_contracts",
+      "users",
+      "roles",
+    ],
   },
   {
     id: "finance",

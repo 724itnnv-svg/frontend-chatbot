@@ -16,9 +16,10 @@ const APP_PERMISSIONS = {
     },
     {
       id: "attendance",
-      name: "Chấm công",
-      description: "Chấm công, ca làm, KPI, tính lương và thông báo thiết bị",
+      name: "Nhân viên",
+      description: "Công việc, chấm công, ca làm, KPI, tính lương và thông báo thiết bị",
       screenIds: [
+        "work_tasks",
         "attendance_self",
         "attendance",
         "approved_leave",
@@ -40,15 +41,10 @@ const APP_PERMISSIONS = {
         "employee_health_records",
         "employee_violations",
         "employee_assets",
+        "operational_contracts",
         "users",
         "roles",
       ],
-    },
-    {
-      id: "operations",
-      name: "Vận hành",
-      description: "Quản lý thời hạn hợp đồng dịch vụ, tiện ích và tài sản",
-      screenIds: ["operational_contracts"],
     },
     {
       id: "finance",
@@ -113,6 +109,7 @@ const APP_PERMISSIONS = {
     { id: "employee_violations", name: "Vi Phạm Và Biên Bản Nhân Viên" },
     { id: "employee_assets", name: "Kho Tài Sản & Vật Tư" },
     { id: "operational_contracts", name: "Hợp Đồng Dịch Vụ & Tài Sản" },
+    { id: "work_tasks", name: "Quản lý công việc & Deadline" },
     { id: "users", name: "Người Dùng" },
     { id: "roles", name: "Phân quyền" },
     { id: "commission_online", name: "Tính Hoa Hồng Online" },
@@ -179,7 +176,7 @@ const APP_PERMISSIONS = {
       id: "view_all",
       name: "Xem toàn công ty",
       color: "violet",
-      screenIds: ["attendance", "approved_leave"],
+      screenIds: ["attendance", "approved_leave", "work_tasks"],
     },
     {
       id: "review_leave",
@@ -192,6 +189,18 @@ const APP_PERMISSIONS = {
       name: "Duyệt KPI",
       color: "emerald",
       screenIds: ["kpi_management"],
+    },
+    {
+      id: "assign",
+      name: "Gán công việc",
+      color: "cyan",
+      screenIds: ["work_tasks"],
+    },
+    {
+      id: "update_status",
+      name: "Cập nhật trạng thái",
+      color: "emerald",
+      screenIds: ["work_tasks"],
     },
   ],
 };
