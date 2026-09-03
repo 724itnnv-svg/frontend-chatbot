@@ -33,6 +33,25 @@ const nowPeriod = () => {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
 };
+const shiftPeriod = (period, offset) => {
+  const match = String(period || "").match(/^(\d{4})-(\d{2})$/);
+  if (!match) return "";
+  const shifted = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1 + offset, 1));
+  return `${shifted.getUTCFullYear()}-${String(shifted.getUTCMonth() + 1).padStart(2, "0")}`;
+};
+const latestOpenDeadline = (rows = []) => {
+  const deadlines = rows
+    .filter((row) => !row.isOverdue)
+    .map((row) => row.effectiveDueDate || row.dueDate || "")
+    .filter((deadline) => /^\d{4}-\d{2}-\d{2}$/.test(deadline))
+    .sort();
+  return deadlines[deadlines.length - 1] || "";
+};
+const deadlineEndTimestamp = (deadline) => {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(deadline || ""))) return null;
+  // 17:00 UTC is 00:00 of the following day in Asia/Ho_Chi_Minh.
+  return Date.parse(`${deadline}T17:00:00.000Z`);
+};
 const payrollPeriodForKpi = (period) => {
   const match = String(period || "").match(/^(\d{4})-(\d{2})$/);
   if (!match) return "";
@@ -109,7 +128,9 @@ export default function KpiManager() {
   const canEdit = fullAccess || permissions.edit === true;
   const canDelete = fullAccess || permissions.delete === true;
   const canReview = fullAccess || permissions.review_kpi === true || permissions.edit === true;
-  const [period, setPeriod] = useState(nowPeriod);
+  const [period, setPeriod] = useState("");
+  const [followsActivePeriod, setFollowsActivePeriod] = useState(true);
+  const [autoSwitchDeadline, setAutoSwitchDeadline] = useState("");
   const [periodDueDate, setPeriodDueDate] = useState("");
   const [appliedPeriodDueDate, setAppliedPeriodDueDate] = useState("");
   const [status, setStatus] = useState("ALL");
@@ -117,7 +138,7 @@ export default function KpiManager() {
   const [rows, setRows] = useState([]);
   const [selectedIds, setSelectedIds] = useState([]);
   const [employees, setEmployees] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState(null);
   const [showAssign, setShowAssign] = useState(false);
@@ -137,6 +158,7 @@ export default function KpiManager() {
   });
 
   const load = useCallback(async () => {
+    if (!period) return;
     setLoading(true);
     try {
       const params = new URLSearchParams({ period, status });
@@ -144,6 +166,9 @@ export default function KpiManager() {
       const response = await api.get(`/kpi-evaluations?${params}`);
       const loadedRows = response.data?.data || [];
       setRows(loadedRows);
+      if (followsActivePeriod && status === "ALL" && !search.trim()) {
+        setAutoSwitchDeadline(latestOpenDeadline(loadedRows));
+      }
       const loadedDueDate = loadedRows[0]?.dueDate || "";
       setPeriodDueDate((current) => current || loadedDueDate);
       setAppliedPeriodDueDate((current) => current || loadedDueDate);
@@ -157,11 +182,77 @@ export default function KpiManager() {
     } finally {
       setLoading(false);
     }
-  }, [api, period, search, status]);
+  }, [api, followsActivePeriod, period, search, status]);
 
   useEffect(() => {
-    load();
-  }, [load]);
+    let cancelled = false;
+
+    async function resolveActivePeriod() {
+      const thisPeriod = nowPeriod();
+      const previousPeriod = shiftPeriod(thisPeriod, -1);
+      try {
+        const response = await api.get(`/kpi-evaluations?${new URLSearchParams({
+          period: previousPeriod,
+          status: "ALL",
+        })}`);
+        const previousDeadline = latestOpenDeadline(response.data?.data || []);
+        if (!cancelled) {
+          setAutoSwitchDeadline(previousDeadline);
+          setPeriod(previousDeadline ? previousPeriod : thisPeriod);
+        }
+      } catch {
+        if (!cancelled) setPeriod(thisPeriod);
+      }
+    }
+
+    resolveActivePeriod();
+    return () => {
+      cancelled = true;
+    };
+  }, [api]);
+
+  useEffect(() => {
+    if (period) load();
+  }, [load, period]);
+
+  useEffect(() => {
+    if (!followsActivePeriod || !period || !autoSwitchDeadline) return undefined;
+    const switchAt = deadlineEndTimestamp(autoSwitchDeadline);
+    if (!Number.isFinite(switchAt)) return undefined;
+
+    let cancelled = false;
+    let timer;
+    const switchWhenExpired = async () => {
+      const remaining = switchAt - Date.now();
+      if (remaining > 0) {
+        timer = window.setTimeout(switchWhenExpired, Math.min(remaining, 2_147_483_647));
+        return;
+      }
+      try {
+        const response = await api.get(`/kpi-evaluations?${new URLSearchParams({
+          period,
+          status: "ALL",
+        })}`);
+        if (cancelled) return;
+        const extendedDeadline = latestOpenDeadline(response.data?.data || []);
+        if (extendedDeadline) {
+          setAutoSwitchDeadline(extendedDeadline);
+          return;
+        }
+        setPeriodDueDate("");
+        setAppliedPeriodDueDate("");
+        setAutoSwitchDeadline("");
+        setPeriod(shiftPeriod(period, 1));
+      } catch {
+        if (!cancelled) timer = window.setTimeout(switchWhenExpired, 60_000);
+      }
+    };
+    switchWhenExpired();
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [api, autoSwitchDeadline, followsActivePeriod, period]);
   useEffect(() => {
     api
       .get("/kpi-evaluations/employees")
@@ -843,6 +934,7 @@ export default function KpiManager() {
               type="month"
               value={period}
               onChange={(event) => {
+                setFollowsActivePeriod(false);
                 setPeriod(event.target.value);
                 setPeriodDueDate("");
                 setAppliedPeriodDueDate("");
