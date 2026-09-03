@@ -13,6 +13,7 @@ import {
   Copy,
   Download,
   Eye,
+  EyeOff,
   FileSpreadsheet,
   HandCoins,
   ListChecks,
@@ -1441,6 +1442,8 @@ export default function PayrollManager() {
   const [periodLocked, setPeriodLocked] = useState(false);
   const [temporaryUnlockUntil, setTemporaryUnlockUntil] = useState(null);
   const [lockLoading, setLockLoading] = useState(false);
+  const [allowLiveEstimate, setAllowLiveEstimate] = useState(true);
+  const [liveVisibilityLoading, setLiveVisibilityLoading] = useState(false);
   const [attendanceHoursPerDay, setAttendanceHoursPerDay] = useState(8);
   const [showAttendanceSync, setShowAttendanceSync] = useState(false);
   const [attendanceSyncLoading, setAttendanceSyncLoading] = useState(false);
@@ -1748,6 +1751,45 @@ export default function PayrollManager() {
     }
   };
 
+  const fetchLivePayrollVisibility = async () => {
+    try {
+      const res = await fetch("/api/payroll/live-visibility", { headers: authHeader });
+      const data = await res.json();
+      if (!res.ok || data?.success === false) throw new Error(data?.message || "Không tải được trạng thái xem lương tạm tính");
+      setAllowLiveEstimate(data.data?.allowLiveEstimate !== false);
+    } catch (error) {
+      console.warn(error);
+      setMessage(error.message || "Không tải được trạng thái xem lương tạm tính");
+    }
+  };
+
+  const toggleLivePayrollVisibility = async () => {
+    if (!canEdit || liveVisibilityLoading) return;
+    const nextValue = !allowLiveEstimate;
+    const actionLabel = nextValue ? "bật" : "tắt";
+    if (!window.confirm(`Bạn có chắc muốn ${actionLabel} cho nhân viên xem bảng lương tạm tính đến thời điểm hiện tại?`)) return;
+    setLiveVisibilityLoading(true);
+    setMessage("");
+    try {
+      const res = await fetch("/api/payroll/live-visibility", {
+        method: "PUT",
+        headers: { ...authHeader, "Content-Type": "application/json" },
+        body: JSON.stringify({ allowLiveEstimate: nextValue }),
+      });
+      const data = await res.json();
+      if (!res.ok || data?.success === false) throw new Error(data?.message || "Không cập nhật được trạng thái xem lương tạm tính");
+      const enabled = data.data?.allowLiveEstimate !== false;
+      setAllowLiveEstimate(enabled);
+      setMessage(enabled
+        ? "Đã bật cho nhân viên xem bảng lương tạm tính đến hiện tại."
+        : "Đã tắt xem bảng lương tạm tính; bảng lương đã duyệt vẫn xem được.");
+    } catch (error) {
+      setMessage(error.message || "Không cập nhật được trạng thái xem lương tạm tính");
+    } finally {
+      setLiveVisibilityLoading(false);
+    }
+  };
+
   const fetchPayroll = async () => {
     if (!canViewPayroll) {
       setLoading(false);
@@ -1891,6 +1933,7 @@ export default function PayrollManager() {
   useEffect(() => {
     if (commissionOnlyMode) return;
     fetchFormulaSettings();
+    fetchLivePayrollVisibility();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [commissionOnlyMode]);
 
@@ -2771,6 +2814,21 @@ export default function PayrollManager() {
               <RefreshCw className="h-4 w-4" />
               Tải lại
             </button>
+            {canEdit && (
+              <button
+                onClick={toggleLivePayrollVisibility}
+                disabled={liveVisibilityLoading}
+                title={allowLiveEstimate ? "Nhân viên đang xem được lương tạm tính" : "Nhân viên không xem được lương tạm tính"}
+                className={`inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-sm font-semibold disabled:opacity-50 ${allowLiveEstimate ? "border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100" : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"}`}
+              >
+                {liveVisibilityLoading
+                  ? <Loader2 className="h-4 w-4 animate-spin" />
+                  : allowLiveEstimate
+                    ? <Eye className="h-4 w-4" />
+                    : <EyeOff className="h-4 w-4" />}
+                {allowLiveEstimate ? "Đang bật lương tạm tính" : "Đã tắt lương tạm tính"}
+              </button>
+            )}
             {canEdit && (
               <button
                 onClick={togglePeriodLock}

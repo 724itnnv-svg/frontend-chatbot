@@ -517,7 +517,7 @@ export default function CommissionOnlineCalculator() {
         if (!sku) return;
         const salePrice = parseNumber(getCell(row, headerMap, "Giá bán"));
         const unitPrice = parseNumber(getCell(row, headerMap, "Đơn giá"));
-        if (!(salePrice === 0 && unitPrice > 0)) return;
+        if (salePrice !== 0) return;
         const invoiceId = normalizeText(getCell(row, headerMap, "Mã hóa đơn"));
         const itemName = normalizeText(getCell(row, headerMap, "Tên hàng"));
         const seller = normalizeText(getCell(row, headerMap, "Người bán"));
@@ -596,9 +596,10 @@ export default function CommissionOnlineCalculator() {
 
     const {
       overrideReturnsPrices = {},
+      overrideGiftPrices = {},
     } = options;
 
-    const storedReturnPrices = await getStoredManualPrices("online");
+    const storedManualPrices = await getStoredManualPrices("online");
 
     const excludedGiftSet = new Set(excludedGiftCodes.map((c) => normalizeText(c).toUpperCase()));
     const excludedReturnSet = new Set(excludedReturnCodes.map((c) => normalizeText(c).toUpperCase()));
@@ -823,11 +824,26 @@ export default function CommissionOnlineCalculator() {
               const salePrice = parseNumber(getCell(row, headerMap, "Giá bán"));
               const qty = parseNumber(getCell(row, headerMap, "Số lượng"));
               const unit = normalizeUnit(getCell(row, headerMap, "ĐVT"));
-              if (salePrice === 0 && unitPrice > 0 && !excludedGiftSet.has(itemCode)) {
-                const overrideRaw = giftPriceOverrides[itemCode];
-                const effectivePrice = overrideRaw && parseNumber(overrideRaw) > 0
-                  ? parseNumber(overrideRaw)
-                  : unitPrice;
+              if (salePrice === 0 && !excludedGiftSet.has(itemCode)) {
+                const priceCandidates = [
+                  overrideGiftPrices[itemCode],
+                  giftPriceOverrides[itemCode],
+                  unitPrice,
+                  storedManualPrices[itemCode],
+                ];
+                const effectivePrice = priceCandidates
+                  .map((price) => parseNumber(price))
+                  .find((price) => Number.isFinite(price) && price > 0);
+                if (!(effectivePrice > 0)) {
+                  missingGiftsLocal.push({
+                    itemCode,
+                    itemName,
+                    unit,
+                    qty,
+                    invoiceId,
+                  });
+                  return;
+                }
                 const value = effectivePrice * qty;
                 if (value > 0) {
                   stats[deductKey] -= value;
@@ -1019,7 +1035,7 @@ export default function CommissionOnlineCalculator() {
                 const confirmedPrice = overrideReturnsPrices[returnPriceKey];
                 if (!(confirmedPrice > 0)) {
                   // Not yet confirmed → show in modal, pre-fill from localStorage
-                  const storedPrice = storedReturnPrices[returnPriceKey];
+                  const storedPrice = storedManualPrices[returnPriceKey];
                   missingReturnsLocal.push({
                     employee,
                     sku,
@@ -1332,7 +1348,7 @@ export default function CommissionOnlineCalculator() {
     missingGifts.forEach((item) => {
       if (item.manualPrice == null || item.manualPrice === "") invalid = true;
       const val = parseNumber(item.manualPrice);
-      if (!Number.isFinite(val) || val < 0) invalid = true;
+      if (!Number.isFinite(val) || val <= 0) invalid = true;
       giftPriceMap[item.itemCode] = val;
     });
 
@@ -1344,10 +1360,15 @@ export default function CommissionOnlineCalculator() {
     }
 
     const existing = await getStoredManualPrices("online");
-    await saveAllManualPrices("online", { ...existing, ...returnsPriceMap });
+    await saveAllManualPrices("online", {
+      ...existing,
+      ...returnsPriceMap,
+      ...giftPriceMap,
+    });
     setMissingPriceModalOpen(false);
     runCalculation({
       overrideReturnsPrices: returnsPriceMap,
+      overrideGiftPrices: giftPriceMap,
       ambiguousChoices: ambiguousChoices,
     });
   };
