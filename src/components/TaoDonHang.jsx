@@ -224,6 +224,21 @@ function extractProductRecord(response, fallbackId = null) {
   };
 }
 
+function isProductDiscontinued(product) {
+  if (!product || typeof product !== "object") return false;
+
+  const activeValues = [product?.isActive, product?.IsActive];
+  const isExplicitlyInactive = activeValues.some(
+    (value) => value === false || value === 0 || String(value).toLowerCase() === "false",
+  );
+  const deletedValues = [product?.isDeleted, product?.IsDeleted];
+  const isDeleted = deletedValues.some(
+    (value) => value === true || value === 1 || String(value).toLowerCase() === "true",
+  );
+
+  return isExplicitlyInactive || isDeleted;
+}
+
 function getProductCampaigns(product, campaigns = []) {
   const productId = Number(product?.id ?? product?.Id ?? product?.ProductId);
   if (!Number.isFinite(productId)) return [];
@@ -5286,6 +5301,53 @@ export default function TaoDonHang() {
     selectedRetailerId,
   ]);
 
+  const discontinuedProducts = useMemo(() => {
+    if (
+      orderPreparation.status !== "ready" ||
+      orderPreparation.key !== orderPreparationKey
+    ) {
+      return [];
+    }
+
+    const productsByKey = new Map();
+    const addProduct = (product, fallbackCode = "") => {
+      if (!isProductDiscontinued(product)) return;
+      const productCode = getProductDisplayCode(product) || fallbackCode;
+      const productId = product?.id ?? product?.Id ?? product?.ProductId;
+      const key = String(productId ?? productCode).trim();
+      if (key) productsByKey.set(key, product);
+    };
+
+    parsed.items.forEach((item) => {
+      const productCode = String(item?.sku || "").trim();
+      addProduct(orderPreparation.productMap.get(productCode), productCode);
+    });
+    Object.values(promotionSelections).forEach((campaignSelections) => {
+      Object.values(campaignSelections || {}).forEach((selection) => {
+        Object.entries(selection?.giftQuantities || {}).forEach(
+          ([productId, quantity]) => {
+            if (Number(quantity || 0) <= 0) return;
+            addProduct(
+              orderPreparation.promotionProductMap.get(Number(productId)),
+              productId,
+            );
+          },
+        );
+      });
+    });
+
+    return [...productsByKey.values()];
+  }, [
+    orderPreparation.key,
+    orderPreparation.productMap,
+    orderPreparation.promotionProductMap,
+    orderPreparation.status,
+    orderPreparationKey,
+    parsed.items,
+    promotionSelections,
+  ]);
+  const hasDiscontinuedProducts = discontinuedProducts.length > 0;
+
   const agencyProductsWithoutPrice = useMemo(() => {
     if (
       pricingCustomerType !== "dai_ly" ||
@@ -5873,6 +5935,8 @@ export default function TaoDonHang() {
             {receivedProductIds.map((productId) => {
               const receivedProduct =
                 orderPreparation.promotionProductMap.get(productId);
+              const receivedProductDiscontinued =
+                isProductDiscontinued(receivedProduct);
               const quantity = Number(
                 selection?.giftQuantities?.[productId] || 0,
               );
@@ -5880,7 +5944,11 @@ export default function TaoDonHang() {
               return (
                 <label
                   key={productId}
-                  className="flex items-center gap-3 rounded-xl border border-emerald-100 bg-emerald-50/60 px-3 py-2"
+                  className={`flex items-center gap-3 rounded-xl border px-3 py-2 ${
+                    receivedProductDiscontinued
+                      ? "border-red-200 bg-red-50"
+                      : "border-emerald-100 bg-emerald-50/60"
+                  }`}
                 >
                   <div className="min-w-0 flex-1">
                     <div className="text-xs font-semibold text-slate-800">
@@ -5893,13 +5961,20 @@ export default function TaoDonHang() {
                         ? getProductDisplayCode(receivedProduct)
                         : "Không tải được thông tin"}
                     </div>
+                    {receivedProductDiscontinued ? (
+                      <div className="mt-0.5 text-[11px] font-semibold text-red-600">
+                        Sản phẩm đã ngừng kinh doanh
+                      </div>
+                    ) : null}
                   </div>
                   <input
                     type="number"
                     min="0"
                     step="1"
                     value={quantity}
-                    disabled={!receivedProduct}
+                    disabled={
+                      !receivedProduct || receivedProductDiscontinued
+                    }
                     onChange={(event) =>
                       handlePromotionGiftQuantityChange(
                         selectionProductCode,
@@ -5985,6 +6060,17 @@ export default function TaoDonHang() {
 
     if (!isOrderPreparationReady) {
       console.warn("Order data is not prepared yet.");
+      return;
+    }
+
+    if (hasDiscontinuedProducts) {
+      const productCodes = discontinuedProducts
+        .map((product) => getProductDisplayCode(product))
+        .filter(Boolean)
+        .join(", ");
+      setCreateOrderError(
+        `Không thể tạo đơn: sản phẩm ${productCodes || "đã chọn"} đã ngừng kinh doanh.`,
+      );
       return;
     }
 
@@ -6656,6 +6742,7 @@ export default function TaoDonHang() {
 
   const isCreateOrderDisabled =
     !isOrderPreparationReady ||
+    hasDiscontinuedProducts ||
     hasInvalidProductPrices ||
     !promotionSelectionsAreComplete ||
     !matchedKiotUser ||
@@ -7105,6 +7192,27 @@ export default function TaoDonHang() {
                 </div>
               </div>
 
+              {hasDiscontinuedProducts ? (
+                <div className="flex items-start gap-2 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                  <XCircle className="mt-0.5 h-5 w-5 shrink-0" />
+                  <div>
+                    <div className="font-bold">
+                      Không thể tạo đơn với sản phẩm ngừng kinh doanh
+                    </div>
+                    <div className="mt-1 leading-5">
+                      Các sản phẩm sau đã ngừng kinh doanh: {" "}
+                      <span className="font-mono font-bold">
+                        {discontinuedProducts
+                          .map((product) => getProductDisplayCode(product))
+                          .filter(Boolean)
+                          .join(", ") || "Chưa xác định"}
+                      </span>
+                      . Vui lòng bỏ sản phẩm này hoặc chọn sản phẩm thay thế.
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
               {hasMissingAgencyPrices ? (
                 <div className="flex items-start gap-2 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
                   <XCircle className="mt-0.5 h-5 w-5 shrink-0" />
@@ -7552,6 +7660,22 @@ export default function TaoDonHang() {
                                         </div>
                                       </div>
                                     </div>
+                                  ) : isProductDiscontinued(product) ? (
+                                    <div className="mt-3 flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-xs text-rose-700">
+                                      <XCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                                      <div>
+                                        <div className="font-bold">
+                                          Sản phẩm đã ngừng kinh doanh
+                                        </div>
+                                        <div className="mt-0.5 leading-5">
+                                          Sản phẩm mã {" "}
+                                          <span className="font-mono font-bold">
+                                            {displayProductCode || productCode}
+                                          </span>{" "}
+                                          không thể được thêm vào đơn hàng.
+                                        </div>
+                                      </div>
+                                    </div>
                                   ) : pricingCustomerType === "dai_ly" &&
                                     !isPromotionProduct &&
                                     !hasAgencyPrice(product, item) ? (
@@ -7705,6 +7829,10 @@ export default function TaoDonHang() {
                                                       orderPreparation.promotionProductMap.get(
                                                         productId,
                                                       );
+                                                    const receivedProductDiscontinued =
+                                                      isProductDiscontinued(
+                                                        receivedProduct,
+                                                      );
                                                     const quantity = Number(
                                                       selection
                                                         ?.giftQuantities?.[
@@ -7715,7 +7843,11 @@ export default function TaoDonHang() {
                                                     return (
                                                       <label
                                                         key={productId}
-                                                        className="flex items-start gap-2 rounded-xl border border-emerald-100 bg-white px-2.5 py-2"
+                                                        className={`flex items-start gap-2 rounded-xl border px-2.5 py-2 ${
+                                                          receivedProductDiscontinued
+                                                            ? "border-red-200 bg-red-50"
+                                                            : "border-emerald-100 bg-white"
+                                                        }`}
                                                       >
                                                         <div className="min-w-0 flex-1">
                                                           <div className="break-words text-xs font-semibold leading-4 text-slate-800">
@@ -7732,6 +7864,11 @@ export default function TaoDonHang() {
                                                                 )
                                                               : "Không tải được thông tin"}
                                                           </div>
+                                                          {receivedProductDiscontinued ? (
+                                                            <div className="mt-0.5 text-[11px] font-semibold text-red-600">
+                                                              Sản phẩm đã ngừng kinh doanh
+                                                            </div>
+                                                          ) : null}
                                                         </div>
                                                         <input
                                                           type="number"
@@ -7739,7 +7876,8 @@ export default function TaoDonHang() {
                                                           step="1"
                                                           value={quantity}
                                                           disabled={
-                                                            !receivedProduct
+                                                            !receivedProduct ||
+                                                            receivedProductDiscontinued
                                                           }
                                                           onChange={(event) =>
                                                             handlePromotionGiftQuantityChange(
