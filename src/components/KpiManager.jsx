@@ -18,6 +18,7 @@ import {
   RefreshCcw,
   Save,
   Send,
+  Sparkles,
   Target,
   Trash2,
   Upload,
@@ -99,6 +100,47 @@ const DELETABLE_STATUSES = new Set([
 ]);
 const EDITABLE_STATUSES = new Set(["ASSIGNED", "DRAFT", "REVISION_REQUESTED"]);
 
+const FORMULA_LABELS = {
+  proportional: "Tỷ lệ thực tế / mục tiêu",
+  unit_add: "Cộng điểm theo mỗi đơn vị vượt mốc",
+  unit_deduct: "Trừ điểm theo mỗi đơn vị vượt mốc",
+  signed_delta: "Số dương cộng, số âm trừ",
+  threshold: "Đạt hoặc không đạt theo ngưỡng",
+};
+const METRIC_LABELS = { number: "Số lượng", percentage: "Phần trăm", currency: "Tiền / doanh thu" };
+const CAP_LABELS = {
+  standard_score: "Tối đa bằng điểm chuẩn",
+  fixed_score: "Giới hạn tùy chỉnh",
+  unlimited: "Không giới hạn",
+};
+const COMPARISON_LABELS = { LTE: "≤", LT: "<", GTE: "≥", GT: ">" };
+
+function configDetails(config = {}) {
+  if (config.scoringVersion === "legacy_v1") {
+    return [
+      "Công thức cũ từ ghi chú",
+      `Khối lượng tiêu chuẩn: ${config.standardQuantity || "để trống"}`,
+      CAP_LABELS[config.scoreCapMode] || config.scoreCapMode || "-",
+    ];
+  }
+  const details = [
+    METRIC_LABELS[config.metricType] || config.metricType || "-",
+    FORMULA_LABELS[config.formulaType] || config.formulaType || "-",
+  ];
+  if (config.formulaType === "threshold") {
+    details.push(`Ngưỡng ${COMPARISON_LABELS[config.comparison] || config.comparison || ""} ${config.thresholdValue ?? "-"}`);
+    details.push(`Đạt ${config.passScore ?? "điểm chuẩn"} · Không đạt ${config.failScore ?? 0}`);
+  } else if (config.formulaType !== "signed_delta") {
+    details.push(`Mục tiêu/mốc: ${config.targetValue ?? "-"}`);
+  }
+  if (["unit_add", "unit_deduct", "signed_delta"].includes(config.formulaType)) {
+    details.push(`Mỗi ${config.stepValue ?? "-"} ${config.unit || "đơn vị"}: ${config.pointsPerStep ?? "-"} điểm`);
+  }
+  details.push(`Điểm sàn: ${config.minimumScore ?? 0}`);
+  details.push(CAP_LABELS[config.scoreCapMode] || config.scoreCapMode || "-");
+  return details;
+}
+
 const IMPORT_HEADERS = [
   "MSNV",
   "CHỈ TIÊU",
@@ -123,6 +165,7 @@ const IMPORT_HEADERS = [
   "ĐIỂM MỖI BƯỚC",
   "ĐIỂM TỐI THIỂU",
   "ĐƠN VỊ",
+  "CHẾ ĐỘ CHẤM",
 ];
 
 function importValue(row, names) {
@@ -165,10 +208,14 @@ export default function KpiManager() {
   const [importErrors, setImportErrors] = useState([]);
   const [importSummary, setImportSummary] = useState(null);
   const [showImport, setShowImport] = useState(false);
+  const [aiNormalizing, setAiNormalizing] = useState(false);
+  const [aiNormalization, setAiNormalization] = useState(null);
+  const [selectedAiSuggestions, setSelectedAiSuggestions] = useState([]);
   const importInputRef = useRef(null);
   const [assignment, setAssignment] = useState({
     employeeCode: "",
     dueDate: "",
+    assessmentMode: "calculated",
     items: [emptyItem()],
   });
 
@@ -334,7 +381,9 @@ export default function KpiManager() {
 
   function resetAssignment() {
     setEditingId(null);
-    setAssignment({ employeeCode: "", dueDate: periodDueDate, items: [emptyItem()] });
+    setAiNormalization(null);
+    setSelectedAiSuggestions([]);
+    setAssignment({ employeeCode: "", dueDate: periodDueDate, assessmentMode: "calculated", items: [emptyItem()] });
   }
 
   function openNewAssignment() {
@@ -351,6 +400,7 @@ export default function KpiManager() {
     setAssignment({
       employeeCode: row.employeeCode,
       dueDate: row.dueDate || "",
+      assessmentMode: row.assessmentMode === "simple" ? "simple" : "calculated",
       items: row.items.map((item) => {
         const cap = resolveScoreCap(item);
         return {
@@ -387,6 +437,74 @@ export default function KpiManager() {
     resetAssignment();
   }
 
+  async function requestAiNormalization(itemIndex = null) {
+    const targetItems = itemIndex == null ? assignment.items : [assignment.items[itemIndex]];
+    if (targetItems.some((item) => !String(item?.name || "").trim())) {
+      setMessage({ ok: false, text: "Vui lòng nhập tên tiêu chí trước khi dùng AI" });
+      return;
+    }
+    setAiNormalizing(true);
+    setMessage(null);
+    try {
+      const response = await api.post("/kpi-evaluations/ai-normalize", { items: targetItems });
+      const result = response.data?.data || { suggestions: [] };
+      const suggestions = (result.suggestions || []).map((suggestion) => ({
+        ...suggestion,
+        index: itemIndex == null ? suggestion.index : itemIndex,
+      }));
+      setAiNormalization({ ...result, suggestions });
+      setSelectedAiSuggestions(suggestions
+        .filter((suggestion) => suggestion.canApply && suggestion.status === "ready")
+        .map((suggestion) => suggestion.index));
+    } catch (error) {
+      setMessage({
+        ok: false,
+        text: error.response?.data?.message || "AI chưa thể chuẩn hóa KPI lúc này",
+      });
+    } finally {
+      setAiNormalizing(false);
+    }
+  }
+
+  function toggleAiSuggestion(index) {
+    setSelectedAiSuggestions((current) => current.includes(index)
+      ? current.filter((value) => value !== index)
+      : [...current, index]);
+  }
+
+  function applyAiSuggestions() {
+    const selected = new Set(selectedAiSuggestions);
+    const suggestionByIndex = new Map((aiNormalization?.suggestions || [])
+      .filter((suggestion) => suggestion.canApply && selected.has(suggestion.index))
+      .map((suggestion) => [suggestion.index, suggestion]));
+    setAssignment((current) => ({
+      ...current,
+      items: current.items.map((item, index) => {
+        const suggestion = suggestionByIndex.get(index);
+        if (!suggestion) return item;
+        const proposed = suggestion.proposed || {};
+        return {
+          ...item,
+          ...proposed,
+          targetValue: proposed.targetValue ?? "",
+          stepValue: proposed.stepValue ?? 1,
+          pointsPerStep: proposed.pointsPerStep ?? 0,
+          maxScore: proposed.maxScore ?? "",
+          comparison: proposed.comparison || "GTE",
+          thresholdValue: proposed.thresholdValue ?? "",
+          passScore: proposed.passScore ?? "",
+          failScore: proposed.failScore ?? 0,
+        };
+      }),
+    }));
+    setAiNormalization(null);
+    setSelectedAiSuggestions([]);
+    setMessage({
+      ok: true,
+      text: `Đã đưa ${suggestionByIndex.size} đề xuất AI vào biểu mẫu. Vui lòng kiểm tra rồi bấm lưu để xác nhận.`,
+    });
+  }
+
   async function assign(event) {
     event.preventDefault();
     if (
@@ -402,6 +520,7 @@ export default function KpiManager() {
       const response = editingId
         ? await api.patch(`/kpi-evaluations/${editingId}`, {
             dueDate: assignment.dueDate,
+            assessmentMode: assignment.assessmentMode,
             items: assignment.items,
           })
         : await api.post("/kpi-evaluations/assign", {
@@ -649,6 +768,7 @@ export default function KpiManager() {
         "Cho phép để trống với chỉ tiêu định tính, hoặc nhập số/điều kiện như: 100%, Không quá 10%, >= 90%, 2.",
       ],
       ["Cách tính", "Dùng các cột cấu trúc: proportional, unit_add, unit_deduct, signed_delta hoặc threshold. Ghi chú chỉ để hướng dẫn, không tham gia tính điểm với structured_v2."],
+      ["Chế độ chấm", "Nhập calculated để hệ thống tính từ kết quả thực tế, hoặc simple để nhân viên tự nhập điểm. Với simple, nhập TRUE tại cột KHÔNG GIỚI HẠN ĐIỂM nếu tiêu chí được phép vượt điểm chuẩn. Các dòng cùng MSNV phải dùng chung một chế độ."],
       ["Lưu ý", "Phiếu đã gửi duyệt/đã duyệt sẽ không bị ghi đè."],
     ]);
     guide.getRow(1).font = {
@@ -700,6 +820,7 @@ export default function KpiManager() {
         "",
         0,
         "%",
+        "calculated",
       ],
       [
         "NV001",
@@ -725,6 +846,7 @@ export default function KpiManager() {
         "",
         0,
         "%",
+        "calculated",
       ],
       [
         "NV001",
@@ -750,6 +872,7 @@ export default function KpiManager() {
         10,
         0,
         "quy trình",
+        "calculated",
       ],
     ]);
     const header = sheet.getRow(1);
@@ -765,7 +888,7 @@ export default function KpiManager() {
       horizontal: "center",
       wrapText: true,
     };
-    sheet.autoFilter = { from: "A1", to: "W1" };
+    sheet.autoFilter = { from: "A1", to: "X1" };
     for (let row = 2; row <= 1001; row += 1) {
       sheet.getCell(`D${row}`).dataValidation = {
         type: "decimal",
@@ -842,6 +965,7 @@ export default function KpiManager() {
           pointsPerStep: importValue(row, ["ĐIỂM MỖI BƯỚC", "Diem moi buoc", "pointsPerStep"]),
           minimumScore: importValue(row, ["ĐIỂM TỐI THIỂU", "Diem toi thieu", "minimumScore"]),
           unit: String(importValue(row, ["ĐƠN VỊ", "Don vi", "unit"])).trim(),
+          assessmentMode: String(importValue(row, ["CHẾ ĐỘ CHẤM", "Che do cham", "assessmentMode"])).trim().toLowerCase(),
         };})
         .filter((row) => row.employeeCode || row.indicator);
       setImportRows(rows);
@@ -1306,6 +1430,7 @@ export default function KpiManager() {
                         <th className="px-3 py-2">Nhân viên</th>
                         <th className="px-3 py-2">Phòng ban</th>
                         <th className="px-3 py-2">Số KPI</th>
+                        <th className="px-3 py-2">Chế độ</th>
                         <th className="px-3 py-2">Điểm chuẩn</th>
                         <th className="px-3 py-2">Xử lý</th>
                       </tr>
@@ -1321,6 +1446,9 @@ export default function KpiManager() {
                           </td>
                           <td className="px-3 py-2">{item.teamId || "-"}</td>
                           <td className="px-3 py-2">{item.itemCount}</td>
+                          <td className="px-3 py-2">
+                            {item.assessmentMode === "simple" ? "Đơn giản" : "Tự động tính"}
+                          </td>
                           <td className="px-3 py-2 font-bold text-emerald-700">
                             {item.totalStandardScore}
                           </td>
@@ -1383,9 +1511,22 @@ export default function KpiManager() {
                   Tổng điểm tiêu chuẩn bắt buộc bằng 100
                 </p>
               </div>
-              <button type="button" onClick={closeAssignment}>
-                <X />
-              </button>
+              <div className="flex items-center gap-2">
+                {assignment.assessmentMode !== "simple" && (
+                  <button
+                    type="button"
+                    onClick={() => requestAiNormalization()}
+                    disabled={aiNormalizing || assignment.items.length === 0}
+                    className="inline-flex items-center gap-2 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-sm font-bold text-violet-700 hover:bg-violet-100 disabled:opacity-50"
+                  >
+                    {aiNormalizing ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
+                    <span className="hidden sm:inline">AI chuẩn hóa</span>
+                  </button>
+                )}
+                <button type="button" onClick={closeAssignment} aria-label="Đóng">
+                  <X />
+                </button>
+              </div>
             </div>
             <div className="space-y-4 p-5">
               <div className="grid gap-3 sm:grid-cols-2">
@@ -1426,24 +1567,58 @@ export default function KpiManager() {
                   />
                 </label>
               </div>
+              <label className="flex cursor-pointer items-start justify-between gap-4 rounded-xl border border-sky-200 bg-sky-50 p-4">
+                <span>
+                  <span className="block text-sm font-black text-sky-900">KPI đơn giản</span>
+                  <span className="mt-1 block text-xs text-sky-700">
+                    Nhân viên xem nội dung cần đạt và tự nhập điểm. Mặc định điểm không vượt điểm chuẩn; có thể cho phép từng tiêu chí không giới hạn điểm.
+                  </span>
+                </span>
+                <input
+                  type="checkbox"
+                  checked={assignment.assessmentMode === "simple"}
+                  onChange={(event) => {
+                    setAiNormalization(null);
+                    setSelectedAiSuggestions([]);
+                    setAssignment((current) => ({
+                      ...current,
+                      assessmentMode: event.target.checked ? "simple" : "calculated",
+                    }));
+                  }}
+                  className="mt-1 h-5 w-5 shrink-0 rounded border-sky-300"
+                />
+              </label>
               {assignment.items.map((item, index) => (
                 <div key={index} className="rounded-xl border bg-slate-50 p-3">
-                  <div className="mb-3 flex justify-between">
+                  <div className="mb-3 flex justify-between gap-3">
                     <b className="text-sm">Tiêu chí {index + 1}</b>
-                    {assignment.items.length > 1 && (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setAssignment((current) => ({
-                            ...current,
-                            items: current.items.filter((_, i) => i !== index),
-                          }))
-                        }
-                        className="text-rose-600"
-                      >
-                        <Trash2 size={16} />
-                      </button>
-                    )}
+                    <div className="flex items-center gap-3">
+                      {assignment.assessmentMode !== "simple" && (
+                        <button
+                          type="button"
+                          onClick={() => requestAiNormalization(index)}
+                          disabled={aiNormalizing}
+                          className="inline-flex items-center gap-1 text-xs font-bold text-violet-700 disabled:opacity-50"
+                          title="AI chuẩn hóa riêng tiêu chí này"
+                        >
+                          <Sparkles size={14} /> AI
+                        </button>
+                      )}
+                      {assignment.items.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setAssignment((current) => ({
+                              ...current,
+                              items: current.items.filter((_, i) => i !== index),
+                            }))
+                          }
+                          className="text-rose-600"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      )}
+                    </div>
                   </div>
                   <div className="grid gap-2 sm:grid-cols-2">
                     <input
@@ -1455,6 +1630,8 @@ export default function KpiManager() {
                       placeholder="Tên tiêu chí"
                       className="rounded-lg border px-3 py-2"
                     />
+                    {assignment.assessmentMode !== "simple" && (
+                      <>
                     <select
                       value={item.scoringVersion === "legacy_v1" ? "legacy_v1" : (item.formulaType || "proportional")}
                       onChange={(event) => {
@@ -1593,6 +1770,8 @@ export default function KpiManager() {
                         />
                       </>
                     )}
+                      </>
+                    )}
                     <input
                       required
                       type="number"
@@ -1610,7 +1789,31 @@ export default function KpiManager() {
                       placeholder="Điểm tiêu chuẩn"
                       className="rounded-lg border px-3 py-2"
                     />
-                    {item.scoringVersion !== "legacy_v1" && item.formulaType === "threshold" && (
+                    {assignment.assessmentMode === "simple" && (
+                      <label className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-800">
+                        <input
+                          type="checkbox"
+                          checked={item.isScoreUnlimited === true || item.scoreCapMode === "unlimited"}
+                          onChange={(event) => {
+                            const isUnlimited = event.target.checked;
+                            setAssignment((current) => ({
+                              ...current,
+                              items: current.items.map((currentItem, itemIndex) => itemIndex === index
+                                ? {
+                                  ...currentItem,
+                                  isScoreUnlimited: isUnlimited,
+                                  scoreCapMode: isUnlimited ? "unlimited" : "standard_score",
+                                  maxScore: "",
+                                }
+                                : currentItem),
+                            }));
+                          }}
+                          className="h-4 w-4 rounded border-emerald-300"
+                        />
+                        Không giới hạn điểm
+                      </label>
+                    )}
+                    {assignment.assessmentMode !== "simple" && item.scoringVersion !== "legacy_v1" && item.formulaType === "threshold" && (
                       <>
                         <input
                           type="number"
@@ -1638,7 +1841,7 @@ export default function KpiManager() {
                         />
                       </>
                     )}
-                    {item.scoringVersion !== "legacy_v1" && (
+                    {assignment.assessmentMode !== "simple" && item.scoringVersion !== "legacy_v1" && (
                       <input
                         required
                         type="number"
@@ -1658,7 +1861,11 @@ export default function KpiManager() {
                           event.target.value,
                         )
                       }
-                      placeholder={item.scoringVersion === "legacy_v1" ? "Ghi chú đang điều khiển công thức cũ" : "Ghi chú hướng dẫn nhân viên (không dùng để tính điểm)"}
+                      placeholder={assignment.assessmentMode === "simple"
+                        ? "Nội dung, yêu cầu và hướng dẫn để nhân viên tự chấm điểm"
+                        : item.scoringVersion === "legacy_v1"
+                          ? "Ghi chú đang điều khiển công thức cũ"
+                          : "Ghi chú hướng dẫn nhân viên (không dùng để tính điểm)"}
                       rows={2}
                       className="rounded-lg border px-3 py-2 sm:col-span-2"
                     />
@@ -1710,6 +1917,122 @@ export default function KpiManager() {
         </div>
       )}
 
+      {aiNormalization && (
+        <div className="fixed inset-0 z-[120] overflow-y-auto bg-slate-950/60 p-3 sm:p-6">
+          <div className="mx-auto max-w-5xl overflow-hidden rounded-2xl bg-white shadow-2xl">
+            <div className="flex items-start justify-between gap-4 border-b px-5 py-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="rounded-xl bg-violet-100 p-2 text-violet-700"><Sparkles size={20} /></span>
+                  <h2 className="font-black text-slate-900">AI đề xuất chuẩn hóa KPI</h2>
+                </div>
+                <p className="mt-2 max-w-3xl text-sm text-slate-600">
+                  {aiNormalization.summary || "Kiểm tra cấu hình và các mức điểm mô phỏng trước khi áp dụng."}
+                </p>
+                <p className="mt-1 text-xs font-semibold text-amber-700">
+                  AI chỉ đề xuất. Dữ liệu chưa được lưu cho đến khi bạn bấm Lưu thay đổi hoặc Giao KPI.
+                </p>
+              </div>
+              <button type="button" onClick={() => setAiNormalization(null)} aria-label="Đóng đề xuất AI">
+                <X />
+              </button>
+            </div>
+
+            <div className="max-h-[70vh] space-y-4 overflow-y-auto bg-slate-50 p-4 sm:p-5">
+              {(aiNormalization.suggestions || []).map((suggestion) => {
+                const selected = selectedAiSuggestions.includes(suggestion.index);
+                const confidenceClasses = suggestion.confidence === "high"
+                  ? "bg-emerald-100 text-emerald-700"
+                  : suggestion.confidence === "medium"
+                    ? "bg-amber-100 text-amber-700"
+                    : "bg-rose-100 text-rose-700";
+                return (
+                  <section key={suggestion.index} className={`rounded-2xl border bg-white p-4 ${selected ? "border-violet-400 ring-1 ring-violet-200" : "border-slate-200"}`}>
+                    <div className="flex items-start gap-3">
+                      <input
+                        type="checkbox"
+                        checked={selected}
+                        disabled={!suggestion.canApply}
+                        onChange={() => toggleAiSuggestion(suggestion.index)}
+                        className="mt-1 h-4 w-4 rounded border-slate-300"
+                        aria-label={`Áp dụng đề xuất cho ${suggestion.name}`}
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h3 className="font-black text-slate-900">Tiêu chí {suggestion.index + 1}: {suggestion.name}</h3>
+                          <span className={`rounded-full px-2 py-1 text-[11px] font-bold ${confidenceClasses}`}>
+                            Tin cậy {suggestion.confidence === "high" ? "cao" : suggestion.confidence === "medium" ? "trung bình" : "thấp"}
+                          </span>
+                          {suggestion.status === "needs_review" && (
+                            <span className="rounded-full bg-amber-50 px-2 py-1 text-[11px] font-bold text-amber-700">Cần kiểm tra</span>
+                          )}
+                        </div>
+                        <p className="mt-2 text-sm text-slate-700">{suggestion.reasoning || "AI chưa cung cấp diễn giải."}</p>
+                        {suggestion.ambiguity && (
+                          <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                            Chưa rõ: {suggestion.ambiguity}
+                          </p>
+                        )}
+                        {(suggestion.issues || []).length > 0 && (
+                          <div className="mt-2 rounded-lg bg-rose-50 px-3 py-2 text-xs text-rose-700">
+                            {suggestion.issues.map((issue) => <p key={issue}>• {issue}</p>)}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="mt-4 grid gap-3 md:grid-cols-2">
+                      <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                        <p className="mb-2 text-xs font-black uppercase text-slate-500">Cấu hình hiện tại</p>
+                        <div className="space-y-1 text-sm text-slate-600">
+                          {configDetails(suggestion.current).map((detail, detailIndex) => <p key={detailIndex}>{detail}</p>)}
+                        </div>
+                      </div>
+                      <div className="rounded-xl border border-violet-200 bg-violet-50 p-3">
+                        <p className="mb-2 text-xs font-black uppercase text-violet-600">AI đề xuất</p>
+                        <div className="space-y-1 text-sm text-violet-900">
+                          {configDetails(suggestion.proposed).map((detail, detailIndex) => <p key={detailIndex}>{detail}</p>)}
+                        </div>
+                      </div>
+                    </div>
+
+                    {(suggestion.simulations || []).length > 0 && (
+                      <div className="mt-3">
+                        <p className="mb-2 text-xs font-black uppercase text-slate-500">Mô phỏng kết quả → điểm</p>
+                        <div className="flex flex-wrap gap-2">
+                          {suggestion.simulations.map((simulation) => (
+                            <span key={simulation.actual} className="rounded-lg border bg-white px-2.5 py-1.5 text-xs font-bold text-slate-700">
+                              {simulation.actual}{suggestion.proposed?.unit ? ` ${suggestion.proposed.unit}` : ""} → {simulation.score} điểm
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </section>
+                );
+              })}
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t px-5 py-4">
+              <p className="text-sm font-semibold text-slate-600">Đã chọn {selectedAiSuggestions.length} đề xuất</p>
+              <div className="flex gap-2">
+                <button type="button" onClick={() => setAiNormalization(null)} className="rounded-xl border px-4 py-2 text-sm font-semibold">
+                  Đóng
+                </button>
+                <button
+                  type="button"
+                  disabled={selectedAiSuggestions.length === 0}
+                  onClick={applyAiSuggestions}
+                  className="inline-flex items-center gap-2 rounded-xl bg-violet-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
+                >
+                  <CheckCircle2 size={16} /> Áp dụng vào biểu mẫu
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {reviewing && (
         <div className="fixed inset-0 z-[100] overflow-y-auto bg-slate-950/45 p-3 sm:p-6">
           <div className="mx-auto max-w-4xl rounded-2xl bg-white shadow-2xl">
@@ -1736,18 +2059,28 @@ export default function KpiManager() {
                     </b>
                     <span className="text-xs font-bold text-violet-700">
                       {item.scoringMethod === "standard_points"
-                        ? `Điểm chuẩn ${item.standardScore}`
+                        ? reviewing.assessmentMode === "simple" && (item.isScoreUnlimited === true || item.scoreCapMode === "unlimited")
+                          ? `Mốc ${item.standardScore} · Không giới hạn`
+                          : `Điểm chuẩn ${item.standardScore}`
                         : `Trọng số ${item.weight}%`}
                     </span>
                   </div>
-                  <p className="mt-1 text-sm text-slate-500">
-                    Khối lượng chuẩn:{" "}
-                    {item.scoringMethod === "standard_points" ? (item.standardQuantity || "Không áp dụng") : (item.type === "boolean"
-                      ? "Đạt / Không đạt"
-                      : `${item.target} ${item.unit || ""}`)}{" "}
-                    · Nhân viên khai: {item.scoringMethod === "standard_points" ? (item.employeeActualText || "-") : (item.employeeActual ?? "-")} · Điểm thực tế:{" "}
-                    {item.employeeScore ?? 0}{item.scoringMethod === "standard_points" ? "" : "%"}
-                  </p>
+                  {reviewing.assessmentMode === "simple" ? (
+                    <p className="mt-1 text-sm font-semibold text-sky-700">
+                      Nhân viên tự chấm: {item.employeeScore ?? 0}{item.isScoreUnlimited === true || item.scoreCapMode === "unlimited"
+                        ? ` điểm (mốc tham chiếu ${item.standardScore})`
+                        : ` / ${item.standardScore} điểm`}
+                    </p>
+                  ) : (
+                    <p className="mt-1 text-sm text-slate-500">
+                      Khối lượng chuẩn:{" "}
+                      {item.scoringMethod === "standard_points" ? (item.standardQuantity || "Không áp dụng") : (item.type === "boolean"
+                        ? "Đạt / Không đạt"
+                        : `${item.target} ${item.unit || ""}`)}{" "}
+                      · Nhân viên khai: {item.scoringMethod === "standard_points" ? (item.employeeActualText || "-") : (item.employeeActual ?? "-")} · Điểm thực tế:{" "}
+                      {item.employeeScore ?? 0}{item.scoringMethod === "standard_points" ? "" : "%"}
+                    </p>
+                  )}
                   {item.criteriaNote && (
                     <p className="mt-1 text-sm text-slate-500">Ghi chú: {item.criteriaNote}</p>
                   )}
@@ -1778,45 +2111,49 @@ export default function KpiManager() {
                     </div>
                   )}
                   <div className="mt-3 grid gap-2 sm:grid-cols-3">
-                    <label className="text-xs font-semibold text-slate-600">
-                      Kết quả xác nhận
-                      <input
-                        disabled={!canReview || reviewing.status !== "SUBMITTED"}
-                        type={item.scoringMethod === "standard_points" && item.scoringVersion !== "structured_v2" ? "text" : "number"}
-                        step={item.scoringMethod === "standard_points" && item.scoringVersion === "structured_v2" ? "any" : undefined}
-                        value={item.scoringMethod === "standard_points" ? item.approvedActualText : (item.approvedActual ?? "")}
-                        onChange={(event) =>
-                          changeReviewItem(
-                            index,
-                            item.scoringMethod === "standard_points" ? "approvedActualText" : "approvedActual",
-                            event.target.value,
-                          )
-                        }
-                        className="mt-1 w-full rounded-lg border px-3 py-2"
-                      />
-                    </label>
-                    <label className="text-xs font-semibold text-slate-600">
-                      {item.scoringMethod === "standard_points" ? "Điểm hệ thống tính" : "Mức hoàn thành duyệt (%)"}
-                      <input
-                        disabled={item.scoringMethod === "standard_points" || !canReview || reviewing.status !== "SUBMITTED"}
-                        type="number"
-                        min={item.scoringMethod === "standard_points" ? (item.minimumScore ?? 0) : 0}
-                        max={item.scoringMethod === "standard_points" && resolveScoreCap(item).mode === "unlimited"
-                          ? undefined
-                          : item.scoringMethod === "standard_points"
-                            ? resolveScoreCap(item).maxScore
-                            : item.maxAchievementPercent || 150}
-                        value={item.approvedScore ?? ""}
-                        onChange={(event) =>
-                          changeReviewItem(
-                            index,
-                            "approvedScore",
-                            event.target.value,
-                          )
-                        }
-                        className="mt-1 w-full rounded-lg border px-3 py-2"
-                      />
-                    </label>
+                    {reviewing.assessmentMode === "simple" ? (
+                      <label className="text-xs font-semibold text-slate-600 sm:col-span-2">
+                        {item.isScoreUnlimited === true || item.scoreCapMode === "unlimited"
+                          ? "Điểm quản lý duyệt (từ 0, không giới hạn)"
+                          : `Điểm quản lý duyệt (0–${item.standardScore})`}
+                        <input
+                          disabled={!canReview || reviewing.status !== "SUBMITTED"}
+                          type="number"
+                          min="0"
+                          max={item.isScoreUnlimited === true || item.scoreCapMode === "unlimited" ? undefined : item.standardScore}
+                          step="any"
+                          value={item.approvedScore ?? ""}
+                          onChange={(event) => changeReviewItem(index, "approvedScore", event.target.value)}
+                          className="mt-1 w-full rounded-lg border px-3 py-2"
+                        />
+                      </label>
+                    ) : (
+                      <>
+                        <label className="text-xs font-semibold text-slate-600">
+                          Kết quả xác nhận
+                          <input
+                            disabled={!canReview || reviewing.status !== "SUBMITTED"}
+                            type={item.scoringMethod === "standard_points" && item.scoringVersion !== "structured_v2" ? "text" : "number"}
+                            step={item.scoringMethod === "standard_points" && item.scoringVersion === "structured_v2" ? "any" : undefined}
+                            value={item.scoringMethod === "standard_points" ? item.approvedActualText : (item.approvedActual ?? "")}
+                            onChange={(event) => changeReviewItem(index, item.scoringMethod === "standard_points" ? "approvedActualText" : "approvedActual", event.target.value)}
+                            className="mt-1 w-full rounded-lg border px-3 py-2"
+                          />
+                        </label>
+                        <label className="text-xs font-semibold text-slate-600">
+                          {item.scoringMethod === "standard_points" ? "Điểm hệ thống tính" : "Mức hoàn thành duyệt (%)"}
+                          <input
+                            disabled={item.scoringMethod === "standard_points" || !canReview || reviewing.status !== "SUBMITTED"}
+                            type="number"
+                            min={item.scoringMethod === "standard_points" ? (item.minimumScore ?? 0) : 0}
+                            max={item.scoringMethod === "standard_points" && resolveScoreCap(item).mode === "unlimited" ? undefined : item.scoringMethod === "standard_points" ? resolveScoreCap(item).maxScore : item.maxAchievementPercent || 150}
+                            value={item.approvedScore ?? ""}
+                            onChange={(event) => changeReviewItem(index, "approvedScore", event.target.value)}
+                            className="mt-1 w-full rounded-lg border px-3 py-2"
+                          />
+                        </label>
+                      </>
+                    )}
                     <label className="text-xs font-semibold text-slate-600">
                       Nhận xét
                       <input
