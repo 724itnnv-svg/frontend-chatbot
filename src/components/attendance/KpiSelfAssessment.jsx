@@ -116,7 +116,11 @@ function scoreCapText(item) {
   return `Điểm tối đa bằng điểm chuẩn: ${cap.maxScore}`;
 }
 
-function scorePreview(item) {
+function scorePreview(item, assessmentMode = "calculated") {
+  if (assessmentMode === "simple") {
+    const score = Number(item.employeeScore);
+    return Number.isFinite(score) ? score : 0;
+  }
   if (item.scoringMethod === "standard_points") {
     return standardPointScore(item);
   }
@@ -230,8 +234,8 @@ export default function KpiSelfAssessment() {
     () =>
       (evaluation?.items || []).reduce(
         (sum, item) => sum + (item.scoringMethod === "standard_points"
-          ? scorePreview(item)
-          : (scorePreview(item) * Number(item.weight || 0)) / 100),
+          ? scorePreview(item, evaluation?.assessmentMode)
+          : (scorePreview(item, evaluation?.assessmentMode) * Number(item.weight || 0)) / 100),
         0,
       ),
     [evaluation],
@@ -528,6 +532,11 @@ export default function KpiSelfAssessment() {
                     Hạn nộp: {(evaluation.effectiveDueDate || evaluation.dueDate).split("-").reverse().join("/")}
                   </span>
                 )}
+                {evaluation.assessmentMode === "simple" && (
+                  <span className="ml-2 inline-flex rounded-full bg-sky-50 px-2.5 py-1 text-xs font-bold text-sky-700">
+                    KPI đơn giản
+                  </span>
+                )}
               </div>
               <div className="text-right">
                 <p className="text-xs text-slate-500">
@@ -581,17 +590,17 @@ export default function KpiSelfAssessment() {
                           Ghi chú: {item.criteriaNote}
                         </p>
                       )}
-                      {thresholdRuleText(item) && (
+                      {evaluation.assessmentMode !== "simple" && thresholdRuleText(item) && (
                         <p className="mt-1 text-sm font-semibold text-violet-700">
                           Quy tắc: {thresholdRuleText(item)}
                         </p>
                       )}
-                      {structuredRuleText(item) && item.formulaType !== "threshold" && (
+                      {evaluation.assessmentMode !== "simple" && structuredRuleText(item) && item.formulaType !== "threshold" && (
                         <p className="mt-1 text-sm font-semibold text-violet-700">
                           Quy tắc: {structuredRuleText(item)}
                         </p>
                       )}
-                      {scoreCapText(item) && (
+                      {evaluation.assessmentMode !== "simple" && scoreCapText(item) && (
                         <p className="mt-1 text-sm font-semibold text-emerald-700">
                           {scoreCapText(item)}
                         </p>
@@ -599,10 +608,45 @@ export default function KpiSelfAssessment() {
                     </div>
                     <span className="h-fit rounded-lg bg-violet-50 px-2.5 py-1 text-xs font-bold text-violet-700">
                       {item.scoringMethod === "standard_points"
-                        ? `Điểm chuẩn ${item.standardScore}`
+                        ? evaluation.assessmentMode === "simple" && (item.isScoreUnlimited === true || item.scoreCapMode === "unlimited")
+                          ? `Mốc ${item.standardScore} · Không giới hạn`
+                          : `Điểm chuẩn ${item.standardScore}`
                         : `Trọng số ${item.weight}%`}
                     </span>
                   </div>
+                  {evaluation.assessmentMode === "simple" ? (
+                    <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                      <label className="text-sm font-semibold text-slate-700">
+                        {item.isScoreUnlimited === true || item.scoreCapMode === "unlimited"
+                          ? "Điểm tự chấm (từ 0, không giới hạn)"
+                          : `Điểm tự chấm (0–${item.standardScore})`}
+                        <input
+                          type="number"
+                          min="0"
+                          max={item.isScoreUnlimited === true || item.scoreCapMode === "unlimited" ? undefined : item.standardScore}
+                          step="any"
+                          required
+                          disabled={!canEdit}
+                          value={item.employeeScore ?? ""}
+                          onChange={(event) => updateItem(index, "employeeScore", event.target.value)}
+                          className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 disabled:bg-slate-50"
+                        />
+                      </label>
+                      <div className="rounded-xl bg-violet-50 px-3 py-2">
+                        <p className="text-xs text-violet-600">Điểm bạn tự chấm</p>
+                        <p className="font-bold text-violet-800">
+                          {scorePreview(item, "simple").toFixed(2)}{item.isScoreUnlimited === true || item.scoreCapMode === "unlimited"
+                            ? ` điểm (mốc tham chiếu ${item.standardScore})`
+                            : ` / ${item.standardScore} điểm`}
+                        </p>
+                        {approved && (
+                          <p className="text-xs text-emerald-700">
+                            Quản lý duyệt: {Number(item.approvedScore || 0).toFixed(2)} điểm
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  ) : (
                   <div className="mt-4 grid gap-3 sm:grid-cols-3">
                     <div className="rounded-xl bg-slate-50 px-3 py-2">
                       <p className="text-xs text-slate-500">{item.scoringVersion === "structured_v2" ? "Mục tiêu/mốc" : "Khối lượng tiêu chuẩn"}</p>
@@ -649,7 +693,7 @@ export default function KpiSelfAssessment() {
                         {item.scoringMethod === "standard_points" ? "Điểm thực tế" : "Mức hoàn thành"}
                       </p>
                       <p className="font-bold text-violet-800">
-                        {scorePreview(item).toFixed(2)}{item.scoringMethod === "standard_points" ? " điểm" : "%"}
+                        {scorePreview(item, evaluation.assessmentMode).toFixed(2)}{item.scoringMethod === "standard_points" ? " điểm" : "%"}
                       </p>
                       {approved && (
                         <p className="text-xs text-emerald-700">
@@ -658,6 +702,7 @@ export default function KpiSelfAssessment() {
                       )}
                     </div>
                   </div>
+                  )}
                   <div className="mt-3 grid gap-3 sm:grid-cols-2">
                     <label className="text-sm text-slate-600">
                       Giải trình
