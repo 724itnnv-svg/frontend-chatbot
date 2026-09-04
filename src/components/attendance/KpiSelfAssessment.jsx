@@ -19,6 +19,7 @@ import { EvidenceThumbnail, KpiEvidenceViewer } from "./KpiEvidenceViewer";
 
 const MAX_EVIDENCE_FILE_SIZE_BYTES = 1024 * 1024 * 1024;
 const MAX_EVIDENCE_FILE_SIZE_LABEL = "1 GB";
+const MAX_EVIDENCE_FILES_PER_ITEM = 5;
 
 function currentPeriod() {
   const now = new Date();
@@ -316,7 +317,7 @@ export default function KpiSelfAssessment() {
       setMessage({ ok: false, text: `Tệp "${oversizedFile.name}" vượt quá giới hạn ${MAX_EVIDENCE_FILE_SIZE_LABEL}.` });
       return false;
     }
-    const remaining = 20 - (item.evidences?.length || 0);
+    const remaining = MAX_EVIDENCE_FILES_PER_ITEM - (item.evidences?.length || 0);
     if (selected.length > remaining) {
       setMessage({
         ok: false,
@@ -374,7 +375,7 @@ export default function KpiSelfAssessment() {
       setUploadModalError(`Tệp "${oversizedFile.name}" vượt quá giới hạn ${MAX_EVIDENCE_FILE_SIZE_LABEL}.`);
       return;
     }
-    const remaining = 20 - (uploadTargetItem.evidences?.length || 0);
+    const remaining = MAX_EVIDENCE_FILES_PER_ITEM - (uploadTargetItem.evidences?.length || 0);
     setPendingEvidenceFiles((current) => {
       const unique = selected.filter((file) => !current.some(
         (existing) => existing.name === file.name
@@ -725,7 +726,7 @@ export default function KpiSelfAssessment() {
                           </span>
                         </span>
                         <span className="text-xs text-slate-400">
-                          {item.evidences?.length || 0}/20 tệp
+                          {item.evidences?.length || 0}/{MAX_EVIDENCE_FILES_PER_ITEM} tệp
                         </span>
                       </div>
                       {item.evidences?.length > 0 && (
@@ -763,7 +764,7 @@ export default function KpiSelfAssessment() {
                           ))}
                         </div>
                       )}
-                      {canEdit && (item.evidences?.length || 0) < 20 && (
+                      {canEdit && (item.evidences?.length || 0) < MAX_EVIDENCE_FILES_PER_ITEM && (
                         <button
                           type="button"
                           disabled={Boolean(uploadingItemId)}
@@ -849,7 +850,7 @@ export default function KpiSelfAssessment() {
               <div>
                 <h3 className="font-black text-slate-900">Thêm minh chứng KPI</h3>
                 <p className="mt-1 text-xs text-slate-500">
-                  {uploadTargetItem.name} · Đã có {uploadTargetItem.evidences?.length || 0}/20 tệp
+                  {uploadTargetItem.name} · Đã có {uploadTargetItem.evidences?.length || 0}/{MAX_EVIDENCE_FILES_PER_ITEM} tệp
                 </p>
               </div>
               <button
@@ -908,7 +909,7 @@ export default function KpiSelfAssessment() {
                   Có thể nhấn Ctrl + V để dán ảnh vừa chụp bằng Win + Shift + S
                 </p>
                 <p className="mt-2 text-xs text-slate-500">
-                  Tối đa 20 tệp cho mỗi tiêu chí, không quá {MAX_EVIDENCE_FILE_SIZE_LABEL}/tệp
+                  Tối đa {MAX_EVIDENCE_FILES_PER_ITEM} tệp cho mỗi tiêu chí, không quá {MAX_EVIDENCE_FILE_SIZE_LABEL}/tệp
                 </p>
               </label>
 
