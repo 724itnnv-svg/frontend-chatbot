@@ -785,7 +785,8 @@ function findBestKeywordLocation(rows = [], address = "") {
         const matchedTokenCount = normalizedFullAddress
           .split(" ")
           .filter((token) => addressTokens.has(token)).length;
-        const exactBonus = normalizedFullAddress === normalizedAddress ? 10000 : 0;
+        const exactBonus =
+          normalizedFullAddress === normalizedAddress ? 10000 : 0;
         const containsBonus =
           normalizedFullAddress.includes(normalizedAddress) ||
           normalizedAddress.includes(normalizedFullAddress)
@@ -813,7 +814,6 @@ async function resolveKiotLocationByKeyword({
     retailId,
     address,
     retailer,
-    accessToken,
     accessPrivateToken,
   );
   const keywordRows = getVtpCategoryRows(keywordResponse);
@@ -827,10 +827,10 @@ async function resolveKiotLocationByKeyword({
     district: matchedAddress.district || "",
     ward: matchedAddress.ward || "",
     retailer,
-    accessToken,
     accessPrivateToken,
   });
-  const mappingCandidate = mappingResponse?.data ?? mappingResponse?.Data ?? mappingResponse;
+  const mappingCandidate =
+    mappingResponse?.data ?? mappingResponse?.Data ?? mappingResponse;
   const mapping = Array.isArray(mappingCandidate)
     ? mappingCandidate[0]
     : mappingCandidate;
@@ -1331,12 +1331,11 @@ function getProvinceInitials(address = "") {
     .replace(/\s*-\s*/g, " ")
     .trim();
 
-  const words = cleaned.split(" ").filter(Boolean);
+  const words = cleaned.split(/\s+/).filter(Boolean);
   if (words.length === 0) return "";
   if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
 
   return words
-    .slice(0, 2)
     .map((word) => word[0])
     .join("")
     .toUpperCase();
@@ -3984,12 +3983,12 @@ async function buildDeliveryDetailPayload({
         accessPrivateToken,
         address: invoiceAddress,
       })
-    : resolvedAddressDetails ??
+    : (resolvedAddressDetails ??
       (await resolveAdministrativeAreaDetails({
-      retailer,
-      accessPrivateToken,
-      address: invoiceAddress,
-      }));
+        retailer,
+        accessPrivateToken,
+        address: invoiceAddress,
+      })));
   const locationId = resolvedAddress?.locationId ?? null;
   const wardId = resolvedAddress?.wardId ?? null;
   let provinceName =

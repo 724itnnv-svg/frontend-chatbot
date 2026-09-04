@@ -1113,7 +1113,6 @@ export async function getAllLocationsByKeyword(
   input,
   retailer = "kingfarm",
   accessPrivateToken,
-  groupMerchant = "retail",
 ) {
   try {
     const response = await kiotDirectApi.get(
@@ -1122,7 +1121,7 @@ export async function getAllLocationsByKeyword(
         params: {
           retail_id: retailId,
           input,
-          group_merchant: groupMerchant,
+          group_merchant: "retail",
         },
         headers: {
           Accept: "application/json, text/plain, */*",
