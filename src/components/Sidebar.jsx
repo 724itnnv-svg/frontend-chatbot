@@ -120,6 +120,13 @@ const MENU_CONFIG = [
     icon: TrendingUp,
   },
   {
+    id: "roas_dashboard",
+    accessId: "business_stats",
+    path: "/admin/roas",
+    label: "Hiệu quả quảng cáo",
+    icon: MousePointerClick,
+  },
+  {
     id: "debt_tracking",
     path: "/admin/debt-tracking",
     label: "Theo dõi công nợ",
@@ -323,6 +330,7 @@ const MENU_GROUPS = [
     icon: MessageCircle,
     items: [
       "business_stats",
+      "roas_dashboard",
       "debt_tracking",
       "pages",
       "pagesmessage",

@@ -47,6 +47,7 @@ const DonHang = lazy(() => import("./components/DonHang"));
 const WebOrder = lazy(() => import("./components/WebOrder"));
 const TaoDonHang = lazy(() => import("./components/TaoDonHang"));
 const BusinessStats = lazy(() => import("./components/BusinessStats"));
+const RoasDashboard = lazy(() => import("./components/RoasDashboard"));
 const DebtTracking = lazy(() => import("./components/DebtTracking"));
 const UsersPage = lazy(() => import("./components/UserManager"));
 const EmployeeProfileManager = lazy(
@@ -214,6 +215,7 @@ const ADMIN_ROUTE_BY_SCREEN = {
   weborder: "/admin/web-orders",
   tao_don_hang: "/admin/tao-don-hang",
   business_stats: "/admin/business-stats",
+  roas_dashboard: "/admin/roas",
   debt_tracking: "/admin/debt-tracking",
   employee_profiles: "/admin/employee-profiles",
   employee_assets: "/admin/employee-assets",
@@ -270,6 +272,11 @@ const adminRoutes = [
     path: "business-stats",
     screenId: "business_stats",
     element: <BusinessStats />,
+  },
+  {
+    path: "roas",
+    screenId: "business_stats",
+    element: <RoasDashboard />,
   },
   {
     path: "debt-tracking",

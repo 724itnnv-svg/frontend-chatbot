@@ -93,6 +93,7 @@ const buildSinglePayload = ({
   transDate,
 }) => {
   const orderDelivery = getOrderDelivery(row);
+  console.log("orderDelivery", orderDelivery);
   const partnerSource =
     orderDelivery.partnerDeliveryName ||
     row["Đối tác chuyển tiền"] ||
