@@ -202,6 +202,7 @@ export default function KpiManager() {
   const [showAssign, setShowAssign] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [reviewing, setReviewing] = useState(null);
+  const [reopening, setReopening] = useState(null);
   const [previewEvidence, setPreviewEvidence] = useState(null);
   const [importRows, setImportRows] = useState([]);
   const [importPreview, setImportPreview] = useState([]);
@@ -607,6 +608,48 @@ export default function KpiManager() {
         ok: false,
         text: error.response?.data?.message || "Không thể xử lý phiếu KPI",
       });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function openReopen(row) {
+    setReviewing(null);
+    setReopening({
+      row,
+      reason: "",
+      extensionUntil: row.isOverdue ? "" : (row.submissionExtensionUntil || ""),
+    });
+  }
+
+  async function reopenEvaluation() {
+    const reason = String(reopening?.reason || "").trim();
+    const extensionUntil = String(reopening?.extensionUntil || "").trim();
+    if (!reason) {
+      setMessage({ ok: false, text: "Vui lòng nhập lý do cho nhân viên chấm lại" });
+      return;
+    }
+    if (reopening?.row?.isOverdue && !extensionUntil) {
+      setMessage({ ok: false, text: "Phiếu đã quá hạn, vui lòng chọn hạn gửi lại" });
+      return;
+    }
+    const payrollWarning = reopening?.row?.payrollSyncStatus === "SYNCED"
+      ? ` Điểm KPI cũ sẽ được gỡ khỏi bảng lương nháp ${payrollPeriodForKpi(reopening.row.period)}.`
+      : "";
+    if (!window.confirm(`Xác nhận cho ${reopening.row.employeeName} chấm lại KPI?${payrollWarning}`)) return;
+
+    setBusy(true);
+    setMessage(null);
+    try {
+      const response = await api.patch(`/kpi-evaluations/${reopening.row._id}/reopen`, {
+        reason,
+        extensionUntil,
+      });
+      setMessage({ ok: true, text: response.data.message });
+      setReopening(null);
+      await load();
+    } catch (error) {
+      setMessage({ ok: false, text: error.response?.data?.message || "Không thể cho chấm lại KPI" });
     } finally {
       setBusy(false);
     }
@@ -1302,6 +1345,18 @@ export default function KpiManager() {
                               className="rounded-lg border px-3 py-1.5 text-xs font-semibold"
                             >
                               Xem
+                            </button>
+                          )}
+                          {canReview && row.status === "APPROVED" && row.payrollSyncStatus !== "LOCKED" && (
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={() => openReopen(row)}
+                              title="Cho nhân viên chấm lại KPI"
+                              className="inline-flex items-center gap-1 rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-bold text-amber-800 hover:bg-amber-100 disabled:opacity-50"
+                            >
+                              <RefreshCcw size={14} />
+                              Chấm lại
                             </button>
                           )}
                           {canEdit && EDITABLE_STATUSES.has(row.status) && (
@@ -2218,6 +2273,90 @@ export default function KpiManager() {
                   </button>
                 </>
               )}
+              {canReview && reviewing.status === "APPROVED" && reviewing.payrollSyncStatus !== "LOCKED" && (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => openReopen(reviewing)}
+                  className="inline-flex items-center gap-2 rounded-xl bg-amber-100 px-4 py-2 text-sm font-bold text-amber-800"
+                >
+                  <RefreshCcw size={16} /> Cho chấm lại
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {reopening && (
+        <div className="fixed inset-0 z-[110] overflow-y-auto bg-slate-950/45 p-3 sm:p-6">
+          <div className="mx-auto mt-10 max-w-xl rounded-2xl bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b px-5 py-4">
+              <div>
+                <h2 className="font-black text-slate-900">Cho chấm lại KPI</h2>
+                <p className="mt-1 text-xs text-slate-500">
+                  {reopening.row.employeeName} · {reopening.row.employeeCode} · KPI {reopening.row.period}
+                </p>
+              </div>
+              <button type="button" onClick={() => setReopening(null)} disabled={busy}>
+                <X />
+              </button>
+            </div>
+            <div className="space-y-4 p-5">
+              <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                Lần duyệt hiện tại sẽ được lưu vào lịch sử. Nhân viên giữ nguyên phần tự chấm và minh chứng để chỉnh sửa, còn điểm quản lý duyệt sẽ được xóa.
+              </div>
+              {reopening.row.payrollSyncStatus === "SYNCED" && (
+                <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700">
+                  Điểm KPI cũ đang nằm trong bảng lương {payrollPeriodForKpi(reopening.row.period)} và sẽ được gỡ ra. Nếu bảng lương đã duyệt hoặc đã chi trả, hệ thống sẽ từ chối thao tác.
+                </div>
+              )}
+              <label className="block text-sm font-semibold text-slate-700">
+                Lý do chấm lại <span className="text-rose-600">*</span>
+                <textarea
+                  autoFocus
+                  required
+                  maxLength={3000}
+                  rows={4}
+                  value={reopening.reason}
+                  onChange={(event) => setReopening((current) => ({ ...current, reason: event.target.value }))}
+                  placeholder="Nội dung nhân viên cần cập nhật hoặc bổ sung"
+                  className="mt-1 w-full rounded-xl border px-3 py-2"
+                />
+              </label>
+              <label className="block text-sm font-semibold text-slate-700">
+                Hạn gửi lại {reopening.row.isOverdue && <span className="text-rose-600">*</span>}
+                <input
+                  type="date"
+                  required={reopening.row.isOverdue}
+                  min={reopening.row.dueDate || undefined}
+                  value={reopening.extensionUntil}
+                  onChange={(event) => setReopening((current) => ({ ...current, extensionUntil: event.target.value }))}
+                  className="mt-1 w-full rounded-xl border px-3 py-2"
+                />
+                <span className="mt-1 block text-xs font-normal text-slate-500">
+                  Bắt buộc chọn ngày mới nếu hạn nộp hiện tại đã qua.
+                </span>
+              </label>
+            </div>
+            <div className="flex justify-end gap-2 border-t px-5 py-4">
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => setReopening(null)}
+                className="rounded-xl border px-4 py-2 text-sm font-semibold"
+              >
+                Hủy
+              </button>
+              <button
+                type="button"
+                disabled={busy || !reopening.reason.trim() || (reopening.row.isOverdue && !reopening.extensionUntil)}
+                onClick={reopenEvaluation}
+                className="inline-flex items-center gap-2 rounded-xl bg-amber-500 px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
+              >
+                {busy ? <Loader2 size={16} className="animate-spin" /> : <RefreshCcw size={16} />}
+                Xác nhận chấm lại
+              </button>
             </div>
           </div>
         </div>
