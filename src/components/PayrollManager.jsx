@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import QRCode from "qrcode";
 import * as XLSX from "xlsx";
 import { saveAs } from 'file-saver';
@@ -16,16 +16,19 @@ import {
   EyeOff,
   FileSpreadsheet,
   HandCoins,
+  History,
   ListChecks,
   Lock,
   Loader2,
   Plus,
   RefreshCw,
+  Redo2,
   Save,
   Search,
   ShieldAlert,
   Settings2,
   Trash2,
+  Undo2,
   UploadCloud,
   Unlock,
   Wallet,
@@ -1353,6 +1356,49 @@ function Modal({ open, title, children, onClose }) {
   );
 }
 
+const PAYROLL_REVISION_ACTION_LABELS = {
+  CREATE_ROW: "Tạo dòng lương",
+  MANUAL_SAVE: "Lưu thủ công",
+  BULK_SAVE: "Lưu bảng lương",
+  IMPORT_EXCEL: "Import Excel",
+  IMPORT_COMMISSION: "Import doanh số/hoa hồng",
+  SYNC_ATTENDANCE: "Đồng bộ chấm công",
+  IMPORT_ATTENDANCE_KIOT: "Import chấm công KiotViet",
+  SYNC_SALARY_ADVANCE: "Đồng bộ phiếu ứng lương",
+  CLONE_PERIOD: "Nhân bản kỳ lương",
+  DELETE_ROW: "Xóa dòng lương",
+  DELETE_PERIOD: "Xóa kỳ lương",
+  RESTORE: "Khôi phục phiên bản",
+};
+
+function payrollRowFingerprint(row, formulaSettings) {
+  if (!row) return "";
+  return JSON.stringify({ _id: row._id || "", ...buildPayload(row, formulaSettings) });
+}
+
+function applyHistorySnapshots(currentRows, snapshots) {
+  const next = [...currentRows];
+  snapshots.forEach(({ id, row }) => {
+    const index = next.findIndex((item) => item.__clientId === id);
+    if (!row) {
+      if (index >= 0) next.splice(index, 1);
+      return;
+    }
+    const restored = structuredClone(row);
+    if (index >= 0) next[index] = restored;
+    else next.unshift(restored);
+  });
+  return next;
+}
+
+function formatRevisionValue(value) {
+  if (value == null || value === "") return "—";
+  if (typeof value === "boolean") return value ? "Bật" : "Tắt";
+  if (typeof value === "number") return formatPayrollNumber(value);
+  if (typeof value === "object") return JSON.stringify(value);
+  return String(value);
+}
+
 export default function PayrollManager() {
   const { user, token } = useAuth();
   const hasFullAccess = Number(user?.allpage) === 1;
@@ -1382,6 +1428,9 @@ export default function PayrollManager() {
 
   const [rows, setRows] = useState([]);
   const [dirtyIds, setDirtyIds] = useState(() => new Set());
+  const baselineRowsRef = useRef(new Map());
+  const [undoStack, setUndoStack] = useState([]);
+  const [redoStack, setRedoStack] = useState([]);
   const [savingIds, setSavingIds] = useState(() => new Set());
   const [selectedRowIds, setSelectedRowIds] = useState(() => new Set());
   const [loading, setLoading] = useState(true);
@@ -1400,6 +1449,14 @@ export default function PayrollManager() {
   const [showImport, setShowImport] = useState(false);
   const [showCommissionImport, setShowCommissionImport] = useState(false);
   const [showColumns, setShowColumns] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+  const [revisionRows, setRevisionRows] = useState([]);
+  const [revisionTotal, setRevisionTotal] = useState(0);
+  const [revisionLoading, setRevisionLoading] = useState(false);
+  const [selectedRevision, setSelectedRevision] = useState(null);
+  const [revisionPreview, setRevisionPreview] = useState(null);
+  const [revisionDetailLoading, setRevisionDetailLoading] = useState(false);
+  const [revisionRestoring, setRevisionRestoring] = useState(false);
   const [columnTemplateName, setColumnTemplateName] = useState("");
   const [columnTemplateError, setColumnTemplateError] = useState("");
   const [editingColumnTemplateId, setEditingColumnTemplateId] = useState(null);
@@ -1805,8 +1862,15 @@ export default function PayrollManager() {
       const res = await fetch(`/api/payroll?${params}`, { headers: authHeader });
       const data = await res.json();
       if (!res.ok || data?.success === false) throw new Error(data?.message || "Không tải được bảng lương");
-      setRows((data.data || data.items || []).map((row) => normalizePayrollRow(row, period, formulaSettings)));
+      const nextRows = (data.data || data.items || []).map((row) => normalizePayrollRow(row, period, formulaSettings));
+      baselineRowsRef.current = new Map(nextRows.map((row) => [
+        row.__clientId,
+        payrollRowFingerprint(row, formulaSettings),
+      ]));
+      setRows(nextRows);
       setDirtyIds(new Set());
+      setUndoStack([]);
+      setRedoStack([]);
       setSelectedRowIds(new Set());
     } catch (error) {
       console.error(error);
@@ -1959,19 +2023,64 @@ export default function PayrollManager() {
     });
   };
 
+  const calculateDirtyIds = (nextRows) => new Set(nextRows
+    .filter((row) => {
+      const baseline = baselineRowsRef.current.get(row.__clientId);
+      return baseline === undefined || baseline !== payrollRowFingerprint(row, formulaSettings);
+    })
+    .map((row) => row.__clientId));
+
+  const recordLocalCommand = (command, coalesceKey = "") => {
+    const nextCommand = { ...command, coalesceKey, createdAt: Date.now() };
+    setUndoStack((current) => {
+      const last = current[current.length - 1];
+      if (coalesceKey && last?.coalesceKey === coalesceKey && nextCommand.createdAt - last.createdAt < 1000) {
+        return [...current.slice(0, -1), { ...nextCommand, before: last.before }].slice(-150);
+      }
+      return [...current, nextCommand].slice(-150);
+    });
+    setRedoStack([]);
+  };
+
+  const undoLocalChange = () => {
+    if (payrollReadOnly || !undoStack.length) return;
+    const command = undoStack[undoStack.length - 1];
+    const nextRows = applyHistorySnapshots(rows, command.before);
+    setRows(nextRows);
+    setDirtyIds(calculateDirtyIds(nextRows));
+    setUndoStack((current) => current.slice(0, -1));
+    setRedoStack((current) => [...current, command].slice(-150));
+    setMessage(`Đã hoàn tác: ${command.label}`);
+  };
+
+  const redoLocalChange = () => {
+    if (payrollReadOnly || !redoStack.length) return;
+    const command = redoStack[redoStack.length - 1];
+    const nextRows = applyHistorySnapshots(rows, command.after);
+    setRows(nextRows);
+    setDirtyIds(calculateDirtyIds(nextRows));
+    setRedoStack((current) => current.slice(0, -1));
+    setUndoStack((current) => [...current, command].slice(-150));
+    setMessage(`Đã làm lại: ${command.label}`);
+  };
+
   const updateCell = (rowId, key, value) => {
     if (!canEdit || payrollReadOnly) return;
-    setRows((current) =>
-      current.map((row) => {
-        if (row.__clientId !== rowId) return row;
-        const next = structuredClone(row);
-        setDeep(next, key, value);
-        if (LUONG_DANG_AP_DUNG_KEY_SET.has(key)) syncLuongDangApDung(next);
-        if (key === "khauTru.tamUngDieuChinh") syncSalaryAdvanceTotal(next);
-        return applyPayrollFormulas(next, formulaSettings);
-      })
-    );
+    const currentRow = rows.find((row) => row.__clientId === rowId);
+    if (!currentRow || Object.is(getDeep(currentRow, key), value)) return;
+    const nextRow = structuredClone(currentRow);
+    setDeep(nextRow, key, value);
+    if (LUONG_DANG_AP_DUNG_KEY_SET.has(key)) syncLuongDangApDung(nextRow);
+    if (key === "khauTru.tamUngDieuChinh") syncSalaryAdvanceTotal(nextRow);
+    applyPayrollFormulas(nextRow, formulaSettings);
+    setRows((current) => current.map((row) => row.__clientId === rowId ? nextRow : row));
     setDirtyIds((current) => new Set(current).add(rowId));
+    const columnLabel = PAYROLL_COLUMNS.find((column) => column.key === key)?.label || key;
+    recordLocalCommand({
+      label: `sửa ${columnLabel} - ${currentRow.maNhanVien || currentRow.tenNhanVien || "dòng mới"}`,
+      before: [{ id: rowId, row: currentRow }],
+      after: [{ id: rowId, row: nextRow }],
+    }, `cell:${rowId}:${key}`);
   };
 
   const addRow = () => {
@@ -1991,6 +2100,11 @@ export default function PayrollManager() {
     );
     setRows((current) => [newRow, ...current]);
     setDirtyIds((current) => new Set(current).add(newRow.__clientId));
+    recordLocalCommand({
+      label: "thêm dòng lương",
+      before: [{ id: newRow.__clientId, row: null }],
+      after: [{ id: newRow.__clientId, row: newRow }],
+    });
     setPendingScrollId(newRow.__clientId);
   };
 
@@ -2012,27 +2126,33 @@ export default function PayrollManager() {
         body: JSON.stringify({ rows: targetRows.map((row) => ({ _id: row._id, ...buildPayload(row, formulaSettings) })) }),
       });
       const data = await res.json();
-      if (!res.ok || data?.success === false) {
+      if (!res.ok || (data?.success === false && !data?.saved)) {
         const detail = data?.errors?.[0]?.message ? `: ${data.errors[0].message}` : "";
         throw new Error((data?.message || "Không lưu được bảng lương") + detail);
       }
 
       const savedByKey = new Map((data.data || []).map((row) => [row._id, normalizePayrollRow(row, period, formulaSettings)]));
-      setRows((current) =>
-        current.map((row) => {
+      setRows((current) => {
+        const nextRows = current.map((row) => {
           const saved = Array.from(savedByKey.values()).find(
             (item) => item._id === row._id || (item.period === row.period && item.maNhanVien === row.maNhanVien)
           );
           return saved || row;
-        })
-      );
-      setDirtyIds((current) => {
-        const next = new Set(current);
-        targetRows.forEach((row) => next.delete(row.__clientId));
-        return next;
+        });
+        savedByKey.forEach((saved) => {
+          baselineRowsRef.current.set(saved.__clientId, payrollRowFingerprint(saved, formulaSettings));
+        });
+        setDirtyIds(calculateDirtyIds(nextRows));
+        return nextRows;
       });
-      setMessage(`Đã lưu ${data.saved || targetRows.length} dòng.`);
-      await fetchPayroll();
+      setUndoStack([]);
+      setRedoStack([]);
+      const firstError = data.errors?.[0]?.message;
+      setMessage(
+        data.errors?.length
+          ? `Đã lưu ${data.saved || 0}/${targetRows.length} dòng; ${data.errors.length} dòng lỗi${firstError ? `: ${firstError}` : ""}.`
+          : `Đã lưu ${data.saved || targetRows.length} dòng.`
+      );
     } catch (error) {
       console.error(error);
       setMessage(error.message || "Không lưu được bảng lương");
@@ -2052,6 +2172,11 @@ export default function PayrollManager() {
         const next = new Set(current);
         next.delete(row.__clientId);
         return next;
+      });
+      recordLocalCommand({
+        label: `xóa dòng mới ${row.maNhanVien || row.tenNhanVien || ""}`.trim(),
+        before: [{ id: row.__clientId, row }],
+        after: [{ id: row.__clientId, row: null }],
       });
       return;
     }
@@ -2515,17 +2640,23 @@ export default function PayrollManager() {
           ? bulkValue || "DRAFT"
           : bulkValue;
 
-    setRows((current) =>
-      current.map((row) => {
-        if (!targetIds.has(row.__clientId)) return row;
-        const next = structuredClone(row);
-        setDeep(next, bulkColumn.key, nextValue);
-        if (LUONG_DANG_AP_DUNG_KEY_SET.has(bulkColumn.key)) syncLuongDangApDung(next);
-        if (bulkColumn.key === "khauTru.tamUngDieuChinh") syncSalaryAdvanceTotal(next);
-        return applyPayrollFormulas(next, formulaSettings);
-      })
-    );
+    const beforeSnapshots = rows
+      .filter((row) => targetIds.has(row.__clientId))
+      .map((row) => ({ id: row.__clientId, row }));
+    const nextById = new Map(beforeSnapshots.map(({ id, row }) => {
+      const next = structuredClone(row);
+      setDeep(next, bulkColumn.key, nextValue);
+      if (LUONG_DANG_AP_DUNG_KEY_SET.has(bulkColumn.key)) syncLuongDangApDung(next);
+      if (bulkColumn.key === "khauTru.tamUngDieuChinh") syncSalaryAdvanceTotal(next);
+      return [id, applyPayrollFormulas(next, formulaSettings)];
+    }));
+    setRows((current) => current.map((row) => nextById.get(row.__clientId) || row));
     setDirtyIds((current) => new Set([...current, ...targetIds]));
+    recordLocalCommand({
+      label: `nhập hàng loạt ${bulkColumn.label} cho ${targetIds.size} dòng`,
+      before: beforeSnapshots,
+      after: Array.from(nextById, ([id, row]) => ({ id, row })),
+    });
     setShowBulkEdit(false);
     setMessage(`Da ap dung ${bulkColumn.label} cho ${targetIds.size} dong. Bam Luu tat ca de ghi vao DB.`);
   };
@@ -2618,6 +2749,75 @@ export default function PayrollManager() {
     }
   };
 
+  const loadRevisionHistory = async () => {
+    if (!period) return;
+    setRevisionLoading(true);
+    try {
+      const res = await fetch(`/api/payroll/period/${encodeURIComponent(period)}/revisions?limit=50`, { headers: authHeader });
+      const data = await res.json();
+      if (!res.ok || data?.success === false) throw new Error(data?.message || "Không tải được lịch sử bảng lương");
+      setRevisionRows(data.data?.items || []);
+      setRevisionTotal(data.data?.total || 0);
+    } catch (error) {
+      setMessage(error.message || "Không tải được lịch sử bảng lương");
+    } finally {
+      setRevisionLoading(false);
+    }
+  };
+
+  const openRevisionHistory = () => {
+    setSelectedRevision(null);
+    setRevisionPreview(null);
+    setShowHistory(true);
+    loadRevisionHistory();
+  };
+
+  const loadRevisionPreview = async (revision) => {
+    setSelectedRevision(revision);
+    setRevisionPreview(null);
+    setRevisionDetailLoading(true);
+    try {
+      const res = await fetch(`/api/payroll/revisions/${revision._id}/restore-preview`, {
+        method: "POST",
+        headers: authHeader,
+      });
+      const data = await res.json();
+      if (!res.ok || data?.success === false) throw new Error(data?.message || "Không tải được chi tiết phiên bản");
+      setRevisionPreview(data.data);
+    } catch (error) {
+      setMessage(error.message || "Không tải được chi tiết phiên bản");
+    } finally {
+      setRevisionDetailLoading(false);
+    }
+  };
+
+  const restoreSelectedRevision = async () => {
+    if (!selectedRevision || payrollReadOnly || revisionPreview?.conflictCount) return;
+    const dirtyWarning = dirtyIds.size ? ` ${dirtyIds.size} dòng chưa lưu trên màn hình sẽ bị hủy.` : "";
+    if (!window.confirm(`Khôi phục ${revisionPreview?.restorableCount || 0} dòng từ phiên bản này?${dirtyWarning}`)) return;
+    setRevisionRestoring(true);
+    try {
+      const res = await fetch(`/api/payroll/revisions/${selectedRevision._id}/restore`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeader },
+      });
+      const data = await res.json();
+      if (!res.ok || data?.success === false) {
+        if (data?.data) setRevisionPreview(data.data);
+        throw new Error(data?.message || "Khôi phục phiên bản thất bại");
+      }
+      setMessage(`Đã khôi phục ${data.restoredCount || 0} dòng. Hệ thống đã tạo một phiên bản lịch sử mới.`);
+      setSelectedRevision(null);
+      setRevisionPreview(null);
+      await fetchPayroll();
+      await loadRevisionHistory();
+    } catch (error) {
+      setMessage(error.message || "Khôi phục phiên bản thất bại");
+    } finally {
+      setRevisionRestoring(false);
+    }
+  };
+
   const togglePeriodLock = async () => {
     if (!canEdit || lockLoading || !period) return;
     const nextLocked = !periodLocked;
@@ -2651,6 +2851,37 @@ export default function PayrollManager() {
     }
   };
 
+  useEffect(() => {
+    const handleHistoryShortcut = (event) => {
+      if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
+      const tagName = String(event.target?.tagName || "").toLowerCase();
+      if (["input", "textarea", "select"].includes(tagName) || event.target?.isContentEditable) return;
+      const key = event.key.toLowerCase();
+      if (key === "z" && event.shiftKey) {
+        event.preventDefault();
+        redoLocalChange();
+      } else if (key === "z") {
+        event.preventDefault();
+        undoLocalChange();
+      } else if (key === "y") {
+        event.preventDefault();
+        redoLocalChange();
+      }
+    };
+    window.addEventListener("keydown", handleHistoryShortcut);
+    return () => window.removeEventListener("keydown", handleHistoryShortcut);
+  });
+
+  useEffect(() => {
+    if (!dirtyIds.size) return undefined;
+    const warnUnsavedChanges = (event) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warnUnsavedChanges);
+    return () => window.removeEventListener("beforeunload", warnUnsavedChanges);
+  }, [dirtyIds]);
+
   if (loading) {
     return (
       <div className="grid min-h-screen place-items-center bg-slate-50">
@@ -2663,6 +2894,10 @@ export default function PayrollManager() {
   }
 
   const dirtyRows = rows.filter((row) => dirtyIds.has(row.__clientId));
+  const reloadPayroll = () => {
+    if (dirtyRows.length && !window.confirm(`Tải lại sẽ bỏ ${dirtyRows.length} dòng chưa lưu. Bạn vẫn muốn tiếp tục?`)) return;
+    fetchPayroll();
+  };
   const changePayrollPeriod = (nextPeriod) => {
     if (!nextPeriod || nextPeriod === period) return;
     if (
@@ -2811,10 +3046,36 @@ export default function PayrollManager() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <button onClick={fetchPayroll} className="inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-50">
+            <button onClick={reloadPayroll} className="inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-50">
               <RefreshCw className="h-4 w-4" />
               Tải lại
             </button>
+            <button onClick={openRevisionHistory} className="inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-50">
+              <History className="h-4 w-4" />
+              Lịch sử
+            </button>
+            {canEdit && (
+              <>
+                <button
+                  onClick={undoLocalChange}
+                  disabled={payrollReadOnly || !undoStack.length}
+                  title={undoStack.length ? `Hoàn tác: ${undoStack[undoStack.length - 1].label}` : "Không có thao tác để hoàn tác"}
+                  className="inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-50 disabled:opacity-40"
+                >
+                  <Undo2 className="h-4 w-4" />
+                  Hoàn tác
+                </button>
+                <button
+                  onClick={redoLocalChange}
+                  disabled={payrollReadOnly || !redoStack.length}
+                  title={redoStack.length ? `Làm lại: ${redoStack[redoStack.length - 1].label}` : "Không có thao tác để làm lại"}
+                  className="inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-50 disabled:opacity-40"
+                >
+                  <Redo2 className="h-4 w-4" />
+                  Làm lại
+                </button>
+              </>
+            )}
             {canEdit && (
               <button
                 onClick={toggleLivePayrollVisibility}
@@ -3653,6 +3914,112 @@ export default function PayrollManager() {
               {attendanceSyncApplying ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
               Cập nhật {selectedAttendanceSyncFields.size} cột ({validAttendanceSyncRows.length} NV)
             </button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal open={showHistory} onClose={() => setShowHistory(false)} title={`Lịch sử bảng lương ${formatPayrollPeriod(period)}`}>
+        <div className="grid min-h-[520px] gap-4 lg:grid-cols-[340px_minmax(0,1fr)]">
+          <div className="overflow-hidden rounded-xl border">
+            <div className="flex items-center justify-between border-b bg-slate-50 px-3 py-2">
+              <div>
+                <div className="text-sm font-semibold text-slate-800">{revisionTotal} phiên bản</div>
+                <div className="text-[11px] text-slate-500">50 thay đổi gần nhất</div>
+              </div>
+              <button onClick={loadRevisionHistory} disabled={revisionLoading} className="rounded-lg border bg-white p-2 text-slate-600 hover:bg-slate-50 disabled:opacity-50" title="Tải lại lịch sử">
+                <RefreshCw className={`h-4 w-4 ${revisionLoading ? "animate-spin" : ""}`} />
+              </button>
+            </div>
+            <div className="max-h-[620px] overflow-auto">
+              {revisionLoading && !revisionRows.length ? (
+                <div className="flex items-center justify-center gap-2 p-8 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin" /> Đang tải...</div>
+              ) : revisionRows.length ? revisionRows.map((revision) => (
+                <button
+                  key={revision._id}
+                  onClick={() => loadRevisionPreview(revision)}
+                  className={`block w-full border-b px-3 py-3 text-left hover:bg-sky-50 ${selectedRevision?._id === revision._id ? "bg-sky-50 ring-1 ring-inset ring-sky-200" : "bg-white"}`}
+                >
+                  <div className="flex items-start gap-2">
+                    <span className="min-w-0 flex-1 text-sm font-semibold text-slate-800">{PAYROLL_REVISION_ACTION_LABELS[revision.action] || revision.action}</span>
+                    <span className="shrink-0 text-[10px] text-slate-400">{new Date(revision.createdAt).toLocaleString("vi-VN")}</span>
+                  </div>
+                  <div className="mt-1 truncate text-xs text-slate-500">{revision.actor?.fullName || "Hệ thống"} · {revision.affectedCount || 0} dòng</div>
+                  {revision.summary && <div className="mt-1 line-clamp-2 text-[11px] text-slate-400">{revision.summary}</div>}
+                </button>
+              )) : (
+                <div className="p-8 text-center text-sm text-slate-500">Chưa có lịch sử cho kỳ này.</div>
+              )}
+            </div>
+          </div>
+
+          <div className="min-w-0 rounded-xl border">
+            {!selectedRevision ? (
+              <div className="grid min-h-[420px] place-items-center p-8 text-center text-sm text-slate-500">
+                Chọn một phiên bản để xem các dòng và trường đã thay đổi.
+              </div>
+            ) : revisionDetailLoading ? (
+              <div className="flex min-h-[420px] items-center justify-center gap-2 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin" /> Đang đối chiếu dữ liệu hiện tại...</div>
+            ) : revisionPreview ? (
+              <div>
+                <div className="flex flex-wrap items-start justify-between gap-3 border-b bg-slate-50 p-4">
+                  <div>
+                    <div className="font-semibold text-slate-900">{PAYROLL_REVISION_ACTION_LABELS[selectedRevision.action] || selectedRevision.action}</div>
+                    <div className="mt-1 text-xs text-slate-500">
+                      Có thể khôi phục {revisionPreview.restorableCount || 0} dòng
+                      {revisionPreview.conflictCount ? ` · ${revisionPreview.conflictCount} dòng xung đột` : " · không có xung đột"}
+                    </div>
+                  </div>
+                  <button
+                    onClick={restoreSelectedRevision}
+                    disabled={!canEdit || payrollReadOnly || revisionRestoring || revisionPreview.conflictCount > 0 || !revisionPreview.restorableCount}
+                    className="inline-flex items-center gap-2 rounded-xl bg-amber-600 px-3 py-2 text-sm font-semibold text-white hover:bg-amber-700 disabled:opacity-40"
+                    title={periodLocked ? "Cần mở khóa kỳ lương trước khi khôi phục" : revisionPreview.conflictCount ? "Dữ liệu đã thay đổi sau phiên bản này" : "Khôi phục trạng thái trước thao tác này"}
+                  >
+                    {revisionRestoring ? <Loader2 className="h-4 w-4 animate-spin" /> : <History className="h-4 w-4" />}
+                    Khôi phục
+                  </button>
+                </div>
+                {revisionPreview.conflictCount > 0 && (
+                  <div className="m-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
+                    Không thể khôi phục vì một số dòng đã được sửa sau phiên bản này. Hãy chọn phiên bản mới hơn hoặc kiểm tra dữ liệu hiện tại.
+                  </div>
+                )}
+                <div className="max-h-[550px] overflow-auto p-3">
+                  <div className="space-y-3">
+                    {revisionPreview.rows.map((item) => (
+                      <div key={item.itemId} className={`overflow-hidden rounded-xl border ${item.conflict ? "border-rose-200" : "border-slate-200"}`}>
+                        <div className={`flex flex-wrap items-center gap-2 px-3 py-2 text-xs ${item.conflict ? "bg-rose-50" : "bg-slate-50"}`}>
+                          <span className="font-mono font-semibold text-slate-700">{item.employeeCode || "—"}</span>
+                          <span className="font-semibold text-slate-800">{item.employeeName || "—"}</span>
+                          <span className="ml-auto rounded-full bg-white px-2 py-0.5 font-semibold text-slate-500">
+                            {item.operation === "create" ? "Tạo lại" : item.operation === "delete" ? "Xóa dòng đã tạo" : "Hoàn nguyên"}
+                          </span>
+                          {item.conflict && <span className="rounded-full bg-rose-100 px-2 py-0.5 font-semibold text-rose-700">Xung đột</span>}
+                        </div>
+                        <table className="w-full text-left text-xs">
+                          <thead><tr className="border-t text-slate-400"><th className="px-3 py-1.5">Trường</th><th className="px-3 py-1.5">Trước thao tác</th><th className="px-3 py-1.5">Sau thao tác</th></tr></thead>
+                          <tbody>
+                            {(item.changedFields || []).slice(0, 30).map((field) => {
+                              const column = PAYROLL_COLUMNS.find((entry) => entry.key === field);
+                              return (
+                                <tr key={field} className="border-t align-top">
+                                  <td className="max-w-48 px-3 py-2"><div className="font-semibold text-slate-700">{column?.label || field}</div>{column && <div className="font-mono text-[10px] text-slate-400">{field}</div>}</td>
+                                  <td className="max-w-52 break-words px-3 py-2 text-emerald-700">{formatRevisionValue(getDeep(item.beforeSnapshot, field))}</td>
+                                  <td className="max-w-52 break-words px-3 py-2 text-rose-700">{formatRevisionValue(getDeep(item.afterSnapshot, field))}</td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                        {(item.changedFields || []).length > 30 && <div className="border-t px-3 py-2 text-[11px] text-slate-400">Còn {(item.changedFields || []).length - 30} trường thay đổi khác.</div>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="grid min-h-[420px] place-items-center p-8 text-sm text-slate-500">Không tải được chi tiết phiên bản.</div>
+            )}
           </div>
         </div>
       </Modal>

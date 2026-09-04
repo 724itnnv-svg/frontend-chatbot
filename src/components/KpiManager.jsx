@@ -28,6 +28,7 @@ import { useAuth } from "../context/AuthContext";
 import { getApiBaseUrl } from "../api/baseUrl";
 import { hasFullAccess } from "../utils/screenAccess";
 import { resolveScoreCap, standardPointScore } from "../utils/kpiScoring";
+import { createKpiExportWorkbook } from "../utils/kpiExcelExport";
 import { EvidenceThumbnail, KpiEvidenceViewer } from "./attendance/KpiEvidenceViewer";
 
 const nowPeriod = () => {
@@ -198,6 +199,7 @@ export default function KpiManager() {
   const [employees, setEmployees] = useState([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [message, setMessage] = useState(null);
   const [showAssign, setShowAssign] = useState(false);
   const [editingId, setEditingId] = useState(null);
@@ -953,6 +955,37 @@ export default function KpiManager() {
     );
   }
 
+  async function exportKpiExcel() {
+    if (!rows.length) {
+      setMessage({ ok: false, text: "Không có dữ liệu KPI theo bộ lọc để xuất Excel" });
+      return;
+    }
+    setExporting(true);
+    setMessage(null);
+    try {
+      const ExcelJS = (await import("exceljs")).default;
+      const { saveAs } = await import("file-saver");
+      const workbook = createKpiExportWorkbook(ExcelJS, rows, {
+        period,
+        creator: user?.fullName || user?.name || "NNV KPI",
+      });
+      const buffer = await workbook.xlsx.writeBuffer();
+      const statusSuffix = status === "ALL" ? "tat-ca-trang-thai" : status.toLowerCase();
+      saveAs(
+        new Blob([buffer], {
+          type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        }),
+        `Du-lieu-KPI-${period}-${statusSuffix}.xlsx`,
+      );
+      setMessage({ ok: true, text: `Đã xuất đầy đủ dữ liệu KPI của ${rows.length} nhân viên` });
+    } catch (error) {
+      console.error("Export KPI Excel error:", error);
+      setMessage({ ok: false, text: "Không thể xuất dữ liệu KPI ra Excel" });
+    } finally {
+      setExporting(false);
+    }
+  }
+
   async function readImportFile(file) {
     if (!file) return;
     if (!periodDueDate) {
@@ -1196,6 +1229,16 @@ export default function KpiManager() {
             >
               <RefreshCcw size={16} className={loading ? "animate-spin" : ""} />
               Tải lại
+            </button>
+            <button
+              type="button"
+              onClick={exportKpiExcel}
+              disabled={loading || exporting || rows.length === 0}
+              title="Xuất đầy đủ dữ liệu KPI theo bộ lọc hiện tại"
+              className="inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-bold text-emerald-700 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {exporting ? <Loader2 size={16} className="animate-spin" /> : <FileSpreadsheet size={16} />}
+              {exporting ? "Đang xuất..." : "Xuất Excel"}
             </button>
             {canEdit && (
               <button

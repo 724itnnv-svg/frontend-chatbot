@@ -68,6 +68,7 @@ const EMPLOYEE_TRANSITIONS = {
 const EMPTY_FORM = {
   title: "",
   description: "",
+  department: "",
   assigneeUserId: "",
   priority: "MEDIUM",
   startAt: "",
@@ -187,6 +188,7 @@ function parseImportWorkbook(arrayBuffer, users) {
     const title = String(excelValue(source, ["Tên công việc", "Công việc", "Title"]) || "").trim();
     const employeeIdentifier = String(excelValue(source, ["Nhân viên", "Mã nhân viên", "Email nhân viên", "Mã/Email/Tên nhân viên"]) || "").trim();
     const description = String(excelValue(source, ["Mô tả", "Nội dung", "Description"]) || "").trim();
+    const department = String(excelValue(source, ["Bộ phận", "Phòng ban", "Department"]) || "").trim();
     const dueRaw = excelValue(source, ["Deadline", "Hạn hoàn thành", "Hạn chót"]);
     const startRaw = excelValue(source, ["Ngày bắt đầu", "Bắt đầu", "Start"]);
     const priorityRaw = excelValue(source, ["Mức ưu tiên", "Ưu tiên", "Priority"]);
@@ -198,6 +200,7 @@ function parseImportWorkbook(arrayBuffer, users) {
     if (!title) errors.push("Thiếu tên công việc.");
     if (title.length > 300) errors.push("Tên công việc vượt quá 300 ký tự.");
     if (description.length > 10000) errors.push("Mô tả vượt quá 10.000 ký tự.");
+    if (department.length > 200) errors.push("Bộ phận vượt quá 200 ký tự.");
     if (assignee.error) errors.push(assignee.error);
     if (!dueAt) errors.push("Deadline không hợp lệ.");
     if (startRaw !== "" && startRaw != null && !startAt) errors.push("Ngày bắt đầu không hợp lệ.");
@@ -207,6 +210,7 @@ function parseImportWorkbook(arrayBuffer, users) {
       rowNumber,
       title,
       description,
+      department,
       employeeIdentifier,
       assigneeName: assignee.person?.fullName || "",
       assigneeUserId: assignee.person?._id || "",
@@ -220,10 +224,10 @@ function parseImportWorkbook(arrayBuffer, users) {
 
 function downloadImportTemplate() {
   const worksheet = XLSX.utils.aoa_to_sheet([
-    ["Tên công việc", "Mã/Email/Tên nhân viên", "Deadline", "Ngày bắt đầu", "Mức ưu tiên", "Mô tả"],
-    ["Tổng hợp báo cáo tuần", "NV001", "10/09/2026 17:30", "03/09/2026 08:00", "Cao", "Hoàn thiện và gửi báo cáo cho quản lý"],
+    ["Tên công việc", "Mã/Email/Tên nhân viên", "Bộ phận", "Deadline", "Ngày bắt đầu", "Mức ưu tiên", "Mô tả"],
+    ["Tổng hợp báo cáo tuần", "NV001", "Kinh doanh", "10/09/2026 17:30", "03/09/2026 08:00", "Cao", "Hoàn thiện và gửi báo cáo cho quản lý"],
   ]);
-  worksheet["!cols"] = [{ wch: 32 }, { wch: 28 }, { wch: 22 }, { wch: 22 }, { wch: 16 }, { wch: 48 }];
+  worksheet["!cols"] = [{ wch: 32 }, { wch: 28 }, { wch: 22 }, { wch: 22 }, { wch: 22 }, { wch: 16 }, { wch: 48 }];
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, worksheet, "Cong viec");
   XLSX.writeFile(workbook, "Mau_import_cong_viec_deadline.xlsx");
@@ -239,9 +243,9 @@ function ImportDialog({ rows, onClose, onConfirm, importing }) {
         <button type="button" onClick={onClose} className="rounded-xl p-2 text-slate-500 hover:bg-slate-100"><X size={20} /></button>
       </div>
       <div className="overflow-auto p-5">
-        <table className="min-w-[900px] w-full text-left text-sm">
-          <thead className="sticky top-0 bg-slate-50 text-xs uppercase text-slate-500"><tr><th className="px-3 py-2">Dòng</th><th className="px-3 py-2">Công việc</th><th className="px-3 py-2">Nhân viên</th><th className="px-3 py-2">Deadline</th><th className="px-3 py-2">Ưu tiên</th><th className="px-3 py-2">Kết quả kiểm tra</th></tr></thead>
-          <tbody className="divide-y divide-slate-100">{rows.slice(0, 200).map((row) => <tr key={row.rowNumber} className={row.errors.length ? "bg-rose-50/50" : ""}><td className="px-3 py-3 font-bold">{row.rowNumber}</td><td className="max-w-64 px-3 py-3"><div className="truncate font-semibold">{row.title || "-"}</div></td><td className="px-3 py-3">{row.assigneeName || row.employeeIdentifier || "-"}</td><td className="px-3 py-3">{formatDateTime(row.dueAt)}</td><td className="px-3 py-3">{PRIORITY_META[row.priority]?.label || "-"}</td><td className="max-w-sm px-3 py-3">{row.errors.length ? <span className="text-rose-700">{row.errors.join(" ")}</span> : <span className="font-semibold text-emerald-700">Hợp lệ</span>}</td></tr>)}</tbody>
+        <table className="min-w-[1000px] w-full text-left text-sm">
+          <thead className="sticky top-0 bg-slate-50 text-xs uppercase text-slate-500"><tr><th className="px-3 py-2">Dòng</th><th className="px-3 py-2">Công việc</th><th className="px-3 py-2">Nhân viên</th><th className="px-3 py-2">Bộ phận</th><th className="px-3 py-2">Deadline</th><th className="px-3 py-2">Ưu tiên</th><th className="px-3 py-2">Kết quả kiểm tra</th></tr></thead>
+          <tbody className="divide-y divide-slate-100">{rows.slice(0, 200).map((row) => <tr key={row.rowNumber} className={row.errors.length ? "bg-rose-50/50" : ""}><td className="px-3 py-3 font-bold">{row.rowNumber}</td><td className="max-w-64 px-3 py-3"><div className="truncate font-semibold">{row.title || "-"}</div></td><td className="px-3 py-3">{row.assigneeName || row.employeeIdentifier || "-"}</td><td className="px-3 py-3">{row.department || "-"}</td><td className="px-3 py-3">{formatDateTime(row.dueAt)}</td><td className="px-3 py-3">{PRIORITY_META[row.priority]?.label || "-"}</td><td className="max-w-sm px-3 py-3">{row.errors.length ? <span className="text-rose-700">{row.errors.join(" ")}</span> : <span className="font-semibold text-emerald-700">Hợp lệ</span>}</td></tr>)}</tbody>
         </table>
         {rows.length > 200 && <p className="mt-3 text-center text-xs text-slate-500">Chỉ hiển thị 200/{rows.length} dòng; toàn bộ dòng hợp lệ vẫn được import.</p>}
       </div>
@@ -334,6 +338,7 @@ function TaskDialog({ assignees, canAssign, canEdit, editing, onClose, onSave, s
   const [form, setForm] = useState(() => editing ? {
     title: editing.title || "",
     description: editing.description || "",
+    department: editing.department || "",
     assigneeUserId: String(editing.assigneeUserId?._id || editing.assigneeUserId || ""),
     priority: editing.priority || "MEDIUM",
     startAt: toLocalInput(editing.startAt),
@@ -344,6 +349,8 @@ function TaskDialog({ assignees, canAssign, canEdit, editing, onClose, onSave, s
   const selectableAssignees = editing && !assignees.some((person) => String(person._id) === form.assigneeUserId)
     ? [{ _id: form.assigneeUserId, code: editing.assigneeEmployeeCode, fullName: editing.assigneeName }, ...assignees]
     : assignees;
+  const departments = [...new Set(assignees.map((person) => String(person.department || "").trim()).filter(Boolean))]
+    .sort((left, right) => left.localeCompare(right, "vi"));
 
   return <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/45 p-4 backdrop-blur-sm">
     <form
@@ -370,6 +377,11 @@ function TaskDialog({ assignees, canAssign, canEdit, editing, onClose, onSave, s
           <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">Nhân viên thực hiện *</span>
           <UserSearchSelect users={selectableAssignees} value={form.assigneeUserId} onChange={(value) => update("assigneeUserId", value)} disabled={editing && !canAssign} />
         </div>
+        <label>
+          <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">Bộ phận</span>
+          <input disabled={editing && !canEdit} list="work-task-departments" maxLength={200} value={form.department} onChange={(e) => update("department", e.target.value)} className="w-full rounded-xl border border-slate-200 px-3 py-2.5 outline-none disabled:bg-slate-100 focus:border-cyan-400 focus:ring-4 focus:ring-cyan-100" />
+          <datalist id="work-task-departments">{departments.map((department) => <option key={department} value={department} />)}</datalist>
+        </label>
         <label>
           <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">Mức ưu tiên</span>
           <select disabled={editing && !canEdit} value={form.priority} onChange={(e) => update("priority", e.target.value)} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 outline-none disabled:bg-slate-100 focus:border-cyan-400">
@@ -475,8 +487,9 @@ export default function WorkTaskManager() {
 
   const [rows, setRows] = useState([]);
   const [assignees, setAssignees] = useState([]);
+  const [departments, setDepartments] = useState([]);
   const [summary, setSummary] = useState({});
-  const [filters, setFilters] = useState({ search: "", status: "ALL", priority: "ALL", assigneeUserId: "", deadlineFrom: "", deadlineTo: "", overdue: false });
+  const [filters, setFilters] = useState({ search: "", status: "ALL", priority: "ALL", department: "", assigneeUserId: "", deadlineFrom: "", deadlineTo: "", overdue: false });
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState(null);
   const [editor, setEditor] = useState(null);
@@ -492,16 +505,19 @@ export default function WorkTaskManager() {
       if (filters.search.trim()) params.set("search", filters.search.trim());
       if (filters.status !== "ALL") params.set("status", filters.status);
       if (filters.priority !== "ALL") params.set("priority", filters.priority);
+      if (filters.department) params.set("department", filters.department);
       if (filters.assigneeUserId) params.set("assigneeUserId", filters.assigneeUserId);
       if (filters.deadlineFrom) params.set("deadlineFrom", deadlineBoundaryIso(filters.deadlineFrom));
       if (filters.deadlineTo) params.set("deadlineTo", deadlineBoundaryIso(filters.deadlineTo, true));
       if (filters.overdue) params.set("overdue", "1");
-      const [listResponse, summaryResponse] = await Promise.all([
+      const [listResponse, summaryResponse, departmentResponse] = await Promise.all([
         api.get(`/work-tasks?${params}`),
         api.get("/work-tasks/summary"),
+        api.get("/work-tasks/departments"),
       ]);
       setRows(listResponse.data?.data || []);
       setSummary(summaryResponse.data?.data || {});
+      setDepartments(departmentResponse.data?.data || []);
     } catch (error) {
       setMessage({ ok: false, text: errorMessage(error, "Không thể tải danh sách công việc.") });
     } finally {
@@ -611,10 +627,11 @@ export default function WorkTaskManager() {
     setImporting(true);
     try {
       const response = await api.post("/work-tasks/bulk-import", {
-        rows: validRows.map(({ rowNumber, title, description, assigneeUserId, startAt, dueAt, priority }) => ({
+        rows: validRows.map(({ rowNumber, title, description, department, assigneeUserId, startAt, dueAt, priority }) => ({
           rowNumber,
           title,
           description,
+          department,
           assigneeUserId,
           startAt: startAt || null,
           dueAt,
@@ -658,10 +675,11 @@ export default function WorkTaskManager() {
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">{cards.map(({ label, value, icon, className }) => <div key={label} className="flex items-center gap-3 rounded-2xl border border-slate-100 bg-white p-4 shadow-sm"><span className={`rounded-xl p-2.5 ${className}`}>{icon}</span><div><div className="text-2xl font-black text-slate-900">{value}</div><div className="text-xs font-bold uppercase tracking-wide text-slate-500">{label}</div></div></div>)}</div>
 
       <div className="rounded-3xl border border-slate-100 bg-white p-4 shadow-sm">
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
-          <label className="relative xl:col-span-2"><Search size={17} className="absolute left-3 top-3 text-slate-400" /><input value={filters.search} onChange={(e) => setFilters((v) => ({ ...v, search: e.target.value }))} placeholder="Tìm tên việc, mô tả, nhân viên..." className="w-full rounded-xl border border-slate-200 py-2.5 pl-10 pr-3 outline-none focus:border-cyan-400" /></label>
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-7">
+          <label className="relative xl:col-span-2"><Search size={17} className="absolute left-3 top-3 text-slate-400" /><input value={filters.search} onChange={(e) => setFilters((v) => ({ ...v, search: e.target.value }))} placeholder="Tìm tên việc, mô tả, bộ phận, nhân viên..." className="w-full rounded-xl border border-slate-200 py-2.5 pl-10 pr-3 outline-none focus:border-cyan-400" /></label>
           <select value={filters.status} onChange={(e) => setFilters((v) => ({ ...v, status: e.target.value }))} className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">{STATUS_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>
           <select value={filters.priority} onChange={(e) => setFilters((v) => ({ ...v, priority: e.target.value }))} className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">{PRIORITY_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>
+          <select value={filters.department} onChange={(e) => setFilters((v) => ({ ...v, department: e.target.value }))} className="rounded-xl border border-slate-200 bg-white px-3 py-2.5"><option value="">Tất cả bộ phận</option>{departments.map((department) => <option key={department} value={department}>{department}</option>)}</select>
           {canViewAll ? <UserSearchSelect users={assignees} value={filters.assigneeUserId} onChange={(value) => setFilters((v) => ({ ...v, assigneeUserId: value }))} allowEmpty emptyLabel="Tất cả nhân viên" placeholder="Tìm nhân viên để lọc..." /> : <label className="flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-600"><input type="checkbox" checked={filters.overdue} onChange={(e) => setFilters((v) => ({ ...v, overdue: e.target.checked }))} /> Chỉ việc quá hạn</label>}
         </div>
         <div className="mt-3 flex flex-wrap items-end gap-3">
@@ -674,23 +692,24 @@ export default function WorkTaskManager() {
 
       <div className="overflow-hidden rounded-3xl border border-slate-100 bg-white shadow-sm">
         <div className="overflow-x-auto">
-          <table className="min-w-[1050px] w-full text-left text-sm">
-            <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500"><tr><th className="px-5 py-3">Công việc</th><th className="px-4 py-3">Người thực hiện</th><th className="px-4 py-3">Trạng thái</th><th className="px-4 py-3">Tiến độ</th><th className="px-4 py-3">Deadline</th><th className="px-4 py-3 text-right">Thao tác</th></tr></thead>
+          <table className="min-w-[1180px] w-full text-left text-sm">
+            <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500"><tr><th className="px-5 py-3">Công việc</th><th className="px-4 py-3">Bộ phận</th><th className="px-4 py-3">Người thực hiện</th><th className="px-4 py-3">Trạng thái</th><th className="px-4 py-3">Tiến độ</th><th className="px-4 py-3">Deadline</th><th className="px-4 py-3 text-right">Thao tác</th></tr></thead>
             <tbody className="divide-y divide-slate-100">
-              {loading ? <tr><td colSpan="6" className="py-16 text-center text-slate-500"><Loader2 className="mx-auto mb-2 animate-spin text-cyan-600" />Đang tải công việc...</td></tr> : rows.length ? rows.map((task) => {
+              {loading ? <tr><td colSpan="7" className="py-16 text-center text-slate-500"><Loader2 className="mx-auto mb-2 animate-spin text-cyan-600" />Đang tải công việc...</td></tr> : rows.length ? rows.map((task) => {
                 const status = STATUS_META[task.status] || STATUS_META.TODO;
                 const priority = PRIORITY_META[task.priority] || PRIORITY_META.MEDIUM;
                 const own = String(task.assigneeUserId?._id || task.assigneeUserId || "") === currentUserId;
                 const mayUpdate = canUpdateStatus && (manager || own);
                 return <tr key={task._id} className={`${task.isOverdue ? "bg-rose-50/40" : "hover:bg-slate-50/70"} ${highlightedId === task._id ? "ring-2 ring-inset ring-cyan-400" : ""}`}>
                   <td className="max-w-md px-5 py-4"><div className="font-bold text-slate-900">{task.title}</div>{task.description && <div className="mt-1 line-clamp-2 text-xs text-slate-500">{task.description}</div>}<div className={`mt-2 text-xs font-bold ${priority.className}`}>Ưu tiên: {priority.label}</div>{task.evidences?.length > 0 && <div className="mt-2 flex flex-wrap gap-1.5">{task.evidences.slice(0, 3).map((evidence) => <a key={evidence._id} href={evidenceFileUrl(task, evidence)} target="_blank" rel="noreferrer" title={evidence.originalName || evidence.filename} className="inline-flex max-w-36 items-center gap-1 rounded-lg border border-cyan-100 bg-cyan-50 px-2 py-1 text-xs font-semibold text-cyan-700 hover:bg-cyan-100"><Paperclip size={12} className="shrink-0" /><span className="truncate">{evidence.originalName || evidence.filename}</span></a>)}{task.evidences.length > 3 && <span className="rounded-lg bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-600">+{task.evidences.length - 3} tệp</span>}</div>}</td>
+                  <td className="max-w-44 px-4 py-4 font-semibold text-slate-700">{task.department || "-"}</td>
                   <td className="px-4 py-4"><div className="flex items-center gap-2"><span className="rounded-full bg-cyan-50 p-2 text-cyan-700"><UserRound size={15} /></span><div><div className="font-semibold text-slate-800">{task.assigneeName}</div><div className="text-xs text-slate-500">{task.assigneeEmployeeCode || task.companyCode || "-"}</div></div></div></td>
                   <td className="px-4 py-4"><Badge className={status.className}>{status.label}</Badge>{task.employeeNote && <div title={task.employeeNote} className="mt-2 max-w-40 truncate text-xs text-slate-500">{task.employeeNote}</div>}</td>
                   <td className="px-4 py-4"><div className="mb-1 flex justify-between text-xs font-bold text-slate-600"><span>{task.progressPercent || 0}%</span></div><div className="h-2 w-28 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-cyan-500" style={{ width: `${task.progressPercent || 0}%` }} /></div></td>
                   <td className="px-4 py-4"><div className={`font-semibold ${task.isOverdue ? "text-rose-700" : "text-slate-700"}`}>{formatDateTime(task.dueAt)}</div>{task.isOverdue && <div className="mt-1 text-xs font-bold text-rose-600">Đã quá hạn</div>}</td>
                   <td className="px-4 py-4"><div className="flex justify-end gap-1">{mayUpdate && <button title="Cập nhật tiến độ" onClick={() => setStatusTask(task)} className="rounded-lg p-2 text-cyan-700 hover:bg-cyan-50"><CheckCircle2 size={18} /></button>}{(canEdit || canAssign) && <button title={canEdit ? "Chỉnh sửa" : "Chuyển người thực hiện"} onClick={() => setEditor(task)} className="rounded-lg p-2 text-amber-700 hover:bg-amber-50"><Pencil size={18} /></button>}{canDelete && <button title="Xóa" onClick={() => void deleteTask(task)} className="rounded-lg p-2 text-rose-700 hover:bg-rose-50"><Trash2 size={18} /></button>}</div></td>
                 </tr>;
-              }) : <tr><td colSpan="6" className="py-16 text-center text-slate-500"><CalendarClock size={34} className="mx-auto mb-3 text-slate-300" />Chưa có công việc phù hợp bộ lọc.</td></tr>}
+              }) : <tr><td colSpan="7" className="py-16 text-center text-slate-500"><CalendarClock size={34} className="mx-auto mb-3 text-slate-300" />Chưa có công việc phù hợp bộ lọc.</td></tr>}
             </tbody>
           </table>
         </div>
