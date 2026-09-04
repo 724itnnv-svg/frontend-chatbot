@@ -1112,7 +1112,6 @@ export async function getAllLocationsByKeyword(
   retailId,
   input,
   retailer = "kingfarm",
-  accessToken,
   accessPrivateToken,
   groupMerchant = "retail",
 ) {
@@ -1148,7 +1147,6 @@ export async function getKvLocationByAddress({
   district = "",
   ward = "",
   retailer = "kingfarm",
-  accessToken,
   accessPrivateToken,
 }) {
   try {
