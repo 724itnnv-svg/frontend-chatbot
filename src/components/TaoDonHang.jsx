@@ -902,6 +902,17 @@ function getKiotUserDisplayName(kiotUser = {}) {
   );
 }
 
+function buildEmployeeInChargeFields(kiotUser = null) {
+  const userId = kiotUser?.Id ?? kiotUser?.UserId ?? null;
+  const userName = normalizeDisplayText(getKiotUserDisplayName(kiotUser));
+
+  return {
+    EmployeeInChargeIds: userId != null ? [userId] : [],
+    EmployeeInChargeNames: userName ? [userName] : [],
+    EmployeeInCharges: userName ? [userName] : [],
+  };
+}
+
 function buildNewCustomerAssigneeFields(kiotUser = null) {
   const userId = kiotUser?.Id ?? kiotUser?.UserId ?? null;
   const userName = normalizeDisplayText(getKiotUserDisplayName(kiotUser));
@@ -909,10 +920,33 @@ function buildNewCustomerAssigneeFields(kiotUser = null) {
   return {
     ...(userId != null && { CreatedBy: userId }),
     ...(userName && { CreatedName: userName }),
-    EmployeeInChargeIds: userId != null ? [userId] : [],
-    EmployeeInChargeNames: userName ? [userName] : [],
-    EmployeeInCharges: userName ? [userName] : [],
+    ...buildEmployeeInChargeFields(kiotUser),
   };
+}
+
+function getCustomerEmployeeInChargeNames(customer = null) {
+  const values = [
+    ...(Array.isArray(customer?.EmployeeInChargeNames)
+      ? customer.EmployeeInChargeNames
+      : []),
+    ...(Array.isArray(customer?.EmployeeInCharges)
+      ? customer.EmployeeInCharges
+      : []),
+  ];
+
+  return Array.from(
+    new Set(
+      values
+        .map((item) =>
+          normalizeDisplayText(
+            typeof item === "string"
+              ? item
+              : item?.Name || item?.FullName || item?.GivenName,
+          ),
+        )
+        .filter(Boolean),
+    ),
+  );
 }
 
 function findMatchingKiotUser(kiotUsers = [], userName = "") {
@@ -4860,6 +4894,8 @@ export default function TaoDonHang() {
   );
   const [customerType, setCustomerType] = useState("khach_le");
   const [isAbcAgency, setIsAbcAgency] = useState(false);
+  const [addSaleToEmployeeInCharge, setAddSaleToEmployeeInCharge] =
+    useState(false);
   const [
     updateCustomerWhenProvinceChanges,
     setUpdateCustomerWhenProvinceChanges,
@@ -5110,6 +5146,31 @@ export default function TaoDonHang() {
       ),
     };
   }, [customerType, isAbcRetailer, orderPreparation.customerRecord]);
+  const employeeInChargePreview = useMemo(() => {
+    const currentNames = getCustomerEmployeeInChargeNames(
+      orderPreparation.customerRecord,
+    );
+    const selectedEmployeeName = normalizeDisplayText(
+      getKiotUserDisplayName(matchedKiotUser),
+    );
+    const shouldIncludeSelectedEmployee =
+      !orderPreparation.customerRecord || addSaleToEmployeeInCharge;
+
+    return Array.from(
+      new Set(
+        [
+          ...currentNames,
+          ...(shouldIncludeSelectedEmployee && selectedEmployeeName
+            ? [selectedEmployeeName]
+            : []),
+        ].filter(Boolean),
+      ),
+    );
+  }, [
+    addSaleToEmployeeInCharge,
+    matchedKiotUser,
+    orderPreparation.customerRecord,
+  ]);
   const existingCustomerType = orderPreparation.customerRecord
     ? getCustomerTypeKey(orderPreparation.customerRecord)
     : "";
@@ -6243,6 +6304,7 @@ export default function TaoDonHang() {
     setGhnRequiredNote(DEFAULT_GHN_REQUIRED_NOTE);
     setCustomerType("dai_ly");
     setIsAbcAgency(false);
+    setAddSaleToEmployeeInCharge(false);
     setUpdateCustomerWhenProvinceChanges(false);
     setAgencyTaxCode("");
     setAgencyDescription("");
@@ -6672,6 +6734,60 @@ export default function TaoDonHang() {
             "Tìm thấy khách hàng trên KiotViet.",
           );
         }
+
+        if (addSaleToEmployeeInCharge) {
+          const employeeName = normalizeDisplayText(
+            getKiotUserDisplayName(matchedKiotUser),
+          );
+          const lookupCode = normalizeDisplayText(
+            customerRecord?.Code ||
+              customerRecord?.CompareCode ||
+              customerRecord?.CustomerCode,
+          );
+          if (!lookupCode) {
+            throw new Error(
+              "Không tìm thấy mã khách hàng để cập nhật nhân viên phụ trách.",
+            );
+          }
+
+          updateCreateOrderProgress(
+            "customer",
+            "loading",
+            `Đang thêm ${employeeName || "sale đã chọn"} vào nhân viên phụ trách...`,
+          );
+          await updateCustomerAddress(
+            selectedRetailerId,
+            accessPrivateToken,
+            accessToken,
+            {
+              ...customerRecord,
+              LookupCode: lookupCode,
+              ...buildEmployeeInChargeFields(matchedKiotUser),
+            },
+            customerRecord?.CustomerType ||
+              (effectiveCustomerType === "dai_ly" ? "Công ty" : "Cá nhân"),
+            customerRecord?.Organization || "",
+          );
+          const refreshedCustomerResponse = await getCustomerByPhoneNumber(
+            selectedRetailerId,
+            accessPrivateToken,
+            phoneNumber,
+          );
+          customerRecord = extractCustomerRecord(
+            refreshedCustomerResponse,
+            customerRecord,
+          );
+          setOrderPreparation((current) =>
+            current.key === orderPreparationKey
+              ? { ...current, customerRecord }
+              : current,
+          );
+          updateCreateOrderProgress(
+            "customer",
+            "success",
+            `Đã thêm ${employeeName || "sale đã chọn"} vào nhân viên phụ trách và giữ nguyên danh sách cũ.`,
+          );
+        }
       } else {
         updateCreateOrderProgress(
           "customer",
@@ -7062,7 +7178,12 @@ export default function TaoDonHang() {
           </div>
         </div>
 
-        <div className="grid flex-1 gap-4 lg:grid-cols-[minmax(0,1fr)_420px]">
+        <fieldset
+          disabled={isCreatingOrder}
+          aria-busy={isCreatingOrder}
+          className="contents"
+        >
+          <div className="grid flex-1 gap-4 lg:grid-cols-[minmax(0,1fr)_420px]">
           <div className="rounded-3xl border border-slate-200 bg-white shadow-sm">
             <div className="border-b border-slate-100 px-5 py-4">
               <h2 className="text-base font-bold text-slate-900 md:text-xl">
@@ -7171,6 +7292,31 @@ export default function TaoDonHang() {
                   </span>
                 </label>
               </div>
+
+              <label className="flex cursor-pointer items-start justify-between gap-4 rounded-2xl border border-cyan-200 bg-cyan-50/70 px-4 py-3">
+                <div>
+                  <div className="text-sm font-bold text-cyan-900">
+                    Thêm sale vào nhân viên phụ trách
+                  </div>
+                  <div className="mt-1 text-xs leading-5 text-cyan-700">
+                    {matchedKiotUser
+                      ? `Bật để thêm ${getKiotUserDisplayName(matchedKiotUser)} vào danh sách phụ trách của khách hàng hiện có.`
+                      : "Chọn nhân viên tạo đơn trước khi bật tùy chọn này."}
+                    {!orderPreparation.customerRecord
+                      ? " Khách hàng mới vẫn tự động gán người tạo làm người phụ trách."
+                      : " Danh sách nhân viên cũ vẫn được giữ nguyên."}
+                  </div>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={addSaleToEmployeeInCharge}
+                  disabled={!matchedKiotUser}
+                  onChange={(event) =>
+                    setAddSaleToEmployeeInCharge(event.target.checked)
+                  }
+                  className="mt-1 h-5 w-5 shrink-0 cursor-pointer rounded border-cyan-300 text-cyan-600 focus:ring-cyan-300 disabled:cursor-not-allowed disabled:opacity-50"
+                />
+              </label>
 
               {isAbcRetailer ? (
                 <label className="flex cursor-pointer items-start justify-between gap-4 rounded-2xl border border-amber-200 bg-amber-50/70 px-4 py-3">
@@ -7653,6 +7799,17 @@ export default function TaoDonHang() {
                       </div>
                       <div className="sm:col-span-2">
                         <FieldCard
+                          label={
+                            addSaleToEmployeeInCharge
+                              ? "Nhân viên phụ trách sau khi tạo đơn"
+                              : "Nhân viên phụ trách hiện tại"
+                          }
+                          value={employeeInChargePreview.join(", ")}
+                          placeholder="Chưa có nhân viên phụ trách"
+                        />
+                      </div>
+                      <div className="sm:col-span-2">
+                        <FieldCard
                           label="Địa chỉ hiện tại"
                           value={
                             existingCustomerPreview.address || "Chưa có địa chỉ"
@@ -7697,6 +7854,13 @@ export default function TaoDonHang() {
                         label="Nhóm khách hàng dự kiến"
                         value={estimatedCustomerGroupName}
                       />
+                      <div className="sm:col-span-2">
+                        <FieldCard
+                          label="Nhân viên phụ trách dự kiến"
+                          value={employeeInChargePreview.join(", ")}
+                          placeholder="Chưa chọn nhân viên phụ trách"
+                        />
+                      </div>
                       <div className="sm:col-span-2">
                         <FieldCard
                           label="Địa chỉ dự kiến"
@@ -8199,7 +8363,8 @@ export default function TaoDonHang() {
 
             </div>
           </div>
-        </div>
+          </div>
+        </fieldset>
       </div>
     </div>
   );
