@@ -692,10 +692,10 @@ export default function WorkTaskManager() {
 
       <div className="overflow-hidden rounded-3xl border border-slate-100 bg-white shadow-sm">
         <div className="overflow-x-auto">
-          <table className="min-w-[1180px] w-full text-left text-sm">
-            <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500"><tr><th className="px-5 py-3">Công việc</th><th className="px-4 py-3">Bộ phận</th><th className="px-4 py-3">Người thực hiện</th><th className="px-4 py-3">Trạng thái</th><th className="px-4 py-3">Tiến độ</th><th className="px-4 py-3">Deadline</th><th className="px-4 py-3 text-right">Thao tác</th></tr></thead>
+          <table className="min-w-[1340px] w-full text-left text-sm">
+            <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500"><tr><th className="px-5 py-3">Công việc</th><th className="px-4 py-3">Bộ phận</th><th className="px-4 py-3">Người thực hiện</th><th className="px-4 py-3">Trạng thái</th><th className="px-4 py-3">Tiến độ</th><th className="px-4 py-3">Deadline</th><th className="px-4 py-3">Hoàn thành lúc</th><th className="px-4 py-3 text-right">Thao tác</th></tr></thead>
             <tbody className="divide-y divide-slate-100">
-              {loading ? <tr><td colSpan="7" className="py-16 text-center text-slate-500"><Loader2 className="mx-auto mb-2 animate-spin text-cyan-600" />Đang tải công việc...</td></tr> : rows.length ? rows.map((task) => {
+              {loading ? <tr><td colSpan="8" className="py-16 text-center text-slate-500"><Loader2 className="mx-auto mb-2 animate-spin text-cyan-600" />Đang tải công việc...</td></tr> : rows.length ? rows.map((task) => {
                 const status = STATUS_META[task.status] || STATUS_META.TODO;
                 const priority = PRIORITY_META[task.priority] || PRIORITY_META.MEDIUM;
                 const own = String(task.assigneeUserId?._id || task.assigneeUserId || "") === currentUserId;
@@ -707,9 +707,10 @@ export default function WorkTaskManager() {
                   <td className="px-4 py-4"><Badge className={status.className}>{status.label}</Badge>{task.employeeNote && <div title={task.employeeNote} className="mt-2 max-w-40 truncate text-xs text-slate-500">{task.employeeNote}</div>}</td>
                   <td className="px-4 py-4"><div className="mb-1 flex justify-between text-xs font-bold text-slate-600"><span>{task.progressPercent || 0}%</span></div><div className="h-2 w-28 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-cyan-500" style={{ width: `${task.progressPercent || 0}%` }} /></div></td>
                   <td className="px-4 py-4"><div className={`font-semibold ${task.isOverdue ? "text-rose-700" : "text-slate-700"}`}>{formatDateTime(task.dueAt)}</div>{task.isOverdue && <div className="mt-1 text-xs font-bold text-rose-600">Đã quá hạn</div>}</td>
+                  <td className="px-4 py-4"><div className={task.completedAt ? "font-semibold text-emerald-700" : "text-slate-400"}>{formatDateTime(task.completedAt)}</div></td>
                   <td className="px-4 py-4"><div className="flex justify-end gap-1">{mayUpdate && <button title="Cập nhật tiến độ" onClick={() => setStatusTask(task)} className="rounded-lg p-2 text-cyan-700 hover:bg-cyan-50"><CheckCircle2 size={18} /></button>}{(canEdit || canAssign) && <button title={canEdit ? "Chỉnh sửa" : "Chuyển người thực hiện"} onClick={() => setEditor(task)} className="rounded-lg p-2 text-amber-700 hover:bg-amber-50"><Pencil size={18} /></button>}{canDelete && <button title="Xóa" onClick={() => void deleteTask(task)} className="rounded-lg p-2 text-rose-700 hover:bg-rose-50"><Trash2 size={18} /></button>}</div></td>
                 </tr>;
-              }) : <tr><td colSpan="7" className="py-16 text-center text-slate-500"><CalendarClock size={34} className="mx-auto mb-3 text-slate-300" />Chưa có công việc phù hợp bộ lọc.</td></tr>}
+              }) : <tr><td colSpan="8" className="py-16 text-center text-slate-500"><CalendarClock size={34} className="mx-auto mb-3 text-slate-300" />Chưa có công việc phù hợp bộ lọc.</td></tr>}
             </tbody>
           </table>
         </div>

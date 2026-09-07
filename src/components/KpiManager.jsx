@@ -30,6 +30,7 @@ import { hasFullAccess } from "../utils/screenAccess";
 import { resolveScoreCap, standardPointScore } from "../utils/kpiScoring";
 import { createKpiExportWorkbook } from "../utils/kpiExcelExport";
 import { EvidenceThumbnail, KpiEvidenceViewer } from "./attendance/KpiEvidenceViewer";
+import KpiRecloneDialog from "./attendance/KpiRecloneDialog";
 
 const nowPeriod = () => {
   const now = new Date();
@@ -202,6 +203,7 @@ export default function KpiManager() {
   const [exporting, setExporting] = useState(false);
   const [message, setMessage] = useState(null);
   const [showAssign, setShowAssign] = useState(false);
+  const [reclonePeriod, setReclonePeriod] = useState(null);
   const [editingId, setEditingId] = useState(null);
   const [reviewing, setReviewing] = useState(null);
   const [reopening, setReopening] = useState(null);
@@ -1113,6 +1115,7 @@ export default function KpiManager() {
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
+            {canEdit && <button type="button" disabled={busy || !period} onClick={() => setReclonePeriod({ period, dueDate: periodDueDate })} className="inline-flex items-center gap-2 rounded-xl border border-violet-200 bg-white px-3 py-2.5 text-sm font-bold text-violet-700 disabled:opacity-50"><RefreshCcw size={17} /> Nhân bản lại KPI</button>}
             {canCreate && (
               <>
                 <button
@@ -2404,6 +2407,7 @@ export default function KpiManager() {
           </div>
         </div>
       )}
+      {reclonePeriod && <KpiRecloneDialog api={api} period={reclonePeriod.period} dueDate={reclonePeriod.dueDate} onClose={() => setReclonePeriod(null)} onApplied={(text) => { setMessage({ ok: true, text }); load(); }} />}
       <KpiEvidenceViewer evidence={previewEvidence} onClose={() => setPreviewEvidence(null)} />
     </div>
   );
