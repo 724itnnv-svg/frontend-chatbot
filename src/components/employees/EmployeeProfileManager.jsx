@@ -1558,8 +1558,8 @@ export default function EmployeeProfileManager({ users, onClose, standalone = fa
     try {
       setExportingProfiles(true);
       const result = await request("/api/employee-profiles/export-data");
-      const items = result.data?.items || [];
-      if (!items.length) return notify("Chưa có hồ sơ nhân viên để xuất", "warning");
+      const items = (result.data?.items || []).filter((profile) => ACTIVE_EMPLOYMENT_STATUSES.includes(profile.employment?.employmentStatus));
+      if (!items.length) return notify("Không có hồ sơ nhân viên chính thức hoặc thử việc để xuất", "warning");
       const rows = items.map(profileToExcelRow);
       const sheet = XLSX.utils.json_to_sheet(rows, { header: HEADERS });
       sheet["!cols"] = HEADERS.map((header) => ({ wch: Math.min(42, Math.max(16, header.length + 3)) }));

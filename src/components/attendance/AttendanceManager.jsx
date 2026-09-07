@@ -69,8 +69,9 @@ const LEAVE_TYPE_LABELS = {
   remote_work: "Làm việc tại nhà",
   business_trip: "Đi công vụ",
   forgotten_punch: "Quên chấm công",
+  overtime: "Báo tăng ca",
 };
-const TIMED_REQUEST_TYPES = ["emergency", "remote_work", "business_trip", "forgotten_punch"];
+const TIMED_REQUEST_TYPES = ["emergency", "remote_work", "business_trip", "forgotten_punch", "overtime"];
 const LEAVE_SESSION_LABELS = { full_day: "Cả ngày", morning: "Buổi sáng", afternoon: "Buổi chiều" };
 const AI_REVIEW_FLAG_LABELS = {
   unreadable: "Ảnh khó đọc",
@@ -1074,7 +1075,7 @@ export default function AttendanceManager() {
       setLeaveRequests(rows);
       setSelectedLeaveIds((current) => {
         const visiblePendingIds = new Set(rows
-          .filter((request) => request.status === "pending" && !(request.leaveType === "business_trip" && request.needsEvidence))
+          .filter((request) => request.status === "pending" && request.leaveType !== "overtime" && !(request.leaveType === "business_trip" && request.needsEvidence))
           .map((request) => String(request._id)));
         return new Set([...current].filter((id) => visiblePendingIds.has(String(id))));
       });
@@ -1444,13 +1445,37 @@ export default function AttendanceManager() {
     }[action];
     if (!actionMeta) return;
     const verb = actionMeta.verb;
-    const requestLabel = request.leaveType === "forgotten_punch" ? "yêu cầu bổ sung chấm công" : "đơn nghỉ";
+    const requestLabel = request.leaveType === "overtime" ? "báo tăng ca" : request.leaveType === "forgotten_punch" ? "yêu cầu bổ sung chấm công" : "đơn nghỉ";
     const confirmationMessage = approveWithoutEvidence
       ? `${request.userName || "Nhân viên này"} chưa có ảnh minh chứng cho đơn off đột xuất. Bạn có đồng ý duyệt đơn không?`
       : `Xác nhận ${verb} ${requestLabel} của ${request.userName || "nhân viên này"}?`;
     if (!window.confirm(confirmationMessage)) return;
+    const overtimeReview = {};
+    if (request.leaveType === "overtime" && action === "approve") {
+      const start = window.prompt("Giờ bắt đầu được duyệt (HH:mm):", request.startTime);
+      if (start === null) return;
+      const end = window.prompt("Giờ kết thúc được duyệt (HH:mm), trong khung giờ đề nghị:", request.endTime);
+      if (end === null) return;
+      if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(start) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(end) || start < request.startTime || end > request.endTime || end <= start) {
+        return showFlash(false, "Khung giờ duyệt phải hợp lệ và nằm trong khung giờ đề nghị.");
+      }
+      overtimeReview.approvedStartTime = start;
+      overtimeReview.approvedEndTime = end;
+      overtimeReview.manualOvertimeOverlapMinutes = 0;
+      const manualMinutes = Math.max(0, Number(request.attendanceContext?.overtimeMinutes || 0) - Number(request.attendanceContext?.creditedOvertimeMinutes || 0));
+      if (manualMinutes > 0) {
+        const overlap = window.prompt(`Ngày này đã có ${manualMinutes} phút tăng ca nhập tay. Bao nhiêu phút của đơn này đã nằm trong số đó? Nhập 0 nếu không trùng.`, "0");
+        if (overlap === null) return;
+        if (!/^\d+$/.test(overlap.trim())) return showFlash(false, "Số phút trùng phải là số nguyên không âm.");
+        overtimeReview.manualOvertimeOverlapMinutes = Number(overlap);
+        overtimeReview.confirmManualOvertime = true;
+      }
+    }
     const reviewNote = window.prompt(actionMeta.prompt, "");
     if (reviewNote === null) return;
+    if (request.leaveType === "overtime" && action === "approve" && (overtimeReview.approvedStartTime !== request.startTime || overtimeReview.approvedEndTime !== request.endTime) && !reviewNote.trim()) {
+      return showFlash(false, "Vui lòng ghi lý do điều chỉnh khung giờ tăng ca.");
+    }
     if (action === "cancel" && !reviewNote.trim()) return showFlash(false, "Vui lòng nhập lý do hủy đơn.");
     setReviewingLeaveId(request._id);
     try {
@@ -1458,6 +1483,7 @@ export default function AttendanceManager() {
         action,
         reviewNote,
         approveWithoutEvidence,
+        ...overtimeReview,
       });
       showFlash(true, res.data?.message || `Đã ${verb} đơn nghỉ phép.`);
       await Promise.all([
@@ -1497,6 +1523,7 @@ export default function AttendanceManager() {
   async function handleBulkApproveLeave() {
     const selectedRequests = leaveRequests.filter((request) => selectedLeaveIds.has(String(request._id)));
     if (selectedRequests.length === 0) return showFlash(false, "Chưa chọn đơn nghỉ phép nào.");
+    if (selectedRequests.some((request) => request.leaveType === "overtime")) return showFlash(false, "Báo tăng ca cần đối chiếu giờ và duyệt từng đơn.");
     const missingEvidenceCount = selectedRequests.filter((request) => request.leaveType === "emergency" && request.needsEvidence).length;
     const warning = missingEvidenceCount > 0
       ? ` Trong đó có ${missingEvidenceCount} đơn off đột xuất chưa có ảnh minh chứng.`
@@ -2069,7 +2096,7 @@ export default function AttendanceManager() {
 
   const overviewLeaveByUserDate = useMemo(() => {
     const map = new Map();
-    overviewLeaveRequests.filter((request) => request.leaveType !== "forgotten_punch").forEach((request) => {
+    overviewLeaveRequests.filter((request) => !["forgotten_punch", "overtime"].includes(request.leaveType)).forEach((request) => {
       const dates = Array.isArray(request.approvedDates) && request.approvedDates.length
         ? request.approvedDates
         : (() => {
@@ -2189,7 +2216,7 @@ export default function AttendanceManager() {
 
   const totalPages = Math.ceil(total / PAGE_LIMIT);
   const bulkApprovableLeaveRequests = leaveRequests.filter(
-    (request) => request.status === "pending" && !(request.leaveType === "business_trip" && request.needsEvidence),
+    (request) => request.status === "pending" && request.leaveType !== "overtime" && !(request.leaveType === "business_trip" && request.needsEvidence),
   );
   const allBulkApprovableLeavesSelected = bulkApprovableLeaveRequests.length > 0
     && bulkApprovableLeaveRequests.every((request) => selectedLeaveIds.has(String(request._id)));
@@ -3902,6 +3929,7 @@ export default function AttendanceManager() {
                   <span className="rounded-full border border-sky-200 bg-sky-50 px-2 py-1 text-sky-700">Làm việc tại nhà</span>
                   <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-1 text-amber-700">Đi công vụ cần ảnh</span>
                   <span className="rounded-full border border-cyan-200 bg-cyan-50 px-2 py-1 text-cyan-700">Quên chấm công</span>
+                  <span className="rounded-full border border-violet-200 bg-violet-50 px-2 py-1 text-violet-700">Báo tăng ca · duyệt riêng</span>
                 </div>
               </div>
             </div>
@@ -3926,7 +3954,7 @@ export default function AttendanceManager() {
                     const isReviewing = reviewingLeaveId === request._id;
                     const evidences = requestEvidenceList(request);
                     const isSelected = selectedLeaveIds.has(String(request._id));
-                    const canSelectForBulkApproval = request.status === "pending"
+                    const canSelectForBulkApproval = request.status === "pending" && request.leaveType !== "overtime"
                       && !(request.leaveType === "business_trip" && request.needsEvidence);
                     return (
                       <div key={request._id} className={`p-4 transition-colors sm:px-5 ${isSelected ? "bg-violet-50/60" : ""}`}>
@@ -3939,7 +3967,7 @@ export default function AttendanceManager() {
                                   checked={isSelected}
                                   onChange={() => toggleLeaveSelect(request._id)}
                                   disabled={!canSelectForBulkApproval || bulkReviewingLeave || leaveLoading || isReviewing}
-                                  title={!canSelectForBulkApproval ? "Đơn đi công vụ cần bổ sung ảnh minh chứng trước khi duyệt" : "Chọn đơn để duyệt hàng loạt"}
+                                  title={!canSelectForBulkApproval ? "Đơn tăng ca cần duyệt riêng; đơn công vụ cần đủ ảnh minh chứng" : "Chọn đơn để duyệt hàng loạt"}
                                   aria-label={`Chọn đơn của ${request.userName || "nhân viên"}`}
                                   className="h-4 w-4 rounded border-slate-300 accent-violet-600 disabled:cursor-not-allowed disabled:opacity-35"
                                 />
@@ -3956,9 +3984,16 @@ export default function AttendanceManager() {
                               <span>Gửi {new Date(request.createdAt).toLocaleString("vi-VN")}</span>
                             </div>
                             <p className="mt-2 whitespace-pre-wrap text-sm text-slate-600">{request.reason}</p>
+                            {request.leaveType === "overtime" && <div className="mt-2 rounded-xl bg-violet-50 p-3 text-xs text-violet-800">
+                              <p className="font-semibold">Đề nghị: {request.startTime}–{request.endTime} · {({ regular: "Ngày thường", sunday: "Chủ nhật", holiday: "Ngày lễ" })[request.overtimeCategory] || "Tăng ca"}</p>
+                              {(request.attendanceContext?.punches || []).map((punch, index) => <p key={index}>{punch.name}: vào {fmtTime(punch.checkIn)} · ra {fmtTime(punch.checkOut)}</p>)}
+                              {!request.attendanceContext?.punches?.length && <p>Chưa có dấu chấm công; cần đối chiếu nội dung và minh chứng.</p>}
+                              <p>Tăng ca đã ghi nhận trong ngày: {Number(request.attendanceContext?.overtimeMinutes || 0)} phút. Duyệt riêng từng đơn để xác nhận giờ thực tế và phần trùng với tăng ca nhập tay.</p>
+                              {Number(request.manualOvertimeOverlapMinutes || 0) > 0 && <p>Đã đối chiếu: {request.manualOvertimeOverlapMinutes} phút trùng tăng ca nhập tay.</p>}
+                            </div>}
                             {request.convertedFromAnnual && <p className="mt-1 text-xs font-semibold text-amber-700">Đã chuyển từ phép năm sang phép thường không lương do không đủ số dư.</p>}
                             {request.autoApproved && <p className="mt-1 text-xs font-semibold text-violet-700">Hệ thống tự động duyệt · báo trước {Number(request.autoApprovalNoticeDays || 0)}/{Number(request.autoApprovalRequiredDays || 0)} ngày{request.leaveType === "regular" ? " · không trừ phép năm" : ""}.</p>}
-                            {(request.status === "approved" || request.status === "cancel_pending") && <p className="mt-1 text-xs font-semibold text-emerald-700">Đã duyệt: {request.leaveType === "remote_work" ? `${Number(request.approvedMinutes || 0)} phút làm việc tại nhà` : request.leaveType === "business_trip" ? `${Number(request.approvedMinutes || 0)} phút đi công vụ` : request.leaveType === "forgotten_punch" ? `${Number(request.creditedMinutes ?? request.approvedMinutes ?? 0)} phút bổ sung chấm công` : request.leaveType === "emergency" ? `${Number(request.approvedMinutes || 0)} phút nghỉ` : `${Number(request.approvedDays || 0)} ngày nghỉ`}</p>}
+                            {(request.status === "approved" || request.status === "cancel_pending") && <p className="mt-1 text-xs font-semibold text-emerald-700">Đã duyệt: {request.leaveType === "overtime" ? `${request.approvedStartTime}–${request.approvedEndTime} · ${Number(request.approvedMinutes || 0)} phút tăng ca` : request.leaveType === "remote_work" ? `${Number(request.approvedMinutes || 0)} phút làm việc tại nhà` : request.leaveType === "business_trip" ? `${Number(request.approvedMinutes || 0)} phút đi công vụ` : request.leaveType === "forgotten_punch" ? `${Number(request.creditedMinutes ?? request.approvedMinutes ?? 0)} phút bổ sung chấm công` : request.leaveType === "emergency" ? `${Number(request.approvedMinutes || 0)} phút nghỉ` : `${Number(request.approvedDays || 0)} ngày nghỉ`}</p>}
                             {request.leaveType === "emergency" && evidences.length > 0 && (
                               <div className={`mt-3 rounded-xl border p-3 text-xs ${request.aiReview?.recommendation === "recommend_approve" ? TONE.emerald : request.aiReview?.status === "failed" ? TONE.rose : TONE.amber}`}>
                                 <div className="flex flex-wrap items-center gap-2 font-bold">

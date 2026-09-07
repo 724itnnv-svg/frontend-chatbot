@@ -91,8 +91,9 @@ const LEAVE_TYPE_LABELS = {
   remote_work: "Làm việc tại nhà",
   business_trip: "Đi công vụ",
   forgotten_punch: "Quên chấm công",
+  overtime: "Báo tăng ca",
 };
-const TIMED_REQUEST_TYPES = ["emergency", "remote_work", "business_trip", "forgotten_punch"];
+const TIMED_REQUEST_TYPES = ["emergency", "remote_work", "business_trip", "forgotten_punch", "overtime"];
 const LEAVE_SESSION_LABELS = {
   full_day: "Cả ngày",
   morning: "Buổi sáng",
@@ -370,7 +371,10 @@ function requestEvidenceList(request) {
 
 function leaveIntervals(request) {
   if (TIMED_REQUEST_TYPES.includes(request.leaveType)) {
-    return [[request.startTime, request.endTime]];
+    if (request.leaveType === "overtime") return [[request.startTime, request.endTime]];
+    return [["07:30", "11:30"], ["13:00", "17:00"]]
+      .map(([start, end]) => [request.startTime > start ? request.startTime : start, request.endTime < end ? request.endTime : end])
+      .filter(([start, end]) => end > start);
   }
   if (request.leaveType === "annual" || request.session === "full_day") {
     return [["07:30", "11:30"], ["13:00", "17:00"]];
@@ -383,7 +387,10 @@ function leaveIntervals(request) {
 function leaveRequestsOverlap(firstRequest, secondRequest) {
   const overlapStart = firstRequest.startDate > secondRequest.startDate ? firstRequest.startDate : secondRequest.startDate;
   const overlapEnd = firstRequest.endDate < secondRequest.endDate ? firstRequest.endDate : secondRequest.endDate;
-  if (countedLeaveDateKeys(overlapStart, overlapEnd).length === 0) return false;
+  if (overlapEnd < overlapStart) return false;
+  if ((firstRequest.leaveType !== "overtime" || secondRequest.leaveType !== "overtime") && countedLeaveDateKeys(overlapStart, overlapEnd).length === 0) return false;
+  if (firstRequest.approvedDates?.length && !firstRequest.approvedDates.some((date) => date >= overlapStart && date <= overlapEnd)) return false;
+  if (secondRequest.approvedDates?.length && !secondRequest.approvedDates.some((date) => date >= overlapStart && date <= overlapEnd)) return false;
   return leaveIntervals(firstRequest).some(([firstStart, firstEnd]) =>
     leaveIntervals(secondRequest).some(([secondStart, secondEnd]) =>
       firstStart < secondEnd && secondStart < firstEnd,
@@ -1770,7 +1777,7 @@ export default function AttendancePage() {
   const historyMonthDates = useMemo(() => monthDateKeys(historyPeriod), [historyPeriod]);
   const approvedLeavesByDate = useMemo(() => {
     const map = new Map();
-    leaveRequests.filter((request) => request.leaveType !== "forgotten_punch" && (request.status === "approved" || request.status === "cancel_pending")).forEach((request) => {
+    leaveRequests.filter((request) => !["forgotten_punch", "overtime"].includes(request.leaveType) && (request.status === "approved" || request.status === "cancel_pending")).forEach((request) => {
       const dates = request.approvedDates?.length ? request.approvedDates : countedLeaveDateKeys(request.startDate, request.endDate);
       dates.forEach((date) => map.set(date, request));
     });
@@ -1859,14 +1866,17 @@ export default function AttendancePage() {
     if (TIMED_REQUEST_TYPES.includes(leaveForm.leaveType) && (!leaveForm.startTime || !leaveForm.endTime || leaveForm.endTime <= leaveForm.startTime)) {
       return showMsg(false, "Giờ bắt đầu và kết thúc không hợp lệ.");
     }
-    if (TIMED_REQUEST_TYPES.includes(leaveForm.leaveType) && (leaveForm.startTime < "07:30" || leaveForm.endTime > "17:00")) {
+    if (leaveForm.leaveType !== "overtime" && TIMED_REQUEST_TYPES.includes(leaveForm.leaveType) && (leaveForm.startTime < "07:30" || leaveForm.endTime > "17:00")) {
       return showMsg(false, "Khung giờ đăng ký phải nằm trong giờ làm việc 07:30-17:00.");
     }
-    if (TIMED_REQUEST_TYPES.includes(leaveForm.leaveType) && leaveForm.startTime >= "11:30" && leaveForm.endTime <= "13:00") {
+    if (leaveForm.leaveType !== "overtime" && TIMED_REQUEST_TYPES.includes(leaveForm.leaveType) && leaveForm.startTime >= "11:30" && leaveForm.endTime <= "13:00") {
       return showMsg(false, "Khoảng đăng ký không được chỉ nằm trong giờ nghỉ trưa 11:30-13:00.");
     }
     if (leaveForm.leaveType === "forgotten_punch" && leaveForm.startDate > todayKey()) {
       return showMsg(false, "Quên chấm công chỉ áp dụng cho hôm nay hoặc ngày đã qua.");
+    }
+    if (leaveForm.leaveType === "overtime" && new Date(`${leaveForm.startDate}T${leaveForm.endTime}:00+07:00`) > new Date()) {
+      return showMsg(false, "Chỉ báo tăng ca sau khi đã kết thúc khung giờ đăng ký; chưa hỗ trợ ca qua đêm.");
     }
     if (!leaveForm.reason.trim()) return showMsg(false, "Vui lòng nhập lý do gửi đơn.");
     if (leaveForm.leaveType === "business_trip" && leaveForm.evidences.length === 0) return showMsg(false, "Vui lòng chọn ít nhất một ảnh minh chứng đi công vụ.");
@@ -1876,7 +1886,7 @@ export default function AttendancePage() {
       && leaveRequestsOverlap(request, leaveForm),
     );
     if (overlappingRequest) {
-      return showMsg(false, `Bạn đã có đơn xin nghỉ trùng thời gian từ ${fmtShortDate(overlappingRequest.startDate)} đến ${fmtShortDate(overlappingRequest.endDate)}.`);
+      return showMsg(false, `Bạn đã có đơn trùng thời gian từ ${fmtShortDate(overlappingRequest.startDate)} đến ${fmtShortDate(overlappingRequest.endDate)}.`);
     }
 
     const sendRequest = async (convertAnnualToRegular = false) => {
@@ -2116,7 +2126,7 @@ export default function AttendancePage() {
       cancellationReason = window.prompt("Nhập lý do yêu cầu hủy đơn đã duyệt:", "")?.trim();
       if (!cancellationReason) return;
       if (!window.confirm("Gửi yêu cầu hủy đơn này đến quản trị? Đơn vẫn có hiệu lực cho đến khi được duyệt hủy.")) return;
-    } else if (!window.confirm("Bạn có chắc muốn xoá đơn nghỉ phép này?")) return;
+    } else if (!window.confirm("Bạn có chắc muốn xoá đơn này?")) return;
 
     setDeletingLeaveId(request._id);
     try {
@@ -2969,25 +2979,6 @@ export default function AttendancePage() {
             </div>
           )}
 
-          {approvalNotifications.length > 0 && (
-            <div className="space-y-2">
-              {approvalNotifications.map((notification) => (
-                <button
-                  key={notification._id}
-                  type="button"
-                  onClick={() => openApprovalNotification(notification)}
-                  className="flex w-full items-start gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-3 text-left text-emerald-800 shadow-sm transition hover:bg-emerald-100"
-                >
-                  <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-600 text-white"><Bell size={17} /></span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block text-sm font-bold">{notification.title}</span>
-                    <span className="mt-0.5 block text-xs text-emerald-700">{notification.body}</span>
-                    <span className="mt-1 block text-[11px] text-emerald-600">Bấm để xem chi tiết · {new Date(notification.createdAt).toLocaleString("vi-VN")}</span>
-                  </span>
-                </button>
-              ))}
-            </div>
-          )}
           {activeTab === "leave" && (
             <div className="grid gap-5 lg:grid-cols-[minmax(320px,0.85fr)_minmax(0,1.15fr)] lg:items-start">
               <form onSubmit={submitLeaveRequest} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
@@ -2997,7 +2988,7 @@ export default function AttendancePage() {
                   </span>
                   <div>
                     <h2 className="font-bold text-slate-900">Tạo đơn</h2>
-                    <p className="text-xs text-slate-500">Gửi đơn nghỉ phép, công tác hoặc bổ sung chấm công. <span className="font-semibold text-rose-500">* Bắt buộc</span></p>
+                    <p className="text-xs text-slate-500">Gửi đơn nghỉ phép, công tác, bổ sung chấm công hoặc báo tăng ca. <span className="font-semibold text-rose-500">* Bắt buộc</span></p>
                   </div>
                 </div>
 
@@ -3026,8 +3017,10 @@ export default function AttendancePage() {
                         return {
                           ...current,
                           leaveType,
-                          startDate: leaveType === "forgotten_punch" && current.startDate > todayKey() ? todayKey() : current.startDate,
-                          endDate: TIMED_REQUEST_TYPES.includes(leaveType) ? (leaveType === "forgotten_punch" && current.startDate > todayKey() ? todayKey() : current.startDate) : current.endDate,
+                          startTime: leaveType === "overtime" ? "17:00" : current.leaveType === "overtime" ? "07:30" : current.startTime,
+                          endTime: leaveType === "overtime" ? "19:00" : current.leaveType === "overtime" ? "17:00" : current.endTime,
+                          startDate: ["forgotten_punch", "overtime"].includes(leaveType) && current.startDate > todayKey() ? todayKey() : current.startDate,
+                          endDate: TIMED_REQUEST_TYPES.includes(leaveType) ? (["forgotten_punch", "overtime"].includes(leaveType) && current.startDate > todayKey() ? todayKey() : current.startDate) : current.endDate,
                           session: ["annual", ...TIMED_REQUEST_TYPES].includes(leaveType) ? "full_day" : current.session,
                           evidences: leaveType === "remote_work" ? [] : current.evidences,
                         };
@@ -3040,13 +3033,14 @@ export default function AttendancePage() {
                       <option value="remote_work">Làm việc tại nhà</option>
                       <option value="business_trip">Đi công vụ</option>
                       <option value="forgotten_punch">Quên chấm công</option>
+                      <option value="overtime">Báo tăng ca</option>
                     </select>
                   </label>
 
                   <div className={`grid gap-3 ${TIMED_REQUEST_TYPES.includes(leaveForm.leaveType) ? "grid-cols-1" : "grid-cols-2"}`}>
                     <label className="block text-xs font-semibold text-slate-600">
-                      TỪ NGÀY <span className="text-rose-500">*</span>
-                      <input type="date" required max={leaveForm.leaveType === "forgotten_punch" ? todayKey() : undefined} value={leaveForm.startDate} onChange={(event) => setLeaveForm((current) => ({ ...current, startDate: event.target.value, endDate: TIMED_REQUEST_TYPES.includes(current.leaveType) || current.endDate < event.target.value ? event.target.value : current.endDate }))} className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-violet-400" />
+                      {leaveForm.leaveType === "overtime" ? "NGÀY TĂNG CA" : "TỪ NGÀY"} <span className="text-rose-500">*</span>
+                      <input type="date" required max={["forgotten_punch", "overtime"].includes(leaveForm.leaveType) ? todayKey() : undefined} value={leaveForm.startDate} onChange={(event) => setLeaveForm((current) => ({ ...current, startDate: event.target.value, endDate: TIMED_REQUEST_TYPES.includes(current.leaveType) || current.endDate < event.target.value ? event.target.value : current.endDate }))} className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-violet-400" />
                     </label>
                     {!TIMED_REQUEST_TYPES.includes(leaveForm.leaveType) && (
                       <label className="block text-xs font-semibold text-slate-600">
@@ -3058,9 +3052,9 @@ export default function AttendancePage() {
 
                   {TIMED_REQUEST_TYPES.includes(leaveForm.leaveType) ? (
                     <div className="grid grid-cols-2 gap-3">
-                      <label className="block text-xs font-semibold text-slate-600">TỪ GIỜ <span className="text-rose-500">*</span><input type="time" min="07:30" max="17:00" required value={leaveForm.startTime} onChange={(event) => setLeaveForm((current) => ({ ...current, startTime: event.target.value }))} className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-violet-400" /></label>
-                      <label className="block text-xs font-semibold text-slate-600">ĐẾN GIỜ <span className="text-rose-500">*</span><input type="time" min="07:30" max="17:00" required value={leaveForm.endTime} onChange={(event) => setLeaveForm((current) => ({ ...current, endTime: event.target.value }))} className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-violet-400" /></label>
-                      <p className="col-span-2 text-xs text-slate-400">{["remote_work", "business_trip", "forgotten_punch"].includes(leaveForm.leaveType) ? "Thời gian chưa được ghi nhận sau khi duyệt sẽ cộng vào bảng công; tự động loại giờ nghỉ trưa 11:30–13:00 và không cộng trùng giờ đã chấm." : "Chỉ tính thời gian trong giờ làm việc; tự động loại giờ nghỉ trưa 11:30–13:00."}</p>
+                      <label className="block text-xs font-semibold text-slate-600">TỪ GIỜ <span className="text-rose-500">*</span><input type="time" min={leaveForm.leaveType === "overtime" ? undefined : "07:30"} max={leaveForm.leaveType === "overtime" ? undefined : "17:00"} required value={leaveForm.startTime} onChange={(event) => setLeaveForm((current) => ({ ...current, startTime: event.target.value }))} className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-violet-400" /></label>
+                      <label className="block text-xs font-semibold text-slate-600">ĐẾN GIỜ <span className="text-rose-500">*</span><input type="time" min={leaveForm.leaveType === "overtime" ? undefined : "07:30"} max={leaveForm.leaveType === "overtime" ? undefined : "17:00"} required value={leaveForm.endTime} onChange={(event) => setLeaveForm((current) => ({ ...current, endTime: event.target.value }))} className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-violet-400" /></label>
+                      <p className="col-span-2 text-xs text-slate-400">{leaveForm.leaveType === "overtime" ? "Báo giờ đã làm trong cùng ngày, ngoài ca hoặc trong giờ nghỉ trưa 11:30–13:00 (tối đa 90 phút nghỉ trưa). Chỉ ghi nhận sau khi quản trị duyệt; chưa hỗ trợ ca qua đêm." : ["remote_work", "business_trip", "forgotten_punch"].includes(leaveForm.leaveType) ? "Thời gian chưa được ghi nhận sau khi duyệt sẽ cộng vào bảng công; tự động loại giờ nghỉ trưa 11:30–13:00 và không cộng trùng giờ đã chấm." : "Chỉ tính thời gian trong giờ làm việc; tự động loại giờ nghỉ trưa 11:30–13:00."}</p>
                     </div>
                   ) : leaveForm.leaveType === "annual" ? (
                     <div className={`rounded-xl border p-3 text-xs ${TONE.emerald}`}><b>Điều kiện tự duyệt phép năm</b><span className="mt-1 block">Báo trước: 1 ngày ≥ 3 ngày, 2 ngày ≥ 7 ngày, từ 3 ngày ≥ 15 ngày. Chủ nhật không tính ngày nghỉ.</span></div>
@@ -3076,7 +3070,7 @@ export default function AttendancePage() {
                   )}
 
                   <label className="block text-xs font-semibold text-slate-600">
-                    LÝ DO <span className="text-rose-500">*</span>
+                    {leaveForm.leaveType === "overtime" ? "NỘI DUNG CÔNG VIỆC" : "LÝ DO"} <span className="text-rose-500">*</span>
                     <textarea required maxLength={1000} rows={4} value={leaveForm.reason} onChange={(event) => setLeaveForm((current) => ({ ...current, reason: event.target.value }))} placeholder="Nêu lý do và thông tin cần thiết..." className="mt-1.5 w-full resize-none rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100" />
                   </label>
 
@@ -3084,10 +3078,12 @@ export default function AttendancePage() {
                     <input type="file" multiple accept="image/jpeg,image/png,image/webp,image/gif" className="hidden" onChange={(event) => selectLeaveEvidences(event.target.files)} />
                     <span className="flex items-center gap-2 text-sm font-semibold text-slate-600"><ImagePlus size={17} className="text-violet-500" /> {leaveForm.evidences.length > 0 ? `Đã chọn ${leaveForm.evidences.length} ảnh` : "Chọn ảnh minh chứng"}</span>
                     {leaveForm.evidences.length > 0 && <span className="mt-1 block truncate text-xs text-slate-500">{leaveForm.evidences.map((file) => file.name).join(", ")}</span>}
-                    <span className="mt-1 block text-xs text-slate-400">Tối đa 3 ảnh, mỗi ảnh 8 MB. {leaveForm.leaveType === "business_trip" ? "Bắt buộc với đơn đi công vụ." : leaveForm.leaveType === "forgotten_punch" ? "Không bắt buộc, dùng để quản trị đối chiếu khi cần." : "Bắt buộc với off đột xuất; có thể bổ sung sau khi gửi đơn."}</span>
+                    <span className="mt-1 block text-xs text-slate-400">Tối đa 3 ảnh, mỗi ảnh 8 MB. {leaveForm.leaveType === "business_trip" ? "Bắt buộc với đơn đi công vụ." : ["forgotten_punch", "overtime"].includes(leaveForm.leaveType) ? "Không bắt buộc, dùng để quản trị đối chiếu khi cần." : "Bắt buộc với off đột xuất; có thể bổ sung sau khi gửi đơn."}</span>
                   </label>}
 
                   {leaveForm.leaveType === "remote_work" && <div className={`rounded-xl border p-3 text-xs ${TONE.sky}`}><b>Không cần ảnh minh chứng.</b><span className="mt-1 block">Sau khi được duyệt, khung giờ này được tính là giờ làm việc bình thường trong bảng chấm công.</span></div>}
+
+                  {leaveForm.leaveType === "overtime" && <div className={`rounded-xl border p-3 text-xs ${TONE.violet}`}><b>Đề nghị: {Math.max(0, (minutesFromTime(leaveForm.endTime) || 0) - (minutesFromTime(leaveForm.startTime) || 0))} phút tăng ca.</b><span className="mt-1 block">Không trừ phép hoặc cộng vào giờ công thường. Quản trị sẽ đối chiếu chấm công và xác nhận khung giờ thực tế.</span></div>}
 
                   {leaveForm.leaveType === "forgotten_punch" && <div className={`rounded-xl border p-3 text-xs ${TONE.sky}`}><b>Bổ sung giờ công, không tạo dấu chấm GPS giả.</b><span className="mt-1 block">Chỉ phần thời gian còn thiếu được cộng sau khi quản trị duyệt; không tự tính tăng ca.</span></div>}
 
@@ -3138,7 +3134,8 @@ export default function AttendancePage() {
                           <p className="mt-2 whitespace-pre-wrap text-sm text-slate-600">{request.reason}</p>
                           {request.convertedFromAnnual && <p className="mt-1 text-xs font-semibold text-amber-700">Đơn này đã được chuyển sang phép thường không lương do không đủ phép năm.</p>}
                           {request.autoApproved && <p className="mt-1 text-xs font-semibold text-violet-700">Đã được hệ thống tự động duyệt.</p>}
-                          {(request.status === "approved" || request.status === "cancel_pending") && <p className="mt-1 text-xs font-semibold text-emerald-700">Đã duyệt: {request.leaveType === "remote_work" ? `${Number(request.approvedMinutes || 0)} phút làm việc tại nhà` : request.leaveType === "business_trip" ? `${Number(request.approvedMinutes || 0)} phút đi công vụ` : request.leaveType === "forgotten_punch" ? `${Number(request.creditedMinutes ?? request.approvedMinutes ?? 0)} phút bổ sung chấm công` : request.leaveType === "emergency" ? `${Number(request.approvedMinutes || 0)} phút nghỉ` : `${Number(request.approvedDays || 0)} ngày nghỉ`}</p>}
+                          {request.leaveType === "overtime" && <p className="mt-1 text-xs text-violet-700">Đề nghị: {Math.max(0, (minutesFromTime(request.endTime) || 0) - (minutesFromTime(request.startTime) || 0))} phút tăng ca</p>}
+                          {(request.status === "approved" || request.status === "cancel_pending") && <p className="mt-1 text-xs font-semibold text-emerald-700">Đã duyệt: {request.leaveType === "overtime" ? `${request.approvedStartTime}–${request.approvedEndTime} · ${Number(request.approvedMinutes || 0)} phút tăng ca` : request.leaveType === "remote_work" ? `${Number(request.approvedMinutes || 0)} phút làm việc tại nhà` : request.leaveType === "business_trip" ? `${Number(request.approvedMinutes || 0)} phút đi công vụ` : request.leaveType === "forgotten_punch" ? `${Number(request.creditedMinutes ?? request.approvedMinutes ?? 0)} phút bổ sung chấm công` : request.leaveType === "emergency" ? `${Number(request.approvedMinutes || 0)} phút nghỉ` : `${Number(request.approvedDays || 0)} ngày nghỉ`}</p>}
                           {request.cancellationReason && <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700"><strong>Lý do yêu cầu hủy:</strong> {request.cancellationReason}</p>}
                           {request.cancellationReviewNote && <p className="mt-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600"><strong>Phản hồi hủy đơn:</strong> {request.cancellationReviewNote}</p>}
                           {request.reviewNote && <p className={`mt-2 rounded-lg border px-3 py-2 text-xs ${request.status === "rejected" ? TONE.rose : TONE.slate}`}><strong>Phản hồi quản trị:</strong> {request.reviewNote}</p>}
