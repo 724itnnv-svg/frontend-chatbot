@@ -560,15 +560,41 @@ export async function updateCustomerAddress(
       customerPayload,
       "TaxCode",
     );
+    const hasIncomingEmployees =
+      Array.isArray(customerPayload.EmployeeInChargeIds) ||
+      Array.isArray(customerPayload.EmployeeInChargeNames) ||
+      Array.isArray(customerPayload.EmployeeInCharges);
+    const mergeEmployeeValues = (currentValues, incomingValues) =>
+      Array.from(
+        new Set([
+          ...(Array.isArray(currentValues) ? currentValues : []),
+          ...(Array.isArray(incomingValues) ? incomingValues : []),
+        ]),
+      );
     let payloadData = {
       ...customerPayload,
       CustomerGroupNames: hasIncomingGroups
         ? customerPayload.CustomerGroupNames || []
         : currentCustomer.CustomerGroupNames,
       CustomerGroupIds: incomingGroupIds,
-      EmployeeInChargeNames: currentCustomer.EmployeeInChargeNames,
-      EmployeeInChargeIds: currentCustomer.EmployeeInChargeIds,
-      EmployeeInCharges: currentCustomer.EmployeeInCharges,
+      EmployeeInChargeNames: hasIncomingEmployees
+        ? mergeEmployeeValues(
+            currentCustomer.EmployeeInChargeNames,
+            customerPayload.EmployeeInChargeNames,
+          )
+        : currentCustomer.EmployeeInChargeNames,
+      EmployeeInChargeIds: hasIncomingEmployees
+        ? mergeEmployeeValues(
+            currentCustomer.EmployeeInChargeIds,
+            customerPayload.EmployeeInChargeIds,
+          )
+        : currentCustomer.EmployeeInChargeIds,
+      EmployeeInCharges: hasIncomingEmployees
+        ? mergeEmployeeValues(
+            currentCustomer.EmployeeInCharges,
+            customerPayload.EmployeeInCharges,
+          )
+        : currentCustomer.EmployeeInCharges,
       Groups: hasIncomingGroups
         ? customerPayload.Groups ||
           customerPayload.CustomerGroupNames?.join(", ") ||

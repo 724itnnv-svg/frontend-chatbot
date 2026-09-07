@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { io } from "socket.io-client";
 import QRCode from "qrcode";
 import * as XLSX from "xlsx";
 import { saveAs } from 'file-saver';
@@ -35,16 +36,21 @@ import {
   X,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
+import { getApiOrigin } from "../api/baseUrl";
 import { getDefaultPayrollViewPeriod } from "../utils/payrollPeriod";
 import { createBankSalaryPaymentWorkbook } from "../utils/salaryAdvanceExcel";
 import { buildPayrollBankTransferRows, calculatePayrollInstallments } from "../utils/payrollBankExcel";
 import { createPayrollBhxhWorkbook, PAYROLL_BHXH_COMPANY_OPTIONS } from "../utils/payrollBhxhExcel";
+import { hasCommissionExcelColumn, normalizeCommissionExcelRow } from "../utils/payrollCommissionExcel";
 
 const STORAGE_HIDDEN_COLUMNS = "payroll_hidden_columns_v1";
 const STORAGE_COLUMN_ORDER = "payroll_column_order_v1";
 const STORAGE_COLUMN_TEMPLATES = "payroll_column_templates_v1";
 const STORAGE_PAYROLL_FORMULAS = "payroll_formula_settings_v1";
 const STORAGE_PAYROLL_PERIOD = "payroll_manager_period_v1";
+const isViteDevServer = typeof window !== "undefined" && window.location.port === "5173";
+const PAYROLL_SOCKET_URL = import.meta.env.VITE_SOCKET_URL ||
+  (isViteDevServer ? "http://localhost:5000" : getApiOrigin() || undefined);
 const STATUS_OPTIONS = ["DRAFT", "APPROVED", "PAID"];
 const PAYROLL_COMPANY_NAMES = {
   NNV: "CÔNG TY TNHH SX TM DV NÔNG NGHIỆP VIỆT",
@@ -128,7 +134,7 @@ const PAYROLL_COLUMNS = [
   { key: "thuNhapTheoNgayCong.luongTangCaLeTet", label: "Lương TC lễ", width: 150, type: "number" },
   { key: "thuNhapTheoNgayCong.comTangCa", label: "Cơm tăng ca", width: 140, type: "number" },
   { key: "thuNhapTheoNgayCong.traGiamLuong", label: "Trả giam lương", width: 150, type: "number" },
-  { key: "thuNhapTheoNgayCong.diemKPI", label: "Điểm KPI", width: 120, type: "number" },
+  { key: "thuNhapTheoNgayCong.diemKPI", label: "Điểm KPI", width: 120, type: "number", readOnly: true, source: "kpi" },
   { key: "thuNhapTheoNgayCong.thuongKPI", label: "Thưởng KPI", width: 140, type: "number" },
   { key: "thuNhapTheoNgayCong.thuongDotXuat", label: "Thưởng đột xuất (đã chi)", width: 190, type: "number" },
   { key: "thuNhapTheoNgayCong.doanhSo", label: "Doanh số", width: 140, type: "number" },
@@ -209,11 +215,11 @@ const HIDDEN_INPUT_COLUMNS = new Set([
 ]);
 
 const INPUT_TEMPLATE_COLUMNS = PAYROLL_COLUMNS.filter(
-  (column) => !column.profileField && !column.derived && !COMPUTED_PAYROLL_KEYS.has(column.key) && !HIDDEN_INPUT_COLUMNS.has(column.key)
+  (column) => !column.profileField && !column.derived && !column.readOnly && !COMPUTED_PAYROLL_KEYS.has(column.key) && !HIDDEN_INPUT_COLUMNS.has(column.key)
 );
 const BULK_EDIT_EXCLUDED_KEYS = new Set(["maNhanVien", "tenNhanVien"]);
 const BULK_EDIT_COLUMNS = PAYROLL_COLUMNS.filter(
-  (column) => !column.profileField && !column.derived && !COMPUTED_PAYROLL_KEYS.has(column.key) && !BULK_EDIT_EXCLUDED_KEYS.has(column.key)
+  (column) => !column.profileField && !column.derived && !column.readOnly && !COMPUTED_PAYROLL_KEYS.has(column.key) && !BULK_EDIT_EXCLUDED_KEYS.has(column.key)
 );
 
 const IMPORT_COLUMN_ALIAS_MAP = new Map(
@@ -818,16 +824,6 @@ function normalizeExcelRow(raw, fallbackPeriod, formulaSettings = DEFAULT_PAYROL
   return normalizePayrollRow(row, fallbackPeriod, formulaSettings);
 }
 
-function normalizeCommissionExcelRow(raw, fallbackPeriod) {
-  return {
-    period: String(fallbackPeriod || readCell(raw, ["period", "Kỳ lương", "Ky luong", "Tháng", "Thang"])).trim(),
-    maNhanVien: String(readCell(raw, ["maNhanVien", "employeeCode", "Mã NV", "Ma NV", "Mã nhân viên"])).trim(),
-    tenNhanVien: String(readCell(raw, ["tenNhanVien", "employeeName", "Tên NV", "Ten NV", "Tên nhân viên"])).trim(),
-    doanhSo: toNumber(readCell(raw, ["doanhSo", "sales", "revenue", "Doanh số", "Doanh so", "thuNhapTheoNgayCong.doanhSo"])),
-    hoaHong: toNumber(readCell(raw, ["hoaHong", "commission", "Hoa hồng", "Hoa hong", "thuNhapTheoNgayCong.hoaHong"])),
-  };
-}
-
 function downloadPayrollTemplate() {
   const sample = Object.fromEntries(TEMPLATE_COLUMNS.map((column) => [column, 0]));
   Object.assign(sample, {
@@ -1363,6 +1359,7 @@ const PAYROLL_REVISION_ACTION_LABELS = {
   IMPORT_EXCEL: "Import Excel",
   IMPORT_COMMISSION: "Import doanh số/hoa hồng",
   SYNC_ATTENDANCE: "Đồng bộ chấm công",
+  SYNC_KPI: "Đồng bộ KPI đã duyệt",
   IMPORT_ATTENDANCE_KIOT: "Import chấm công KiotViet",
   SYNC_SALARY_ADVANCE: "Đồng bộ phiếu ứng lương",
   CLONE_PERIOD: "Nhân bản kỳ lương",
@@ -1482,7 +1479,7 @@ export default function PayrollManager() {
   const [showFormulaSettings, setShowFormulaSettings] = useState(false);
   const [showBulkEdit, setShowBulkEdit] = useState(false);
   const [bulkScope, setBulkScope] = useState("selected");
-  const [bulkField, setBulkField] = useState("thuNhapTheoNgayCong.diemKPI");
+  const [bulkField, setBulkField] = useState("thuNhapTheoNgayCong.ngayCong");
   const [bulkValue, setBulkValue] = useState("");
   const [formulaSettings, setFormulaSettings] = useState(readFormulaSettings);
   const [formulaDraft, setFormulaDraft] = useState(() => cloneFormulaSettings(readFormulaSettings()));
@@ -1506,6 +1503,7 @@ export default function PayrollManager() {
   const [showAttendanceSync, setShowAttendanceSync] = useState(false);
   const [attendanceSyncLoading, setAttendanceSyncLoading] = useState(false);
   const [attendanceSyncApplying, setAttendanceSyncApplying] = useState(false);
+  const [kpiSyncLoading, setKpiSyncLoading] = useState(false);
   const [attendanceSyncResult, setAttendanceSyncResult] = useState(null);
   const [showSalaryAdvances, setShowSalaryAdvances] = useState(false);
   const [salaryAdvanceStatus, setSalaryAdvanceStatus] = useState("pending");
@@ -1848,14 +1846,14 @@ export default function PayrollManager() {
     }
   };
 
-  const fetchPayroll = async () => {
+  const fetchPayroll = async ({ silent = false } = {}) => {
     if (!canViewPayroll) {
       setLoading(false);
       setRows([]);
       return;
     }
-    setLoading(true);
-    setMessage("");
+    if (!silent) setLoading(true);
+    if (!silent) setMessage("");
     try {
       const params = new URLSearchParams();
       if (period) params.set("period", period);
@@ -1869,15 +1867,53 @@ export default function PayrollManager() {
       ]));
       setRows(nextRows);
       setDirtyIds(new Set());
-      setUndoStack([]);
-      setRedoStack([]);
-      setSelectedRowIds(new Set());
+      if (!silent) {
+        setUndoStack([]);
+        setRedoStack([]);
+        setSelectedRowIds(new Set());
+      }
+      return true;
     } catch (error) {
       console.error(error);
-      setRows([]);
+      if (!silent) setRows([]);
       setMessage(error.message || "Không tải được bảng lương");
+      return false;
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
+    }
+  };
+
+  const syncApprovedKpi = async () => {
+    if (!canEdit || payrollReadOnly || !period || kpiSyncLoading) return;
+    if (dirtyIds.size) {
+      setMessage("Hãy lưu hoặc tải lại các dòng đang sửa trước khi đồng bộ KPI.");
+      return;
+    }
+    setKpiSyncLoading(true);
+    setMessage("");
+    try {
+      const res = await fetch("/api/payroll/sync-kpi", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeader },
+        body: JSON.stringify({ period }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data?.success === false) {
+        throw new Error(data?.message || "Không đồng bộ được điểm KPI");
+      }
+      const refreshed = await fetchPayroll({ silent: true });
+      const skippedText = data.skippedLocked?.length
+        ? ` ${data.skippedLocked.length} dòng đã duyệt/đã chi trả được giữ nguyên.`
+        : "";
+      const refreshWarning = refreshed === false
+        ? " Đồng bộ đã hoàn tất nhưng chưa tải lại được bảng lương. Hãy bấm Tải lại để xem kết quả."
+        : "";
+      setMessage(`${data.message || "Đã đồng bộ KPI."}${skippedText}${refreshWarning}`);
+    } catch (error) {
+      console.error(error);
+      setMessage(error.message || "Không đồng bộ được điểm KPI");
+    } finally {
+      setKpiSyncLoading(false);
     }
   };
 
@@ -1977,6 +2013,56 @@ export default function PayrollManager() {
     setShowCommissionImport(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [period, canViewPayroll]);
+
+  useEffect(() => {
+    if (!canViewPayroll || !period) return undefined;
+    const refreshWhenSafe = () => {
+      if (document.visibilityState === "hidden") return;
+      if (dirtyIds.size) {
+        setMessage("KPI có thay đổi mới. Hãy lưu hoặc tải lại bảng lương để cập nhật dữ liệu.");
+        return;
+      }
+      fetchPayroll({ silent: true });
+    };
+    window.addEventListener("focus", refreshWhenSafe);
+    window.addEventListener("kpi:refresh", refreshWhenSafe);
+    return () => {
+      window.removeEventListener("focus", refreshWhenSafe);
+      window.removeEventListener("kpi:refresh", refreshWhenSafe);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canViewPayroll, period, dirtyIds.size]);
+
+  useEffect(() => {
+    if (!token || !canViewPayroll || !period) return undefined;
+    const socket = io(PAYROLL_SOCKET_URL, {
+      autoConnect: false,
+      withCredentials: true,
+      auth: { token },
+      transports: ["websocket", "polling"],
+    });
+    let refreshTimer = null;
+    const handleChange = (payload = {}) => {
+      if (payload.entity !== "kpi-evaluation") return;
+      window.clearTimeout(refreshTimer);
+      refreshTimer = window.setTimeout(() => {
+        if (dirtyIds.size) {
+          setMessage("KPI vừa được cập nhật. Hãy lưu hoặc tải lại bảng lương để nhận điểm mới.");
+          return;
+        }
+        fetchPayroll({ silent: true });
+      }, 250);
+    };
+    const connectTimer = window.setTimeout(() => socket.connect(), 0);
+    socket.on("attendance:changed", handleChange);
+    return () => {
+      window.clearTimeout(connectTimer);
+      window.clearTimeout(refreshTimer);
+      socket.off("attendance:changed", handleChange);
+      socket.disconnect();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, canViewPayroll, period, dirtyIds.size]);
 
   useEffect(() => {
     if (periodLocked || !temporaryUnlockUntil) return undefined;
@@ -2340,6 +2426,13 @@ export default function PayrollManager() {
       const workbook = XLSX.read(buffer, { type: "array" });
       const sheet = workbook.Sheets[workbook.SheetNames[0]];
       const rawRows = XLSX.utils.sheet_to_json(sheet, { defval: "" });
+      const headers = rawRows.length ? Object.keys(rawRows[0]) : [];
+      if (!hasCommissionExcelColumn(headers, "hoaHong")) {
+        throw new Error("Không tìm thấy cột hoaHong/Hoa hồng trong file Excel.");
+      }
+      if (!hasCommissionExcelColumn(headers, "doanhSo")) {
+        throw new Error("Không tìm thấy cột doanhSo/Doanh số trong file Excel.");
+      }
       const parsed = rawRows
         .map((row) => normalizeCommissionExcelRow(row, period))
         .filter((row) => row.maNhanVien || row.tenNhanVien);
@@ -2352,7 +2445,7 @@ export default function PayrollManager() {
       setCommissionRows([]);
       setCommissionFileName("");
       setCommissionResult(null);
-      setMessage("Không đọc được file doanh số/hoa hồng.");
+      setMessage(error.message || "Không đọc được file doanh số/hoa hồng.");
     }
   };
 
@@ -3150,6 +3243,17 @@ export default function PayrollManager() {
               </button>
             )}
             {canEdit && (
+              <button
+                onClick={syncApprovedKpi}
+                disabled={payrollReadOnly || kpiSyncLoading || !rows.length || dirtyIds.size > 0}
+                title="Lấy điểm KPI đã được quản lý duyệt, sau đó tính lại thưởng và lương"
+                className="inline-flex items-center gap-2 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-sm font-semibold text-violet-800 hover:bg-violet-100 disabled:opacity-50"
+              >
+                {kpiSyncLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                Đồng bộ KPI
+              </button>
+            )}
+            {canEdit && (
               <button onClick={previewAttendanceSync} disabled={payrollReadOnly || attendanceSyncLoading || !rows.length} className="inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-50 disabled:opacity-50">
                 {attendanceSyncLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
                 Lấy chấm công
@@ -3323,6 +3427,7 @@ export default function PayrollManager() {
                         title={`Sap xep theo ${column.label}`}
                       >
                         <span className="truncate">{column.label}</span>
+                        {column.source === "kpi" ? <Lock className="h-3 w-3 shrink-0 text-violet-600" aria-label="Đồng bộ từ KPI đã duyệt" /> : null}
                         {column.required ? <span className="text-rose-500">*</span> : null}
                         <SortIcon className={`ml-auto h-3.5 w-3.5 shrink-0 ${isSorted ? "text-sky-700" : "text-slate-400"}`} />
                       </button>
@@ -3354,6 +3459,7 @@ export default function PayrollManager() {
                         <td
                           key={column.key}
                           style={{ left: isPinned ? ROW_INDEX_COLUMN_WIDTH : undefined }}
+                          title={column.source === "kpi" ? "Điểm được đồng bộ từ phiếu KPI đã duyệt; không nhập trực tiếp tại bảng lương." : undefined}
                           className={`border-b border-r p-0 ${isPinned ? "sticky z-10 bg-inherit shadow-[1px_0_0_0_rgb(226,232,240)]" : ""}`}
                         >
                           <CellInput
