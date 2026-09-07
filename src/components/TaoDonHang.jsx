@@ -4720,98 +4720,125 @@ function CreateOrderProgressPanel({ steps = [], error = "", isCreating }) {
   if (steps.length === 0) return null;
 
   const successCount = steps.filter((step) => step.status === "success").length;
+  const highlightedStep =
+    steps.find((step) => step.status === "error") ||
+    steps.find((step) => step.status === "loading") ||
+    [...steps].reverse().find((step) => step.status === "success") ||
+    steps[0];
+  const reachedStepIndex = Math.max(
+    steps.findIndex(
+      (step) => step.status === "loading" || step.status === "error",
+    ),
+    steps.reduce(
+      (lastIndex, step, index) =>
+        step.status === "success" ? index : lastIndex,
+      0,
+    ),
+  );
+  const progressLinePercent =
+    steps.length > 1 ? (reachedStepIndex / (steps.length - 1)) * 83.34 : 0;
 
   return (
     <div
       aria-live="polite"
-      className="overflow-hidden rounded-2xl border border-cyan-100 bg-gradient-to-br from-cyan-50 via-white to-sky-50 shadow-sm"
+      className="overflow-hidden rounded-2xl border border-cyan-100 bg-gradient-to-r from-cyan-50 via-white to-sky-50 shadow-sm"
     >
-      <div className="flex items-center justify-between gap-3 border-b border-cyan-100 px-4 py-3">
-        <div>
+      <div className="flex items-center justify-between gap-3 border-b border-cyan-100 px-4 py-2.5">
+        <div className="flex min-w-0 items-center gap-2.5">
           <div className="text-[11px] font-black uppercase tracking-[0.18em] text-cyan-700">
             Tiến trình tạo đơn
           </div>
-          <div className="mt-0.5 text-sm font-semibold text-slate-800">
+          <span className="hidden text-xs font-medium text-slate-500 sm:inline">
             {error
               ? "Có bước chưa hoàn tất"
               : isCreating
-                ? "Hệ thống đang xử lý theo thứ tự"
-                : "Tạo đơn hàng hoàn tất"}
-          </div>
+                ? "Đang xử lý"
+                : "Đã hoàn tất"}
+          </span>
         </div>
         <div className="rounded-full border border-cyan-200 bg-white px-3 py-1 text-xs font-bold text-cyan-800">
           {successCount}/{steps.length}
         </div>
       </div>
 
-      <div className="h-1.5 bg-cyan-100/70">
-        <div
-          className={`h-full transition-all duration-500 ${
-            error ? "bg-rose-500" : "bg-cyan-500"
-          }`}
-          style={{ width: `${(successCount / steps.length) * 100}%` }}
-        />
+      <div className="overflow-x-auto px-4 pb-2 pt-3">
+        <div className="relative min-w-[700px]">
+          <div className="absolute left-[8.33%] right-[8.33%] top-3.5 h-1 rounded-full bg-slate-200" />
+          <div
+            className={`absolute left-[8.33%] top-3.5 h-1 max-w-[83.34%] rounded-full transition-all duration-500 ${
+              error ? "bg-rose-500" : "bg-cyan-500"
+            }`}
+            style={{
+              width: `${progressLinePercent}%`,
+            }}
+          />
+
+          <div
+            className="relative grid"
+            style={{ gridTemplateColumns: `repeat(${steps.length}, minmax(0, 1fr))` }}
+          >
+            {steps.map((step, index) => {
+              const isLoading = step.status === "loading";
+              const isSuccess = step.status === "success";
+              const isError = step.status === "error";
+
+              return (
+                <div
+                  key={step.id}
+                  className="flex min-w-0 flex-col items-center px-1"
+                >
+                  <div
+                    className={`relative z-10 flex h-8 w-8 items-center justify-center rounded-full border-2 bg-white transition-colors ${
+                      isLoading
+                        ? "border-amber-400 bg-amber-50 text-amber-600 shadow-[0_0_0_4px_rgba(245,158,11,0.14)]"
+                        : isSuccess
+                          ? "border-emerald-500 bg-emerald-50 text-emerald-600"
+                          : isError
+                            ? "border-rose-500 bg-rose-50 text-rose-600"
+                            : "border-slate-300 text-slate-400"
+                    }`}
+                  >
+                    {isLoading ? (
+                      <LoaderCircle className="h-4 w-4 animate-spin" />
+                    ) : isSuccess ? (
+                      <CheckCircle2 className="h-4 w-4" />
+                    ) : isError ? (
+                      <XCircle className="h-4 w-4" />
+                    ) : (
+                      <span className="text-xs font-black">{index + 1}</span>
+                    )}
+                  </div>
+                  <div
+                    className={`mt-1.5 text-center text-[11px] font-bold leading-4 ${
+                      isError
+                        ? "text-rose-700"
+                        : isSuccess
+                          ? "text-emerald-700"
+                          : isLoading
+                            ? "text-amber-700"
+                            : "text-slate-500"
+                    }`}
+                  >
+                    {step.label}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
       </div>
 
-      <div className="space-y-1.5 p-3">
-        {steps.map((step, index) => {
-          const isLoading = step.status === "loading";
-          const isSuccess = step.status === "success";
-          const isError = step.status === "error";
-
-          return (
-            <div
-              key={step.id}
-              className={`flex gap-3 rounded-xl border px-3 py-2.5 transition-colors ${
-                isLoading
-                  ? "border-cyan-200 bg-white shadow-sm"
-                  : isSuccess
-                    ? "border-emerald-100 bg-emerald-50/70"
-                    : isError
-                      ? "border-rose-200 bg-rose-50"
-                      : "border-transparent bg-white/45"
-              }`}
-            >
-              <div className="mt-0.5 shrink-0">
-                {isLoading ? (
-                  <LoaderCircle className="h-5 w-5 animate-spin text-cyan-600" />
-                ) : isSuccess ? (
-                  <CheckCircle2 className="h-5 w-5 text-emerald-600" />
-                ) : isError ? (
-                  <XCircle className="h-5 w-5 text-rose-600" />
-                ) : (
-                  <Circle className="h-5 w-5 text-slate-300" />
-                )}
-              </div>
-              <div className="min-w-0 flex-1">
-                <div
-                  className={`text-sm font-bold ${
-                    isError
-                      ? "text-rose-800"
-                      : isSuccess
-                        ? "text-emerald-900"
-                        : "text-slate-800"
-                  }`}
-                >
-                  {index + 1}. {step.label}
-                </div>
-                <div
-                  className={`mt-0.5 text-xs leading-5 ${
-                    isError
-                      ? "text-rose-700"
-                      : isSuccess
-                        ? "text-emerald-700"
-                        : isLoading
-                          ? "font-medium text-cyan-700"
-                          : "text-slate-400"
-                  }`}
-                >
-                  {step.message}
-                </div>
-              </div>
-            </div>
-          );
-        })}
+      <div
+        className={`mx-4 mb-3 flex items-start gap-2 rounded-xl px-3 py-2 text-xs leading-5 ${
+          highlightedStep?.status === "error"
+            ? "bg-rose-50 text-rose-700"
+            : highlightedStep?.status === "success"
+              ? "bg-emerald-50 text-emerald-700"
+              : "bg-cyan-50 text-cyan-700"
+        }`}
+      >
+        <span className="shrink-0 font-bold">{highlightedStep?.label}:</span>
+        <span>{highlightedStep?.message}</span>
       </div>
     </div>
   );
@@ -7318,7 +7345,7 @@ export default function TaoDonHang() {
               <textarea
                 value={rawText}
                 onChange={(e) => setRawText(e.target.value)}
-                className="min-h-[420px] w-full rounded-3xl border border-slate-200 bg-slate-50 px-4 py-4 text-[15px] leading-7 text-slate-800 outline-none transition focus:border-cyan-300 focus:bg-white focus:ring-4 focus:ring-cyan-100"
+                className="min-h-[280px] w-full resize-y rounded-3xl border border-slate-200 bg-slate-50 px-4 py-4 text-[15px] leading-7 text-slate-800 outline-none transition sm:min-h-[300px] focus:border-cyan-300 focus:bg-white focus:ring-4 focus:ring-cyan-100"
                 placeholder="Nhập dữ liệu đơn hàng thô..."
                 spellCheck={false}
               />
@@ -7334,6 +7361,14 @@ export default function TaoDonHang() {
               >
                 {orderPreparationMessage}
               </div>
+
+              {createOrderProgress.length > 0 ? (
+                <CreateOrderProgressPanel
+                  steps={createOrderProgress}
+                  error={createOrderError}
+                  isCreating={isCreatingOrder}
+                />
+              ) : null}
 
               <div
                 className={`rounded-2xl border px-4 py-3 ${
@@ -8162,15 +8197,6 @@ export default function TaoDonHang() {
                 </div>
               </div>
 
-              {createOrderProgress.length > 0 ? (
-                <div className="mt-4">
-                  <CreateOrderProgressPanel
-                    steps={createOrderProgress}
-                    error={createOrderError}
-                    isCreating={isCreatingOrder}
-                  />
-                </div>
-              ) : null}
             </div>
           </div>
         </div>
