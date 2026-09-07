@@ -170,9 +170,22 @@ function getCustomerTypeOptions(retailerId) {
 }
 
 function parseMoney(value = "") {
-  const numeric = String(value).replace(/[^\d]/g, "").trim();
-  if (!numeric) return null;
-  return Number(numeric);
+  const text = String(value).trim().toLowerCase();
+  const usesThousandSuffix = /k\s*$/.test(text);
+  const numericText = text
+    .replace(/k\s*$/, "")
+    .replace(/[^\d.,]/g, "")
+    .trim();
+
+  if (!numericText) return null;
+
+  if (usesThousandSuffix) {
+    const numeric = Number(numericText.replace(",", "."));
+    return Number.isFinite(numeric) ? Math.round(numeric * 1000) : null;
+  }
+
+  const numeric = numericText.replace(/[^\d]/g, "");
+  return numeric ? Number(numeric) : null;
 }
 
 function normalizeLookupText(value = "") {
@@ -4659,6 +4672,38 @@ function parseRawOrder(rawText = "") {
       continue;
     }
 
+    const compactPricedItemMatch = normalizedLine.match(
+      /^(\d+)\s*[-–—]\s*([A-Za-z0-9._-]+)\s*\(\s*giá\s*([0-9.,]+\s*k?)\s*(?:₫)?(?:\s*\/\s*([^)]+))?\s*\)$/iu,
+    );
+
+    if (compactPricedItemMatch) {
+      result.items.push({
+        quantity: Number(compactPricedItemMatch[1] || 0),
+        productName: "",
+        sku: compactPricedItemMatch[2].trim(),
+        price: parseMoney(compactPricedItemMatch[3]),
+        unit: compactPricedItemMatch[4]?.trim() || "",
+        rawLine: line,
+      });
+      continue;
+    }
+
+    const compactParenthesizedItemMatch = normalizedLine.match(
+      /^(\d+)\s*\(\s*([A-Za-z0-9._-]+)\s*\)$/u,
+    );
+
+    if (compactParenthesizedItemMatch) {
+      result.items.push({
+        quantity: Number(compactParenthesizedItemMatch[1] || 0),
+        productName: "",
+        sku: compactParenthesizedItemMatch[2].trim(),
+        price: null,
+        unit: "",
+        rawLine: line,
+      });
+      continue;
+    }
+
     const compactItemMatch = normalizedLine.match(
       /^(\d+)\s*[-–—]\s*([A-Za-z0-9._-]+)$/u,
     );
@@ -4668,6 +4713,22 @@ function parseRawOrder(rawText = "") {
         quantity: Number(compactItemMatch[1] || 0),
         productName: "",
         sku: compactItemMatch[2].trim(),
+        price: null,
+        unit: "",
+        rawLine: line,
+      });
+      continue;
+    }
+
+    const reversedCompactItemMatch = normalizedLine.match(
+      /^([A-Za-z0-9._-]+)\s*[-–—]\s*(\d+)$/u,
+    );
+
+    if (reversedCompactItemMatch) {
+      result.items.push({
+        quantity: Number(reversedCompactItemMatch[2] || 0),
+        productName: "",
+        sku: reversedCompactItemMatch[1].trim(),
         price: null,
         unit: "",
         rawLine: line,
