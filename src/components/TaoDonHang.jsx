@@ -2739,6 +2739,23 @@ function extractGhnOrderCode(response = {}) {
   ).trim();
 }
 
+function extractVtpDeliveryCode(response = {}) {
+  const directCode =
+    response?.DeliveryCode ||
+    response?.deliveryCode ||
+    response?.Data?.DeliveryCode ||
+    response?.data?.DeliveryCode ||
+    response?.data?.data?.DeliveryCode ||
+    response?.ShipRequest?.DeliveryCode ||
+    response?.data?.ShipRequest?.DeliveryCode;
+  if (directCode) return String(directCode).trim();
+
+  const responseMessage = String(
+    response?.Message || response?.message || response?.data?.Message || "",
+  );
+  return responseMessage.match(/vận\s*đơn\s+([a-z0-9_-]+)/iu)?.[1] || "";
+}
+
 function buildInvoiceDeliveryPayload({
   invoicePayload,
   invoiceResponse,
@@ -4754,9 +4771,16 @@ function CreateOrderProgressPanel({ steps = [], error = "", isCreating }) {
   if (steps.length === 0) return null;
 
   const successCount = steps.filter((step) => step.status === "success").length;
+  const completedShippingStep =
+    successCount === steps.length
+      ? steps.find(
+          (step) => step.id === "shipping" && step.status === "success",
+        )
+      : null;
   const highlightedStep =
     steps.find((step) => step.status === "error") ||
     steps.find((step) => step.status === "loading") ||
+    completedShippingStep ||
     [...steps].reverse().find((step) => step.status === "success") ||
     steps[0];
   const reachedStepIndex = Math.max(
@@ -4809,7 +4833,9 @@ function CreateOrderProgressPanel({ steps = [], error = "", isCreating }) {
 
           <div
             className="relative grid"
-            style={{ gridTemplateColumns: `repeat(${steps.length}, minmax(0, 1fr))` }}
+            style={{
+              gridTemplateColumns: `repeat(${steps.length}, minmax(0, 1fr))`,
+            }}
           >
             {steps.map((step, index) => {
               const isLoading = step.status === "loading";
@@ -4872,7 +4898,7 @@ function CreateOrderProgressPanel({ steps = [], error = "", isCreating }) {
         }`}
       >
         <span className="shrink-0 font-bold">{highlightedStep?.label}:</span>
-        <span>{highlightedStep?.message}</span>
+        <span className="whitespace-pre-line">{highlightedStep?.message}</span>
       </div>
     </div>
   );
@@ -4922,6 +4948,7 @@ export default function TaoDonHang() {
   const [isCreatingOrder, setIsCreatingOrder] = useState(false);
   const [createOrderProgress, setCreateOrderProgress] = useState([]);
   const [createOrderError, setCreateOrderError] = useState("");
+  const [completedOrderNotice, setCompletedOrderNotice] = useState(null);
   const [promotionSelections, setPromotionSelections] = useState({});
   const [shippingQuotePreview, setShippingQuotePreview] = useState({
     status: "idle",
@@ -6313,6 +6340,7 @@ export default function TaoDonHang() {
     setPromotionSelections({});
     setCreateOrderProgress([]);
     setCreateOrderError("");
+    setCompletedOrderNotice(null);
   };
 
   const handleCopy = async () => {
@@ -6449,6 +6477,7 @@ export default function TaoDonHang() {
       })),
     );
     setCreateOrderError("");
+    setCompletedOrderNotice(null);
     setIsCreatingOrder(true);
     updateCreateOrderProgress(
       "customer",
@@ -6920,6 +6949,10 @@ export default function TaoDonHang() {
         ...invoicePayloadWithoutMetadata
       } = builtInvoicePayload;
       let invoicePayload = invoicePayloadWithoutMetadata;
+      let completedDeliveryCodes = [];
+      const completedDeliveryPartner = isViettelPost
+        ? "Viettel Post"
+        : "GHN";
 
       if (!isViettelPost) {
         updateCreateOrderProgress(
@@ -6964,6 +6997,7 @@ export default function TaoDonHang() {
             ghnCreatedOrderFees.push(createdOrderFee);
           }
         }
+        completedDeliveryCodes = ghnOrderCodes;
         const createdTotalFee =
           ghnCreatedOrderFees.length === ghnOrderPayloads.length
             ? ghnCreatedOrderFees.reduce((sum, fee) => sum + fee, 0)
@@ -6973,7 +7007,7 @@ export default function TaoDonHang() {
         updateCreateOrderProgress(
           "shipping",
           "success",
-          `Tạo vận đơn GHN thành công: ${ghnOrderCodes.join(", ")}. Phí chính thức: ${createdTotalFee.toLocaleString("vi-VN")}đ.`,
+          `Tạo vận đơn GHN thành công.\nMã vận đơn là: ${ghnOrderCodes.join(", ")}.`,
         );
 
         setShippingQuotePreview((current) => ({
@@ -7071,12 +7105,24 @@ export default function TaoDonHang() {
           deliveryPayload,
         );
         console.log("createInvoicesDelivery response", createDeliveryResponse);
+        const vtpDeliveryCode = extractVtpDeliveryCode(createDeliveryResponse);
+        completedDeliveryCodes = vtpDeliveryCode ? [vtpDeliveryCode] : [];
         updateCreateOrderProgress(
           "shipping",
           "success",
-          "Tạo vận đơn Viettel Post thành công.",
+          `Tạo vận đơn Viettel Post thành công.\nMã vận đơn là: ${vtpDeliveryCode || "Chưa nhận được mã từ Viettel Post"}.`,
         );
       }
+
+      setCompletedOrderNotice({
+        partner: completedDeliveryPartner,
+        deliveryCodes: completedDeliveryCodes,
+      });
+      setRawText("");
+      setAgencyTaxCode("");
+      setAgencyDescription("");
+      setPromotionSelections({});
+      setAddSaleToEmployeeInCharge(false);
     } catch (error) {
       console.error("create customer flow error:", error);
       const message = error?.message || "Không thể hoàn tất tạo đơn hàng.";
@@ -7178,512 +7224,570 @@ export default function TaoDonHang() {
           </div>
         </div>
 
+        {completedOrderNotice ? (
+          <div
+            role="status"
+            aria-live="assertive"
+            className="mb-4 flex flex-col gap-3 rounded-2xl border border-emerald-300 bg-emerald-50 px-4 py-3.5 shadow-sm sm:flex-row sm:items-center sm:justify-between"
+          >
+            <div className="flex min-w-0 items-start gap-3">
+              <span className="mt-0.5 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-white">
+                <CheckCircle2 className="h-5 w-5" />
+              </span>
+              <div className="min-w-0">
+                <div className="font-black text-emerald-900">
+                  Đơn hàng đã được tạo thành công
+                </div>
+                <div className="mt-0.5 text-sm text-emerald-800">
+                  {completedOrderNotice.partner} — Mã vận đơn: {" "}
+                  <span className="font-mono font-bold">
+                    {completedOrderNotice.deliveryCodes.length > 0
+                      ? completedOrderNotice.deliveryCodes.join(", ")
+                      : "Chưa nhận được mã vận đơn"}
+                  </span>
+                </div>
+                <div className="mt-1 text-xs leading-5 text-emerald-700">
+                  Thông tin đơn vừa tạo đã được xóa khỏi ô nhập để tránh tạo
+                  trùng. Kết quả vẫn được giữ trong thanh tiến trình bên dưới.
+                </div>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setCompletedOrderNotice(null)}
+              className="shrink-0 rounded-xl border border-emerald-300 bg-white px-4 py-2 text-sm font-bold text-emerald-800 transition hover:bg-emerald-100"
+            >
+              Đã hiểu
+            </button>
+          </div>
+        ) : null}
+
         <fieldset
           disabled={isCreatingOrder}
           aria-busy={isCreatingOrder}
           className="contents"
         >
           <div className="grid flex-1 gap-4 lg:grid-cols-[minmax(0,1fr)_420px]">
-          <div className="rounded-3xl border border-slate-200 bg-white shadow-sm">
-            <div className="border-b border-slate-100 px-5 py-4">
-              <h2 className="text-base font-bold text-slate-900 md:text-xl">
-                Nhập dữ liệu
-              </h2>
-              {/* <p className="mt-1 text-xs text-slate-500 md:text-sm">
+            <div className="rounded-3xl border border-slate-200 bg-white shadow-sm">
+              <div className="border-b border-slate-100 px-5 py-4">
+                <h2 className="text-base font-bold text-slate-900 md:text-xl">
+                  Nhập dữ liệu
+                </h2>
+                {/* <p className="mt-1 text-xs text-slate-500 md:text-sm">
                 Dán toàn bộ nội dung đơn hàng vào đây theo kiểu một cục.
               </p> */}
-            </div>
-
-            <div className="space-y-4 px-5 py-5">
-              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                <label className="block space-y-2">
-                  <span className="text-xs font-semibold text-slate-600">
-                    Công ty
-                  </span>
-                  <select
-                    value={selectedRetailerId}
-                    onChange={(event) => {
-                      setSelectedRetailerId(event.target.value);
-                      setPreparedInvoicePayload(null);
-                      setCreateOrderProgress([]);
-                      setCreateOrderError("");
-                    }}
-                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100"
-                  >
-                    {RETAILERS.map((item) => (
-                      <option key={item.id} value={item.id}>
-                        {item.label}
-                      </option>
-                    ))}
-                  </select>
-                  <span className="block text-[11px] text-slate-400">
-                    Mặc định theo team {user?.teamId || "chưa xác định"}
-                  </span>
-                </label>
-                <label className="block space-y-2">
-                  <span className="text-xs font-semibold text-slate-600">
-                    Đối tác giao hàng
-                  </span>
-                  <select
-                    value={selectedShippingPartner}
-                    onChange={(e) => setSelectedShippingPartner(e.target.value)}
-                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100"
-                  >
-                    {SHIPPING_PARTNERS.map((item) => (
-                      <option key={item.id} value={item.id}>
-                        {item.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-
-                <label className="block space-y-2">
-                  <span className="text-xs font-semibold text-slate-600">
-                    {selectedRetailerId.toLowerCase() === "abctv"
-                      ? "Nhóm khách hàng"
-                      : "Đại lý / khách lẻ"}
-                  </span>
-                  <select
-                    value={customerType}
-                    onChange={(e) => setCustomerType(e.target.value)}
-                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100"
-                  >
-                    {customerTypeOptions.map((item) => (
-                      <option key={item.value} value={item.value}>
-                        {item.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-
-                <label className="block space-y-2">
-                  <span className="text-xs font-semibold text-slate-600">
-                    Nhân viên tạo đơn
-                  </span>
-                  <select
-                    value={selectedKiotUserKey}
-                    onChange={handleKiotUserChange}
-                    disabled={kiotUsersLoading || kiotUserOptions.length === 0}
-                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
-                  >
-                    <option value="">
-                      {kiotUsersLoading
-                        ? "Đang tải nhân viên..."
-                        : "Chọn nhân viên"}
-                    </option>
-                    {kiotUserOptions.map((option) => (
-                      <option key={option.key} value={option.key}>
-                        {option.displayName}
-                        {option.kiotUser?.Id ? ` (#${option.kiotUser.Id})` : ""}
-                      </option>
-                    ))}
-                  </select>
-                  <span
-                    className={`block text-[11px] ${
-                      kiotUsersError || (!kiotUsersLoading && !matchedKiotUser)
-                        ? "text-rose-600"
-                        : "text-slate-500"
-                    }`}
-                  >
-                    {kiotUsersError ||
-                      (matchedKiotUser
-                        ? `Đang dùng user Kiot: ${getKiotUserDisplayName(matchedKiotUser)} - ${kiotUserOptions.length} nhân viên`
-                        : "Chọn nhân viên từ danh sách user Kiot.")}
-                  </span>
-                </label>
               </div>
 
-              <label className="flex cursor-pointer items-start justify-between gap-4 rounded-2xl border border-cyan-200 bg-cyan-50/70 px-4 py-3">
-                <div>
-                  <div className="text-sm font-bold text-cyan-900">
-                    Thêm sale vào nhân viên phụ trách
-                  </div>
-                  <div className="mt-1 text-xs leading-5 text-cyan-700">
-                    {matchedKiotUser
-                      ? `Bật để thêm ${getKiotUserDisplayName(matchedKiotUser)} vào danh sách phụ trách của khách hàng hiện có.`
-                      : "Chọn nhân viên tạo đơn trước khi bật tùy chọn này."}
-                    {!orderPreparation.customerRecord
-                      ? " Khách hàng mới vẫn tự động gán người tạo làm người phụ trách."
-                      : " Danh sách nhân viên cũ vẫn được giữ nguyên."}
-                  </div>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={addSaleToEmployeeInCharge}
-                  disabled={!matchedKiotUser}
-                  onChange={(event) =>
-                    setAddSaleToEmployeeInCharge(event.target.checked)
-                  }
-                  className="mt-1 h-5 w-5 shrink-0 cursor-pointer rounded border-cyan-300 text-cyan-600 focus:ring-cyan-300 disabled:cursor-not-allowed disabled:opacity-50"
-                />
-              </label>
+              <div className="space-y-4 px-5 py-5">
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                  <label className="block space-y-2">
+                    <span className="text-xs font-semibold text-slate-600">
+                      Công ty
+                    </span>
+                    <select
+                      value={selectedRetailerId}
+                      onChange={(event) => {
+                        setSelectedRetailerId(event.target.value);
+                        setPreparedInvoicePayload(null);
+                        setCreateOrderProgress([]);
+                        setCreateOrderError("");
+                      }}
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100"
+                    >
+                      {RETAILERS.map((item) => (
+                        <option key={item.id} value={item.id}>
+                          {item.label}
+                        </option>
+                      ))}
+                    </select>
+                    <span className="block text-[11px] text-slate-400">
+                      Mặc định theo team {user?.teamId || "chưa xác định"}
+                    </span>
+                  </label>
+                  <label className="block space-y-2">
+                    <span className="text-xs font-semibold text-slate-600">
+                      Đối tác giao hàng
+                    </span>
+                    <select
+                      value={selectedShippingPartner}
+                      onChange={(e) =>
+                        setSelectedShippingPartner(e.target.value)
+                      }
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100"
+                    >
+                      {SHIPPING_PARTNERS.map((item) => (
+                        <option key={item.id} value={item.id}>
+                          {item.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
 
-              {isAbcRetailer ? (
-                <label className="flex cursor-pointer items-start justify-between gap-4 rounded-2xl border border-amber-200 bg-amber-50/70 px-4 py-3">
+                  <label className="block space-y-2">
+                    <span className="text-xs font-semibold text-slate-600">
+                      {selectedRetailerId.toLowerCase() === "abctv"
+                        ? "Nhóm khách hàng"
+                        : "Đại lý / khách lẻ"}
+                    </span>
+                    <select
+                      value={customerType}
+                      onChange={(e) => setCustomerType(e.target.value)}
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100"
+                    >
+                      {customerTypeOptions.map((item) => (
+                        <option key={item.value} value={item.value}>
+                          {item.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="block space-y-2">
+                    <span className="text-xs font-semibold text-slate-600">
+                      Nhân viên tạo đơn
+                    </span>
+                    <select
+                      value={selectedKiotUserKey}
+                      onChange={handleKiotUserChange}
+                      disabled={
+                        kiotUsersLoading || kiotUserOptions.length === 0
+                      }
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
+                    >
+                      <option value="">
+                        {kiotUsersLoading
+                          ? "Đang tải nhân viên..."
+                          : "Chọn nhân viên"}
+                      </option>
+                      {kiotUserOptions.map((option) => (
+                        <option key={option.key} value={option.key}>
+                          {option.displayName}
+                          {option.kiotUser?.Id
+                            ? ` (#${option.kiotUser.Id})`
+                            : ""}
+                        </option>
+                      ))}
+                    </select>
+                    <span
+                      className={`block text-[11px] ${
+                        kiotUsersError ||
+                        (!kiotUsersLoading && !matchedKiotUser)
+                          ? "text-rose-600"
+                          : "text-slate-500"
+                      }`}
+                    >
+                      {kiotUsersError ||
+                        (matchedKiotUser
+                          ? `Đang dùng user Kiot: ${getKiotUserDisplayName(matchedKiotUser)} - ${kiotUserOptions.length} nhân viên`
+                          : "Chọn nhân viên từ danh sách user Kiot.")}
+                    </span>
+                  </label>
+                </div>
+
+                <label className="flex cursor-pointer items-start justify-between gap-4 rounded-2xl border border-cyan-200 bg-cyan-50/70 px-4 py-3">
                   <div>
-                    <div className="text-sm font-bold text-amber-900">
-                      Khách hàng là đại lý
+                    <div className="text-sm font-bold text-cyan-900">
+                      Thêm sale vào nhân viên phụ trách
                     </div>
-                    <div className="mt-1 text-xs leading-5 text-amber-700">
-                      Bật để nhập MST và dùng thông tin đại lý. Nhóm khách hàng
-                      vẫn giữ nguyên là {pickCustomerGroupName(customerType)}.
+                    <div className="mt-1 text-xs leading-5 text-cyan-700">
+                      {matchedKiotUser
+                        ? `Bật để thêm ${getKiotUserDisplayName(matchedKiotUser)} vào danh sách phụ trách của khách hàng hiện có.`
+                        : "Chọn nhân viên tạo đơn trước khi bật tùy chọn này."}
+                      {!orderPreparation.customerRecord
+                        ? " Khách hàng mới vẫn tự động gán người tạo làm người phụ trách."
+                        : " Danh sách nhân viên cũ vẫn được giữ nguyên."}
                     </div>
                   </div>
                   <input
                     type="checkbox"
-                    checked={isAbcAgency}
-                    onChange={(event) => {
-                      setIsAbcAgency(event.target.checked);
-                      if (!event.target.checked) setAgencyTaxCode("");
-                    }}
-                    className="mt-1 h-5 w-5 shrink-0 cursor-pointer rounded border-amber-300 text-amber-600 focus:ring-amber-300"
+                    checked={addSaleToEmployeeInCharge}
+                    disabled={!matchedKiotUser}
+                    onChange={(event) =>
+                      setAddSaleToEmployeeInCharge(event.target.checked)
+                    }
+                    className="mt-1 h-5 w-5 shrink-0 cursor-pointer rounded border-cyan-300 text-cyan-600 focus:ring-cyan-300 disabled:cursor-not-allowed disabled:opacity-50"
                   />
                 </label>
-              ) : null}
 
-              <label className="flex cursor-pointer items-start justify-between gap-4 rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-3">
-                <div>
-                  <div className="text-sm font-bold text-slate-800">
-                    Cập nhật khách hàng khi đổi tỉnh/thành
-                  </div>
-                  <div className="mt-1 text-xs leading-5 text-slate-500">
-                    Khi bật, hệ thống sẽ cập nhật địa chỉ E-Invoice, ID hành
-                    chính và mã khách hàng. Khi tắt, thông tin hiện tại trên
-                    KiotViet được giữ nguyên.
-                  </div>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={updateCustomerWhenProvinceChanges}
-                  onChange={(event) =>
-                    setUpdateCustomerWhenProvinceChanges(event.target.checked)
-                  }
-                  className="mt-1 h-5 w-5 shrink-0 cursor-pointer rounded border-slate-300 text-cyan-600 focus:ring-cyan-300"
-                />
-              </label>
+                {isAbcRetailer ? (
+                  <label className="flex cursor-pointer items-start justify-between gap-4 rounded-2xl border border-amber-200 bg-amber-50/70 px-4 py-3">
+                    <div>
+                      <div className="text-sm font-bold text-amber-900">
+                        Khách hàng là đại lý
+                      </div>
+                      <div className="mt-1 text-xs leading-5 text-amber-700">
+                        Bật để nhập MST và dùng thông tin đại lý. Nhóm khách
+                        hàng vẫn giữ nguyên là{" "}
+                        {pickCustomerGroupName(customerType)}.
+                      </div>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={isAbcAgency}
+                      onChange={(event) => {
+                        setIsAbcAgency(event.target.checked);
+                        if (!event.target.checked) setAgencyTaxCode("");
+                      }}
+                      className="mt-1 h-5 w-5 shrink-0 cursor-pointer rounded border-amber-300 text-amber-600 focus:ring-amber-300"
+                    />
+                  </label>
+                ) : null}
 
-              {selectedShippingPartner === "GHN" ? (
-                <label className="block space-y-2">
-                  <span className="text-xs font-semibold text-slate-600">
-                    Ghi chú bắt buộc GHN
-                  </span>
-                  <select
-                    value={ghnRequiredNote}
-                    onChange={(event) => setGhnRequiredNote(event.target.value)}
-                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100"
-                  >
-                    {GHN_REQUIRED_NOTE_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label} ({option.value})
-                      </option>
-                    ))}
-                  </select>
-                  <span className="block text-[11px] text-slate-500">
-                    {
-                      GHN_REQUIRED_NOTE_OPTIONS.find(
-                        (option) => option.value === ghnRequiredNote,
-                      )?.description
+                <label className="flex cursor-pointer items-start justify-between gap-4 rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-3">
+                  <div>
+                    <div className="text-sm font-bold text-slate-800">
+                      Cập nhật khách hàng khi đổi tỉnh/thành
+                    </div>
+                    <div className="mt-1 text-xs leading-5 text-slate-500">
+                      Khi bật, hệ thống sẽ cập nhật địa chỉ E-Invoice, ID hành
+                      chính và mã khách hàng. Khi tắt, thông tin hiện tại trên
+                      KiotViet được giữ nguyên.
+                    </div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={updateCustomerWhenProvinceChanges}
+                    onChange={(event) =>
+                      setUpdateCustomerWhenProvinceChanges(event.target.checked)
                     }
-                  </span>
+                    className="mt-1 h-5 w-5 shrink-0 cursor-pointer rounded border-slate-300 text-cyan-600 focus:ring-cyan-300"
+                  />
                 </label>
-              ) : null}
 
-              {effectiveCustomerType === "dai_ly" ? (
-                <div className="space-y-3">
+                {selectedShippingPartner === "GHN" ? (
                   <label className="block space-y-2">
                     <span className="text-xs font-semibold text-slate-600">
-                      Mã số thuế đại lý
+                      Ghi chú bắt buộc GHN
                     </span>
-                    <input
-                      type="text"
-                      value={agencyTaxCode}
-                      onChange={(event) => setAgencyTaxCode(event.target.value)}
-                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none transition focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100"
-                      placeholder="Nhập TaxCode..."
-                      autoComplete="off"
-                    />
+                    <select
+                      value={ghnRequiredNote}
+                      onChange={(event) =>
+                        setGhnRequiredNote(event.target.value)
+                      }
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100"
+                    >
+                      {GHN_REQUIRED_NOTE_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label} ({option.value})
+                        </option>
+                      ))}
+                    </select>
                     <span className="block text-[11px] text-slate-500">
-                      Nhập MST để kiểm tra thông tin pháp lý của đại lý.
+                      {
+                        GHN_REQUIRED_NOTE_OPTIONS.find(
+                          (option) => option.value === ghnRequiredNote,
+                        )?.description
+                      }
                     </span>
                   </label>
+                ) : null}
 
-                  {String(agencyTaxCode || "").trim() ? (
-                    <div
-                      className={`rounded-2xl border px-4 py-3 ${
-                        agencyTaxInfo.status === "success"
-                          ? "border-emerald-200 bg-emerald-50/80"
-                          : agencyTaxInfo.status === "error"
-                            ? "border-rose-200 bg-rose-50/80"
-                            : "border-cyan-200 bg-cyan-50/70"
-                      }`}
-                      aria-live="polite"
-                    >
-                      <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">
-                        Thông tin đại lý theo MST
-                      </div>
+                {effectiveCustomerType === "dai_ly" ? (
+                  <div className="space-y-3">
+                    <label className="block space-y-2">
+                      <span className="text-xs font-semibold text-slate-600">
+                        Mã số thuế đại lý
+                      </span>
+                      <input
+                        type="text"
+                        value={agencyTaxCode}
+                        onChange={(event) =>
+                          setAgencyTaxCode(event.target.value)
+                        }
+                        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none transition focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100"
+                        placeholder="Nhập TaxCode..."
+                        autoComplete="off"
+                      />
+                      <span className="block text-[11px] text-slate-500">
+                        Nhập MST để kiểm tra thông tin pháp lý của đại lý.
+                      </span>
+                    </label>
 
-                      {agencyTaxInfo.status === "success" ? (
-                        <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                          <FieldCard
-                            label="Mã số thuế"
-                            value={
-                              agencyTaxInfo.data?.id || agencyTaxInfo.taxCode
-                            }
-                          />
-                          <FieldCard
-                            label="Trạng thái"
-                            value={agencyTaxInfo.data?.status}
-                          />
-                          <div className="sm:col-span-2">
+                    {String(agencyTaxCode || "").trim() ? (
+                      <div
+                        className={`rounded-2xl border px-4 py-3 ${
+                          agencyTaxInfo.status === "success"
+                            ? "border-emerald-200 bg-emerald-50/80"
+                            : agencyTaxInfo.status === "error"
+                              ? "border-rose-200 bg-rose-50/80"
+                              : "border-cyan-200 bg-cyan-50/70"
+                        }`}
+                        aria-live="polite"
+                      >
+                        <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">
+                          Thông tin đại lý theo MST
+                        </div>
+
+                        {agencyTaxInfo.status === "success" ? (
+                          <div className="mt-3 grid gap-2 sm:grid-cols-2">
                             <FieldCard
-                              label="Tên pháp lý"
-                              value={agencyTaxInfo.data?.name}
+                              label="Mã số thuế"
+                              value={
+                                agencyTaxInfo.data?.id || agencyTaxInfo.taxCode
+                              }
                             />
-                          </div>
-                          <div className="sm:col-span-2">
                             <FieldCard
-                              label="Địa chỉ đăng ký"
-                              value={agencyTaxInfo.data?.address}
+                              label="Trạng thái"
+                              value={agencyTaxInfo.data?.status}
                             />
-                          </div>
-                          {agencyTaxCodeWillUpdate ? (
-                            <div className="sm:col-span-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs leading-5 text-amber-800">
-                              MST này khác MST hiện tại của khách hàng hoặc
-                              khách chưa có MST. Khi tạo đơn, hệ thống sẽ cập
-                              nhật tên pháp lý, MST, địa chỉ và ID hành chính
-                              theo thông tin phía trên.
+                            <div className="sm:col-span-2">
+                              <FieldCard
+                                label="Tên pháp lý"
+                                value={agencyTaxInfo.data?.name}
+                              />
                             </div>
-                          ) : null}
-                        </div>
-                      ) : agencyTaxInfo.status === "error" ? (
-                        <div className="mt-2 flex items-start gap-2 text-sm text-rose-700">
-                          <XCircle className="mt-0.5 h-4 w-4 shrink-0" />
-                          <span>{agencyTaxInfo.error}</span>
-                        </div>
-                      ) : (
-                        <div className="mt-2 flex items-center gap-2 text-sm text-cyan-700">
-                          <LoaderCircle className="h-4 w-4 animate-spin" />
-                          <span>
-                            {agencyTaxInfo.status === "waiting"
-                              ? "Đang chờ nhập xong mã số thuế..."
-                              : "Đang kiểm tra thông tin đại lý..."}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
+                            <div className="sm:col-span-2">
+                              <FieldCard
+                                label="Địa chỉ đăng ký"
+                                value={agencyTaxInfo.data?.address}
+                              />
+                            </div>
+                            {agencyTaxCodeWillUpdate ? (
+                              <div className="sm:col-span-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs leading-5 text-amber-800">
+                                MST này khác MST hiện tại của khách hàng hoặc
+                                khách chưa có MST. Khi tạo đơn, hệ thống sẽ cập
+                                nhật tên pháp lý, MST, địa chỉ và ID hành chính
+                                theo thông tin phía trên.
+                              </div>
+                            ) : null}
+                          </div>
+                        ) : agencyTaxInfo.status === "error" ? (
+                          <div className="mt-2 flex items-start gap-2 text-sm text-rose-700">
+                            <XCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                            <span>{agencyTaxInfo.error}</span>
+                          </div>
+                        ) : (
+                          <div className="mt-2 flex items-center gap-2 text-sm text-cyan-700">
+                            <LoaderCircle className="h-4 w-4 animate-spin" />
+                            <span>
+                              {agencyTaxInfo.status === "waiting"
+                                ? "Đang chờ nhập xong mã số thuế..."
+                                : "Đang kiểm tra thông tin đại lý..."}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
 
-              <label className="block space-y-2">
-                <span className="text-xs font-semibold text-slate-600">
-                  Ghi chú hóa đơn
-                </span>
-                <textarea
-                  value={agencyDescription}
-                  onChange={(event) => setAgencyDescription(event.target.value)}
-                  rows={3}
-                  className="w-full resize-y rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
-                  placeholder="Nhập ghi chú cho hóa đơn..."
-                />
-              </label>
+                <label className="block space-y-2">
+                  <span className="text-xs font-semibold text-slate-600">
+                    Ghi chú hóa đơn
+                  </span>
+                  <textarea
+                    value={agencyDescription}
+                    onChange={(event) =>
+                      setAgencyDescription(event.target.value)
+                    }
+                    rows={3}
+                    className="w-full resize-y rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
+                    placeholder="Nhập ghi chú cho hóa đơn..."
+                  />
+                </label>
 
               <textarea
                 value={rawText}
-                onChange={(e) => setRawText(e.target.value)}
-                className="min-h-[280px] w-full resize-y rounded-3xl border border-slate-200 bg-slate-50 px-4 py-4 text-[15px] leading-7 text-slate-800 outline-none transition sm:min-h-[300px] focus:border-cyan-300 focus:bg-white focus:ring-4 focus:ring-cyan-100"
-                placeholder="Nhập dữ liệu đơn hàng thô..."
-                spellCheck={false}
-              />
-
-              <div
-                className={`text-xs font-medium ${
-                  orderPreparation.status === "error"
-                    ? "text-rose-600"
-                    : isOrderPreparationReady
-                      ? "text-emerald-700"
-                      : "text-slate-500"
-                }`}
-              >
-                {orderPreparationMessage}
-              </div>
-
-              {createOrderProgress.length > 0 ? (
-                <CreateOrderProgressPanel
-                  steps={createOrderProgress}
-                  error={createOrderError}
-                  isCreating={isCreatingOrder}
+                onChange={(e) => {
+                  setRawText(e.target.value);
+                  if (completedOrderNotice) setCompletedOrderNotice(null);
+                }}
+                  className="min-h-[280px] w-full resize-y rounded-3xl border border-slate-200 bg-slate-50 px-4 py-4 text-[15px] leading-7 text-slate-800 outline-none transition sm:min-h-[300px] focus:border-cyan-300 focus:bg-white focus:ring-4 focus:ring-cyan-100"
+                  placeholder="Nhập dữ liệu đơn hàng thô..."
+                  spellCheck={false}
                 />
-              ) : null}
 
-              <div
-                className={`rounded-2xl border px-4 py-3 ${
-                  shippingQuotePreview.status === "success"
-                    ? "border-emerald-200 bg-emerald-50"
-                    : shippingQuotePreview.status === "error"
-                      ? "border-rose-200 bg-rose-50"
-                      : "border-sky-200 bg-sky-50"
-                }`}
-                aria-live="polite"
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-sky-700">
-                      Phí vận chuyển dự kiến
-                    </div>
-                    <div className="mt-1 text-xs text-slate-500">
-                      {shippingLabel}
-                    </div>
-                  </div>
-                  {shippingQuotePreview.status === "loading" ? (
-                    <LoaderCircle className="h-5 w-5 animate-spin text-sky-600" />
-                  ) : null}
+                <div
+                  className={`text-xs font-medium ${
+                    orderPreparation.status === "error"
+                      ? "text-rose-600"
+                      : isOrderPreparationReady
+                        ? "text-emerald-700"
+                        : "text-slate-500"
+                  }`}
+                >
+                  {orderPreparationMessage}
                 </div>
 
-                <div className="mt-2">
-                  {shippingQuotePreview.status === "success" ? (
-                    <>
-                      <div className="mb-2 flex items-center justify-between gap-3 rounded-xl border border-white/80 bg-white/70 px-3 py-2">
-                        <span className="text-sm font-semibold text-slate-600">
-                          Tổng tiền sản phẩm
-                        </span>
-                        <span className="text-base font-black text-slate-900">
-                          {Number(
-                            shippingQuotePreview.productTotal || 0,
-                          ).toLocaleString("vi-VN")}
-                          đ
-                        </span>
+                {createOrderProgress.length > 0 ? (
+                  <CreateOrderProgressPanel
+                    steps={createOrderProgress}
+                    error={createOrderError}
+                    isCreating={isCreatingOrder}
+                  />
+                ) : null}
+
+                <div
+                  className={`rounded-2xl border px-4 py-3 ${
+                    shippingQuotePreview.status === "success"
+                      ? "border-emerald-200 bg-emerald-50"
+                      : shippingQuotePreview.status === "error"
+                        ? "border-rose-200 bg-rose-50"
+                        : "border-sky-200 bg-sky-50"
+                  }`}
+                  aria-live="polite"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-sky-700">
+                        Phí vận chuyển dự kiến
                       </div>
-                      <div className="mb-1 text-xs font-semibold uppercase tracking-[0.12em] text-emerald-700/80">
-                        Tổng phí vận chuyển
+                      <div className="mt-1 text-xs text-slate-500">
+                        {shippingLabel}
                       </div>
-                      <div className="text-xl font-black text-emerald-700">
-                        {Number(shippingQuotePreview.fee || 0).toLocaleString(
-                          "vi-VN",
-                        )}
-                        đ
-                      </div>
-                      {shippingQuotePreview.serviceCode ||
-                      shippingQuotePreview.serviceName ? (
-                        <div className="mt-1 text-xs text-emerald-700/80">
-                          Dịch vụ: {shippingQuotePreview.serviceName || "VTPFW"}
-                          {shippingQuotePreview.serviceCode
-                            ? ` (${shippingQuotePreview.serviceCode})`
-                            : ""}
+                    </div>
+                    {shippingQuotePreview.status === "loading" ? (
+                      <LoaderCircle className="h-5 w-5 animate-spin text-sky-600" />
+                    ) : null}
+                  </div>
+
+                  <div className="mt-2">
+                    {shippingQuotePreview.status === "success" ? (
+                      <>
+                        <div className="mb-2 flex items-center justify-between gap-3 rounded-xl border border-white/80 bg-white/70 px-3 py-2">
+                          <span className="text-sm font-semibold text-slate-600">
+                            Tổng tiền sản phẩm
+                          </span>
+                          <span className="text-base font-black text-slate-900">
+                            {Number(
+                              shippingQuotePreview.productTotal || 0,
+                            ).toLocaleString("vi-VN")}
+                            đ
+                          </span>
                         </div>
-                      ) : null}
-                    </>
-                  ) : shippingQuotePreview.status === "error" ? (
-                    <div className="text-sm font-medium text-rose-700">
-                      {shippingQuotePreview.error}
-                    </div>
-                  ) : shippingQuotePreview.status === "loading" ? (
-                    <div className="text-sm font-medium text-sky-700">
-                      Đang kiểm tra phí sau khi áp dụng sản phẩm và khuyến
-                      mãi...
-                    </div>
-                  ) : (
-                    <div className="text-sm text-slate-500">
-                      Hoàn tất kiểm tra sản phẩm và lựa chọn khuyến mãi để xem
-                      phí.
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {hasDiscontinuedProducts ? (
-                <div className="flex items-start gap-2 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-                  <XCircle className="mt-0.5 h-5 w-5 shrink-0" />
-                  <div>
-                    <div className="font-bold">
-                      Không thể tạo đơn với sản phẩm ngừng kinh doanh
-                    </div>
-                    <div className="mt-1 leading-5">
-                      Các sản phẩm sau đã ngừng kinh doanh:{" "}
-                      <span className="font-mono font-bold">
-                        {discontinuedProducts
-                          .map((product) => getProductDisplayCode(product))
-                          .filter(Boolean)
-                          .join(", ") || "Chưa xác định"}
-                      </span>
-                      . Vui lòng bỏ sản phẩm này hoặc chọn sản phẩm thay thế.
-                    </div>
+                        <div className="mb-1 text-xs font-semibold uppercase tracking-[0.12em] text-emerald-700/80">
+                          Tổng phí vận chuyển
+                        </div>
+                        <div className="text-xl font-black text-emerald-700">
+                          {Number(shippingQuotePreview.fee || 0).toLocaleString(
+                            "vi-VN",
+                          )}
+                          đ
+                        </div>
+                        {shippingQuotePreview.serviceCode ||
+                        shippingQuotePreview.serviceName ? (
+                          <div className="mt-1 text-xs text-emerald-700/80">
+                            Dịch vụ:{" "}
+                            {shippingQuotePreview.serviceName || "VTPFW"}
+                            {shippingQuotePreview.serviceCode
+                              ? ` (${shippingQuotePreview.serviceCode})`
+                              : ""}
+                          </div>
+                        ) : null}
+                      </>
+                    ) : shippingQuotePreview.status === "error" ? (
+                      <div className="text-sm font-medium text-rose-700">
+                        {shippingQuotePreview.error}
+                      </div>
+                    ) : shippingQuotePreview.status === "loading" ? (
+                      <div className="text-sm font-medium text-sky-700">
+                        Đang kiểm tra phí sau khi áp dụng sản phẩm và khuyến
+                        mãi...
+                      </div>
+                    ) : (
+                      <div className="text-sm text-slate-500">
+                        Hoàn tất kiểm tra sản phẩm và lựa chọn khuyến mãi để xem
+                        phí.
+                      </div>
+                    )}
                   </div>
                 </div>
-              ) : null}
 
-              {hasMissingAgencyPrices ? (
-                <div className="flex items-start gap-2 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-                  <XCircle className="mt-0.5 h-5 w-5 shrink-0" />
-                  <div>
-                    <div className="font-bold">Không thể tạo đơn đại lý</div>
-                    <div className="mt-1 leading-5">
-                      Các sản phẩm sau không có Bảng giá chung:{" "}
-                      <span className="font-mono font-bold">
-                        {agencyProductsWithoutPrice
-                          .map((item) => String(item?.sku || "").trim())
-                          .filter(Boolean)
-                          .join(", ") || "Chưa xác định"}
-                      </span>
-                      . Vui lòng bổ sung bảng giá dành cho đại lý trước khi tạo
-                      đơn.
+                {hasDiscontinuedProducts ? (
+                  <div className="flex items-start gap-2 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                    <XCircle className="mt-0.5 h-5 w-5 shrink-0" />
+                    <div>
+                      <div className="font-bold">
+                        Không thể tạo đơn với sản phẩm ngừng kinh doanh
+                      </div>
+                      <div className="mt-1 leading-5">
+                        Các sản phẩm sau đã ngừng kinh doanh:{" "}
+                        <span className="font-mono font-bold">
+                          {discontinuedProducts
+                            .map((product) => getProductDisplayCode(product))
+                            .filter(Boolean)
+                            .join(", ") || "Chưa xác định"}
+                        </span>
+                        . Vui lòng bỏ sản phẩm này hoặc chọn sản phẩm thay thế.
+                      </div>
                     </div>
                   </div>
-                </div>
-              ) : null}
+                ) : null}
 
-              {hasZeroRetailPrices ? (
-                <div className="flex items-start gap-2 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-                  <XCircle className="mt-0.5 h-5 w-5 shrink-0" />
-                  <div>
-                    <div className="font-bold">Không thể tạo đơn khách lẻ</div>
-                    <div className="mt-1 leading-5">
-                      Các sản phẩm sau đang có giá khách lẻ bằng 0đ:{" "}
-                      <span className="font-mono font-bold">
-                        {retailProductsWithZeroPrice
-                          .map((item) => String(item?.sku || "").trim())
-                          .filter(Boolean)
-                          .join(", ") || "Chưa xác định"}
-                      </span>
-                      . Vui lòng cập nhật Bảng giá Khách lẻ trước khi tạo đơn.
+                {hasMissingAgencyPrices ? (
+                  <div className="flex items-start gap-2 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                    <XCircle className="mt-0.5 h-5 w-5 shrink-0" />
+                    <div>
+                      <div className="font-bold">Không thể tạo đơn đại lý</div>
+                      <div className="mt-1 leading-5">
+                        Các sản phẩm sau không có Bảng giá chung:{" "}
+                        <span className="font-mono font-bold">
+                          {agencyProductsWithoutPrice
+                            .map((item) => String(item?.sku || "").trim())
+                            .filter(Boolean)
+                            .join(", ") || "Chưa xác định"}
+                        </span>
+                        . Vui lòng bổ sung bảng giá dành cho đại lý trước khi
+                        tạo đơn.
+                      </div>
                     </div>
                   </div>
+                ) : null}
+
+                {hasZeroRetailPrices ? (
+                  <div className="flex items-start gap-2 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                    <XCircle className="mt-0.5 h-5 w-5 shrink-0" />
+                    <div>
+                      <div className="font-bold">
+                        Không thể tạo đơn khách lẻ
+                      </div>
+                      <div className="mt-1 leading-5">
+                        Các sản phẩm sau đang có giá khách lẻ bằng 0đ:{" "}
+                        <span className="font-mono font-bold">
+                          {retailProductsWithZeroPrice
+                            .map((item) => String(item?.sku || "").trim())
+                            .filter(Boolean)
+                            .join(", ") || "Chưa xác định"}
+                        </span>
+                        . Vui lòng cập nhật Bảng giá Khách lẻ trước khi tạo đơn.
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={handleCopy}
+                    className="inline-flex items-center gap-2 rounded-xl border border-cyan-200 bg-cyan-50 px-4 py-2.5 text-sm font-semibold text-cyan-800 hover:bg-cyan-100"
+                  >
+                    <Copy className="h-4 w-4" />
+                    {copied ? "Đã sao chép" : "Sao chép nội dung"}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleReset}
+                    className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    Xóa và điền lại mẫu
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleCreateOrder}
+                    disabled={isCreateOrderDisabled}
+                    className="inline-flex items-center gap-2 rounded-xl bg-cyan-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-cyan-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+                  >
+                    {isCreatingOrder ? "Đang tạo đơn..." : "Tạo đơn hàng"}
+                  </button>
                 </div>
-              ) : null}
-
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={handleCopy}
-                  className="inline-flex items-center gap-2 rounded-xl border border-cyan-200 bg-cyan-50 px-4 py-2.5 text-sm font-semibold text-cyan-800 hover:bg-cyan-100"
-                >
-                  <Copy className="h-4 w-4" />
-                  {copied ? "Đã sao chép" : "Sao chép nội dung"}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handleReset}
-                  className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-                >
-                  <Trash2 className="h-4 w-4" />
-                  Xóa và điền lại mẫu
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handleCreateOrder}
-                  disabled={isCreateOrderDisabled}
-                  className="inline-flex items-center gap-2 rounded-xl bg-cyan-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-cyan-700 disabled:cursor-not-allowed disabled:bg-slate-300"
-                >
-                  {isCreatingOrder ? "Đang tạo đơn..." : "Tạo đơn hàng"}
-                </button>
               </div>
             </div>
-          </div>
 
-          <div className="space-y-4">
-            {/* <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="space-y-4">
+              {/* <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
               <div className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-700">
                 Tóm tắt
               </div>
@@ -7727,155 +7831,156 @@ export default function TaoDonHang() {
               </div>
             </div> */}
 
-            <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-              <div className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-700">
-                Thông tin đã tách
-              </div>
-
-              <div className="mt-4 grid gap-3">
-                <FieldCard label="Khách hàng" value={parsed.customerName} />
-                <FieldCard label="SĐT" value={parsed.phoneNumber} />
-                <FieldCard label="Địa chỉ cũ" value={parsed.oldAddress} />
-                <FieldCard
-                  label={newAddressPreviewLabel}
-                  value={newAddressPreview}
-                />
-                {/* <FieldCard label="NVC" value={parsed.nvc} /> */}
-              </div>
-
-              <div
-                className={`mt-4 rounded-2xl border px-4 py-3 ${
-                  isOrderPreparationReady && existingCustomerPreview
-                    ? "border-emerald-200 bg-emerald-50/80"
-                    : isOrderPreparationReady
-                      ? "border-sky-200 bg-sky-50/80"
-                      : orderPreparation.status === "error"
-                        ? "border-rose-200 bg-rose-50/80"
-                        : "border-slate-200 bg-slate-50/80"
-                }`}
-                aria-live="polite"
-              >
-                <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">
-                  Kiểm tra thông tin khách hàng
+              <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+                <div className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-700">
+                  Thông tin đã tách
                 </div>
 
-                {!String(parsed.phoneNumber || "").trim() ? (
-                  <div className="mt-2 text-sm text-slate-600">
-                    Nhập số điện thoại để kiểm tra khách hàng trên KiotViet.
+                <div className="mt-4 grid gap-3">
+                  <FieldCard label="Khách hàng" value={parsed.customerName} />
+                  <FieldCard label="SĐT" value={parsed.phoneNumber} />
+                  <FieldCard label="Địa chỉ cũ" value={parsed.oldAddress} />
+                  <FieldCard
+                    label={newAddressPreviewLabel}
+                    value={newAddressPreview}
+                  />
+                  {/* <FieldCard label="NVC" value={parsed.nvc} /> */}
+                </div>
+
+                <div
+                  className={`mt-4 rounded-2xl border px-4 py-3 ${
+                    isOrderPreparationReady && existingCustomerPreview
+                      ? "border-emerald-200 bg-emerald-50/80"
+                      : isOrderPreparationReady
+                        ? "border-sky-200 bg-sky-50/80"
+                        : orderPreparation.status === "error"
+                          ? "border-rose-200 bg-rose-50/80"
+                          : "border-slate-200 bg-slate-50/80"
+                  }`}
+                  aria-live="polite"
+                >
+                  <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">
+                    Kiểm tra thông tin khách hàng
                   </div>
-                ) : !isOrderPreparationReady ? (
-                  <div className="mt-2 flex items-center gap-2 text-sm text-slate-600">
-                    {orderPreparation.status !== "error" ? (
-                      <LoaderCircle className="h-4 w-4 animate-spin text-cyan-600" />
-                    ) : (
-                      <XCircle className="h-4 w-4 text-rose-600" />
-                    )}
-                    <span>
-                      {orderPreparation.status === "error"
-                        ? `Không kiểm tra được khách hàng: ${orderPreparation.error}`
-                        : "Đang kiểm tra khách hàng..."}
-                    </span>
-                  </div>
-                ) : existingCustomerPreview ? (
-                  <div className="mt-2">
-                    <div className="flex items-center gap-2 text-sm font-bold text-emerald-800">
-                      <CheckCircle2 className="h-4 w-4" />
-                      Khách hàng đã tồn tại
+
+                  {!String(parsed.phoneNumber || "").trim() ? (
+                    <div className="mt-2 text-sm text-slate-600">
+                      Nhập số điện thoại để kiểm tra khách hàng trên KiotViet.
                     </div>
-                    <div className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
-                      <FieldCard
-                        label="Mã khách hàng hiện tại"
-                        value={existingCustomerPreview.code || "Chưa có mã"}
-                      />
-                      <FieldCard
-                        label="Tên khách hàng hiện tại"
-                        value={existingCustomerPreview.name || "Chưa có tên"}
-                      />
-                      <div className="sm:col-span-2">
-                        <FieldCard
-                          label="Nhóm khách hàng"
-                          value={existingCustomerPreview.groupName}
-                        />
-                      </div>
-                      <div className="sm:col-span-2">
-                        <FieldCard
-                          label={
-                            addSaleToEmployeeInCharge
-                              ? "Nhân viên phụ trách sau khi tạo đơn"
-                              : "Nhân viên phụ trách hiện tại"
-                          }
-                          value={employeeInChargePreview.join(", ")}
-                          placeholder="Chưa có nhân viên phụ trách"
-                        />
-                      </div>
-                      <div className="sm:col-span-2">
-                        <FieldCard
-                          label="Địa chỉ hiện tại"
-                          value={
-                            existingCustomerPreview.address || "Chưa có địa chỉ"
-                          }
-                        />
-                      </div>
+                  ) : !isOrderPreparationReady ? (
+                    <div className="mt-2 flex items-center gap-2 text-sm text-slate-600">
+                      {orderPreparation.status !== "error" ? (
+                        <LoaderCircle className="h-4 w-4 animate-spin text-cyan-600" />
+                      ) : (
+                        <XCircle className="h-4 w-4 text-rose-600" />
+                      )}
+                      <span>
+                        {orderPreparation.status === "error"
+                          ? `Không kiểm tra được khách hàng: ${orderPreparation.error}`
+                          : "Đang kiểm tra khách hàng..."}
+                      </span>
                     </div>
-                    {customerTypeWillChange ? (
-                      <div className="mt-3 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-800">
-                        <Circle className="mt-0.5 h-4 w-4 shrink-0 fill-amber-400 text-amber-500" />
-                        <div>
-                          Khách hiện tại là{" "}
-                          <b>{getCustomerTypeLabel(existingCustomerType)}</b>,
-                          nhưng đơn đang chọn{" "}
-                          <b>{getCustomerTypeLabel(selectedCustomerType)}</b>.
-                          Khi tạo đơn, hệ thống sẽ yêu cầu xác nhận trước khi
-                          chuyển loại khách hàng.
+                  ) : existingCustomerPreview ? (
+                    <div className="mt-2">
+                      <div className="flex items-center gap-2 text-sm font-bold text-emerald-800">
+                        <CheckCircle2 className="h-4 w-4" />
+                        Khách hàng đã tồn tại
+                      </div>
+                      <div className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
+                        <FieldCard
+                          label="Mã khách hàng hiện tại"
+                          value={existingCustomerPreview.code || "Chưa có mã"}
+                        />
+                        <FieldCard
+                          label="Tên khách hàng hiện tại"
+                          value={existingCustomerPreview.name || "Chưa có tên"}
+                        />
+                        <div className="sm:col-span-2">
+                          <FieldCard
+                            label="Nhóm khách hàng"
+                            value={existingCustomerPreview.groupName}
+                          />
+                        </div>
+                        <div className="sm:col-span-2">
+                          <FieldCard
+                            label={
+                              addSaleToEmployeeInCharge
+                                ? "Nhân viên phụ trách sau khi tạo đơn"
+                                : "Nhân viên phụ trách hiện tại"
+                            }
+                            value={employeeInChargePreview.join(", ")}
+                            placeholder="Chưa có nhân viên phụ trách"
+                          />
+                        </div>
+                        <div className="sm:col-span-2">
+                          <FieldCard
+                            label="Địa chỉ hiện tại"
+                            value={
+                              existingCustomerPreview.address ||
+                              "Chưa có địa chỉ"
+                            }
+                          />
                         </div>
                       </div>
-                    ) : null}
-                  </div>
-                ) : (
-                  <div className="mt-2">
-                    <div className="flex items-center gap-2 text-sm font-bold text-sky-800">
-                      <Sparkles className="h-4 w-4" />
-                      Khách hàng chưa tồn tại, có thể tạo mới khách hàng này
+                      {customerTypeWillChange ? (
+                        <div className="mt-3 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-800">
+                          <Circle className="mt-0.5 h-4 w-4 shrink-0 fill-amber-400 text-amber-500" />
+                          <div>
+                            Khách hiện tại là{" "}
+                            <b>{getCustomerTypeLabel(existingCustomerType)}</b>,
+                            nhưng đơn đang chọn{" "}
+                            <b>{getCustomerTypeLabel(selectedCustomerType)}</b>.
+                            Khi tạo đơn, hệ thống sẽ yêu cầu xác nhận trước khi
+                            chuyển loại khách hàng.
+                          </div>
+                        </div>
+                      ) : null}
                     </div>
-                    <div className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
-                      <FieldCard
-                        label="Mã khách hàng dự kiến"
-                        value={estimatedCustomerPreview.code}
-                      />
-                      <FieldCard
-                        label="Tên khách hàng dự kiến"
-                        value={estimatedCustomerPreview.name}
-                      />
-                      <FieldCard
-                        label="SĐT dự kiến"
-                        value={estimatedCustomerPreview.phoneNumber}
-                      />
-                      <FieldCard
-                        label="Nhóm khách hàng dự kiến"
-                        value={estimatedCustomerGroupName}
-                      />
-                      <div className="sm:col-span-2">
-                        <FieldCard
-                          label="Nhân viên phụ trách dự kiến"
-                          value={employeeInChargePreview.join(", ")}
-                          placeholder="Chưa chọn nhân viên phụ trách"
-                        />
+                  ) : (
+                    <div className="mt-2">
+                      <div className="flex items-center gap-2 text-sm font-bold text-sky-800">
+                        <Sparkles className="h-4 w-4" />
+                        Khách hàng chưa tồn tại, có thể tạo mới khách hàng này
                       </div>
-                      <div className="sm:col-span-2">
+                      <div className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
                         <FieldCard
-                          label="Địa chỉ dự kiến"
-                          value={
-                            estimatedCustomerPreview.address ||
-                            "Chưa có địa chỉ"
-                          }
+                          label="Mã khách hàng dự kiến"
+                          value={estimatedCustomerPreview.code}
                         />
+                        <FieldCard
+                          label="Tên khách hàng dự kiến"
+                          value={estimatedCustomerPreview.name}
+                        />
+                        <FieldCard
+                          label="SĐT dự kiến"
+                          value={estimatedCustomerPreview.phoneNumber}
+                        />
+                        <FieldCard
+                          label="Nhóm khách hàng dự kiến"
+                          value={estimatedCustomerGroupName}
+                        />
+                        <div className="sm:col-span-2">
+                          <FieldCard
+                            label="Nhân viên phụ trách dự kiến"
+                            value={employeeInChargePreview.join(", ")}
+                            placeholder="Chưa chọn nhân viên phụ trách"
+                          />
+                        </div>
+                        <div className="sm:col-span-2">
+                          <FieldCard
+                            label="Địa chỉ dự kiến"
+                            value={
+                              estimatedCustomerPreview.address ||
+                              "Chưa có địa chỉ"
+                            }
+                          />
+                        </div>
                       </div>
                     </div>
-                  </div>
-                )}
-              </div>
+                  )}
+                </div>
 
-              {/* <div className="mt-4 rounded-2xl border border-cyan-100 bg-cyan-50/60 px-4 py-3">
+                {/* <div className="mt-4 rounded-2xl border border-cyan-100 bg-cyan-50/60 px-4 py-3">
                 <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-cyan-700">
                   Thông tin người dùng Kiot
                 </div>
@@ -7911,7 +8016,7 @@ export default function TaoDonHang() {
                 </div>
               </div> */}
 
-              {/* <div className="mt-4 rounded-2xl border border-amber-100 bg-amber-50/70 px-4 py-3">
+                {/* <div className="mt-4 rounded-2xl border border-amber-100 bg-amber-50/70 px-4 py-3">
                 <div className="flex items-center justify-between gap-3">
                   <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-amber-700">
                     Payload hóa đơn
@@ -7932,437 +8037,450 @@ export default function TaoDonHang() {
                 )}
               </div> */}
 
-              <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-3">
-                <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">
-                  Dòng sản phẩm
-                </div>
-                <div className="mt-2 space-y-3">
-                  {parsed.items.length > 0 ? (
-                    productLineDisplayGroups.map((productGroup) => (
-                      <div
-                        key={productGroup.key}
-                        className={`rounded-2xl border p-3 ${
-                          productGroup.isPromotionGroup
-                            ? "border-emerald-200 bg-emerald-50/60"
-                            : "border-slate-200 bg-white/60"
-                        }`}
-                      >
-                        <div className="flex flex-wrap items-start justify-between gap-2">
-                          <div className="min-w-0">
+                <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-3">
+                  <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">
+                    Dòng sản phẩm
+                  </div>
+                  <div className="mt-2 space-y-3">
+                    {parsed.items.length > 0 ? (
+                      productLineDisplayGroups.map((productGroup) => (
+                        <div
+                          key={productGroup.key}
+                          className={`rounded-2xl border p-3 ${
+                            productGroup.isPromotionGroup
+                              ? "border-emerald-200 bg-emerald-50/60"
+                              : "border-slate-200 bg-white/60"
+                          }`}
+                        >
+                          <div className="flex flex-wrap items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <div
+                                className={`text-[10px] font-bold uppercase tracking-[0.16em] ${
+                                  productGroup.isPromotionGroup
+                                    ? "text-emerald-700"
+                                    : "text-slate-500"
+                                }`}
+                              >
+                                {productGroup.isPromotionGroup
+                                  ? "Chương trình khuyến mãi"
+                                  : "Nhóm sản phẩm"}
+                              </div>
+                              <div className="mt-1 text-sm font-bold text-slate-900">
+                                {productGroup.label}
+                              </div>
+                              {productGroup.code ? (
+                                <div className="mt-0.5 text-xs text-slate-500">
+                                  Mã chương trình: {productGroup.code}
+                                </div>
+                              ) : null}
+                            </div>
                             <div
-                              className={`text-[10px] font-bold uppercase tracking-[0.16em] ${
+                              className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-bold ${
                                 productGroup.isPromotionGroup
-                                  ? "text-emerald-700"
-                                  : "text-slate-500"
+                                  ? "bg-white text-emerald-700"
+                                  : "bg-slate-100 text-slate-600"
                               }`}
                             >
-                              {productGroup.isPromotionGroup
-                                ? "Chương trình khuyến mãi"
-                                : "Nhóm sản phẩm"}
+                              {productGroup.items.length} sản phẩm
                             </div>
-                            <div className="mt-1 text-sm font-bold text-slate-900">
-                              {productGroup.label}
-                            </div>
-                            {productGroup.code ? (
-                              <div className="mt-0.5 text-xs text-slate-500">
-                                Mã chương trình: {productGroup.code}
-                              </div>
-                            ) : null}
                           </div>
-                          <div
-                            className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-bold ${
-                              productGroup.isPromotionGroup
-                                ? "bg-white text-emerald-700"
-                                : "bg-slate-100 text-slate-600"
-                            }`}
-                          >
-                            {productGroup.items.length} sản phẩm
-                          </div>
-                        </div>
 
-                        <div className="mt-3 space-y-2">
-                          {productGroup.items.map(({ item, index }) => {
-                            const productCode = String(item.sku || "").trim();
-                            const product =
-                              orderPreparation.productMap.get(productCode);
-                            const displayProductName = product
-                              ? getProductDisplayName(product)
-                              : "";
-                            const displayProductCode = product
-                              ? getProductDisplayCode(product) || productCode
-                              : productCode;
-                            const displayProductUnit =
-                              product?.unit || "Chưa có";
-                            const displayProductPrice = product
-                              ? getProductUnitPrice(
+                          <div className="mt-3 space-y-2">
+                            {productGroup.items.map(({ item, index }) => {
+                              const productCode = String(item.sku || "").trim();
+                              const product =
+                                orderPreparation.productMap.get(productCode);
+                              const displayProductName = product
+                                ? getProductDisplayName(product)
+                                : "";
+                              const displayProductCode = product
+                                ? getProductDisplayCode(product) || productCode
+                                : productCode;
+                              const displayProductUnit =
+                                product?.unit || "Chưa có";
+                              const displayProductPrice = product
+                                ? getProductUnitPrice(
+                                    product,
+                                    item,
+                                    pricingCustomerType,
+                                  )
+                                : null;
+                              const displayProductWeight = product
+                                ? getProductWeightFromProduct(product)
+                                : null;
+                              const productCampaigns =
+                                orderPreparation.productCampaignMap.get(
+                                  productCode,
+                                ) || [];
+                              const campaignSelections =
+                                promotionSelections[productCode] || {};
+                              const isPromotionProduct =
+                                isProductCoveredBySelectedPromotion({
+                                  productCode,
                                   product,
-                                  item,
-                                  pricingCustomerType,
-                                )
-                              : null;
-                            const displayProductWeight = product
-                              ? getProductWeightFromProduct(product)
-                              : null;
-                            const productCampaigns =
-                              orderPreparation.productCampaignMap.get(
-                                productCode,
-                              ) || [];
-                            const campaignSelections =
-                              promotionSelections[productCode] || {};
-                            const isPromotionProduct =
-                              isProductCoveredBySelectedPromotion({
-                                productCode,
-                                product,
-                                promotionSelections,
-                                productCampaignMap:
-                                  orderPreparation.productCampaignMap,
-                              });
+                                  promotionSelections,
+                                  productCampaignMap:
+                                    orderPreparation.productCampaignMap,
+                                });
 
-                            return (
-                              <div
-                                key={`${item.sku}-${index}`}
-                                className="rounded-2xl border border-white bg-white px-3 py-3 shadow-sm"
-                              >
-                                {product ? (
-                                  <>
-                                    <div className="text-sm font-semibold text-slate-900">
-                                      {item.quantity} x {displayProductName}
-                                    </div>
-                                    <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500">
-                                      <span>SKU: {displayProductCode}</span>
-                                      <span>Đơn vị: {displayProductUnit}</span>
-                                      <span>
-                                        Giá:{" "}
-                                        {typeof displayProductPrice === "number"
-                                          ? displayProductPrice.toLocaleString(
-                                              "vi-VN",
-                                            )
-                                          : "Chưa có"}
-                                      </span>
-                                      {displayProductWeight != null ? (
+                              return (
+                                <div
+                                  key={`${item.sku}-${index}`}
+                                  className="rounded-2xl border border-white bg-white px-3 py-3 shadow-sm"
+                                >
+                                  {product ? (
+                                    <>
+                                      <div className="text-sm font-semibold text-slate-900">
+                                        {item.quantity} x {displayProductName}
+                                      </div>
+                                      <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500">
+                                        <span>SKU: {displayProductCode}</span>
                                         <span>
-                                          Trọng lượng:{" "}
-                                          {displayProductWeight.toLocaleString(
-                                            "vi-VN",
-                                          )}
-                                          g
+                                          Đơn vị: {displayProductUnit}
                                         </span>
-                                      ) : null}
+                                        <span>
+                                          Giá:{" "}
+                                          {typeof displayProductPrice ===
+                                          "number"
+                                            ? displayProductPrice.toLocaleString(
+                                                "vi-VN",
+                                              )
+                                            : "Chưa có"}
+                                        </span>
+                                        {displayProductWeight != null ? (
+                                          <span>
+                                            Trọng lượng:{" "}
+                                            {displayProductWeight.toLocaleString(
+                                              "vi-VN",
+                                            )}
+                                            g
+                                          </span>
+                                        ) : null}
+                                      </div>
+                                    </>
+                                  ) : orderPreparation.status !== "ready" ? (
+                                    <div className="text-xs font-medium text-slate-500">
+                                      Đang kiểm tra sản phẩm mã{" "}
+                                      <span className="font-mono font-bold text-slate-700">
+                                        {productCode || "trống"}
+                                      </span>
+                                      ...
                                     </div>
-                                  </>
-                                ) : orderPreparation.status !== "ready" ? (
-                                  <div className="text-xs font-medium text-slate-500">
-                                    Đang kiểm tra sản phẩm mã{" "}
-                                    <span className="font-mono font-bold text-slate-700">
-                                      {productCode || "trống"}
-                                    </span>
-                                    ...
-                                  </div>
-                                ) : null}
+                                  ) : null}
 
-                                {orderPreparation.status === "ready" ? (
-                                  !product ? (
-                                    <div className="mt-3 flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-xs text-rose-700">
-                                      <XCircle className="mt-0.5 h-4 w-4 shrink-0" />
-                                      <div>
-                                        <div className="font-bold">
-                                          Không tìm thấy sản phẩm
-                                        </div>
-                                        <div className="mt-0.5 leading-5">
-                                          Không có sản phẩm nào khớp với mã{" "}
-                                          <span className="font-mono font-bold">
-                                            {productCode || "trống"}
-                                          </span>{" "}
-                                          trên KiotViet.
-                                        </div>
-                                      </div>
-                                    </div>
-                                  ) : isProductDiscontinued(product) ? (
-                                    <div className="mt-3 flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-xs text-rose-700">
-                                      <XCircle className="mt-0.5 h-4 w-4 shrink-0" />
-                                      <div>
-                                        <div className="font-bold">
-                                          Sản phẩm đã ngừng kinh doanh
-                                        </div>
-                                        <div className="mt-0.5 leading-5">
-                                          Sản phẩm mã{" "}
-                                          <span className="font-mono font-bold">
-                                            {displayProductCode || productCode}
-                                          </span>{" "}
-                                          không thể được thêm vào đơn hàng.
-                                        </div>
-                                      </div>
-                                    </div>
-                                  ) : pricingCustomerType === "dai_ly" &&
-                                    !isPromotionProduct &&
-                                    !hasAgencyPrice(product, item) ? (
-                                    <div className="mt-3 flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-xs text-rose-700">
-                                      <XCircle className="mt-0.5 h-4 w-4 shrink-0" />
-                                      <div>
-                                        <div className="font-bold">
-                                          Không có bảng giá dành cho đại lý
-                                        </div>
-                                        <div className="mt-0.5 leading-5">
-                                          Sản phẩm mã{" "}
-                                          <span className="font-mono font-bold">
-                                            {displayProductCode || productCode}
-                                          </span>{" "}
-                                          chưa có giá trong Bảng giá chung.
-                                          Không thể tạo đơn đại lý với sản phẩm
-                                          này.
-                                        </div>
-                                      </div>
-                                    </div>
-                                  ) : pricingCustomerType === "khach_le" &&
-                                    !isPromotionProduct &&
-                                    !hasValidRetailPrice(product, item) ? (
-                                    <div className="mt-3 flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-xs text-rose-700">
-                                      <XCircle className="mt-0.5 h-4 w-4 shrink-0" />
-                                      <div>
-                                        <div className="font-bold">
-                                          Sản phẩm đang có giá khách lẻ bằng 0đ
-                                        </div>
-                                        <div className="mt-0.5 leading-5">
-                                          Sản phẩm mã{" "}
-                                          <span className="font-mono font-bold">
-                                            {displayProductCode || productCode}
-                                          </span>{" "}
-                                          chưa có giá hợp lệ trong Bảng giá
-                                          Khách lẻ nên không thể tạo đơn.
-                                        </div>
-                                      </div>
-                                    </div>
-                                  ) : promotionDisplayGroups.length === 0 &&
-                                    productCampaigns.length > 0 ? (
-                                    <div className="mt-3 space-y-2 rounded-xl border border-emerald-200 bg-emerald-50/80 px-3 py-2.5">
-                                      <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-emerald-700">
-                                        Chọn 1 trong {productCampaigns.length}{" "}
-                                        chương trình khuyến mãi
-                                      </div>
-                                      <label className="flex cursor-pointer items-center gap-2.5 rounded-xl border border-emerald-100 bg-white px-3 py-2 text-sm font-medium text-slate-600">
-                                        <input
-                                          type="radio"
-                                          name={`promotion-${productCode}-${index}`}
-                                          checked={
-                                            Object.keys(campaignSelections)
-                                              .length === 0
-                                          }
-                                          onChange={() =>
-                                            handlePromotionClear(productCode)
-                                          }
-                                          className="h-4 w-4 accent-emerald-600"
-                                        />
-                                        Không áp dụng khuyến mãi
-                                      </label>
-                                      {productCampaigns.map((campaign) => {
-                                        const campaignId = String(campaign.Id);
-                                        const selection =
-                                          campaignSelections[campaignId];
-                                        const details =
-                                          getPromotionSelectionDetails({
-                                            item,
-                                            product,
-                                            campaign,
-                                            selection,
-                                            parsedItems: parsed.items,
-                                            productMap:
-                                              orderPreparation.productMap,
-                                            productCampaignMap:
-                                              orderPreparation.productCampaignMap,
-                                          });
-                                        const receivedProductIds =
-                                          getPromotionReceivedProductIds(
-                                            details.promotion,
-                                          );
-                                        const isSelected = Boolean(selection);
-
-                                        return (
-                                          <div
-                                            key={campaign.Id || campaign.Code}
-                                            className={`rounded-xl border px-3 py-2.5 ${
-                                              isSelected
-                                                ? "border-emerald-300 bg-white"
-                                                : "border-emerald-100 bg-emerald-50/40"
-                                            }`}
-                                          >
-                                            <label className="flex cursor-pointer items-start gap-2.5">
-                                              <input
-                                                type="radio"
-                                                name={`promotion-${productCode}-${index}`}
-                                                checked={isSelected}
-                                                disabled={
-                                                  details.applicationCount < 1
-                                                }
-                                                onChange={(event) =>
-                                                  handlePromotionCampaignToggle(
-                                                    productCode,
-                                                    campaignId,
-                                                    item,
-                                                    event.target.checked,
-                                                  )
-                                                }
-                                                className="mt-1 h-4 w-4 accent-emerald-600"
-                                              />
-                                              <div className="min-w-0 flex-1">
-                                                <div className="text-sm font-semibold leading-5 text-emerald-950">
-                                                  {campaign.Name ||
-                                                    campaign.Code}
-                                                </div>
-                                                <div className="mt-1 text-xs text-emerald-800/80">
-                                                  {[
-                                                    campaign.Code,
-                                                    formatPromotionRule(
-                                                      campaign,
-                                                      product,
-                                                    ),
-                                                    details.promotionType ===
-                                                      6 &&
-                                                    details.qualifyingItems
-                                                      .length > 1
-                                                      ? `Cộng dồn ${details.purchasedQuantity}/${details.prerequisiteQuantity} từ ${details.qualifyingItems.length} sản phẩm`
-                                                      : "",
-                                                    details.applicationCount < 1
-                                                      ? "Chưa đủ số lượng"
-                                                      : "",
-                                                  ]
-                                                    .filter(Boolean)
-                                                    .join(" · ")}
-                                                </div>
-                                              </div>
-                                            </label>
-
-                                            {isSelected &&
-                                            details.promotionType === 6 ? (
-                                              <div className="mt-3 space-y-2 border-t border-emerald-100 pt-2">
-                                                <div className="text-xs font-semibold text-emerald-900">
-                                                  Chọn sản phẩm tặng: đã chọn{" "}
-                                                  {details.selectedGiftQuantity}
-                                                  /
-                                                  {details.expectedGiftQuantity}
-                                                </div>
-                                                {receivedProductIds.map(
-                                                  (productId) => {
-                                                    const receivedProduct =
-                                                      orderPreparation.promotionProductMap.get(
-                                                        productId,
-                                                      );
-                                                    const receivedProductDiscontinued =
-                                                      isProductDiscontinued(
-                                                        receivedProduct,
-                                                      );
-                                                    const quantity = Number(
-                                                      selection
-                                                        ?.giftQuantities?.[
-                                                        productId
-                                                      ] || 0,
-                                                    );
-
-                                                    return (
-                                                      <label
-                                                        key={productId}
-                                                        className={`flex items-start gap-2 rounded-xl border px-2.5 py-2 ${
-                                                          receivedProductDiscontinued
-                                                            ? "border-red-200 bg-red-50"
-                                                            : "border-emerald-100 bg-white"
-                                                        }`}
-                                                      >
-                                                        <div className="min-w-0 flex-1">
-                                                          <div className="break-words text-xs font-semibold leading-4 text-slate-800">
-                                                            {receivedProduct
-                                                              ? getProductDisplayName(
-                                                                  receivedProduct,
-                                                                )
-                                                              : `Sản phẩm #${productId}`}
-                                                          </div>
-                                                          <div className="text-[11px] text-slate-500">
-                                                            {receivedProduct
-                                                              ? getProductDisplayCode(
-                                                                  receivedProduct,
-                                                                )
-                                                              : "Không tải được thông tin"}
-                                                          </div>
-                                                          {receivedProductDiscontinued ? (
-                                                            <div className="mt-0.5 text-[11px] font-semibold text-red-600">
-                                                              Sản phẩm đã ngừng
-                                                              kinh doanh
-                                                            </div>
-                                                          ) : null}
-                                                        </div>
-                                                        <input
-                                                          type="number"
-                                                          min="0"
-                                                          step="1"
-                                                          value={quantity}
-                                                          disabled={
-                                                            !receivedProduct ||
-                                                            receivedProductDiscontinued
-                                                          }
-                                                          onChange={(event) =>
-                                                            handlePromotionGiftQuantityChange(
-                                                              productCode,
-                                                              campaignId,
-                                                              productId,
-                                                              event.target
-                                                                .value,
-                                                            )
-                                                          }
-                                                          className="w-12 shrink-0 rounded-lg border border-slate-200 px-1 py-1.5 text-center text-sm outline-none focus:border-emerald-300"
-                                                        />
-                                                      </label>
-                                                    );
-                                                  },
-                                                )}
-                                                <div
-                                                  className={`text-xs font-medium ${
-                                                    details.isComplete
-                                                      ? "text-emerald-700"
-                                                      : "text-amber-700"
-                                                  }`}
-                                                >
-                                                  {details.isComplete
-                                                    ? "Đã đủ quà, chương trình sẽ được thêm vào payload."
-                                                    : "Phân bổ đủ số lượng quà để áp chương trình."}
-                                                </div>
-                                              </div>
-                                            ) : isSelected &&
-                                              details.promotionType === 8 ? (
-                                              <div className="mt-3 rounded-xl border border-emerald-100 bg-white px-3 py-2 text-xs font-medium text-emerald-800">
-                                                Giá khuyến mãi sẽ được áp vào
-                                                dòng sản phẩm khi tạo đơn.
-                                              </div>
-                                            ) : isSelected ? (
-                                              <div className="mt-3 text-xs text-amber-700">
-                                                Loại khuyến mãi này chưa được hỗ
-                                                trợ tự động.
-                                              </div>
-                                            ) : null}
+                                  {orderPreparation.status === "ready" ? (
+                                    !product ? (
+                                      <div className="mt-3 flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-xs text-rose-700">
+                                        <XCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                                        <div>
+                                          <div className="font-bold">
+                                            Không tìm thấy sản phẩm
                                           </div>
-                                        );
-                                      })}
-                                    </div>
-                                  ) : null
-                                ) : null}
-                              </div>
-                            );
-                          })}
+                                          <div className="mt-0.5 leading-5">
+                                            Không có sản phẩm nào khớp với mã{" "}
+                                            <span className="font-mono font-bold">
+                                              {productCode || "trống"}
+                                            </span>{" "}
+                                            trên KiotViet.
+                                          </div>
+                                        </div>
+                                      </div>
+                                    ) : isProductDiscontinued(product) ? (
+                                      <div className="mt-3 flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-xs text-rose-700">
+                                        <XCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                                        <div>
+                                          <div className="font-bold">
+                                            Sản phẩm đã ngừng kinh doanh
+                                          </div>
+                                          <div className="mt-0.5 leading-5">
+                                            Sản phẩm mã{" "}
+                                            <span className="font-mono font-bold">
+                                              {displayProductCode ||
+                                                productCode}
+                                            </span>{" "}
+                                            không thể được thêm vào đơn hàng.
+                                          </div>
+                                        </div>
+                                      </div>
+                                    ) : pricingCustomerType === "dai_ly" &&
+                                      !isPromotionProduct &&
+                                      !hasAgencyPrice(product, item) ? (
+                                      <div className="mt-3 flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-xs text-rose-700">
+                                        <XCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                                        <div>
+                                          <div className="font-bold">
+                                            Không có bảng giá dành cho đại lý
+                                          </div>
+                                          <div className="mt-0.5 leading-5">
+                                            Sản phẩm mã{" "}
+                                            <span className="font-mono font-bold">
+                                              {displayProductCode ||
+                                                productCode}
+                                            </span>{" "}
+                                            chưa có giá trong Bảng giá chung.
+                                            Không thể tạo đơn đại lý với sản
+                                            phẩm này.
+                                          </div>
+                                        </div>
+                                      </div>
+                                    ) : pricingCustomerType === "khach_le" &&
+                                      !isPromotionProduct &&
+                                      !hasValidRetailPrice(product, item) ? (
+                                      <div className="mt-3 flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-xs text-rose-700">
+                                        <XCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                                        <div>
+                                          <div className="font-bold">
+                                            Sản phẩm đang có giá khách lẻ bằng
+                                            0đ
+                                          </div>
+                                          <div className="mt-0.5 leading-5">
+                                            Sản phẩm mã{" "}
+                                            <span className="font-mono font-bold">
+                                              {displayProductCode ||
+                                                productCode}
+                                            </span>{" "}
+                                            chưa có giá hợp lệ trong Bảng giá
+                                            Khách lẻ nên không thể tạo đơn.
+                                          </div>
+                                        </div>
+                                      </div>
+                                    ) : promotionDisplayGroups.length === 0 &&
+                                      productCampaigns.length > 0 ? (
+                                      <div className="mt-3 space-y-2 rounded-xl border border-emerald-200 bg-emerald-50/80 px-3 py-2.5">
+                                        <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-emerald-700">
+                                          Chọn 1 trong {productCampaigns.length}{" "}
+                                          chương trình khuyến mãi
+                                        </div>
+                                        <label className="flex cursor-pointer items-center gap-2.5 rounded-xl border border-emerald-100 bg-white px-3 py-2 text-sm font-medium text-slate-600">
+                                          <input
+                                            type="radio"
+                                            name={`promotion-${productCode}-${index}`}
+                                            checked={
+                                              Object.keys(campaignSelections)
+                                                .length === 0
+                                            }
+                                            onChange={() =>
+                                              handlePromotionClear(productCode)
+                                            }
+                                            className="h-4 w-4 accent-emerald-600"
+                                          />
+                                          Không áp dụng khuyến mãi
+                                        </label>
+                                        {productCampaigns.map((campaign) => {
+                                          const campaignId = String(
+                                            campaign.Id,
+                                          );
+                                          const selection =
+                                            campaignSelections[campaignId];
+                                          const details =
+                                            getPromotionSelectionDetails({
+                                              item,
+                                              product,
+                                              campaign,
+                                              selection,
+                                              parsedItems: parsed.items,
+                                              productMap:
+                                                orderPreparation.productMap,
+                                              productCampaignMap:
+                                                orderPreparation.productCampaignMap,
+                                            });
+                                          const receivedProductIds =
+                                            getPromotionReceivedProductIds(
+                                              details.promotion,
+                                            );
+                                          const isSelected = Boolean(selection);
+
+                                          return (
+                                            <div
+                                              key={campaign.Id || campaign.Code}
+                                              className={`rounded-xl border px-3 py-2.5 ${
+                                                isSelected
+                                                  ? "border-emerald-300 bg-white"
+                                                  : "border-emerald-100 bg-emerald-50/40"
+                                              }`}
+                                            >
+                                              <label className="flex cursor-pointer items-start gap-2.5">
+                                                <input
+                                                  type="radio"
+                                                  name={`promotion-${productCode}-${index}`}
+                                                  checked={isSelected}
+                                                  disabled={
+                                                    details.applicationCount < 1
+                                                  }
+                                                  onChange={(event) =>
+                                                    handlePromotionCampaignToggle(
+                                                      productCode,
+                                                      campaignId,
+                                                      item,
+                                                      event.target.checked,
+                                                    )
+                                                  }
+                                                  className="mt-1 h-4 w-4 accent-emerald-600"
+                                                />
+                                                <div className="min-w-0 flex-1">
+                                                  <div className="text-sm font-semibold leading-5 text-emerald-950">
+                                                    {campaign.Name ||
+                                                      campaign.Code}
+                                                  </div>
+                                                  <div className="mt-1 text-xs text-emerald-800/80">
+                                                    {[
+                                                      campaign.Code,
+                                                      formatPromotionRule(
+                                                        campaign,
+                                                        product,
+                                                      ),
+                                                      details.promotionType ===
+                                                        6 &&
+                                                      details.qualifyingItems
+                                                        .length > 1
+                                                        ? `Cộng dồn ${details.purchasedQuantity}/${details.prerequisiteQuantity} từ ${details.qualifyingItems.length} sản phẩm`
+                                                        : "",
+                                                      details.applicationCount <
+                                                      1
+                                                        ? "Chưa đủ số lượng"
+                                                        : "",
+                                                    ]
+                                                      .filter(Boolean)
+                                                      .join(" · ")}
+                                                  </div>
+                                                </div>
+                                              </label>
+
+                                              {isSelected &&
+                                              details.promotionType === 6 ? (
+                                                <div className="mt-3 space-y-2 border-t border-emerald-100 pt-2">
+                                                  <div className="text-xs font-semibold text-emerald-900">
+                                                    Chọn sản phẩm tặng: đã chọn{" "}
+                                                    {
+                                                      details.selectedGiftQuantity
+                                                    }
+                                                    /
+                                                    {
+                                                      details.expectedGiftQuantity
+                                                    }
+                                                  </div>
+                                                  {receivedProductIds.map(
+                                                    (productId) => {
+                                                      const receivedProduct =
+                                                        orderPreparation.promotionProductMap.get(
+                                                          productId,
+                                                        );
+                                                      const receivedProductDiscontinued =
+                                                        isProductDiscontinued(
+                                                          receivedProduct,
+                                                        );
+                                                      const quantity = Number(
+                                                        selection
+                                                          ?.giftQuantities?.[
+                                                          productId
+                                                        ] || 0,
+                                                      );
+
+                                                      return (
+                                                        <label
+                                                          key={productId}
+                                                          className={`flex items-start gap-2 rounded-xl border px-2.5 py-2 ${
+                                                            receivedProductDiscontinued
+                                                              ? "border-red-200 bg-red-50"
+                                                              : "border-emerald-100 bg-white"
+                                                          }`}
+                                                        >
+                                                          <div className="min-w-0 flex-1">
+                                                            <div className="break-words text-xs font-semibold leading-4 text-slate-800">
+                                                              {receivedProduct
+                                                                ? getProductDisplayName(
+                                                                    receivedProduct,
+                                                                  )
+                                                                : `Sản phẩm #${productId}`}
+                                                            </div>
+                                                            <div className="text-[11px] text-slate-500">
+                                                              {receivedProduct
+                                                                ? getProductDisplayCode(
+                                                                    receivedProduct,
+                                                                  )
+                                                                : "Không tải được thông tin"}
+                                                            </div>
+                                                            {receivedProductDiscontinued ? (
+                                                              <div className="mt-0.5 text-[11px] font-semibold text-red-600">
+                                                                Sản phẩm đã
+                                                                ngừng kinh doanh
+                                                              </div>
+                                                            ) : null}
+                                                          </div>
+                                                          <input
+                                                            type="number"
+                                                            min="0"
+                                                            step="1"
+                                                            value={quantity}
+                                                            disabled={
+                                                              !receivedProduct ||
+                                                              receivedProductDiscontinued
+                                                            }
+                                                            onChange={(event) =>
+                                                              handlePromotionGiftQuantityChange(
+                                                                productCode,
+                                                                campaignId,
+                                                                productId,
+                                                                event.target
+                                                                  .value,
+                                                              )
+                                                            }
+                                                            className="w-12 shrink-0 rounded-lg border border-slate-200 px-1 py-1.5 text-center text-sm outline-none focus:border-emerald-300"
+                                                          />
+                                                        </label>
+                                                      );
+                                                    },
+                                                  )}
+                                                  <div
+                                                    className={`text-xs font-medium ${
+                                                      details.isComplete
+                                                        ? "text-emerald-700"
+                                                        : "text-amber-700"
+                                                    }`}
+                                                  >
+                                                    {details.isComplete
+                                                      ? "Đã đủ quà, chương trình sẽ được thêm vào payload."
+                                                      : "Phân bổ đủ số lượng quà để áp chương trình."}
+                                                  </div>
+                                                </div>
+                                              ) : isSelected &&
+                                                details.promotionType === 8 ? (
+                                                <div className="mt-3 rounded-xl border border-emerald-100 bg-white px-3 py-2 text-xs font-medium text-emerald-800">
+                                                  Giá khuyến mãi sẽ được áp vào
+                                                  dòng sản phẩm khi tạo đơn.
+                                                </div>
+                                              ) : isSelected ? (
+                                                <div className="mt-3 text-xs text-amber-700">
+                                                  Loại khuyến mãi này chưa được
+                                                  hỗ trợ tự động.
+                                                </div>
+                                              ) : null}
+                                            </div>
+                                          );
+                                        })}
+                                      </div>
+                                    ) : null
+                                  ) : null}
+                                </div>
+                              );
+                            })}
+                          </div>
+                          {productGroup.isPromotionGroup
+                            ? renderPromotionGroupControl(
+                                productGroup.promotionGroup,
+                              )
+                            : null}
                         </div>
-                        {productGroup.isPromotionGroup
-                          ? renderPromotionGroupControl(
-                              productGroup.promotionGroup,
-                            )
-                          : null}
+                      ))
+                    ) : (
+                      <div className="text-sm text-slate-500">
+                        Chưa tách được dòng sản phẩm nào.
                       </div>
-                    ))
-                  ) : (
-                    <div className="text-sm text-slate-500">
-                      Chưa tách được dòng sản phẩm nào.
-                    </div>
-                  )}
+                    )}
+                  </div>
                 </div>
               </div>
-
             </div>
-          </div>
           </div>
         </fieldset>
       </div>
