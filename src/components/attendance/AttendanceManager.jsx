@@ -602,6 +602,9 @@ function createBulkEditTimeForm() {
 
 function createAutoAttendanceForm() {
   return {
+    randomEnabled: false,
+    randomCheckInMinutes: 15,
+    randomCheckOutMinutes: 15,
     locationId: "",
     checkInTime: "07:30",
     checkOutTime: "17:00",
@@ -738,12 +741,12 @@ export default function AttendanceManager() {
   const canManageAttendance = canCreateAttendance || canEditAttendance || canDeleteAttendance;
   const visibleTabs = useMemo(
     () => TABS.filter((item) => {
-      if (item.id === "auto") return canManageAttendance;
+      if (item.id === "auto") return isAttendanceAdmin;
       if (item.id === "holidays") return canManageAttendance;
       if (item.id === "pending") return canCreateAttendance || canEditAttendance;
       return true;
     }),
-    [canCreateAttendance, canEditAttendance, canManageAttendance],
+    [canCreateAttendance, canEditAttendance, canManageAttendance, isAttendanceAdmin],
   );
   const formRef = useRef(null);
   const realtimeRefreshRef = useRef(null);
@@ -1208,6 +1211,24 @@ export default function AttendanceManager() {
   }
 
   async function saveAutoAttendanceSettings() {
+    if (!isAttendanceAdmin) return;
+    if (autoForm.randomEnabled) {
+      const inWindow = Number(autoForm.randomCheckInMinutes);
+      const outWindow = Number(autoForm.randomCheckOutMinutes);
+      if ([autoForm.randomCheckInMinutes, autoForm.randomCheckOutMinutes].some((value) => value === "")
+        || [inWindow, outWindow].some((value) => !Number.isInteger(value) || value < 0 || value > 180)) {
+        return showFlash(false, "Khoảng random phải là số phút nguyên từ 0 đến 180.");
+      }
+      const start = minutesFromTime(autoForm.checkInTime);
+      const ends = [minutesFromTime(autoForm.checkOutTime)];
+      if (autoForm.saturdayHalfDay && !autoForm.saturdayOff) ends.push(minutesFromTime(autoForm.saturdayCheckOutTime));
+      if (start == null || ends.some((end) => end == null || end <= start)) {
+        return showFlash(false, "Giờ ra phải sau giờ vào trong cùng ngày.");
+      }
+      if (start < inWindow || ends.some((end) => end + outWindow > 1439)) {
+        return showFlash(false, "Khoảng random phải nằm trong cùng ngày chấm công.");
+      }
+    }
     if (autoUserIds.size === 0) return showFlash(false, "Chọn ít nhất một nhân viên để chấm công tự động.");
     if (!autoForm.locationId) return showFlash(false, "Chọn vị trí chấm công tự động.");
 
@@ -1225,6 +1246,9 @@ export default function AttendanceManager() {
           userId,
           locationId: autoForm.locationId,
           isEnabled: true,
+          randomEnabled: autoForm.randomEnabled,
+          randomCheckInMinutes: autoForm.randomEnabled ? Number(autoForm.randomCheckInMinutes) : 15,
+          randomCheckOutMinutes: autoForm.randomEnabled ? Number(autoForm.randomCheckOutMinutes) : 15,
           checkInTime: autoForm.checkInTime || "07:30",
           checkOutTime: autoForm.checkOutTime || "17:00",
           saturdayOff: autoForm.saturdayOff,
@@ -1250,6 +1274,9 @@ export default function AttendanceManager() {
     setAutoUserIds(userId ? new Set([userId]) : new Set());
     setAutoForm({
       ...createAutoAttendanceForm(),
+      randomEnabled: setting.randomEnabled === true,
+      randomCheckInMinutes: setting.randomCheckInMinutes ?? 15,
+      randomCheckOutMinutes: setting.randomCheckOutMinutes ?? 15,
       locationId: String(setting.locationId?._id || setting.locationId || setting.location?._id || ""),
       checkInTime: setting.checkInTime || "07:30",
       checkOutTime: setting.checkOutTime || "17:00",
@@ -1291,14 +1318,13 @@ export default function AttendanceManager() {
   }
 
   async function runAutoAttendanceNow(type) {
+    if (!isAttendanceAdmin) return;
+    if (!autoUserIds.size) return showFlash(false, "Chọn nhân viên cần chạy chấm công tự động.");
     setAutoSaving(true);
     try {
-      const time = type === "checkOut"
-        ? (autoForm.saturdayOff ? autoForm.checkOutTime : (autoForm.saturdayHalfDay ? autoForm.saturdayCheckOutTime : autoForm.checkOutTime))
-        : autoForm.checkInTime;
-      const res = await api.post("/auto-attendance/run-now", { type, time });
+      const res = await api.post("/auto-attendance/run-now", { type, userIds: [...autoUserIds] });
       const data = res.data?.data || {};
-      showFlash(true, `Đã chạy thử: tạo ${data.created || 0}, cập nhật ${data.updated || 0}, bỏ qua ${data.skipped || 0}.`);
+      showFlash(!data.errors?.length, `Đã chạy cấu hình đã lưu cho người được chọn, tính đến hiện tại: tạo ${data.created || 0}, cập nhật ${data.updated || 0}, bỏ qua ${data.skipped || 0}, lỗi ${data.errors?.length || 0}.`);
       await refreshCurrentTab();
     } catch (err) {
       showFlash(false, err.response?.data?.message || "Không thể chạy thử chấm công tự động.");
@@ -1367,7 +1393,7 @@ export default function AttendanceManager() {
         const refresh = realtimeRefreshRef.current;
         refresh?.loadPendingCount();
         if (payload.entity === "leave-request") {
-          void refreshAttendanceLeavePendingTotal().catch(() => {});
+          void refreshAttendanceLeavePendingTotal().catch(() => { });
         }
         if (payload.entity === "holiday-calendar") refresh?.loadHolidays();
         if (refresh?.tab === "overview") refresh.loadOverview();
@@ -3487,7 +3513,7 @@ export default function AttendanceManager() {
         )}
 
 
-        {tab === "auto" && (
+        {tab === "auto" && isAttendanceAdmin && (
           <div className="grid gap-5 xl:grid-cols-[minmax(360px,0.95fr)_minmax(0,1.55fr)]">
             <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
               <div className="mb-4 flex items-start justify-between gap-3">
@@ -3495,7 +3521,27 @@ export default function AttendanceManager() {
                   <h2 className="text-base font-bold text-slate-900">Chấm công tự động</h2>
                   <p className="text-xs text-slate-500">Chọn nhân viên cần tự chấm nguyên ngày. Đến ngày nghỉ đã chọn thì hệ thống bỏ qua.</p>
                 </div>
-                <Badge tone="violet">07:30 - 17:00</Badge>
+                <Badge tone="violet">Chỉ admin</Badge>
+              </div>
+
+              <div className="mb-4 space-y-3 rounded-xl border border-violet-200 bg-violet-50 p-3">
+                <label className="flex items-center gap-2 text-sm font-semibold text-violet-800">
+                  <input type="checkbox" checked={autoForm.randomEnabled} onChange={(e) => setAutoForm((prev) => ({ ...prev, randomEnabled: e.target.checked }))} className="h-4 w-4 accent-violet-600" />
+                  Random giờ vào và giờ ra
+                </label>
+                {autoForm.randomEnabled && (
+                  <>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      {[["randomCheckInMinutes", "Vào sớm tối đa (phút)"], ["randomCheckOutMinutes", "Ra muộn tối đa (phút)"]].map(([field, label]) => (
+                        <label key={field} className="text-xs font-semibold text-violet-800">
+                          {label}
+                          <input type="number" min="0" max="180" step="1" value={autoForm[field]} onChange={(e) => setAutoForm((prev) => ({ ...prev, [field]: e.target.value }))} className="mt-1.5 w-full rounded-xl border border-violet-200 bg-white px-3 py-2 text-sm outline-none focus:border-violet-400" />
+                        </label>
+                      ))}
+                    </div>
+                    <p className="text-xs text-violet-700">Mỗi người, mỗi ngày có giờ riêng: từ 0 đến số phút đã chọn trước giờ vào và sau giờ ra (GMT+7). Áp dụng cả giờ ra thứ 7 nửa ngày. Ví dụ: ca 07:30–17:00, random 15 phút → vào 07:15–07:30, ra 17:00–17:15.</p>
+                  </>
+                )}
               </div>
 
               <div className="grid gap-3 sm:grid-cols-2">
@@ -3515,37 +3561,38 @@ export default function AttendanceManager() {
                     value={autoForm.checkOutTime}
                     onChange={(e) => setAutoForm((prev) => ({ ...prev, checkOutTime: e.target.value }))}
                     className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
-                  />                <label className="flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700">
-                    <input
-                      type="checkbox"
-                      checked={autoForm.saturdayOff}
-                      onChange={(e) => setAutoForm((prev) => ({ ...prev, saturdayOff: e.target.checked, saturdayHalfDay: e.target.checked ? false : prev.saturdayHalfDay }))}
-                      className="h-4 w-4 rounded border-slate-300 accent-amber-600"
-                    />
-                    NGHỈ CẢ NGÀY THỨ 7
-                  </label>
-                  <label className="flex items-center gap-2 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs font-semibold text-sky-700">
-                    <input
-                      type="checkbox"
-                      checked={autoForm.saturdayHalfDay}
-                      onChange={(e) => setAutoForm((prev) => ({ ...prev, saturdayHalfDay: e.target.checked }))}
-                      disabled={autoForm.saturdayOff}
-                      className="h-4 w-4 rounded border-slate-300 accent-sky-600 disabled:opacity-50"
-                    />
-                    THỨ 7 NỬA NGÀY
-                  </label>
-                  <label className="text-xs font-semibold text-slate-500">
-                    GIỜ RA THỨ 7
-                    <input
-                      type="time"
-                      value={autoForm.saturdayCheckOutTime}
-                      onChange={(e) => setAutoForm((prev) => ({ ...prev, saturdayCheckOutTime: e.target.value }))}
-                      disabled={autoForm.saturdayOff || !autoForm.saturdayHalfDay}
-                      className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none focus:border-sky-400 focus:ring-2 focus:ring-sky-100 disabled:opacity-50"
-                    />
-                  </label>
-
+                  />
                 </label>
+                <label className="flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700">
+                  <input
+                    type="checkbox"
+                    checked={autoForm.saturdayOff}
+                    onChange={(e) => setAutoForm((prev) => ({ ...prev, saturdayOff: e.target.checked, saturdayHalfDay: e.target.checked ? false : prev.saturdayHalfDay }))}
+                    className="h-4 w-4 rounded border-slate-300 accent-amber-600"
+                  />
+                  NGHỈ CẢ NGÀY THỨ 7
+                </label>
+                <label className="flex items-center gap-2 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs font-semibold text-sky-700">
+                  <input
+                    type="checkbox"
+                    checked={autoForm.saturdayHalfDay}
+                    onChange={(e) => setAutoForm((prev) => ({ ...prev, saturdayHalfDay: e.target.checked }))}
+                    disabled={autoForm.saturdayOff}
+                    className="h-4 w-4 rounded border-slate-300 accent-sky-600 disabled:opacity-50"
+                  />
+                  THỨ 7 NỬA NGÀY
+                </label>
+                <label className="text-xs font-semibold text-slate-500">
+                  GIỜ RA THỨ 7
+                  <input
+                    type="time"
+                    value={autoForm.saturdayCheckOutTime}
+                    onChange={(e) => setAutoForm((prev) => ({ ...prev, saturdayCheckOutTime: e.target.value }))}
+                    disabled={autoForm.saturdayOff || !autoForm.saturdayHalfDay}
+                    className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none focus:border-sky-400 focus:ring-2 focus:ring-sky-100 disabled:opacity-50"
+                  />
+                </label>
+
                 <label className="text-xs font-semibold text-slate-500 sm:col-span-2">
                   VỊ TRÍ CHẤM CÔNG
                   <select
@@ -3673,6 +3720,7 @@ export default function AttendanceManager() {
                       </div>
                       <div className="text-sm text-slate-600">
                         <p className="font-semibold">{setting.checkInTime || "07:30"} - {setting.checkOutTime || "17:00"}</p>
+                        {setting.randomEnabled && <p className="text-xs font-semibold text-violet-700">Random: vào sớm 0–{setting.randomCheckInMinutes ?? 15}p · ra muộn 0–{setting.randomCheckOutMinutes ?? 15}p</p>}
                         {setting.saturdayOff ? (
                           <p className="text-xs font-semibold text-amber-600">T7: nghỉ cả ngày</p>
                         ) : setting.saturdayHalfDay && (
