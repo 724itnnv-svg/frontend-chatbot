@@ -97,7 +97,6 @@ const NotificationManager = lazy(
   () => import("./components/NotificationManager"),
 );
 const AccountSecurity = lazy(() => import("./components/security/AccountSecurity"));
-const AccountNotificationLink = lazy(() => import("./components/security/AccountNotificationLink"));
 const PayrollManager = lazy(() => import("./components/PayrollManager"));
 const KpiManager = lazy(() => import("./components/KpiManager"));
 const SalaryAdvanceManager = lazy(
@@ -602,7 +601,6 @@ export default function App() {
           <Route path="/404" element={<NotFoundPage />} />
           <Route path="*" element={<NotFoundPage />} />
         </Routes>
-        {isLoggedIn && <AccountNotificationLink />}
       </Suspense>
     </ErrorBoundary>
   );

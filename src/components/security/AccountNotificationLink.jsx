@@ -3,7 +3,7 @@ import { Link, useLocation } from "react-router-dom";
 import { BellRing } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 
-export default function AccountNotificationLink() {
+export default function AccountNotificationLink({ onClick }) {
   const { api } = useAuth();
   const location = useLocation();
   const [count, setCount] = useState(0);
@@ -23,5 +23,20 @@ export default function AccountNotificationLink() {
     return () => { controller.abort(); clearInterval(interval); document.removeEventListener("visibilitychange", load); };
   }, [api, hidden, location.pathname, location.search]);
   if (hidden) return null;
-  return <Link to="/account-security?tab=inbox" aria-label={`Thông báo của tôi, ${count} chưa đọc`} title="Thiết bị & thông báo của tôi" className="fixed bottom-5 right-5 z-40 inline-flex items-center gap-2 rounded-full border border-cyan-200 bg-white px-4 py-3 text-sm font-semibold text-cyan-800 shadow-lg hover:bg-cyan-50"><BellRing size={20} /><span className="hidden sm:inline">Thông báo</span>{count > 0 && <span className="rounded-full bg-rose-600 px-1.5 py-0.5 text-xs text-white">{count > 99 ? "99+" : count}</span>}</Link>;
+  return (
+    <Link
+      to="/account-security?tab=inbox"
+      onClick={onClick}
+      aria-label={`Thông báo của tôi, ${count} chưa đọc`}
+      title="Thiết bị & thông báo của tôi"
+      className="relative inline-flex h-9 w-9 items-center justify-center rounded-xl border border-cyan-200 bg-cyan-50 text-cyan-800 shadow-sm transition hover:bg-cyan-100 focus:outline-none focus:ring-2 focus:ring-cyan-300"
+    >
+      <BellRing size={17} />
+      {count > 0 && (
+        <span className="absolute -right-1.5 -top-1.5 inline-flex min-h-5 min-w-5 items-center justify-center rounded-full border-2 border-white bg-rose-600 px-1 text-[10px] font-extrabold leading-none text-white">
+          {count > 99 ? "99+" : count}
+        </span>
+      )}
+    </Link>
+  );
 }

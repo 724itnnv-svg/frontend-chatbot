@@ -54,6 +54,7 @@ import {
 import { useAuth } from "../context/AuthContext";
 import { canAccessScreen, hasFullAccess } from "../utils/screenAccess";
 import { getApiOrigin } from "../api/baseUrl";
+import AccountNotificationLink from "./security/AccountNotificationLink";
 
 const ACTIVE_TAB_KEY = "dashboard_active_tab";
 const isViteDevServer =
@@ -725,9 +726,12 @@ const Sidebar = memo(() => {
                   Quản trị hệ thống
                 </div>
               </div>
+              <div className={`ml-auto flex-shrink-0 ${isCollapsed ? "md:hidden" : ""}`}>
+                <AccountNotificationLink onClick={() => setIsOpen(false)} />
+              </div>
               {canViewOnlineUsers && (
                 <div
-                  className={`group/presence relative ml-auto flex-shrink-0 ${isCollapsed ? "md:hidden" : ""}`}
+                  className={`group/presence relative flex-shrink-0 ${isCollapsed ? "md:hidden" : ""}`}
                 >
                   <button
                     type="button"
