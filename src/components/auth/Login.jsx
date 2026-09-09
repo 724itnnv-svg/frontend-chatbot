@@ -346,7 +346,7 @@ export default function Login() {
         loginIdentifier = `${loginIdentifier}@gmail.com`;
       }
 
-      const { deviceId, deviceName, platform } = getDeviceInfo();
+      const { deviceId, deviceName, platform, clientType } = getDeviceInfo();
 
       const res = await fetch("/api/auth/login", {
         method: "POST",
@@ -359,6 +359,7 @@ export default function Login() {
           deviceId,
           deviceName,
           platform,
+          clientType,
         }),
       });
 

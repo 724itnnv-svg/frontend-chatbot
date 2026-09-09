@@ -24,6 +24,7 @@ const LEAVE_TYPE_LABELS = {
   regular: "Nghỉ phép thường",
   emergency: "Off đột xuất",
   annual: "Phép năm",
+  paid_family: "Nghỉ hưởng lương (cưới, sinh, tang)",
   remote_work: "Làm việc tại nhà",
   business_trip: "Đi công vụ",
 };
@@ -281,6 +282,7 @@ export default function ApprovedLeaveViewer() {
                 <option value="regular">Nghỉ phép thường</option>
                 <option value="emergency">Off đột xuất</option>
                 <option value="annual">Phép năm</option>
+                      <option value="paid_family">Nghỉ hưởng lương (cưới, sinh, tang)</option>
                 <option value="remote_work">Làm việc tại nhà</option>
                 <option value="business_trip">Đi công vụ</option>
               </select>

@@ -43,7 +43,9 @@ import { buildPayrollBankTransferRows, calculatePayrollInstallments } from "../u
 import { createPayrollBhxhWorkbook, PAYROLL_BHXH_COMPANY_OPTIONS } from "../utils/payrollBhxhExcel";
 import { hasCommissionExcelColumn, normalizeCommissionExcelRow } from "../utils/payrollCommissionExcel";
 
-const STORAGE_HIDDEN_COLUMNS = "payroll_hidden_columns_v1";
+const STORAGE_HIDDEN_COLUMNS = "payroll_hidden_columns_v2";
+const LEGACY_STORAGE_HIDDEN_COLUMNS = "payroll_hidden_columns_v1";
+const DEFAULT_HIDDEN_COLUMNS = ["khauTru.tamUngTuPhieu", "khauTru.tamUngDieuChinh"];
 const STORAGE_COLUMN_ORDER = "payroll_column_order_v1";
 const STORAGE_COLUMN_TEMPLATES = "payroll_column_templates_v1";
 const STORAGE_PAYROLL_FORMULAS = "payroll_formula_settings_v1";
@@ -68,7 +70,7 @@ const ATTENDANCE_SYNC_COLUMNS = [
   { key: "tangCaChuNhat", label: "Tăng ca Chủ nhật" },
   { key: "tangCaLeTet", label: "Tăng ca lễ/tết" },
   { key: "comTangCa", label: "Cơm tăng ca" },
-  { key: "phepNam", label: "Phép năm" },
+  { key: "phepNam", label: "Phép năm / nghỉ hưởng lương" },
 ];
 const COMPUTED_PAYROLL_KEYS = new Set([
   "dataTinhLuong.mucDongBHXH",
@@ -124,8 +126,8 @@ const PAYROLL_COLUMNS = [
   { key: "thuNhapTheoNgayCong.phuCapNhiemVuThucTe", label: "PC NV TT", width: 130, type: "number" },
   { key: "thuNhapTheoNgayCong.leTet", label: "Lễ tết", width: 110, type: "number" },
   { key: "thuNhapTheoNgayCong.luongLeTet", label: "Lương lễ tết", width: 150, type: "number" },
-  { key: "thuNhapTheoNgayCong.phepNam", label: "Phép năm", width: 120, type: "number" },
-  { key: "thuNhapTheoNgayCong.luongPhepNam", label: "Lương phép năm", width: 140, type: "number" },
+  { key: "thuNhapTheoNgayCong.phepNam", label: "Phép năm / nghỉ hưởng lương", width: 120, type: "number" },
+  { key: "thuNhapTheoNgayCong.luongPhepNam", label: "Lương phép năm / nghỉ hưởng lương", width: 140, type: "number" },
   { key: "thuNhapTheoNgayCong.tangCaThuong", label: "TC thường", width: 120, type: "number" },
   { key: "thuNhapTheoNgayCong.luongTangCaThuong", label: "Lương TC thường", width: 170, type: "number" },
   { key: "thuNhapTheoNgayCong.tangCaChuNhat", label: "TC CN", width: 110, type: "number" },
@@ -148,6 +150,8 @@ const PAYROLL_COLUMNS = [
   { key: "khauTru.congDoan", label: "Công đoàn", width: 130, type: "number" },
   { key: "khauTru.giamLuong", label: "Giam lương", width: 140, type: "number" },
   { key: "khauTru.giamLuongKhongTru", label: "Giam lương (chưa trừ)", width: 180, type: "number" },
+  { key: "khauTru.tamUngTuPhieu", label: "Ứng từ phiếu", width: 140, type: "number", readOnly: true },
+  { key: "khauTru.tamUngDieuChinh", label: "Ứng điều chỉnh", width: 150, type: "number" },
   { key: "khauTru.tamUng", label: "Tổng tạm ứng", width: 140, type: "number", readOnly: true },
   { key: "khauTru.phiDienThoai", label: "Phí điện thoại", width: 150, type: "number" },
   { key: "khauTru.truKhac", label: "Trừ khác", width: 130, type: "number" },
@@ -1516,9 +1520,12 @@ export default function PayrollManager() {
   );
   const [hiddenColumns, setHiddenColumns] = useState(() => {
     try {
-      return new Set(JSON.parse(localStorage.getItem(STORAGE_HIDDEN_COLUMNS) || "[]"));
+      const saved = JSON.parse(localStorage.getItem(STORAGE_HIDDEN_COLUMNS) || "null");
+      if (Array.isArray(saved)) return new Set(saved);
+      const legacy = JSON.parse(localStorage.getItem(LEGACY_STORAGE_HIDDEN_COLUMNS) || "[]");
+      return new Set([...DEFAULT_HIDDEN_COLUMNS, ...(Array.isArray(legacy) ? legacy : [])]);
     } catch {
-      return new Set();
+      return new Set(DEFAULT_HIDDEN_COLUMNS);
     }
   });
 
@@ -3673,7 +3680,7 @@ export default function PayrollManager() {
                 </select>
               </label>
               <div className="rounded-xl border border-amber-200 bg-white px-4 py-3 text-sm text-amber-900">
-                File gồm 30 cột theo mẫu, tự lấy mã số BHXH từ hồ sơ nhân viên, trạng thái áp dụng BHXH và các số liệu thu nhập/khấu trừ của kỳ {period}. Các ô cần kiểm tra thủ công được tô vàng.
+                File gồm 32 cột theo mẫu, bao gồm Phúc lợi và Thưởng đột xuất (đã chi), tự lấy mã số BHXH từ hồ sơ nhân viên, trạng thái áp dụng BHXH và các số liệu thu nhập/khấu trừ của kỳ {period}. Lương thực lĩnh trong file đã cộng thưởng đột xuất đã chi. Các ô cần kiểm tra thủ công được tô vàng.
               </div>
             </div>
           )}
@@ -3970,8 +3977,8 @@ export default function PayrollManager() {
                       <th className="px-3 py-2 text-right">TC CN</th>
                       <th className="px-3 py-2 text-right">TC lễ</th>
                       <th className="px-3 py-2 text-right">Cơm TC</th>
-                      <th className="px-3 py-2 text-right">Phép năm cũ</th>
-                      <th className="px-3 py-2 text-right">Phép năm mới</th>
+                      <th className="px-3 py-2 text-right">Phép năm / nghỉ hưởng lương cũ</th>
+                      <th className="px-3 py-2 text-right">Phép năm / nghỉ hưởng lương mới</th>
                       <th className="px-3 py-2 text-right">Ngày lễ cũ</th>
                       <th className="px-3 py-2 text-right">Ngày lễ mới</th>
                       <th className="px-3 py-2 text-right">Ngày công cũ</th>

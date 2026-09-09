@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { AlertTriangle, ArrowLeft, BadgeCheck, Building2, CalendarClock, Copy, Download, Eye, FileText, History, IdCard, Image as ImageIcon, PanelLeftClose, PanelLeftOpen, Plus, RefreshCcw, Save, Search, Sparkles, Trash2, Upload, UsersRound, X } from "lucide-react";
 import * as XLSX from "xlsx";
@@ -361,7 +361,9 @@ function profileToExcelRow(profile) {
 
 const inputClass = "w-full rounded-xl border border-cyan-100 bg-white px-3 py-2 text-sm outline-none focus:border-cyan-400 focus:ring-4 focus:ring-cyan-100";
 const labelClass = "mb-1 block text-[11px] font-bold uppercase tracking-wide text-slate-500";
+const ProfileAutoSaveContext = createContext(false);
 function Field({ label, value, onChange, type = "text", disabled = false, immediate = false }) {
+  const autoSave = useContext(ProfileAutoSaveContext);
   const [draft, setDraft] = useState(value ?? "");
   const editingRef = useRef(false);
   useEffect(() => {
@@ -374,13 +376,14 @@ function Field({ label, value, onChange, type = "text", disabled = false, immedi
   const change = (event) => {
     const nextValue = event.target.value;
     setDraft(nextValue);
-    if (immediate) onChange(nextValue);
+    if (immediate || autoSave) onChange(nextValue);
   };
   return <label><span className={labelClass}>{label}</span><input type={type} value={draft} disabled={disabled} onFocus={() => { editingRef.current = true; }} onChange={change} onBlur={commit} className={`${inputClass} disabled:bg-slate-50`} /></label>;
 }
 const moneyDigits = (value) => String(value ?? "").replace(/\D/g, "").replace(/^0+(?=\d)/, "");
 const formatMoney = (value) => moneyDigits(value).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 function MoneyField({ label, value, onChange, numeric = false }) {
+  const autoSave = useContext(ProfileAutoSaveContext);
   const [draft, setDraft] = useState(() => moneyDigits(value));
   const editingRef = useRef(false);
   useEffect(() => {
@@ -391,7 +394,7 @@ function MoneyField({ label, value, onChange, numeric = false }) {
     const nextValue = numeric ? Number(draft) || 0 : draft;
     if (String(nextValue) !== String(value ?? "")) onChange(nextValue);
   };
-  return <label><span className={labelClass}>{label}</span><input type="text" inputMode="numeric" value={formatMoney(draft)} onFocus={() => { editingRef.current = true; }} onChange={(event) => setDraft(moneyDigits(event.target.value))} onBlur={commit} className={inputClass} /></label>;
+  return <label><span className={labelClass}>{label}</span><input type="text" inputMode="numeric" value={formatMoney(draft)} onFocus={() => { editingRef.current = true; }} onChange={(event) => { const next = moneyDigits(event.target.value); setDraft(next); if (autoSave) onChange(numeric ? Number(next) || 0 : next); }} onBlur={commit} className={inputClass} /></label>;
 }
 function SelectField({ label, value, onChange, options }) {
   return <label><span className={labelClass}>{label}</span><select value={value} onChange={(e) => onChange(e.target.value)} className={inputClass}>{options.map(([v, n]) => <option key={v} value={v}>{n}</option>)}</select></label>;
@@ -875,8 +878,18 @@ export default function EmployeeProfileManager({ users, onClose, standalone = fa
   const [loading, setLoading] = useState(false);
   const [savingProfile, setSavingProfile] = useState(false);
   const [search, setSearch] = useState("");
+  const [companyFilter, setCompanyFilter] = useState("all");
   const [employmentStatusFilter, setEmploymentStatusFilter] = useState("working");
-  const [editor, setEditor] = useState(null);
+  const [editor, setEditorState] = useState(null);
+  const editorRef = useRef(null);
+  const setEditor = (update) => {
+    const next = typeof update === "function" ? update(editorRef.current) : update;
+    editorRef.current = next;
+    setEditorState(next);
+  };
+  const profileSaveRef = useRef(null);
+  const failedProfileSnapshotRef = useRef(null);
+  const [profileSaveError, setProfileSaveError] = useState("");
   const [generatingEmployeeCode, setGeneratingEmployeeCode] = useState(false);
   const employeeCodeRequestRef = useRef(0);
   const [contractEditor, setContractEditorState] = useState(null);
@@ -918,7 +931,13 @@ export default function EmployeeProfileManager({ users, onClose, standalone = fa
   const [accountRoles, setAccountRoles] = useState([]);
   const [toasts, setToasts] = useState([]);
   const [confirmState, setConfirmState] = useState(null);
-  const [editorSnapshot, setEditorSnapshot] = useState(null);
+  const [editorSnapshot, setEditorSnapshotState] = useState(null);
+  const editorSnapshotRef = useRef(null);
+  const setEditorSnapshot = (update) => {
+    const next = typeof update === "function" ? update(editorSnapshotRef.current) : update;
+    editorSnapshotRef.current = next;
+    setEditorSnapshotState(next);
+  };
   const canProfileAction = (action) => String(user?.role || "").toLowerCase() === "superadmin" || Number(user?.allpage) === 1 || user?.action?.employee_profiles?.[action] === true;
   const canHealthAction = (action) => String(user?.role || "").toLowerCase() === "superadmin" || Number(user?.allpage) === 1 || user?.action?.employee_health_records?.[action] === true;
   const canViolationAction = (action) => String(user?.role || "").toLowerCase() === "superadmin" || Number(user?.allpage) === 1 || user?.action?.employee_violations?.[action] === true;
@@ -934,12 +953,16 @@ export default function EmployeeProfileManager({ users, onClose, standalone = fa
 
   const isEditorDirty = Boolean(editor) && editorSnapshot !== null && JSON.stringify(editor) !== editorSnapshot;
   const requestCloseEditor = async () => {
-    if (isEditorDirty && !(await confirmAction("Hồ sơ có thay đổi chưa lưu. Rời khỏi trang và bỏ các thay đổi này?"))) return;
+    if (editorRef.current?._id && canProfileAction("edit")) {
+      if (!(await flushProfileChanges())) return;
+    } else if (isEditorDirty && !(await confirmAction("Hồ sơ có thay đổi chưa lưu. Rời khỏi trang và bỏ các thay đổi này?"))) return;
     setEditor(null);
     setEditorSnapshot(null);
   };
   const requestClose = async () => {
-    if (isEditorDirty && !(await confirmAction("Hồ sơ có thay đổi chưa lưu. Đóng và bỏ các thay đổi này?"))) return;
+    if (editorRef.current?._id && canProfileAction("edit")) {
+      if (!(await flushProfileChanges())) return;
+    } else if (isEditorDirty && !(await confirmAction("Hồ sơ có thay đổi chưa lưu. Đóng và bỏ các thay đổi này?"))) return;
     onClose();
   };
 
@@ -1007,8 +1030,9 @@ export default function EmployeeProfileManager({ users, onClose, standalone = fa
     const matchesStatus = employmentStatusFilter === "all"
       || (employmentStatusFilter === "working" && ACTIVE_EMPLOYMENT_STATUSES.includes(employmentStatus))
       || employmentStatus === employmentStatusFilter;
-    return matchesStatus && norm([p.employeeCode, p.personal?.fullName, p.employment?.department, p.employment?.company].join(" ")).includes(norm(search));
-  }), [profiles, search, employmentStatusFilter]);
+    const matchesCompany = companyFilter === "all" || norm(p.employment?.company) === norm(companyFilter);
+    return matchesCompany && matchesStatus && norm([p.employeeCode, p.personal?.fullName, p.employment?.department, p.employment?.company].join(" ")).includes(norm(search));
+  }), [profiles, search, employmentStatusFilter, companyFilter]);
   const visibleAlerts = useMemo(() => (alerts.items || []).filter((item) => alertFilter === "all" || item.urgency === alertFilter), [alerts.items, alertFilter]);
   const activeContractTemplates = useMemo(() => {
     const department = norm(editor?.employment?.department);
@@ -1030,6 +1054,7 @@ export default function EmployeeProfileManager({ users, onClose, standalone = fa
       [section]: {
         ...old[section],
         [key]: value,
+        ...(section === "employment" && key === "company" ? { companyCode: value } : {}),
         ...(section === "employment" && key === "employmentStatus" && value === "resigned" && old.employment.employmentStatus !== "resigned"
           ? { endDate: new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Ho_Chi_Minh", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date()) }
           : {}),
@@ -1093,7 +1118,7 @@ export default function EmployeeProfileManager({ users, onClose, standalone = fa
       setEditor((current) => ({
         ...current,
         employeeCode: result.data?.employeeCode || current.employeeCode,
-        employment: { ...current.employment, company },
+        employment: { ...current.employment, company, companyCode: company },
       }));
     } catch (error) {
       if (employeeCodeRequestRef.current === requestId) notify(error.message, "error");
@@ -1103,6 +1128,8 @@ export default function EmployeeProfileManager({ users, onClose, standalone = fa
   };
   const openProfile = async (profile) => {
     try {
+      if (editorRef.current?._id && canProfileAction("edit") && !(await flushProfileChanges())) return;
+      setProfileSaveError("");
       setAuditLoading(true);
       const [result, historyResult] = await Promise.all([
         request(`/api/employee-profiles/${profile._id}`),
@@ -1119,7 +1146,65 @@ export default function EmployeeProfileManager({ users, onClose, standalone = fa
     } catch (error) { notify(error.message, "error"); }
     finally { setAuditLoading(false); }
   };
+  const saveExistingProfile = async () => {
+    if (profileSaveRef.current) return profileSaveRef.current;
+    const submitted = clone(editorRef.current);
+    if (!submitted?._id || !canProfileAction("edit")) return false;
+    const snapshot = JSON.stringify(submitted);
+    if (snapshot === editorSnapshotRef.current) return true;
+    setSavingProfile(true);
+    setProfileSaveError("");
+    const pending = (async () => {
+      try {
+        const payload = {
+          ...submitted,
+          userId: submitted.userId || null,
+          account: undefined,
+          compensation: { ...submitted.compensation, allowances: allowanceSummary(submitted.compensation) },
+        };
+        const result = await request(`/api/employee-profiles/${submitted._id}`, { method: "PUT", body: JSON.stringify(payload) });
+        failedProfileSnapshotRef.current = null;
+        if (editorRef.current?._id === submitted._id) {
+          // Acknowledge only the submitted version; keep edits typed during the request.
+          setEditorSnapshot(snapshot);
+          if (JSON.stringify(editorRef.current) === snapshot && result.data?.payrollBankAccount) {
+            const saved = { ...submitted, payrollBankAccount: result.data.payrollBankAccount };
+            setEditor(saved);
+            setEditorSnapshot(JSON.stringify(saved));
+          }
+        }
+        setProfiles((current) => current.map((profile) => profile._id === submitted._id ? { ...profile, ...result.data } : profile));
+        return true;
+      } catch (error) {
+        failedProfileSnapshotRef.current = snapshot;
+        setProfileSaveError(error.message || "Không thể lưu hồ sơ");
+        return false;
+      } finally {
+        profileSaveRef.current = null;
+        setSavingProfile(false);
+      }
+    })();
+    profileSaveRef.current = pending;
+    return pending;
+  };
+  const flushProfileChanges = async () => {
+    if (profileSaveRef.current && !(await profileSaveRef.current)) return false;
+    while (editorRef.current?._id && JSON.stringify(editorRef.current) !== editorSnapshotRef.current) {
+      if (!(await saveExistingProfile())) return false;
+    }
+    return true;
+  };
+  useEffect(() => {
+    if (!editor?._id || !canProfileAction("edit") || !isEditorDirty || savingProfile || JSON.stringify(editor) === failedProfileSnapshotRef.current) return undefined;
+    const timer = setTimeout(() => { void saveExistingProfile(); }, 1000);
+    return () => clearTimeout(timer);
+  }, [editor, editorSnapshot, savingProfile]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const saveProfile = async () => {
+    if (editorRef.current?._id) {
+      if (await flushProfileChanges()) notify("Đã lưu hồ sơ nhân sự");
+      return;
+    }
     try {
       setSavingProfile(true);
       const isNew = !editor._id;
@@ -1590,12 +1675,13 @@ export default function EmployeeProfileManager({ users, onClose, standalone = fa
     <div className={`mx-auto max-w-[1500px] rounded-3xl border border-cyan-100 bg-gradient-to-b from-cyan-50 to-white shadow-2xl ${standalone ? "min-h-[calc(100vh-48px)]" : "min-h-[calc(100vh-24px)]"}`}>
       <header className="sticky top-0 z-10 flex flex-wrap items-center gap-3 rounded-t-3xl border-b border-cyan-100 bg-white/95 px-5 py-4 backdrop-blur">
         {(editor || !standalone) && <button onClick={editor ? requestCloseEditor : onClose} className="rounded-xl border border-cyan-100 p-2 text-cyan-700 hover:bg-cyan-50"><ArrowLeft size={18} /></button>}
-        <div className="mr-auto"><h2 className="flex items-center gap-2 text-lg font-black text-slate-900">{editor ? `Hồ sơ ${editor.personal?.fullName || "nhân viên"}` : "Quản lý hồ sơ nhân sự"}{isEditorDirty && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-bold text-amber-700">Chưa lưu</span>}</h2><p className="text-xs text-slate-500">Hồ sơ, hợp đồng, phụ lục và xuất biểu mẫu</p></div>
+        <div className="mr-auto"><h2 className="flex items-center gap-2 text-lg font-black text-slate-900">{editor ? `Hồ sơ ${editor.personal?.fullName || "nhân viên"}` : "Quản lý hồ sơ nhân sự"}{editor && <span role="status" aria-live="polite" className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${profileSaveError ? "bg-red-100 text-red-700" : isEditorDirty || savingProfile ? "bg-amber-100 text-amber-700" : "bg-emerald-100 text-emerald-700"}`}>{savingProfile ? "Đang lưu..." : profileSaveError ? "Lưu chưa thành công" : isEditorDirty ? (editor._id && canProfileAction("edit") ? "Chờ tự động lưu..." : "Chưa lưu") : "Đã lưu"}</span>}</h2><p className="text-xs text-slate-500">Hồ sơ, hợp đồng, phụ lục và xuất biểu mẫu</p></div>
         {!editor && <><button onClick={downloadTemplate} className="flex items-center gap-2 rounded-xl border border-cyan-200 bg-white px-3 py-2 text-sm font-semibold text-cyan-700"><Download size={16} /> File mẫu</button>{canProfileAction("edit") && <button disabled={!documentDefaults} onClick={openTemplateManager} className="flex items-center gap-2 rounded-xl bg-violet-600 px-3 py-2 text-sm font-bold text-white disabled:opacity-50"><FileText size={16} /> Thư viện mẫu HĐ</button>}{canProfileAction("create") && <label className="flex cursor-pointer items-center gap-2 rounded-xl bg-emerald-600 px-3 py-2 text-sm font-bold text-white"><Upload size={16} /> Import Excel<input type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={readExcel} /></label>}{canProfileAction("export") && <button disabled={exportingProfiles} onClick={exportEmployeeProfiles} className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-bold text-emerald-700 disabled:opacity-50"><Download size={16} /> {exportingProfiles ? "Đang xuất..." : "Xuất hồ sơ Excel"}</button>}{canProfileAction("create") && <button disabled={generatingEmployeeCode} onClick={openNew} className="flex items-center gap-2 rounded-xl bg-cyan-600 px-3 py-2 text-sm font-bold text-white disabled:opacity-60"><Plus size={16} /> {generatingEmployeeCode ? "Đang cấp MSNV..." : "Thêm hồ sơ"}</button>}</>}
         {editor && canProfileAction(editor._id ? "edit" : "create") && <button disabled={savingProfile} onClick={saveProfile} className="flex items-center gap-2 rounded-xl bg-cyan-600 px-4 py-2 text-sm font-bold text-white disabled:cursor-wait disabled:opacity-60"><Save size={16} /> {savingProfile ? "Đang lưu..." : "Lưu hồ sơ"}</button>}
         {!standalone && <button onClick={requestClose} className="rounded-xl p-2 text-slate-400 hover:bg-slate-100"><X size={18} /></button>}
       </header>
 
+      {editor && profileSaveError && <div role="alert" className="mx-5 mt-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">Chưa lưu được: {profileSaveError}. Nội dung vẫn được giữ trên màn hình. <button type="button" disabled={savingProfile} onClick={saveProfile} className="font-bold underline disabled:opacity-50">Thử lưu lại</button></div>}
       {!editor ? <main className="p-5">
         <section className="mb-5 overflow-hidden rounded-2xl border border-orange-200 bg-white shadow-sm">
           <div className="flex flex-wrap items-center gap-3 border-b border-orange-100 bg-gradient-to-r from-orange-50 to-amber-50 px-4 py-3">
@@ -1612,9 +1698,9 @@ export default function EmployeeProfileManager({ users, onClose, standalone = fa
         {annualLeaveImport.preview && <section className="mb-5 overflow-hidden rounded-2xl border border-emerald-200 bg-white shadow-sm"><div className="flex flex-wrap items-center gap-3 border-b border-emerald-100 bg-emerald-50 p-4"><div className="mr-auto"><b className="text-emerald-900">Import phép năm · {annualLeaveImport.fileName}</b><p className="text-xs text-slate-600">{annualLeaveImport.result ? `Thành công ${annualLeaveImport.result.success}/${annualLeaveImport.result.total}, lỗi ${annualLeaveImport.result.failed}` : `Hợp lệ ${annualLeaveImport.preview.valid}/${annualLeaveImport.preview.total}, lỗi ${annualLeaveImport.preview.invalid}, cảnh báo ${annualLeaveImport.preview.warnings}`}</p></div><button onClick={downloadAnnualLeaveImportResult} className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-white px-3 py-2 text-sm font-bold text-emerald-700"><Download size={15} /> Tải kết quả</button><button disabled={annualLeaveImporting} onClick={() => setAnnualLeaveImport({ fileName: "", rows: [], preview: null, result: null })} className="rounded-xl border bg-white px-3 py-2 text-sm">Đóng</button>{!annualLeaveImport.result && <button disabled={annualLeaveImporting || !annualLeaveImport.preview.valid} onClick={confirmAnnualLeaveImport} className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-50">{annualLeaveImporting ? "Đang cập nhật..." : `Cập nhật ${annualLeaveImport.preview.valid} dòng hợp lệ`}</button>}</div><div className="max-h-80 overflow-auto"><table className="w-full min-w-[1050px] text-left text-xs"><thead className="sticky top-0 bg-slate-100 text-slate-600"><tr><th className="p-2">Dòng</th><th>MSNV</th><th>Họ tên</th><th>Năm</th><th>Số ngày phép hiện tại</th><th>Số ngày phép sau import</th><th>Kết quả</th><th>Ghi chú</th></tr></thead><tbody>{annualLeaveImportItems.map((item) => <tr key={`${item.rowNumber}-${item.employeeCode}`} className={`border-t ${item.valid ? "bg-white" : "bg-red-50"}`}><td className="p-2">{item.rowNumber}</td><td className="font-bold">{item.employeeCode || "-"}</td><td>{item.fullName || "-"}</td><td>{Number.isInteger(Number(item.year)) && Number(item.year) >= 2000 ? item.year : "-"}</td><td>{Number(item.currentRemainingDays || 0)} ngày</td><td><b>{item.remainingDays ?? "-"}</b> ngày</td><td><span className={`font-bold ${item.status === "success" || (item.valid && !item.status) ? "text-emerald-700" : "text-red-600"}`}>{item.status === "success" ? "Thành công" : item.valid && !item.status ? "Hợp lệ" : "Lỗi"}</span><div className="max-w-xs text-[11px] text-red-600">{item.message || (item.errors || []).join("; ")}</div>{item.warning && <div className="max-w-xs text-[11px] text-amber-700">{item.warning}</div>}</td><td>{item.note || "-"}</td></tr>)}</tbody></table></div></section>}
         {importRows.length > 0 && <section className="mb-5 rounded-2xl border border-emerald-200 bg-emerald-50 p-4"><div className="flex flex-wrap items-center gap-3"><div className="mr-auto"><b>Đã đọc {importRows.length} dòng từ {importFileName}</b><p className="text-xs text-slate-600">Kiểm tra nhanh rồi xác nhận ghi dữ liệu.</p></div><button onClick={() => setImportRows([])} className="rounded-xl border bg-white px-3 py-2 text-sm">Hủy</button><button disabled={importing} onClick={confirmImport} className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-60">{importing ? "Đang import..." : "Xác nhận import"}</button></div><div className="mt-3 max-h-44 overflow-auto rounded-xl bg-white"><table className="w-full text-left text-xs"><thead className="sticky top-0 bg-slate-100"><tr><th className="p-2">Dòng</th><th>MSNV</th><th>Họ tên</th><th>Hợp đồng</th></tr></thead><tbody>{importRows.slice(0, 100).map((row) => <tr key={row.rowNumber} className="border-t"><td className="p-2">{row.rowNumber}</td><td>{row.employeeCode || <span className="text-red-500">Thiếu</span>}</td><td>{row.personal.fullName || <span className="text-red-500">Thiếu</span>}</td><td>{row.contract?.contractNumber || "-"}</td></tr>)}</tbody></table></div></section>}
         {importResult && <section className="mb-5 rounded-2xl border border-sky-200 bg-sky-50 p-4 text-sm"><b>Kết quả import:</b> tạo {importResult.profilesCreated} hồ sơ, cập nhật {importResult.profilesUpdated}, tạo {importResult.contractsCreated} hợp đồng, cập nhật {importResult.contractsUpdated}. <span className={importResult.errors?.length ? "text-red-600" : "text-emerald-700"}>Lỗi: {importResult.errors?.length || 0}</span>{importResult.errors?.length > 0 && <div className="mt-2 max-h-28 overflow-auto">{importResult.errors.map((e, i) => <div key={i}>Dòng {e.row} ({e.employeeCode}): {e.message}</div>)}</div>}</section>}
-        <div className="mb-4 grid grid-cols-[minmax(280px,1fr)_220px_42px] items-center gap-3"><div className="relative min-w-0"><Search size={17} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Tìm MSNV, họ tên, bộ phận, công ty..." className={`${inputClass} pl-10`} /></div><select aria-label="Lọc theo tình trạng nhân viên" value={employmentStatusFilter} onChange={(e) => setEmploymentStatusFilter(e.target.value)} className="h-[42px] w-[220px] rounded-xl border border-cyan-100 bg-white px-3 text-sm text-slate-700 outline-none focus:border-cyan-400 focus:ring-4 focus:ring-cyan-100"><option value="working">Thử việc & Chính thức</option><option value="probation">Thử việc</option><option value="official">Chính thức</option><option value="leave">Tạm nghỉ</option><option value="resigned">Nghỉ việc</option><option value="terminated">Chấm dứt</option><option value="unknown">Chưa xác định</option><option value="all">Tất cả tình trạng</option></select><button onClick={() => { loadProfiles(); loadAlerts(); }} title="Tải lại danh sách" aria-label="Tải lại danh sách nhân viên" className="flex h-[42px] w-[42px] items-center justify-center rounded-xl border border-cyan-100 bg-white text-cyan-700 hover:border-cyan-300 hover:bg-cyan-50"><RefreshCcw size={17} /></button></div>
+        <div className="mb-4 grid grid-cols-1 sm:grid-cols-[1fr_auto] xl:grid-cols-[minmax(280px,1fr)_180px_220px_42px] items-center gap-3"><div className="relative min-w-0"><Search size={17} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Tìm MSNV, họ tên, bộ phận, công ty..." className={`${inputClass} pl-10`} /></div><select aria-label="Lọc theo công ty" value={companyFilter} onChange={(e) => setCompanyFilter(e.target.value)} className="h-[42px] w-full rounded-xl border border-cyan-100 bg-white px-3 text-sm text-slate-700 outline-none focus:border-cyan-400 focus:ring-4 focus:ring-cyan-100"><option value="all">Tất cả công ty</option>{COMPANY_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><select aria-label="Lọc theo tình trạng nhân viên" value={employmentStatusFilter} onChange={(e) => setEmploymentStatusFilter(e.target.value)} className="h-[42px] w-full rounded-xl border border-cyan-100 bg-white px-3 text-sm text-slate-700 outline-none focus:border-cyan-400 focus:ring-4 focus:ring-cyan-100"><option value="working">Thử việc & Chính thức</option><option value="probation">Thử việc</option><option value="official">Chính thức</option><option value="leave">Tạm nghỉ</option><option value="resigned">Nghỉ việc</option><option value="terminated">Chấm dứt</option><option value="unknown">Chưa xác định</option><option value="all">Tất cả tình trạng</option></select><button onClick={() => { loadProfiles(); loadAlerts(); }} title="Tải lại danh sách" aria-label="Tải lại danh sách nhân viên" className="flex h-[42px] w-[42px] items-center justify-center rounded-xl border border-cyan-100 bg-white text-cyan-700 hover:border-cyan-300 hover:bg-cyan-50"><RefreshCcw size={17} /></button></div>
         <div className="overflow-auto rounded-2xl border border-cyan-100 bg-white"><table className="w-full min-w-[1000px] text-left text-sm"><thead className="bg-cyan-50 text-xs uppercase text-slate-500"><tr><th className="p-3">Nhân viên</th><th>MSNV</th><th>Bộ phận / chức danh</th><th>Công ty</th><th>Tình trạng</th><th>Phép năm</th><th>Thâm niên</th><th className="pr-3 text-right">Thao tác</th></tr></thead><tbody>{loading ? <tr><td colSpan="8" className="p-10 text-center">Đang tải...</td></tr> : filtered.map((p) => <tr key={p._id} className="border-t border-cyan-50 hover:bg-cyan-50/50"><td className="p-3 font-bold text-slate-800">{p.personal?.fullName}</td><td>{p.employeeCode}</td><td>{p.employment?.department || "-"}<div className="text-xs text-slate-400">{p.employment?.jobTitle}</div></td><td>{p.employment?.company || "-"}</td><td><span className={`rounded-full px-2 py-1 text-xs font-semibold ${ACTIVE_EMPLOYMENT_STATUSES.includes(p.employment?.employmentStatus) ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"}`}>{exportEmploymentStatus[p.employment?.employmentStatus] || "Chưa xác định"}</span></td><td><b className="text-emerald-700">{Number(p.annualLeaveBalance?.remainingDays || 0)} ngày</b></td><td>{p.seniority?.years || 0} năm</td><td className="pr-3 text-right"><button onClick={() => openProfile(p)} className="rounded-lg bg-cyan-600 px-3 py-1.5 text-xs font-bold text-white">Chi tiết</button></td></tr>)}</tbody></table></div>
-      </main> : <main className="space-y-5 p-5">
+      </main> : <ProfileAutoSaveContext.Provider value={Boolean(editor._id && canProfileAction("edit"))}><main className="space-y-5 p-5">
         <section className="rounded-2xl border border-cyan-100 bg-white p-4"><div className="mb-4 flex flex-wrap items-center gap-3"><div className="mr-auto"><h3 className="font-black text-cyan-800">Thông tin tài khoản và cá nhân</h3><p className="text-xs text-slate-500">Tên, MSNV, email, SĐT và công ty được dùng chung với tài khoản đăng nhập.</p></div>{!editor._id && <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-cyan-200 bg-cyan-50 px-3 py-2 text-sm font-bold text-cyan-800"><input type="checkbox" checked={editor.account?.create !== false} onChange={(e) => setEditor((current) => ({ ...current, userId: e.target.checked ? "" : current.userId, account: { ...current.account, create: e.target.checked } }))} /> Tạo tài khoản đăng nhập</label>}</div>{!editor._id && editor.account?.create !== false && <div className="mb-4 grid gap-3 rounded-xl border border-cyan-100 bg-cyan-50/50 p-3 md:grid-cols-3"><label><span className={labelClass}>Vai trò tài khoản</span><select value={editor.account?.role || "user"} onChange={(e) => setEditor((current) => ({ ...current, account: { ...current.account, role: e.target.value } }))} className={inputClass}><option value="user">Người dùng (user)</option>{accountRoles.filter((role) => String(role.roleID || "").toLowerCase() !== "user").map((role) => <option key={role._id} value={String(role.roleID || "").toLowerCase()}>{role.roles} ({String(role.roleID || "").toLowerCase()})</option>)}</select></label><label><span className={labelClass}>Trạng thái ban đầu</span><select value={Number(editor.account?.approveStatus ?? 1)} onChange={(e) => setEditor((current) => ({ ...current, account: { ...current.account, approveStatus: Number(e.target.value) } }))} className={inputClass}><option value={1}>Đã duyệt</option><option value={0}>Chờ duyệt</option></select></label><label className="flex items-end"><span className="flex min-h-11 w-full cursor-pointer items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700"><input type="checkbox" checked={editor.account?.sendSetupEmail !== false} onChange={(e) => setEditor((current) => ({ ...current, account: { ...current.account, sendSetupEmail: e.target.checked } }))} /> Gửi email tạo mật khẩu</span></label></div>}<div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">{(editor._id || editor.account?.create === false) && <label><span className={labelClass}>Liên kết tài khoản</span><select value={editor.userId || ""} disabled={Boolean(editor._id && editor.userId)} onChange={(e) => changeLinkedUser(e.target.value)} className={`${inputClass} disabled:cursor-not-allowed disabled:bg-slate-100`}><option value="">Không có tài khoản</option>{profileUsers.map((u) => <option key={u._id} value={u._id} disabled={Boolean(u.employeeProfileId && String(u.employeeProfileId) !== String(editor._id || ""))}>{u.code || "--"} - {u.fullName}{u.employeeProfileId && String(u.employeeProfileId) !== String(editor._id || "") ? " (đã liên kết)" : ""}</option>)}</select></label>}<Field label="MSNV" value={editor.employeeCode} onChange={(v) => setEditor({ ...editor, employeeCode: v })} /><Field label="Họ và tên" value={editor.personal.fullName} onChange={(v) => setNested("personal", "fullName", v)} /><Field label={`Email${!editor._id && editor.account?.create !== false ? " *" : ""}`} type="email" value={editor.personal.email} onChange={(v) => setNested("personal", "email", v)} /><Field label="SĐT cá nhân" value={editor.personal.personalPhone} onChange={(v) => setNested("personal", "personalPhone", v)} /><SelectField label="Giới tính" value={editor.personal.gender} onChange={(v) => setNested("personal", "gender", v)} options={[["unknown", "Chưa xác định"], ["male", "Nam"], ["female", "Nữ"], ["other", "Khác"]]} /><Field label="Ngày sinh" type="date" value={editor.personal.dateOfBirth} onChange={(v) => setNested("personal", "dateOfBirth", v)} /><Field label="Dân tộc" value={editor.personal.ethnicity} onChange={(v) => setNested("personal", "ethnicity", v)} /><SelectField label="Hôn nhân" value={editor.personal.maritalStatus} onChange={(v) => setNested("personal", "maritalStatus", v)} options={[["unknown", "Chưa xác định"], ["single", "Độc thân"], ["married", "Đã kết hôn"], ["divorced", "Ly hôn"], ["widowed", "Góa"]]} /></div></section>
         <EmployeeProfileFilesSection profile={editor} canEdit={canProfileAction(editor._id ? "edit" : "create")} canEditIdentity={canProfileAction("view")} canDelete={canProfileAction("delete")} onChanged={handleProfileFileChanged} notify={notify} confirmAction={confirmAction} />
         <FamilyMembersSection members={editor.familyMembers || []} editable={canProfileAction(editor._id ? "edit" : "create")} onChange={(familyMembers) => setEditor((current) => ({ ...current, familyMembers }))} />
@@ -1666,7 +1752,7 @@ export default function EmployeeProfileManager({ users, onClose, standalone = fa
           <div className="flex items-center gap-3 border-b border-indigo-100 bg-indigo-50/70 px-4 py-3"><span className="flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-600 text-white"><History size={18} /></span><div className="mr-auto"><h3 className="font-black text-indigo-900">Lịch sử thay đổi</h3><p className="text-xs text-slate-500">{auditHistory.total || 0} hoạt động · hiển thị tối đa 100 hoạt động gần nhất</p></div><button disabled={auditLoading} onClick={() => openProfile(editor)} className="rounded-xl border border-indigo-200 bg-white p-2 text-indigo-700 disabled:opacity-50"><RefreshCcw size={15} className={auditLoading ? "animate-spin" : ""} /></button></div>
           {auditLoading && !auditHistory.items?.length ? <div className="p-8 text-center text-sm text-slate-500">Đang tải lịch sử...</div> : auditHistory.items?.length ? <div className="max-h-[520px] overflow-y-auto p-4"><div className="relative ml-3 border-l-2 border-indigo-100 pl-6">{auditHistory.items.map((item) => <article key={item._id} className="relative mb-5 last:mb-0"><span className={`absolute -left-[34px] top-0 flex h-4 w-4 rounded-full border-4 border-white ${item.entityType === "contract" ? "bg-violet-500" : item.entityType === "asset" ? "bg-teal-500" : "bg-indigo-500"}`} /><div className="rounded-xl border border-slate-100 bg-slate-50/70 p-3"><div className="flex flex-wrap items-start gap-2"><div className="mr-auto"><div className="flex flex-wrap items-center gap-2"><b className="text-sm text-slate-800">{item.summary || AUDIT_ACTION_LABELS[item.action] || item.action}</b><span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${item.entityType === "contract" ? "bg-violet-100 text-violet-700" : item.entityType === "asset" ? "bg-teal-100 text-teal-700" : "bg-indigo-100 text-indigo-700"}`}>{item.entityType === "contract" ? "Hợp đồng" : item.entityType === "asset" ? "Thiết bị" : "Hồ sơ"}</span>{item.source !== "manual" && <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-semibold text-slate-600">{item.source === "import" ? "Import Excel" : item.source === "bulk" ? "Hàng loạt" : item.source}</span>}</div><div className="mt-1 text-xs text-slate-500">{item.actor?.fullName || item.actor?.email || "Hệ thống"} · {auditDateVN(item.createdAt)}</div></div><span className="text-[11px] font-semibold text-slate-400">{AUDIT_ACTION_LABELS[item.action] || ""}</span></div>{item.changes?.length > 0 && <details className="mt-3"><summary className="cursor-pointer select-none text-xs font-bold text-indigo-700">{item.changes.length} trường thay đổi</summary><div className="mt-2 grid gap-2 md:grid-cols-2">{item.changes.map((change, index) => <div key={`${change.field}-${index}`} className="rounded-lg border border-slate-100 bg-white p-2 text-xs"><div className="mb-1 font-bold text-slate-600">{change.label || change.field}</div><div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2"><span className="break-words rounded bg-red-50 px-2 py-1 text-red-700">{change.oldValue || "—"}</span><span className="text-slate-300">→</span><span className="break-words rounded bg-emerald-50 px-2 py-1 text-emerald-700">{change.newValue || "—"}</span></div></div>)}</div></details>}</div></article>)}</div></div> : <div className="p-8 text-center text-sm text-slate-500"><History size={20} className="mx-auto mb-2 text-indigo-300" />Chưa có lịch sử thay đổi cho hồ sơ này.</div>}
         </section>}
-      </main>}
+      </main></ProfileAutoSaveContext.Provider>}
     </div>
 
     {showTemplateManager && templateEditor && <ContractTemplateManagerModal
