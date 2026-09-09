@@ -275,6 +275,8 @@ const RETAILER_CONFIG = {
       "Ấp Công Thiện Hùng, Xã Long Đức, Thành phố Trà Vinh, Trà Vinh - 0915283068",
     Token_GHN: "b124eb06-2a43-11f1-b85d-fab563a1e61d",
     ShopId_GHN: 5822099,
+    BranchTakingAddressStrNewAdress:
+      "Ấp Công Thiện Hùng, Phường Long Đức, Tỉnh Vĩnh Long - 0915283068",
   },
   vietnhattv: {
     branchId: 1000016463,
@@ -284,6 +286,8 @@ const RETAILER_CONFIG = {
       "Ấp Công Thiện Hùng, Xã Long Đức,  Thành phố Trà Vinh, Trà Vinh  - +84 915 283 053",
     Token_GHN: "e7d0b63f-66e1-11f0-ba41-0aaf661d8b6b",
     ShopId_GHN: 5854630,
+    BranchTakingAddressStrNewAdress:
+      "Ấp Công Thiện Hùng, Phường Long Đức, Tỉnh Vĩnh Long - +84 915 283 053",
   },
   abctv: {
     branchId: 1000016450,
@@ -293,6 +297,8 @@ const RETAILER_CONFIG = {
       "Ấp Đa Cần, Xã Hòa Thuận, Huyện Châu Thành, Trà Vinh - 0915283017",
     Token_GHN: "b5beb0fd-2c1a-11f1-a3eb-52dcb54263af",
     ShopId_GHN: 5788767,
+    BranchTakingAddressStrNewAdress:
+      "Ấp Đa Cần, Phường Hòa Thuận, Tỉnh Vĩnh Long - +84 915 283 017",
   },
   nnvtv: {
     branchId: 1000016413,
@@ -302,6 +308,8 @@ const RETAILER_CONFIG = {
       "Ấp Công Thiện Hùng, Xã Long Đức, Thành phố Trà Vinh, Trà Vinh - 0915283068",
     Token_GHN: "77b2aa78-2a43-11f1-bf7c-9a8540816395",
     ShopId_GHN: 5854657,
+    BranchTakingAddressStrNewAdress:
+      "Ấp Công Thiện Hùng, Phường Long Đức, Tỉnh Vĩnh Long - 0915283068",
   },
 };
 
