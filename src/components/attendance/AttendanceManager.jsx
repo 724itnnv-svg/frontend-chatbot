@@ -66,6 +66,7 @@ const LEAVE_TYPE_LABELS = {
   regular: "Nghỉ phép thường",
   emergency: "Off đột xuất",
   annual: "Phép năm",
+  paid_family: "Nghỉ hưởng lương (cưới, sinh, tang)",
   remote_work: "Làm việc tại nhà",
   business_trip: "Đi công vụ",
   forgotten_punch: "Quên chấm công",

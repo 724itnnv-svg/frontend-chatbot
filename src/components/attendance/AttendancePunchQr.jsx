@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { CheckCircle2, Clock, Loader2, LogIn, LogOut, MapPin, ShieldAlert } from "lucide-react";
 import { apiUrl } from "../../api/baseUrl";
+import { getDeviceInfo } from "../../utils/deviceIdentity";
 
 export default function AttendancePunchQr() {
   const location = useLocation();
@@ -29,7 +30,7 @@ export default function AttendancePunchQr() {
         const res = await fetch(apiUrl("/api/public/attendance/punch-by-token"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ token, locationId }),
+          body: JSON.stringify({ token, locationId, ...getDeviceInfo() }),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data?.message || "Không thể chấm công");
@@ -45,7 +46,6 @@ export default function AttendancePunchQr() {
     doPunch();
   }, [token, locationId]);
 
-  const isCheckIn = result?.action === "check-in";
   const isCheckOut = result?.action === "check-out";
 
   const iconBg =

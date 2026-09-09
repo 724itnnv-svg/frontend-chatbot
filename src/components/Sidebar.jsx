@@ -240,7 +240,7 @@ const MENU_CONFIG = [
   {
     id: "notifications",
     path: "/admin/notifications",
-    label: "Thông báo thiết bị",
+    label: "Thiết bị & thông báo",
     icon: BellRing,
   },
   {

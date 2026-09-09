@@ -88,6 +88,7 @@ const LEAVE_TYPE_LABELS = {
   regular: "Nghỉ phép thường",
   emergency: "Off đột xuất",
   annual: "Phép năm",
+  paid_family: "Nghỉ hưởng lương (cưới, sinh, tang)",
   remote_work: "Làm việc tại nhà",
   business_trip: "Đi công vụ",
   forgotten_punch: "Quên chấm công",
@@ -147,7 +148,7 @@ const dayWorkIncomeKeys = [
 const incomeRows = [
   ["Lương theo ngày công", dayWorkIncomeKeys, { detailPath: "thuNhapTheoNgayCong.ngayCong", unit: "ngày" }],
   ["Lương lễ tết", "thuNhapTheoNgayCong.luongLeTet", { detailPath: "thuNhapTheoNgayCong.leTet", unit: "ngày" }],
-  ["Lương phép năm", "thuNhapTheoNgayCong.luongPhepNam", { detailPath: "thuNhapTheoNgayCong.phepNam", unit: "ngày" }],
+  ["Lương phép năm / nghỉ hưởng lương", "thuNhapTheoNgayCong.luongPhepNam", { detailPath: "thuNhapTheoNgayCong.phepNam", unit: "ngày" }],
   ["Lương tăng ca thường", "thuNhapTheoNgayCong.luongTangCaThuong", { detailPath: "thuNhapTheoNgayCong.tangCaThuong", unit: "giờ" }],
   ["Lương tăng ca chủ nhật", "thuNhapTheoNgayCong.luongTangCaChuNhat", { detailPath: "thuNhapTheoNgayCong.tangCaChuNhat", unit: "giờ" }],
   ["Lương tăng ca lễ tết", "thuNhapTheoNgayCong.luongTangCaLeTet", { detailPath: "thuNhapTheoNgayCong.tangCaLeTet", unit: "giờ" }],
@@ -267,7 +268,7 @@ function shiftHasInvalidPunch(shift) {
 function attendanceDayMeta(record, date, today = todayKey(), approvedLeave = null) {
   if (approvedLeave && (!record || record.status === "incomplete" || !hasAttendancePunch(record))) {
     return {
-      label: approvedLeave.leaveType === "annual" ? "Phép năm đã duyệt" : approvedLeave.leaveType === "emergency" ? "Off đột xuất đã duyệt" : approvedLeave.leaveType === "remote_work" ? "Làm việc tại nhà đã duyệt" : approvedLeave.leaveType === "business_trip" ? "Đi công vụ đã duyệt" : "Nghỉ phép đã duyệt",
+      label: approvedLeave.leaveType === "annual" ? "Phép năm đã duyệt" : ["paid_family"].includes(approvedLeave.leaveType) ? `${LEAVE_TYPE_LABELS[approvedLeave.leaveType]} đã duyệt` : approvedLeave.leaveType === "emergency" ? "Off đột xuất đã duyệt" : approvedLeave.leaveType === "remote_work" ? "Làm việc tại nhà đã duyệt" : approvedLeave.leaveType === "business_trip" ? "Đi công vụ đã duyệt" : "Nghỉ phép đã duyệt",
       dot: "bg-violet-500",
       border: "border-violet-300",
       bg: "bg-violet-50",
@@ -376,7 +377,7 @@ function leaveIntervals(request) {
       .map(([start, end]) => [request.startTime > start ? request.startTime : start, request.endTime < end ? request.endTime : end])
       .filter(([start, end]) => end > start);
   }
-  if (request.leaveType === "annual" || request.session === "full_day") {
+  if (["annual", "paid_family"].includes(request.leaveType) || request.session === "full_day") {
     return [["07:30", "11:30"], ["13:00", "17:00"]];
   }
   if (request.session === "morning") return [["07:30", "11:30"]];
@@ -3021,7 +3022,7 @@ export default function AttendancePage() {
                           endTime: leaveType === "overtime" ? "19:00" : current.leaveType === "overtime" ? "17:00" : current.endTime,
                           startDate: ["forgotten_punch", "overtime"].includes(leaveType) && current.startDate > todayKey() ? todayKey() : current.startDate,
                           endDate: TIMED_REQUEST_TYPES.includes(leaveType) ? (["forgotten_punch", "overtime"].includes(leaveType) && current.startDate > todayKey() ? todayKey() : current.startDate) : current.endDate,
-                          session: ["annual", ...TIMED_REQUEST_TYPES].includes(leaveType) ? "full_day" : current.session,
+                          session: ["annual", "paid_family", ...TIMED_REQUEST_TYPES].includes(leaveType) ? "full_day" : current.session,
                           evidences: leaveType === "remote_work" ? [] : current.evidences,
                         };
                       })}
@@ -3030,6 +3031,7 @@ export default function AttendancePage() {
                       <option value="emergency">Off đột xuất</option>
                       <option value="regular">Nghỉ phép thường</option>
                       <option value="annual">Phép năm</option>
+                      <option value="paid_family">Nghỉ hưởng lương (cưới, sinh, tang)</option>
                       <option value="remote_work">Làm việc tại nhà</option>
                       <option value="business_trip">Đi công vụ</option>
                       <option value="forgotten_punch">Quên chấm công</option>
@@ -3056,8 +3058,8 @@ export default function AttendancePage() {
                       <label className="block text-xs font-semibold text-slate-600">ĐẾN GIỜ <span className="text-rose-500">*</span><input type="time" min={leaveForm.leaveType === "overtime" ? undefined : "07:30"} max={leaveForm.leaveType === "overtime" ? undefined : "17:00"} required value={leaveForm.endTime} onChange={(event) => setLeaveForm((current) => ({ ...current, endTime: event.target.value }))} className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-violet-400" /></label>
                       <p className="col-span-2 text-xs text-slate-400">{leaveForm.leaveType === "overtime" ? "Báo giờ đã làm trong cùng ngày, ngoài ca hoặc trong giờ nghỉ trưa 11:30–13:00 (tối đa 90 phút nghỉ trưa). Chỉ ghi nhận sau khi quản trị duyệt; chưa hỗ trợ ca qua đêm." : ["remote_work", "business_trip", "forgotten_punch"].includes(leaveForm.leaveType) ? "Thời gian chưa được ghi nhận sau khi duyệt sẽ cộng vào bảng công; tự động loại giờ nghỉ trưa 11:30–13:00 và không cộng trùng giờ đã chấm." : "Chỉ tính thời gian trong giờ làm việc; tự động loại giờ nghỉ trưa 11:30–13:00."}</p>
                     </div>
-                  ) : leaveForm.leaveType === "annual" ? (
-                    <div className={`rounded-xl border p-3 text-xs ${TONE.emerald}`}><b>Điều kiện tự duyệt phép năm</b><span className="mt-1 block">Báo trước: 1 ngày ≥ 3 ngày, 2 ngày ≥ 7 ngày, từ 3 ngày ≥ 15 ngày. Chủ nhật không tính ngày nghỉ.</span></div>
+                  ) : ["annual", "paid_family"].includes(leaveForm.leaveType) ? (
+                    <div className={`rounded-xl border p-3 text-xs ${TONE.emerald}`}><b>Điều kiện tự duyệt {leaveForm.leaveType === "annual" ? "phép năm" : "nghỉ hưởng lương"}</b><span className="mt-1 block">Báo trước: 1 ngày ≥ 3 ngày, 2 ngày ≥ 7 ngày, từ 3 ngày ≥ 15 ngày. Chủ nhật và ngày lễ không tính ngày nghỉ. Chưa đủ thời gian báo trước sẽ chuyển quản trị duyệt.</span>{leaveForm.leaveType !== "annual" && <span className="mt-1 block">Nghỉ cả ngày, hưởng lương như phép năm và không trừ quỹ phép năm.</span>}</div>
                   ) : (
                     <label className="block text-xs font-semibold text-slate-600">
                       THỜI GIAN <span className="text-rose-500">*</span>
@@ -3081,7 +3083,7 @@ export default function AttendancePage() {
                     <span className="mt-1 block text-xs text-slate-400">Tối đa 3 ảnh, mỗi ảnh 8 MB. {leaveForm.leaveType === "business_trip" ? "Bắt buộc với đơn đi công vụ." : ["forgotten_punch", "overtime"].includes(leaveForm.leaveType) ? "Không bắt buộc, dùng để quản trị đối chiếu khi cần." : "Bắt buộc với off đột xuất; có thể bổ sung sau khi gửi đơn."}</span>
                   </label>}
 
-                  {leaveForm.leaveType === "remote_work" && <div className={`rounded-xl border p-3 text-xs ${TONE.sky}`}><b>Không cần ảnh minh chứng.</b><span className="mt-1 block">Sau khi được duyệt, khung giờ này được tính là giờ làm việc bình thường trong bảng chấm công.</span></div>}
+                  {leaveForm.leaveType === "remote_work" && <div className={`rounded-xl border p-3 text-xs ${TONE.sky}`}><b>Tự động duyệt khi gửi trước ngày làm ít nhất 1 ngày.</b><span className="mt-1 block">Tính theo ngày lịch tại Việt Nam. Đơn gửi trong ngày hoặc cho ngày đã qua sẽ chờ quản trị duyệt. Không cần ảnh minh chứng.</span><span className="mt-1 block">Sau khi được duyệt, khung giờ này được tính là giờ làm việc bình thường trong bảng chấm công, không trừ phép năm.</span></div>}
 
                   {leaveForm.leaveType === "overtime" && <div className={`rounded-xl border p-3 text-xs ${TONE.violet}`}><b>Đề nghị: {Math.max(0, (minutesFromTime(leaveForm.endTime) || 0) - (minutesFromTime(leaveForm.startTime) || 0))} phút tăng ca.</b><span className="mt-1 block">Không trừ phép hoặc cộng vào giờ công thường. Quản trị sẽ đối chiếu chấm công và xác nhận khung giờ thực tế.</span></div>}
 

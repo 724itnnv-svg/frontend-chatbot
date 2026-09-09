@@ -583,6 +583,11 @@ export default function UserProfile() {
                         </form>
                     </section>
                 </main>
+                <section className={`${cardClass} mt-5 p-5 sm:p-6`}>
+                    <h2 className="text-base font-bold text-slate-900">Thiết bị đăng nhập & thông báo</h2>
+                    <p className="mt-1 text-sm text-slate-500">Xem các trình duyệt từng đăng nhập, thu hồi phiên và đọc thông báo của bạn.</p>
+                    <button type="button" onClick={() => navigate("/account-security")} className="mt-4 rounded-xl bg-cyan-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-cyan-700">Quản lý thiết bị của tôi</button>
+                </section>
 
                 <section className={`${cardClass} mt-5 p-5 sm:p-6`}>
                     <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">

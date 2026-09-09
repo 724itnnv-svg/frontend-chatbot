@@ -46,6 +46,8 @@ const COLUMNS = [
   ["Điểm KPI", 9, "days"],
   ["Thưởng KPI", 13, "money"],
   ["Khoản cộng khác", 13, "money"],
+  ["Phúc lợi", 13, "money"],
+  ["Thưởng đột xuất (đã chi)", 18, "money"],
   ["Tổng thu nhập", 15, "money"],
   ["Khấu trừ bảo hiểm bắt buộc (phần NLĐ)", 18, "money"],
   ["Tổng tạm ứng", 13, "money"],
@@ -122,6 +124,8 @@ function buildDataRow(row, index, profile, standardWorkDays) {
     number(get(row, "thuNhapTheoNgayCong.diemKPI")),
     number(get(row, "thuNhapTheoNgayCong.thuongKPI")),
     number(get(row, "thuNhapTheoNgayCong.congKhac")),
+    number(get(row, "thuNhapTheoNgayCong.phucLoi")),
+    number(get(row, "thuNhapTheoNgayCong.thuongDotXuat")),
     number(get(row, "thuNhapTheoNgayCong.tongThuNhap")),
     number(get(row, "khauTru.bhxh")),
     number(get(row, "khauTru.tamUng")),
@@ -129,7 +133,7 @@ function buildDataRow(row, index, profile, standardWorkDays) {
     otherDeductions,
     number(get(row, "khauTru.tongKhauTru")),
     number(get(row, "tinhThueTNCN.thueTNCNTamTinh")),
-    number(row.luongThucLinh),
+    number(row.luongThucLinh) + number(get(row, "thuNhapTheoNgayCong.thuongDotXuat")),
     buildBhxhNote(row),
     "",
   ];
@@ -162,19 +166,20 @@ export function createPayrollBhxhWorkbook(ExcelJS, rows, period, profilesByEmplo
 
   COLUMNS.forEach(([, width], index) => { sheet.getColumn(index + 1).width = width; });
   const { month, year } = displayPeriod(period);
-  sheet.mergeCells("A1:AD1");
+  const lastColumn = columnLetter(COLUMNS.length);
+  sheet.mergeCells(`A1:${lastColumn}1`);
   sheet.getCell("A1").value = `${company.name}\nĐịa chỉ: ${company.address}\nMST: ${company.taxCode}`;
   sheet.getCell("A1").font = { name: "Times New Roman", size: 11, bold: true };
   sheet.getCell("A1").alignment = { vertical: "middle", wrapText: true };
   sheet.getRow(1).height = 48;
 
-  sheet.mergeCells("A2:AD2");
+  sheet.mergeCells(`A2:${lastColumn}2`);
   sheet.getCell("A2").value = `BẢNG LƯƠNG THÁNG ${month} NĂM ${year} – BẢN CHUẨN HÓA ĐỐI CHIẾU BHXH`;
   sheet.getCell("A2").font = { name: "Times New Roman", size: 12, bold: true, color: { argb: "FFC00000" } };
   sheet.getCell("A2").alignment = { horizontal: "center", vertical: "middle" };
   sheet.getRow(2).height = 24;
 
-  sheet.mergeCells("A3:AD3");
+  sheet.mergeCells(`A3:${lastColumn}3`);
   sheet.getCell("A3").value = "Lưu ý: Các ô tô vàng là thông tin phục vụ đối chiếu BHXH; vui lòng kiểm tra mã số BHXH, ngày công chuẩn, ngày nghỉ không hưởng lương và ghi chú trước khi xuất trình.";
   sheet.getCell("A3").font = { name: "Times New Roman", size: 9, italic: true };
   sheet.getCell("A3").fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFF2CC" } };
@@ -206,7 +211,7 @@ export function createPayrollBhxhWorkbook(ExcelJS, rows, period, profilesByEmplo
         wrapText: true,
       };
       if (type === "money") cell.numFmt = "#,##0";
-      if (["days", "insuranceDays"].includes(type)) cell.numFmt = "0.##";
+      if (["days", "insuranceDays"].includes(type)) cell.numFmt = "General";
       if (type === "insurance" || type === "insuranceDays") {
         cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFF2CC" } };
       }
@@ -234,16 +239,18 @@ export function createPayrollBhxhWorkbook(ExcelJS, rows, period, profilesByEmplo
   const dateRow = totalRowNumber + 2;
   const roleRow = totalRowNumber + 3;
   const nameRow = totalRowNumber + 8;
-  sheet.mergeCells(`Y${dateRow}:AD${dateRow}`);
-  sheet.getCell(`Y${dateRow}`).value = signatureDate(options.signatureDate, options.location || company.location);
-  sheet.getCell(`Y${dateRow}`).alignment = { horizontal: "center", vertical: "middle" };
-  sheet.getCell(`Y${dateRow}`).font = { name: "Times New Roman", size: 10 };
+  const preparedByFrom = columnLetter(COLUMNS.length - 5);
+  const preparedByTo = columnLetter(COLUMNS.length - 3);
+  sheet.mergeCells(`${preparedByFrom}${dateRow}:${lastColumn}${dateRow}`);
+  sheet.getCell(`${preparedByFrom}${dateRow}`).value = signatureDate(options.signatureDate, options.location || company.location);
+  sheet.getCell(`${preparedByFrom}${dateRow}`).alignment = { horizontal: "center", vertical: "middle" };
+  sheet.getCell(`${preparedByFrom}${dateRow}`).font = { name: "Times New Roman", size: 10 };
 
   const signatures = [
     ["B", "D", "Giám đốc"],
     ["J", "L", "Thủ quỹ"],
     ["R", "T", "Kế toán"],
-    ["Y", "AA", "Lập bảng"],
+    [preparedByFrom, preparedByTo, "Lập bảng"],
   ];
   signatures.forEach(([from, to, label]) => {
     sheet.mergeCells(`${from}${roleRow}:${to}${roleRow}`);
@@ -253,15 +260,15 @@ export function createPayrollBhxhWorkbook(ExcelJS, rows, period, profilesByEmplo
     cell.alignment = { horizontal: "center", vertical: "middle" };
   });
   if (options.preparedBy) {
-    sheet.mergeCells(`Y${nameRow}:AA${nameRow}`);
-    const preparedByCell = sheet.getCell(`Y${nameRow}`);
+    sheet.mergeCells(`${preparedByFrom}${nameRow}:${preparedByTo}${nameRow}`);
+    const preparedByCell = sheet.getCell(`${preparedByFrom}${nameRow}`);
     preparedByCell.value = options.preparedBy;
     preparedByCell.font = { name: "Times New Roman", size: 10, bold: true };
     preparedByCell.alignment = { horizontal: "center", vertical: "middle" };
   }
 
-  sheet.autoFilter = { from: "A4", to: `AD${lastDataRow}` };
-  sheet.pageSetup.printArea = `A1:AD${nameRow}`;
+  sheet.autoFilter = { from: "A4", to: `${lastColumn}${lastDataRow}` };
+  sheet.pageSetup.printArea = `A1:${lastColumn}${nameRow}`;
   sheet.pageSetup.printTitlesRow = "1:4";
   return workbook;
 }

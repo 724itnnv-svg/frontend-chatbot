@@ -96,6 +96,8 @@ const EventSimulator = lazy(() => import("./components/EventSimulator"));
 const NotificationManager = lazy(
   () => import("./components/NotificationManager"),
 );
+const AccountSecurity = lazy(() => import("./components/security/AccountSecurity"));
+const AccountNotificationLink = lazy(() => import("./components/security/AccountNotificationLink"));
 const PayrollManager = lazy(() => import("./components/PayrollManager"));
 const KpiManager = lazy(() => import("./components/KpiManager"));
 const SalaryAdvanceManager = lazy(
@@ -528,6 +530,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<HomeRoute />} />
           <Route path="/user" element={<UserDashboard />} />
+          <Route path="/account-security" element={<RequireAuth><AccountSecurity /></RequireAuth>} />
           <Route
             path="/tao-don-hang"
             element={
@@ -599,6 +602,7 @@ export default function App() {
           <Route path="/404" element={<NotFoundPage />} />
           <Route path="*" element={<NotFoundPage />} />
         </Routes>
+        {isLoggedIn && <AccountNotificationLink />}
       </Suspense>
     </ErrorBoundary>
   );

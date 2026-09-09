@@ -1,3 +1,4 @@
+import { Capacitor } from "@capacitor/core";
 const DEVICE_ID_KEY = "nnvDeviceId";
 const LEGACY_DEVICE_ID_KEY = "_did";
 
@@ -18,9 +19,12 @@ export function getDeviceId() {
 }
 
 export function getDeviceInfo() {
+  let deviceId = "";
+  try { deviceId = getDeviceId(); } catch { /* Chấm công vẫn hoạt động khi trình duyệt chặn storage; không suy đoán thiết bị. */ }
   return {
-    deviceId: getDeviceId(),
+    deviceId,
     deviceName: navigator.userAgent || "",
     platform: navigator.platform || "",
+    clientType: Capacitor.isNativePlatform() ? Capacitor.getPlatform() : "web",
   };
 }
