@@ -8,7 +8,7 @@ export default function AccountNotificationLink({ onClick }) {
   const location = useLocation();
   const [count, setCount] = useState(0);
   const pathname = location.pathname.replace(/\/+$/, "") || "/";
-  const hidden = ["/account-security", "/cham-cong", "/admin/my-attendance"].includes(pathname);
+  const hidden = pathname === "/account-security";
   useEffect(() => {
     if (hidden) return;
     const controller = new AbortController();
