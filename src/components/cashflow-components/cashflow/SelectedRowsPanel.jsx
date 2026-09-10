@@ -281,6 +281,7 @@ export default function SelectedRowsPanel({
   onSendPayloads,
   onRetryFailedPayloads,
   onExportExcel,
+  onOpenCashflowList,
   isSendingPayloads,
   isLoadingOrderDeliveries,
   sendPayloadProgress,
@@ -484,6 +485,14 @@ export default function SelectedRowsPanel({
               disabled={isExportingExcel}
             >
               {isExportingExcel ? "Đang xuất..." : "Xuất Excel"}
+            </button>
+            <button
+              type="button"
+              className={buttonClass}
+              onClick={onOpenCashflowList}
+              disabled={isLoadingOrderDeliveries}
+            >
+              Xem danh sách sổ quỹ
             </button>
           </div>
         </div>

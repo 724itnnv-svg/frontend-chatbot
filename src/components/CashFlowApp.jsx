@@ -7,6 +7,8 @@ import {
   getPartnerDelivery,
   getAccessPrivateToken,
   getBankAccount,
+  getCashflowList,
+  updateCashflowDates,
   getOrderDelivery,
 } from "../services/cashflowService/kiotService";
 import {
@@ -23,6 +25,7 @@ import ControlsPanel from "./cashflow-components/cashflow/ControlsPanel";
 import StatsGrid from "./cashflow-components/cashflow/StatsGrid";
 import ExcelTable from "./cashflow-components/cashflow/ExcelTable";
 import SelectedRowsPanel from "./cashflow-components/cashflow/SelectedRowsPanel";
+import CashflowListModal from "./cashflow-components/cashflow/CashflowListModal";
 import ToastContainer from "./cashflow-components/cashflow/ToastContainer";
 import EinvoicesTab from "./cashflow-components/Einvoices/EinvoicesTab";
 
@@ -376,6 +379,10 @@ export default function CashFlowApp() {
   const [currentAccessPrivateToken, setCurrentAccessPrivateToken] =
     useState("");
   const [cashflowTransDate, setCashflowTransDate] = useState("");
+  const [cashflowListModalOpen, setCashflowListModalOpen] = useState(false);
+  const [cashflowListPayload, setCashflowListPayload] = useState(null);
+  const [cashflowListLoading, setCashflowListLoading] = useState(false);
+  const [cashflowListError, setCashflowListError] = useState("");
   const [toasts, setToasts] = useState([]);
   const toastIdRef = useRef(0);
   const [sendingPayloads, setSendingPayloads] = useState(false);
@@ -442,6 +449,99 @@ export default function CashFlowApp() {
       completed: 0,
     });
     return runId;
+  };
+
+  const loadCashflowList = async (filters = {}) => {
+    setCashflowListModalOpen(true);
+    setCashflowListLoading(true);
+    setCashflowListError("");
+
+    try {
+      let accessPrivateToken = currentAccessPrivateToken;
+      if (!accessPrivateToken) {
+        accessPrivateToken = await getAccessPrivateToken(retailer);
+        setCurrentAccessPrivateToken(accessPrivateToken || "");
+        setCookie(
+          getPrivateTokenCookieName(retailer),
+          accessPrivateToken || "",
+        );
+      }
+
+      const response = await getCashflowList(
+        retailer,
+        accessPrivateToken,
+        filters,
+      );
+      setCashflowListPayload(response);
+    } catch (error) {
+      setCashflowListError(
+        error.message || "Không tải được danh sách sổ quỹ từ KiotViet",
+      );
+    } finally {
+      setCashflowListLoading(false);
+    }
+  };
+
+  const handleUpdateCashflowDates = async (
+    cashflows,
+    dateTime,
+    filters = {},
+  ) => {
+    let accessPrivateToken = currentAccessPrivateToken;
+    if (!accessPrivateToken) {
+      accessPrivateToken = await getAccessPrivateToken(retailer);
+      setCurrentAccessPrivateToken(accessPrivateToken || "");
+      setCookie(getPrivateTokenCookieName(retailer), accessPrivateToken || "");
+    }
+
+    const successIds = [];
+    const failures = [];
+    for (let index = 0; index < cashflows.length; index += 1) {
+      const cashflow = cashflows[index];
+      const rowId = String(
+        cashflow?.Id ??
+          cashflow?.id ??
+          cashflow?.Code ??
+          cashflow?.code ??
+          index,
+      );
+      try {
+        await updateCashflowDates(
+          retailer,
+          accessPrivateToken,
+          cashflow,
+          dateTime,
+        );
+        successIds.push(rowId);
+      } catch (error) {
+        failures.push({
+          id: rowId,
+          code: cashflow?.Code || cashflow?.code || rowId,
+          message: error.message || "Không cập nhật được phiếu",
+        });
+      }
+    }
+
+    if (successIds.length > 0) {
+      setCashflowListLoading(true);
+      try {
+        const response = await getCashflowList(
+          retailer,
+          accessPrivateToken,
+          filters,
+        );
+        setCashflowListPayload(response);
+        setCashflowListError("");
+      } catch (error) {
+        setCashflowListError(
+          error.message || "Không tải lại được danh sách sổ quỹ",
+        );
+      } finally {
+        setCashflowListLoading(false);
+      }
+    }
+
+    return { successIds, failures };
   };
 
   const cancelBulkOrderDeliveryLoad = () => {
@@ -814,6 +914,9 @@ export default function CashFlowApp() {
     setPayloadError("");
     setCurrentAccessToken("");
     setCurrentAccessPrivateToken("");
+    setCashflowListModalOpen(false);
+    setCashflowListPayload(null);
+    setCashflowListError("");
     setSourceWorkbook(null);
     setSourceFile(null);
     setSourceFileBuffer(null);
@@ -1502,6 +1605,7 @@ export default function CashFlowApp() {
               onSendPayloads={handleSendPayloads}
               onRetryFailedPayloads={() => handleSendPayloads(true)}
               onExportExcel={handleExportExcel}
+              onOpenCashflowList={loadCashflowList}
               isSendingPayloads={sendingPayloads}
               isLoadingOrderDeliveries={
                 orderDeliveryLoadProgress.active || isInitializingRetailerData
@@ -1513,6 +1617,16 @@ export default function CashFlowApp() {
               missingInvoiceRows={missingInvoiceRows}
             />
           </section>
+          <CashflowListModal
+            open={cashflowListModalOpen}
+            payload={cashflowListPayload}
+            loading={cashflowListLoading}
+            error={cashflowListError}
+            retailer={retailer}
+            onRefresh={loadCashflowList}
+            onUpdateCashflows={handleUpdateCashflowDates}
+            onClose={() => setCashflowListModalOpen(false)}
+          />
         </>
       )}
     </div>
