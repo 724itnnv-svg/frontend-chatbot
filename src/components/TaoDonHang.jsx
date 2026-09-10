@@ -517,13 +517,21 @@ function getAdministrativeAreaDisplayName(
 ) {
   const originalName = normalizeDisplayText(value);
   const recordName = normalizeDisplayText(
-    record?.Name || record?.CompareName || record?.name || "",
+    record?.Name ||
+      record?.FullName ||
+      record?.CompareName ||
+      record?.name ||
+      record?.fullName ||
+      "",
   );
   const hasAdministrativePrefix = (name) =>
     /^(Tỉnh|Thành phố|TP\.?|Quận|Huyện|Thị xã|Phường|Xã|Thị trấn)\s+/iu.test(
       name,
     );
-  const prefixedName = [originalName, recordName].find(hasAdministrativePrefix);
+  // Tên API trả về là tên hành chính chuẩn gắn với đúng Id. Ưu tiên tên này
+  // khi tìm cấp dưới (ví dụ "Đồng Nai" trả về "Thành phố Đồng Nai"), tránh
+  // lấy lại prefix sale nhập như "Tỉnh Đồng Nai" rồi làm sai lname của request.
+  const prefixedName = [recordName, originalName].find(hasAdministrativePrefix);
 
   if (Number(level) !== 1) {
     return prefixedName || originalName || recordName;
