@@ -24,6 +24,7 @@ import { useSearchParams } from "react-router-dom";
 import * as XLSX from "xlsx";
 import { getApiBaseUrl } from "../../api/baseUrl";
 import { useAuth } from "../../context/AuthContext";
+import "./WorkTaskManager.css";
 
 const STATUS_OPTIONS = [
   ["ALL", "Tất cả trạng thái"],
@@ -659,7 +660,7 @@ export default function WorkTaskManager() {
     { label: "Hoàn thành", value: summary.DONE || 0, icon: <CheckCircle2 size={20} />, className: "text-emerald-700 bg-emerald-100" },
   ], [summary]);
 
-  return <div className="min-h-full bg-slate-50/70 p-4 md:p-6">
+  return <div className="work-task-manager min-h-full min-w-0 max-w-full bg-slate-50/70 p-4 md:p-6">
     <div className="mx-auto max-w-[1500px] space-y-5">
       <div className="flex flex-col gap-4 rounded-3xl border border-cyan-100 bg-gradient-to-r from-white via-cyan-50 to-sky-50 p-5 shadow-sm md:flex-row md:items-center md:justify-between">
         <div><div className="flex items-center gap-3"><span className="rounded-2xl bg-cyan-600 p-3 text-white shadow-lg shadow-cyan-200"><CalendarClock size={25} /></span><div><h1 className="text-2xl font-black text-slate-900">Công việc & Deadline</h1><p className="text-sm text-slate-600">{manager ? "Theo dõi và phân công công việc trong phạm vi quản lý." : "Theo dõi và cập nhật các công việc được giao cho bạn."}</p></div></div></div>
@@ -691,8 +692,8 @@ export default function WorkTaskManager() {
       </div>
 
       <div className="overflow-hidden rounded-3xl border border-slate-100 bg-white shadow-sm">
-        <div className="overflow-x-auto">
-          <table className="min-w-[1340px] w-full text-left text-sm">
+        <div className="work-task-list">
+          <table className="work-task-table w-full text-left text-sm">
             <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500"><tr><th className="px-5 py-3">Công việc</th><th className="px-4 py-3">Bộ phận</th><th className="px-4 py-3">Người thực hiện</th><th className="px-4 py-3">Trạng thái</th><th className="px-4 py-3">Tiến độ</th><th className="px-4 py-3">Deadline</th><th className="px-4 py-3">Hoàn thành lúc</th><th className="px-4 py-3 text-right">Thao tác</th></tr></thead>
             <tbody className="divide-y divide-slate-100">
               {loading ? <tr><td colSpan="8" className="py-16 text-center text-slate-500"><Loader2 className="mx-auto mb-2 animate-spin text-cyan-600" />Đang tải công việc...</td></tr> : rows.length ? rows.map((task) => {
@@ -701,14 +702,14 @@ export default function WorkTaskManager() {
                 const own = String(task.assigneeUserId?._id || task.assigneeUserId || "") === currentUserId;
                 const mayUpdate = canUpdateStatus && (manager || own);
                 return <tr key={task._id} className={`${task.isOverdue ? "bg-rose-50/40" : "hover:bg-slate-50/70"} ${highlightedId === task._id ? "ring-2 ring-inset ring-cyan-400" : ""}`}>
-                  <td className="max-w-md px-5 py-4"><div className="font-bold text-slate-900">{task.title}</div>{task.description && <div className="mt-1 line-clamp-2 text-xs text-slate-500">{task.description}</div>}<div className={`mt-2 text-xs font-bold ${priority.className}`}>Ưu tiên: {priority.label}</div>{task.evidences?.length > 0 && <div className="mt-2 flex flex-wrap gap-1.5">{task.evidences.slice(0, 3).map((evidence) => <a key={evidence._id} href={evidenceFileUrl(task, evidence)} target="_blank" rel="noreferrer" title={evidence.originalName || evidence.filename} className="inline-flex max-w-36 items-center gap-1 rounded-lg border border-cyan-100 bg-cyan-50 px-2 py-1 text-xs font-semibold text-cyan-700 hover:bg-cyan-100"><Paperclip size={12} className="shrink-0" /><span className="truncate">{evidence.originalName || evidence.filename}</span></a>)}{task.evidences.length > 3 && <span className="rounded-lg bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-600">+{task.evidences.length - 3} tệp</span>}</div>}</td>
-                  <td className="max-w-44 px-4 py-4 font-semibold text-slate-700">{task.department || "-"}</td>
-                  <td className="px-4 py-4"><div className="flex items-center gap-2"><span className="rounded-full bg-cyan-50 p-2 text-cyan-700"><UserRound size={15} /></span><div><div className="font-semibold text-slate-800">{task.assigneeName}</div><div className="text-xs text-slate-500">{task.assigneeEmployeeCode || task.companyCode || "-"}</div></div></div></td>
-                  <td className="px-4 py-4"><Badge className={status.className}>{status.label}</Badge>{task.employeeNote && <div title={task.employeeNote} className="mt-2 max-w-40 truncate text-xs text-slate-500">{task.employeeNote}</div>}</td>
-                  <td className="px-4 py-4"><div className="mb-1 flex justify-between text-xs font-bold text-slate-600"><span>{task.progressPercent || 0}%</span></div><div className="h-2 w-28 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-cyan-500" style={{ width: `${task.progressPercent || 0}%` }} /></div></td>
-                  <td className="px-4 py-4"><div className={`font-semibold ${task.isOverdue ? "text-rose-700" : "text-slate-700"}`}>{formatDateTime(task.dueAt)}</div>{task.isOverdue && <div className="mt-1 text-xs font-bold text-rose-600">Đã quá hạn</div>}</td>
-                  <td className="px-4 py-4"><div className={task.completedAt ? "font-semibold text-emerald-700" : "text-slate-400"}>{formatDateTime(task.completedAt)}</div></td>
-                  <td className="px-4 py-4"><div className="flex justify-end gap-1">{mayUpdate && <button title="Cập nhật tiến độ" onClick={() => setStatusTask(task)} className="rounded-lg p-2 text-cyan-700 hover:bg-cyan-50"><CheckCircle2 size={18} /></button>}{(canEdit || canAssign) && <button title={canEdit ? "Chỉnh sửa" : "Chuyển người thực hiện"} onClick={() => setEditor(task)} className="rounded-lg p-2 text-amber-700 hover:bg-amber-50"><Pencil size={18} /></button>}{canDelete && <button title="Xóa" onClick={() => void deleteTask(task)} className="rounded-lg p-2 text-rose-700 hover:bg-rose-50"><Trash2 size={18} /></button>}</div></td>
+                  <td data-label="Công việc" className="max-w-md px-5 py-4"><div className="font-bold text-slate-900">{task.title}</div>{task.description && <div className="mt-1 line-clamp-2 text-xs text-slate-500">{task.description}</div>}<div className={`mt-2 text-xs font-bold ${priority.className}`}>Ưu tiên: {priority.label}</div>{task.evidences?.length > 0 && <div className="mt-2 flex flex-wrap gap-1.5">{task.evidences.slice(0, 3).map((evidence) => <a key={evidence._id} href={evidenceFileUrl(task, evidence)} target="_blank" rel="noreferrer" title={evidence.originalName || evidence.filename} className="inline-flex max-w-full items-center gap-1 rounded-lg border border-cyan-100 bg-cyan-50 px-2 py-1 text-xs font-semibold text-cyan-700 hover:bg-cyan-100"><Paperclip size={12} className="shrink-0" /><span className="truncate">{evidence.originalName || evidence.filename}</span></a>)}{task.evidences.length > 3 && <span className="rounded-lg bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-600">+{task.evidences.length - 3} tệp</span>}</div>}</td>
+                  <td data-label="Bộ phận" className="max-w-44 px-4 py-4 font-semibold text-slate-700">{task.department || "-"}</td>
+                  <td data-label="Người thực hiện" className="px-4 py-4"><div className="flex items-center gap-2"><span className="shrink-0 rounded-full bg-cyan-50 p-2 text-cyan-700"><UserRound size={15} /></span><div className="min-w-0"><div className="font-semibold text-slate-800">{task.assigneeName}</div><div className="text-xs text-slate-500">{task.assigneeEmployeeCode || task.companyCode || "-"}</div></div></div></td>
+                  <td data-label="Trạng thái" className="px-4 py-4"><Badge className={status.className}>{status.label}</Badge>{task.employeeNote && <div title={task.employeeNote} className="mt-2 max-w-40 truncate text-xs text-slate-500">{task.employeeNote}</div>}</td>
+                  <td data-label="Tiến độ" className="px-4 py-4"><div className="mb-1 flex justify-between text-xs font-bold text-slate-600"><span>{task.progressPercent || 0}%</span></div><div className="h-2 w-full overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-cyan-500" style={{ width: `${task.progressPercent || 0}%` }} /></div></td>
+                  <td data-label="Deadline" className="px-4 py-4"><div className={`font-semibold ${task.isOverdue ? "text-rose-700" : "text-slate-700"}`}>{formatDateTime(task.dueAt)}</div>{task.isOverdue && <div className="mt-1 text-xs font-bold text-rose-600">Đã quá hạn</div>}</td>
+                  <td data-label="Hoàn thành lúc" className="px-4 py-4"><div className={task.completedAt ? "font-semibold text-emerald-700" : "text-slate-400"}>{formatDateTime(task.completedAt)}</div></td>
+                  <td data-label="Thao tác" className="px-4 py-4"><div className="work-task-actions flex flex-wrap justify-end gap-1">{mayUpdate && <button title="Cập nhật tiến độ" onClick={() => setStatusTask(task)} className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-lg bg-cyan-50 p-2 text-xs font-bold text-cyan-700 hover:bg-cyan-100"><CheckCircle2 size={18} className="shrink-0" /><span>Cập nhật tiến độ</span></button>}{(canEdit || canAssign) && <button title={canEdit ? "Chỉnh sửa" : "Chuyển người thực hiện"} onClick={() => setEditor(task)} className="rounded-lg p-2 text-amber-700 hover:bg-amber-50"><Pencil size={18} /></button>}{canDelete && <button title="Xóa" onClick={() => void deleteTask(task)} className="rounded-lg p-2 text-rose-700 hover:bg-rose-50"><Trash2 size={18} /></button>}</div></td>
                 </tr>;
               }) : <tr><td colSpan="8" className="py-16 text-center text-slate-500"><CalendarClock size={34} className="mx-auto mb-3 text-slate-300" />Chưa có công việc phù hợp bộ lọc.</td></tr>}
             </tbody>
