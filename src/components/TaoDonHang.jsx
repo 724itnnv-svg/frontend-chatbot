@@ -1547,9 +1547,9 @@ async function buildNewCustomerPayloadV2({
   const branchId = retailerConfig?.branchId ?? null;
   const displayName = customerName || phoneNumber;
   const invoiceName = isAgency ? displayName : displayName || "Khách lẻ";
-  const customerAddress = isAgency
-    ? newAddress || oldAddress
-    : oldAddress || newAddress;
+  // Khi có ĐC MỚI, toàn bộ thông tin địa chỉ thường và địa chỉ hóa đơn phải
+  // cùng lấy từ địa chỉ này. Không ghép phần đường của ĐC CŨ với xã/tỉnh mới.
+  const customerAddress = newAddress || oldAddress;
   const invoiceAddress = newAddress || oldAddress;
   const customerAddressParts = parseVietnamAddressParts(customerAddress);
   const invoiceAddressDetails =
@@ -1586,18 +1586,21 @@ async function buildNewCustomerPayloadV2({
     : [];
   const provinceRecord =
     provinceIds?.[0] || invoiceAddressDetails?.provinceRows?.[0] || null;
-  const provinceDisplayName = getAdministrativeAreaDisplayName(
+  const provinceLookupName = getAdministrativeAreaDisplayName(
     provinceName,
     provinceRecord,
   );
+  const provinceDisplayName = /^(Tỉnh|Thành phố|TP\.?)\s+/iu.test(provinceName)
+    ? normalizeDisplayText(provinceName)
+    : provinceLookupName;
   const wardIds =
-    provinceDisplayName && districtName
+    provinceLookupName && districtName
       ? await lookupLevelTwoIdWithFallback({
           lookup: getIdAdministrativearea,
           retailer,
           accessPrivateToken,
           areaName: districtName,
-          provinceName: provinceDisplayName,
+          provinceName: provinceLookupName,
         })
       : [];
   const wardRecord =
@@ -1642,7 +1645,6 @@ async function buildNewCustomerPayloadV2({
     newAddress: invoiceAddress,
     customerType,
   });
-  console.log("check", { invoiceAddressParts, invoiceAddressDetails });
   return {
     Customer: {
       Type: isAgency ? 1 : 0,
@@ -1656,15 +1658,17 @@ async function buildNewCustomerPayloadV2({
       Name: invoiceName,
       CompareName: invoiceName,
       ContactNumber: phoneNumber,
-      Address: customerAddressParts.street,
+      Address:
+        invoiceStreetAddress || customerAddressParts.street || invoiceAddress,
       LocationName: provinceDisplayName,
       WardName: districtDisplayName,
-      LastWard: customerAddressParts.ward || "",
+      LastWard:
+        invoiceAddressParts.ward ||
+        invoiceAddressDetails?.parts?.ward ||
+        districtDisplayName ||
+        "",
       LocationId: provinceId,
-      LastLocation: [
-        customerAddressParts.district || customerAddressParts.ward,
-        customerAddressParts.province,
-      ]
+      LastLocation: [districtDisplayName, provinceDisplayName]
         .filter(Boolean)
         .join(" - "),
       WardId: wardId,
@@ -1834,20 +1838,25 @@ async function buildExistingCustomerAddressUpdatePayload({
       })
     : [];
   const provinceRecord = provinceIds?.[0] || null;
-  const provinceDisplayName = getAdministrativeAreaDisplayName(
+  const provinceLookupName = getAdministrativeAreaDisplayName(
     addressParts.province,
     provinceRecord,
     1,
   );
+  const provinceDisplayName = /^(Tỉnh|Thành phố|TP\.?)\s+/iu.test(
+    addressParts.province,
+  )
+    ? normalizeDisplayText(addressParts.province)
+    : provinceLookupName;
   const districtName = addressParts.district || addressParts.ward;
   const wardIds =
-    provinceDisplayName && districtName
+    provinceLookupName && districtName
       ? await lookupLevelTwoIdWithFallback({
           lookup: getIdAdministrativearea,
           retailer,
           accessPrivateToken,
           areaName: districtName,
-          provinceName: provinceDisplayName,
+          provinceName: provinceLookupName,
         })
       : [];
   const wardRecord = wardIds?.[0] || null;
