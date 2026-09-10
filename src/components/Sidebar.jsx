@@ -122,7 +122,6 @@ const MENU_CONFIG = [
   },
   {
     id: "roas_dashboard",
-    accessId: "business_stats",
     path: "/admin/roas",
     label: "Hiệu quả quảng cáo",
     icon: MousePointerClick,
