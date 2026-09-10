@@ -276,7 +276,7 @@ const adminRoutes = [
   },
   {
     path: "roas",
-    screenId: "business_stats",
+    screenId: "roas_dashboard",
     element: <RoasDashboard />,
   },
   {
