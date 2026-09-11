@@ -196,7 +196,7 @@ const buildCashflowPayloadEntriesForRow = ({
   }
 
   const isGhnRow = normalizeText(row.__sourceFormat).toLowerCase() === "ghn";
-  if (isGhnRow && row.__orderDeliveryFeeMismatch === true) {
+  if (row.__orderDeliveryFeeMismatch === true) {
     return [];
   }
 

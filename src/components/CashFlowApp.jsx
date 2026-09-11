@@ -131,25 +131,28 @@ const getOrderDeliveryMoneyMismatch = (row = {}, orderDelivery = {}) => {
   const orderDeliveryMoneyValue =
     getOrderDeliveryInvoiceTotalValue(orderDelivery);
   const sourceFormat = normalizeText(row.__sourceFormat).toLowerCase();
-  const isGhnRow = sourceFormat === "ghn";
   const shouldCheckCod = sourceFormat === "ghn" || sourceFormat === "viettel";
+  const shouldCheckDeliveryFee =
+    sourceFormat === "ghn" || sourceFormat === "viettel";
   const excelDeliveryFeeValue = getExcelDeliveryFeeValue(row);
   const orderDeliveryFeeValue = getOrderDeliveryFeeValue(orderDelivery);
+  const normalizedExcelDeliveryFeeValue = Math.abs(excelDeliveryFeeValue);
+  const normalizedOrderDeliveryFeeValue = Math.abs(orderDeliveryFeeValue);
 
   const isCodMismatch =
     shouldCheckCod &&
     excelMoneyValue > 0 &&
     excelMoneyValue > orderDeliveryMoneyValue;
-  const isGhnDeliveryFeeMismatch =
-    isGhnRow &&
-    excelDeliveryFeeValue !== 0 &&
+  const isDeliveryFeeMismatch =
+    shouldCheckDeliveryFee &&
+    normalizedExcelDeliveryFeeValue !== 0 &&
     normalizeText(orderDelivery.totalPrice) !== "" &&
-    excelDeliveryFeeValue !== orderDeliveryFeeValue;
+    normalizedExcelDeliveryFeeValue !== normalizedOrderDeliveryFeeValue;
 
   return {
     isCodMismatch,
-    isGhnDeliveryFeeMismatch,
-    hasMismatch: isCodMismatch || isGhnDeliveryFeeMismatch,
+    isDeliveryFeeMismatch,
+    hasMismatch: isCodMismatch || isDeliveryFeeMismatch,
   };
 };
 
@@ -346,7 +349,7 @@ const mergeOrderDeliveryIntoRow = (row, orderDelivery) => {
     ),
     __orderDeliveryMoneyMismatch: moneyMismatch.hasMismatch,
     __orderDeliveryCodMismatch: moneyMismatch.isCodMismatch,
-    __orderDeliveryFeeMismatch: moneyMismatch.isGhnDeliveryFeeMismatch,
+    __orderDeliveryFeeMismatch: moneyMismatch.isDeliveryFeeMismatch,
   };
 };
 
