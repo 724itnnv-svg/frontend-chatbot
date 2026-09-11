@@ -482,6 +482,8 @@ export async function getCashflowList(
     const datePattern = /^\d{4}-\d{2}-\d{2}$/;
     const startDate = String(filters?.startDate || "");
     const endDate = String(filters?.endDate || "");
+    const parsedSkip = Number.parseInt(filters?.skip, 10);
+    const skip = Number.isFinite(parsedSkip) && parsedSkip > 0 ? parsedSkip : 0;
     const transDateFilter =
       filters?.timeRange === "custom" &&
       datePattern.test(startDate) &&
@@ -498,6 +500,7 @@ export async function getCashflowList(
       $inlinecount: "allpages",
       $format: "json",
       $top: 100,
+      $skip: skip,
       $filter: `(${filterParts.join(" and ")})`,
       CalcDebtStatus: [1, 0, -1],
       Description: null,
@@ -582,16 +585,31 @@ export async function updateCashflowDates(
   retailer = "kingfarm",
   accessPrivateToken,
   cashflow,
-  dateTime,
+  updateOptions = {},
 ) {
-  const selectedDate = new Date(dateTime);
-  if (Number.isNaN(selectedDate.getTime())) {
+  const legacyDateTime =
+    typeof updateOptions === "string" ? updateOptions : "";
+  const updateTransDate =
+    Boolean(legacyDateTime) || updateOptions?.updateTransDate === true;
+  const updateDescription = updateOptions?.updateDescription === true;
+  const dateTime = legacyDateTime || updateOptions?.dateTime || "";
+  const nextDescription = String(updateOptions?.description ?? "").trim();
+
+  if (!updateTransDate && !updateDescription) {
+    throw new Error("Chưa chọn trường cần cập nhật");
+  }
+
+  const selectedDate = updateTransDate ? new Date(dateTime) : null;
+  if (updateTransDate && Number.isNaN(selectedDate.getTime())) {
     throw new Error("Ngày giờ cập nhật không hợp lệ");
+  }
+
+  if (updateDescription && !nextDescription) {
+    throw new Error("Ghi chú cập nhật không được để trống");
   }
 
   try {
     const config = getRetailerConfig(retailer);
-    const updatedDate = selectedDate.toISOString();
     const originalValue = Number(
       cashflow?.Plus ?? cashflow?.Amount ?? cashflow?.Value,
     );
@@ -633,6 +651,16 @@ export async function updateCashflowDates(
       cashflow?.TransDate ||
       cashflow?.transDate ||
       cashflow?.PaymentDate;
+    const updatedTransDate = updateTransDate
+      ? selectedDate.toISOString()
+      : originalTransDate;
+    const updatedPaymentDate = updateTransDate
+      ? selectedDate.toISOString()
+      : originalPaymentDate;
+    const originalDescription = cashflow?.Description ?? cashflow?.description;
+    const updatedDescription = updateDescription
+      ? nextDescription
+      : originalDescription;
     const cashflowPayload = {
       AccountId: cashflow?.AccountId,
       AutoCalcLiability: cashflow?.AutoCalcLiability ?? true,
@@ -651,7 +679,7 @@ export async function updateCashflowDates(
       CreatedBy: cashflow?.CreatedBy,
       CreatedDate: cashflow?.CreatedDate,
       CreatedName: employeeName,
-      Description: cashflow?.Description,
+      Description: updatedDescription,
       EventAction: cashflow?.EventAction ?? 0,
       EventId: cashflow?.EventId ?? 0,
       ExchangeRate: cashflow?.ExchangeRate ?? 0,
@@ -670,7 +698,7 @@ export async function updateCashflowDates(
       PartnerName: cashflow?.PartnerName,
       PartnerOldDebt: cashflow?.PartnerOldDebt,
       PartnerType: cashflow?.PartnerType || cashflow?.partnerType,
-      PaymentDate: updatedDate,
+      PaymentDate: updatedPaymentDate,
       PaymentMethod: cashflow?.PaymentMethod || cashflow?.Method || "Transfer",
       Plus: originalValue,
       RetailerId: cashflow?.RetailerId,
@@ -690,7 +718,7 @@ export async function updateCashflowDates(
         cashflow?.CompareCashFlowGroupId ?? cashflow?.CashFlowGroupId,
       CompareCashflowGroupName:
         cashflow?.CompareCashflowGroupName || cashflowGroupName,
-      CompareDescription: cashflow?.CompareDescription ?? cashflow?.Description,
+      CompareDescription: cashflow?.CompareDescription ?? originalDescription,
       ComparePartnerName: cashflow?.ComparePartnerName ?? "",
       EmployeeName: employeeName,
       IsFromPurchaseEInvoice: cashflow?.IsFromPurchaseEInvoice ?? false,
@@ -698,22 +726,22 @@ export async function updateCashflowDates(
         cashflow?.IsPartnerLiability ??
         (cashflow?.PartnerType || cashflow?.partnerType) === "D",
       KeyCheckDup: cashflow?.KeyCheckDup,
-      TransDate: updatedDate,
+      TransDate: updatedTransDate,
     };
     const commonPaymentPayload = {
       AccountId: cashflow?.AccountId,
       AccountName: accountName,
       Code: code,
       CompareAccountName: cashflow?.CompareAccountName || accountName,
-      CompareDescription: cashflow?.CompareDescription ?? cashflow?.Description,
+      CompareDescription: cashflow?.CompareDescription ?? originalDescription,
       ComparePaymentMethodLabel:
         cashflow?.ComparePaymentMethodLabel || paymentMethodLabel,
       CompareTransDate: originalTransDate,
       CompareUserId: cashflow?.CompareUserId ?? userId,
-      Description: cashflow?.Description,
+      Description: updatedDescription,
       PaymentMedthod: paymentMethod,
       PaymentMedthodLabel: paymentMethodLabel,
-      TransDate: updatedDate,
+      TransDate: updatedTransDate,
       UserId: userId,
     };
     let requestUrl = KIOT_CASHFLOW_URL;

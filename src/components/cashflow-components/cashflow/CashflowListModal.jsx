@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import Calendar from "react-calendar";
 import { CalendarDays } from "lucide-react";
+import * as XLSX from "xlsx";
 import "react-calendar/dist/Calendar.css";
 
 const normalizeText = (value) => String(value ?? "").trim();
@@ -142,6 +143,24 @@ const getRowId = (item, index) =>
   normalizeText(pickValue(item, ["Id", "id", "Code", "code"])) ||
   `cashflow-row-${index}`;
 
+const getInvoiceIdFromCashflowCode = (item) => {
+  const code = normalizeText(pickValue(item, ["Code", "code"]));
+  const separatorIndex = code.lastIndexOf("_");
+  const invoiceId = separatorIndex >= 0 ? code.slice(separatorIndex + 1) : code;
+  return normalizeText(invoiceId).toUpperCase();
+};
+
+const normalizeExcelHeader = (value) =>
+  normalizeSearchText(value).replace(/[^a-z0-9]/g, "");
+
+const pickExcelValue = (row, acceptedHeaders) => {
+  const normalizedHeaders = new Set(acceptedHeaders.map(normalizeExcelHeader));
+  const matchedEntry = Object.entries(row || {}).find(([header]) =>
+    normalizedHeaders.has(normalizeExcelHeader(header)),
+  );
+  return matchedEntry?.[1] ?? "";
+};
+
 const getCashflowType = (item) => {
   const value = Number(pickValue(item, ["Value", "value", "Amount", "amount"]));
   const partnerType = normalizeText(
@@ -171,6 +190,7 @@ export default function CashflowListModal({
   open,
   payload,
   loading,
+  loadingMore,
   error,
   retailer,
   onRefresh,
@@ -184,6 +204,12 @@ export default function CashflowListModal({
   const [updateModalOpen, setUpdateModalOpen] = useState(false);
   const [updateDateTime, setUpdateDateTime] = useState("");
   const [pendingUpdateDateTime, setPendingUpdateDateTime] = useState("");
+  const [updateTransDateEnabled, setUpdateTransDateEnabled] = useState(true);
+  const [updateDescriptionEnabled, setUpdateDescriptionEnabled] =
+    useState(false);
+  const [descriptionFileName, setDescriptionFileName] = useState("");
+  const [descriptionsByInvoiceId, setDescriptionsByInvoiceId] = useState({});
+  const [descriptionFileError, setDescriptionFileError] = useState("");
   const [updatingCashflows, setUpdatingCashflows] = useState(false);
   const [updateError, setUpdateError] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
@@ -195,6 +221,7 @@ export default function CashflowListModal({
   const selectAllRef = useRef(null);
   const items = useMemo(() => getItems(payload), [payload]);
   const total = getTotal(payload, items.length);
+  const hasMoreItems = items.length < total;
   const employeeOptions = useMemo(
     () =>
       [...new Set(items.map(getEmployeeName).filter(Boolean))].sort((a, b) =>
@@ -239,6 +266,21 @@ export default function CashflowListModal({
       items.filter((item, index) => selectedRowIds.has(getRowId(item, index))),
     [items, selectedRowIds],
   );
+  const matchedDescriptionCount = useMemo(
+    () =>
+      selectedCashflows.filter((item) => {
+        const invoiceId = getInvoiceIdFromCashflowCode(item);
+        return Boolean(invoiceId && descriptionsByInvoiceId[invoiceId]);
+      }).length,
+    [descriptionsByInvoiceId, selectedCashflows],
+  );
+  const descriptionEntryCount = Object.keys(descriptionsByInvoiceId).length;
+  const hasSelectedUpdateField =
+    updateTransDateEnabled || updateDescriptionEnabled;
+  const canSubmitUpdate =
+    hasSelectedUpdateField &&
+    (!updateTransDateEnabled || Boolean(updateDateTime)) &&
+    (!updateDescriptionEnabled || matchedDescriptionCount > 0);
   const hasFilters = Boolean(
     timeRange !== "month" ||
     startDate ||
@@ -318,6 +360,11 @@ export default function CashflowListModal({
 
   const openUpdateModal = () => {
     setUpdateDateTime(pendingUpdateDateTime || getCurrentDateTimeInputValue());
+    setUpdateTransDateEnabled(true);
+    setUpdateDescriptionEnabled(false);
+    setDescriptionFileName("");
+    setDescriptionsByInvoiceId({});
+    setDescriptionFileError("");
     setUpdateError("");
     setUpdateModalOpen(true);
   };
@@ -325,24 +372,117 @@ export default function CashflowListModal({
   const cancelSelection = () => {
     setSelectedRowIds(new Set());
     setPendingUpdateDateTime("");
+    setDescriptionsByInvoiceId({});
+    setDescriptionFileName("");
+    setDescriptionFileError("");
     setUpdateError("");
     setUpdateModalOpen(false);
   };
 
+  const handleDescriptionFileChange = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+
+    setDescriptionFileError("");
+
+    try {
+      const fileBuffer = await file.arrayBuffer();
+      const workbook = XLSX.read(fileBuffer, { type: "array" });
+      const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+      if (!worksheet) {
+        throw new Error("File Excel không có sheet dữ liệu");
+      }
+
+      const rows = XLSX.utils.sheet_to_json(worksheet, { defval: "" });
+      const nextDescriptions = {};
+      const selectedInvoiceIds = new Set(
+        selectedCashflows.map(getInvoiceIdFromCashflowCode).filter(Boolean),
+      );
+
+      rows.forEach((row) => {
+        const invoiceId = normalizeText(
+          pickExcelValue(row, ["invoiceId", "Mã hóa đơn"]),
+        ).toUpperCase();
+        const description = normalizeText(
+          pickExcelValue(row, ["description", "Ghi chú"]),
+        );
+
+        if (
+          invoiceId &&
+          description &&
+          selectedInvoiceIds.has(invoiceId)
+        ) {
+          nextDescriptions[invoiceId] = description;
+        }
+      });
+
+      if (Object.keys(nextDescriptions).length === 0) {
+        throw new Error(
+          "Không tìm thấy invoiceId nào khớp với các phiếu đang được tick",
+        );
+      }
+
+      setDescriptionFileName(file.name);
+      setDescriptionsByInvoiceId(nextDescriptions);
+    } catch (fileError) {
+      setDescriptionFileName("");
+      setDescriptionsByInvoiceId({});
+      setDescriptionFileError(
+        fileError.message || "Không đọc được file Excel ghi chú",
+      );
+    }
+  };
+
   const confirmUpdateDate = async () => {
-    if (!updateDateTime || !selectedCashflows.length || !onUpdateCashflows) {
+    if (!selectedCashflows.length || !onUpdateCashflows) {
       return;
     }
+
+    if (!updateTransDateEnabled && !updateDescriptionEnabled) {
+      setUpdateError("Vui lòng chọn ít nhất một trường cần cập nhật");
+      return;
+    }
+
+    if (updateTransDateEnabled && !updateDateTime) {
+      setUpdateError("Vui lòng chọn ngày và giờ mới");
+      return;
+    }
+
+    if (
+      updateDescriptionEnabled &&
+      Object.keys(descriptionsByInvoiceId).length === 0
+    ) {
+      setUpdateError("Vui lòng thêm file Excel chứa invoiceId và description");
+      return;
+    }
+
+    if (updateDescriptionEnabled && matchedDescriptionCount === 0) {
+      setUpdateError(
+        "Không có invoiceId nào trong file khớp với phần cuối mã phiếu đã chọn",
+      );
+      return;
+    }
+
     setUpdatingCashflows(true);
     setUpdateError("");
     try {
       const result = await onUpdateCashflows(
         selectedCashflows,
-        updateDateTime,
+        {
+          updateTransDate: updateTransDateEnabled,
+          dateTime: updateTransDateEnabled ? updateDateTime : "",
+          updateDescription: updateDescriptionEnabled,
+          descriptionsByInvoiceId: updateDescriptionEnabled
+            ? descriptionsByInvoiceId
+            : {},
+        },
         { timeRange, startDate, endDate },
       );
       const failures = result?.failures || [];
-      setPendingUpdateDateTime(updateDateTime);
+      setPendingUpdateDateTime(
+        updateTransDateEnabled ? updateDateTime : pendingUpdateDateTime,
+      );
       if (failures.length > 0) {
         setSelectedRowIds(new Set(failures.map((failure) => failure.id)));
         setUpdateError(
@@ -670,7 +810,8 @@ export default function CashflowListModal({
                   Không có phiếu nào phù hợp với bộ lọc.
                 </div>
               ) : (
-                <div className="overflow-x-auto overscroll-x-contain rounded-2xl border border-slate-200 [scrollbar-gutter:stable]">
+                <>
+                  <div className="overflow-x-auto overscroll-x-contain rounded-2xl border border-slate-200 [scrollbar-gutter:stable]">
                   <table
                     className="w-full border-collapse text-left text-xs"
                     style={{
@@ -869,8 +1010,31 @@ export default function CashflowListModal({
                         );
                       })}
                     </tbody>
-                  </table>
-                </div>
+                    </table>
+                  </div>
+                  {hasMoreItems && (
+                    <div className="mt-4 flex justify-center">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          onRefresh({
+                            timeRange,
+                            startDate,
+                            endDate,
+                            skip: items.length,
+                            append: true,
+                          })
+                        }
+                        disabled={loading || loadingMore}
+                        className="rounded-xl border border-sky-200 bg-sky-50 px-5 py-2.5 text-xs font-extrabold text-sky-700 shadow-sm hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {loadingMore
+                          ? "Đang tải thêm..."
+                          : `Tải thêm (${items.length}/${total})`}
+                      </button>
+                    </div>
+                  )}
+                </>
               )}
             </div>
           )}
@@ -893,26 +1057,83 @@ export default function CashflowListModal({
                   Cập nhật hàng loạt
                 </p>
                 <h3 className="m-0 mt-1 text-lg font-black text-slate-950">
-                  Chọn ngày giờ cập nhật
+                  Chọn trường cần cập nhật
                 </h3>
                 <p className="m-0 mt-1 text-xs font-semibold text-slate-500">
                   Áp dụng cho {selectedRowIds.size} phiếu đã chọn
                 </p>
               </div>
               <div className="p-5">
-                <label className="block">
-                  <span className="mb-2 block text-xs font-extrabold text-slate-700">
-                    Ngày và giờ mới
-                  </span>
-                  <input
-                    type="datetime-local"
-                    value={updateDateTime}
-                    onChange={(event) => setUpdateDateTime(event.target.value)}
-                    disabled={updatingCashflows}
-                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm font-bold text-slate-800 outline-none focus:border-emerald-400 focus:bg-white focus:ring-2 focus:ring-emerald-100"
-                    autoFocus
-                  />
-                </label>
+                <div className="grid gap-3">
+                  <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-xs font-extrabold text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={updateTransDateEnabled}
+                      onChange={(event) =>
+                        setUpdateTransDateEnabled(event.target.checked)
+                      }
+                      disabled={updatingCashflows}
+                      className="h-4 w-4 accent-emerald-600"
+                    />
+                    Cập nhật ngày giao dịch
+                  </label>
+
+                  {updateTransDateEnabled && (
+                    <label className="block pl-1">
+                      <span className="mb-2 block text-xs font-extrabold text-slate-700">
+                        Ngày và giờ mới
+                      </span>
+                      <input
+                        type="datetime-local"
+                        value={updateDateTime}
+                        onChange={(event) =>
+                          setUpdateDateTime(event.target.value)
+                        }
+                        disabled={updatingCashflows}
+                        className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm font-bold text-slate-800 outline-none focus:border-emerald-400 focus:bg-white focus:ring-2 focus:ring-emerald-100"
+                      />
+                    </label>
+                  )}
+
+                  <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-xs font-extrabold text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={updateDescriptionEnabled}
+                      onChange={(event) => {
+                        setUpdateDescriptionEnabled(event.target.checked);
+                        setUpdateError("");
+                      }}
+                      disabled={updatingCashflows}
+                      className="h-4 w-4 accent-emerald-600"
+                    />
+                    Cập nhật ghi chú
+                  </label>
+
+                  {updateDescriptionEnabled && (
+                    <div className="rounded-xl border border-sky-200 bg-sky-50/70 p-3">
+                      <label className="inline-flex cursor-pointer items-center rounded-xl bg-sky-600 px-4 py-2.5 text-xs font-extrabold text-white shadow-sm hover:bg-sky-700">
+                        Thêm file Excel
+                        <input
+                          type="file"
+                          accept=".xlsx,.xls"
+                          onChange={handleDescriptionFileChange}
+                          disabled={updatingCashflows}
+                          className="hidden"
+                        />
+                      </label>
+                      <p className="m-0 mt-2 text-[11px] font-semibold text-slate-600">
+                        {descriptionFileName
+                          ? `${descriptionFileName} · Khớp ${matchedDescriptionCount}/${selectedCashflows.length} phiếu · ${descriptionEntryCount} ghi chú sẽ cập nhật`
+                          : "File cần có hai cột invoiceId và description."}
+                      </p>
+                      {descriptionFileError && (
+                        <p className="m-0 mt-2 text-[11px] font-bold text-red-700">
+                          {descriptionFileError}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
                 {updateError && (
                   <div className="mt-4 max-h-36 overflow-auto whitespace-pre-line rounded-xl border border-red-200 bg-red-50 px-3 py-3 text-xs font-semibold text-red-700">
                     {updateError}
@@ -930,7 +1151,7 @@ export default function CashflowListModal({
                   <button
                     type="button"
                     onClick={confirmUpdateDate}
-                    disabled={!updateDateTime || updatingCashflows}
+                    disabled={!canSubmitUpdate || updatingCashflows}
                     className="rounded-xl bg-emerald-600 px-4 py-2.5 text-xs font-extrabold text-white disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     {updatingCashflows

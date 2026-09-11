@@ -282,6 +282,47 @@ const mergePayloadErrorSummaries = (...summaries) =>
     .filter(Boolean)
     .join("\n\n");
 
+const getCashflowResponseRows = (payload) => {
+  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload?.Data)) return payload.Data;
+  if (Array.isArray(payload?.data?.Data)) return payload.data.Data;
+  if (Array.isArray(payload?.data)) return payload.data;
+  return [];
+};
+
+const mergeCashflowListResponses = (currentPayload, nextPayload) => {
+  const mergedRows = [];
+  const seenRowIds = new Set();
+  const allRows = [
+    ...getCashflowResponseRows(currentPayload),
+    ...getCashflowResponseRows(nextPayload),
+  ];
+
+  allRows.forEach((row, index) => {
+    const rowId = normalizeText(row?.Id ?? row?.id ?? row?.Code ?? row?.code);
+    const uniqueKey = rowId || `cashflow-row-${index}`;
+    if (seenRowIds.has(uniqueKey)) return;
+    seenRowIds.add(uniqueKey);
+    mergedRows.push(row);
+  });
+
+  if (Array.isArray(nextPayload)) return mergedRows;
+  if (Array.isArray(nextPayload?.Data)) {
+    return { ...nextPayload, Data: mergedRows };
+  }
+  if (Array.isArray(nextPayload?.data?.Data)) {
+    return {
+      ...nextPayload,
+      data: { ...nextPayload.data, Data: mergedRows },
+    };
+  }
+  if (Array.isArray(nextPayload?.data)) {
+    return { ...nextPayload, data: mergedRows };
+  }
+
+  return nextPayload;
+};
+
 const sumMoneyColumn = (rows, header) =>
   rows.reduce((total, row) => total + parseMoneyValue(row?.[header]), 0);
 
@@ -296,6 +337,13 @@ const getOrderDeliveryCode = (row) =>
     "Mã Đơn GHN",
     "mã đơn ghn",
   ]);
+
+const getInvoiceIdFromCashflowCode = (cashflow = {}) => {
+  const code = normalizeText(cashflow?.Code || cashflow?.code);
+  const separatorIndex = code.lastIndexOf("_");
+  const invoiceId = separatorIndex >= 0 ? code.slice(separatorIndex + 1) : code;
+  return normalizeText(invoiceId).toUpperCase();
+};
 
 const stripOrderDeliveryData = (row) => {
   const {
@@ -373,6 +421,9 @@ export default function CashFlowApp() {
   const [sourceFileBuffer, setSourceFileBuffer] = useState(null);
   const [headers, setHeaders] = useState([]);
   const [allRows, setAllRows] = useState([]);
+  const [orderDeliveryDescriptions, setOrderDeliveryDescriptions] = useState(
+    [],
+  );
   const [selectedIds, setSelectedIds] = useState(() => new Set());
   const [excelError, setExcelError] = useState("");
   const [fileName, setFileName] = useState("");
@@ -385,6 +436,7 @@ export default function CashFlowApp() {
   const [cashflowListModalOpen, setCashflowListModalOpen] = useState(false);
   const [cashflowListPayload, setCashflowListPayload] = useState(null);
   const [cashflowListLoading, setCashflowListLoading] = useState(false);
+  const [cashflowListLoadingMore, setCashflowListLoadingMore] = useState(false);
   const [cashflowListError, setCashflowListError] = useState("");
   const [toasts, setToasts] = useState([]);
   const toastIdRef = useRef(0);
@@ -455,8 +507,13 @@ export default function CashFlowApp() {
   };
 
   const loadCashflowList = async (filters = {}) => {
+    const append = filters?.append === true;
     setCashflowListModalOpen(true);
-    setCashflowListLoading(true);
+    if (append) {
+      setCashflowListLoadingMore(true);
+    } else {
+      setCashflowListLoading(true);
+    }
     setCashflowListError("");
 
     try {
@@ -475,19 +532,35 @@ export default function CashFlowApp() {
         accessPrivateToken,
         filters,
       );
-      setCashflowListPayload(response);
-    } catch (error) {
-      setCashflowListError(
-        error.message || "Không tải được danh sách sổ quỹ từ KiotViet",
+      setCashflowListPayload((currentPayload) =>
+        append
+          ? mergeCashflowListResponses(currentPayload, response)
+          : response,
       );
+    } catch (error) {
+      const errorMessage =
+        error.message || "Không tải được danh sách sổ quỹ từ KiotViet";
+      if (append) {
+        addToast({
+          type: "error",
+          title: "Không tải thêm được sổ quỹ",
+          message: errorMessage,
+        });
+      } else {
+        setCashflowListError(errorMessage);
+      }
     } finally {
-      setCashflowListLoading(false);
+      if (append) {
+        setCashflowListLoadingMore(false);
+      } else {
+        setCashflowListLoading(false);
+      }
     }
   };
 
   const handleUpdateCashflowDates = async (
     cashflows,
-    dateTime,
+    updateOptions,
     filters = {},
   ) => {
     let accessPrivateToken = currentAccessPrivateToken;
@@ -508,12 +581,31 @@ export default function CashFlowApp() {
           cashflow?.code ??
           index,
       );
+      const invoiceId = getInvoiceIdFromCashflowCode(cashflow);
+      const nextDescription = normalizeText(
+        updateOptions?.descriptionsByInvoiceId?.[invoiceId],
+      );
+
+      if (updateOptions?.updateDescription && !nextDescription) {
+        failures.push({
+          id: rowId,
+          code: cashflow?.Code || cashflow?.code || rowId,
+          message: `Không tìm thấy description cho mã hóa đơn ${invoiceId || "ở cuối mã phiếu"}`,
+        });
+        continue;
+      }
+
       try {
         await updateCashflowDates(
           retailer,
           accessPrivateToken,
           cashflow,
-          dateTime,
+          {
+            updateTransDate: updateOptions?.updateTransDate === true,
+            dateTime: updateOptions?.dateTime || "",
+            updateDescription: updateOptions?.updateDescription === true,
+            description: nextDescription,
+          },
         );
         successIds.push(rowId);
       } catch (error) {
@@ -597,9 +689,37 @@ export default function CashFlowApp() {
         deliveryCode,
         accessToken,
       );
-      const orderDelivery = Array.isArray(response)
-        ? response[0]
-        : response?.data?.[0] || response?.Data?.[0] || response;
+      const orderDeliveries = Array.isArray(response)
+        ? response
+        : Array.isArray(response?.data)
+          ? response.data
+          : Array.isArray(response?.Data)
+            ? response.Data
+            : response && typeof response === "object"
+              ? [response]
+              : [];
+      const descriptionEntries = orderDeliveries
+        .map((item) => ({
+          invoiceId: normalizeText(item?.invoiceId),
+          description: normalizeText(item?.description),
+        }))
+        .filter((item) => item.invoiceId && item.description);
+
+      if (descriptionEntries.length > 0) {
+        setOrderDeliveryDescriptions((currentEntries) => {
+          const entriesByInvoiceId = new Map(
+            currentEntries.map((item) => [item.invoiceId, item]),
+          );
+
+          descriptionEntries.forEach((item) => {
+            entriesByInvoiceId.set(item.invoiceId, item);
+          });
+
+          return Array.from(entriesByInvoiceId.values());
+        });
+      }
+
+      const orderDelivery = orderDeliveries[0];
 
       if (!orderDelivery || typeof orderDelivery !== "object") {
         setAllRows((currentRows) =>
@@ -923,6 +1043,7 @@ export default function CashFlowApp() {
     setSourceWorkbook(null);
     setSourceFile(null);
     setSourceFileBuffer(null);
+    setOrderDeliveryDescriptions([]);
     sourceExcelRef.current = {
       workbook: null,
       file: null,
@@ -1336,6 +1457,46 @@ export default function CashFlowApp() {
     }
   };
 
+  const handleExportOrderDeliveryDescriptions = () => {
+    if (orderDeliveryDescriptions.length === 0) {
+      addToast({
+        type: "warning",
+        title: "Không có dữ liệu mô tả",
+        message: "Chưa có orderDelivery nào có description để xuất.",
+      });
+      return;
+    }
+
+    try {
+      const worksheet = XLSX.utils.json_to_sheet(orderDeliveryDescriptions, {
+        header: ["invoiceId", "description"],
+      });
+      worksheet["!cols"] = [{ wch: 18 }, { wch: 70 }];
+
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Descriptions");
+
+      const baseName = fileName
+        ? fileName.replace(/\.(xlsx|xls)$/i, "")
+        : "order-delivery";
+      XLSX.writeFile(workbook, `${baseName}-descriptions.xlsx`);
+
+      addToast({
+        type: "success",
+        title: "Xuất Excel thành công",
+        message: `Đã xuất ${orderDeliveryDescriptions.length} mô tả vận đơn.`,
+      });
+    } catch (error) {
+      const errorMessage = error.message || "Không xuất được danh sách mô tả";
+      setPayloadError(errorMessage);
+      addToast({
+        type: "error",
+        title: "Lỗi xuất Excel",
+        message: errorMessage,
+      });
+    }
+  };
+
   const handleFileChange = async (file) => {
     if (!file) return;
 
@@ -1343,6 +1504,7 @@ export default function CashFlowApp() {
     cancelSendPayloadProgress();
     setExcelError("");
     setSelectedIds(new Set());
+    setOrderDeliveryDescriptions([]);
     setFailedPayloadEntries([]);
     setPayloadError("");
     setFileName(file.name);
@@ -1608,6 +1770,9 @@ export default function CashFlowApp() {
               onSendPayloads={handleSendPayloads}
               onRetryFailedPayloads={() => handleSendPayloads(true)}
               onExportExcel={handleExportExcel}
+              onExportOrderDeliveryDescriptions={
+                handleExportOrderDeliveryDescriptions
+              }
               onOpenCashflowList={loadCashflowList}
               isSendingPayloads={sendingPayloads}
               isLoadingOrderDeliveries={
@@ -1615,6 +1780,9 @@ export default function CashFlowApp() {
               }
               sendPayloadProgress={sendPayloadProgress}
               isExportingExcel={exportingExcel}
+              orderDeliveryDescriptionCount={
+                orderDeliveryDescriptions.length
+              }
               payloadSourceCount={payloadSourceRows.length}
               failedPayloadCount={failedPayloadEntries.length}
               missingInvoiceRows={missingInvoiceRows}
@@ -1624,6 +1792,7 @@ export default function CashFlowApp() {
             open={cashflowListModalOpen}
             payload={cashflowListPayload}
             loading={cashflowListLoading}
+            loadingMore={cashflowListLoadingMore}
             error={cashflowListError}
             retailer={retailer}
             onRefresh={loadCashflowList}
