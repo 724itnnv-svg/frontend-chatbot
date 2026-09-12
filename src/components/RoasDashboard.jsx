@@ -42,6 +42,21 @@ const RETAILER_LABELS = {
   abctv: "ABC",
 };
 
+const ALLOWED_AD_ACCOUNT_IDS = new Set([
+  "727099283175561",
+  "1365025578067205",
+  "731525842964747",
+  "4132336063652746",
+]);
+
+function isAllowedAdAccount(account) {
+  const accountId = String(account?.accountId || account?.id || "").replace(
+    /^act_/,
+    "",
+  );
+  return ALLOWED_AD_ACCOUNT_IDS.has(accountId);
+}
+
 const EMPTY_SUMMARY = {
   receiptAmount: 0,
   expenseAmount: 0,
@@ -99,6 +114,7 @@ function formatDateLabel(value) {
     day: "2-digit",
     month: "2-digit",
     year: "numeric",
+    timeZone: "Asia/Ho_Chi_Minh",
   }).format(date);
 }
 
@@ -150,6 +166,133 @@ const formatNumber = (value) =>
 
 const formatPercent = (value, digits = 2) =>
   `${(Number(value) || 0).toFixed(digits)}%`;
+
+const INACTIVE_AD_STATUS_LABELS = {
+  PAUSED: "Đã tắt",
+  STOPPED: "Đã tắt",
+  INACTIVE: "Đã tắt",
+  CAMPAIGN_PAUSED: "Đã tắt theo chiến dịch",
+  ADSET_PAUSED: "Đã tắt theo nhóm",
+  ARCHIVED: "Đã lưu trữ",
+  DELETED: "Đã xóa",
+  DISAPPROVED: "Không được duyệt",
+  PENDING_REVIEW: "Đang xét duyệt",
+  IN_PROCESS: "Đang xử lý",
+  WITH_ISSUES: "Có lỗi phân phối",
+  PENDING_BILLING_INFO: "Chờ thanh toán",
+  PREAPPROVED: "Chờ kích hoạt",
+};
+
+function getAdDeliveryStatus(ad = {}) {
+  const explicitRunning = ad.isRunning ?? ad.isActive;
+  const rawStatus = String(
+    ad.effectiveStatus ??
+      ad.effective_status ??
+      ad.deliveryStatus ??
+      ad.delivery_status ??
+      ad.status ??
+      ad.configuredStatus ??
+      ad.configured_status ??
+      "",
+  )
+    .trim()
+    .toUpperCase();
+
+  if (explicitRunning === true || ["ACTIVE", "RUNNING"].includes(rawStatus)) {
+    return { running: true, label: "Đang chạy" };
+  }
+
+  if (explicitRunning === false || rawStatus) {
+    return {
+      running: false,
+      label: INACTIVE_AD_STATUS_LABELS[rawStatus] || "Không chạy",
+    };
+  }
+
+  return { running: null, label: "Chưa có trạng thái" };
+}
+
+function getAdStoppedAt(ad = {}) {
+  return (
+    ad.stoppedAt ??
+    ad.stopped_at ??
+    ad.pausedAt ??
+    ad.paused_at ??
+    ad.deactivatedAt ??
+    ad.deactivated_at ??
+    ad.statusChangedAt ??
+    ad.status_changed_at ??
+    null
+  );
+}
+
+function getAdStatusUpdatedAt(ad = {}) {
+  return (
+    ad.statusUpdatedAt ??
+    ad.status_updated_at ??
+    ad.updatedTime ??
+    ad.updated_time ??
+    null
+  );
+}
+
+function formatAdStatusDate(value) {
+  if (!value) return "";
+  const numericValue = Number(value);
+  const date = Number.isFinite(numericValue) && numericValue > 0
+    ? new Date(numericValue < 1000000000000 ? numericValue * 1000 : numericValue)
+    : new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat("vi-VN", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  }).format(date);
+}
+
+function AdDeliveryStatus({ ad }) {
+  const status = getAdDeliveryStatus(ad);
+  const stoppedAt = status.running === false
+    ? formatAdStatusDate(getAdStoppedAt(ad))
+    : "";
+  const statusUpdatedAt = status.running === false && !stoppedAt
+    ? formatAdStatusDate(getAdStatusUpdatedAt(ad))
+    : "";
+
+  return (
+    <span className="inline-flex flex-wrap items-center gap-1.5">
+      <span
+        className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-extrabold ring-1 ${
+          status.running === true
+            ? "bg-emerald-50 text-emerald-700 ring-emerald-200"
+            : status.running === false
+              ? "bg-rose-50 text-rose-700 ring-rose-200"
+              : "bg-slate-50 text-slate-500 ring-slate-200"
+        }`}
+      >
+        <span
+          className={`h-1.5 w-1.5 rounded-full ${
+            status.running === true
+              ? "bg-emerald-500"
+              : status.running === false
+                ? "bg-rose-500"
+                : "bg-slate-400"
+          }`}
+        />
+        {status.label}
+      </span>
+      {status.running === false && (
+        <span className="text-[9px] font-semibold text-slate-400">
+          {stoppedAt
+            ? `Tắt ngày ${stoppedAt}`
+            : statusUpdatedAt
+              ? `Cập nhật gần nhất ${statusUpdatedAt}`
+              : "Chưa có ngày tắt"}
+        </span>
+      )}
+    </span>
+  );
+}
 
 function groupProductsByUser(productGroups = []) {
   const users = new Map();
@@ -986,7 +1129,9 @@ export default function RoasDashboard() {
     try {
       const response = await api.get("/roas/options");
       const data = response.data || {};
-      const accounts = Array.isArray(data.accounts) ? data.accounts : [];
+      const accounts = Array.isArray(data.accounts)
+        ? data.accounts.filter(isAllowedAdAccount)
+        : [];
       const retailers = Array.isArray(data.retailers) ? data.retailers : [];
       const months = Array.isArray(data.months) ? data.months : [];
       setOptions({
@@ -1053,7 +1198,7 @@ export default function RoasDashboard() {
       if (data?.retailerAutoMatched && data.retailerName !== retailerName) {
         setRetailerName(data.retailerName);
       }
-      setExpandedKeys(new Set((data?.groups || []).map((group) => group.key)));
+      setExpandedKeys(new Set());
       setLastUpdated(
         new Date().toLocaleTimeString("vi-VN", {
           hour: "2-digit",
@@ -1140,6 +1285,20 @@ export default function RoasDashboard() {
       const next = new Set(current);
       if (next.has(key)) next.delete(key);
       else next.add(key);
+      return next;
+    });
+  };
+
+  const toggleUserGroup = (userGroup) => {
+    setExpandedKeys((current) => {
+      const next = new Set(current);
+      const shouldExpand = !next.has(userGroup.key);
+
+      if (shouldExpand) next.add(userGroup.key);
+      else next.delete(userGroup.key);
+
+      // Mỗi lần đổi trạng thái nhân viên, thu các SKU con để chỉ mở từng cấp.
+      userGroup.productGroups.forEach((group) => next.delete(group.key));
       return next;
     });
   };
@@ -1837,7 +1996,7 @@ export default function RoasDashboard() {
                   return (
                     <Fragment key={userGroup.key}>
                       <tr
-                        onClick={() => toggleGroup(userGroup.key)}
+                        onClick={() => toggleUserGroup(userGroup)}
                         className="cursor-pointer bg-cyan-50/70 font-bold transition-colors hover:bg-cyan-100/60"
                         title="Bấm vào hàng để xem chi tiết SKU"
                       >
@@ -1846,7 +2005,7 @@ export default function RoasDashboard() {
                             type="button"
                             onClick={(event) => {
                               event.stopPropagation();
-                              toggleGroup(userGroup.key);
+                              toggleUserGroup(userGroup);
                             }}
                             className="flex w-full items-center gap-3 text-left"
                           >
@@ -1960,13 +2119,16 @@ export default function RoasDashboard() {
                                         <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-slate-100 text-slate-500">
                                           <Megaphone size={14} />
                                         </span>
-                                        <div className="min-w-0">
+                                        <div className="min-w-0 flex-1">
                                           <p className="truncate text-xs font-bold text-slate-700">
                                             {ad.title}
                                           </p>
-                                          <p className="mt-1 truncate text-[10px] text-slate-400">
-                                            {ad.campaignName} · {ad.adsetName}
-                                          </p>
+                                          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
+                                            <p className="min-w-0 truncate text-[10px] text-slate-400">
+                                              {ad.campaignName} · {ad.adsetName}
+                                            </p>
+                                            <AdDeliveryStatus ad={ad} />
+                                          </div>
                                         </div>
                                       </div>
                                     </td>
@@ -2132,9 +2294,12 @@ export default function RoasDashboard() {
                         <p className="truncate text-xs font-extrabold text-slate-800">
                           {ad.title}
                         </p>
-                        <p className="mt-1 truncate text-[10px] text-slate-400">
-                          {ad.campaignName} · {ad.adsetName}
-                        </p>
+                        <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
+                          <p className="min-w-0 truncate text-[10px] text-slate-400">
+                            {ad.campaignName} · {ad.adsetName}
+                          </p>
+                          <AdDeliveryStatus ad={ad} />
+                        </div>
                       </td>
                       <td className="px-4 py-4">
                         <p className="text-xs font-extrabold text-cyan-700">
