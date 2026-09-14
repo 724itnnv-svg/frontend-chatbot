@@ -1271,6 +1271,7 @@ async function resolveAdministrativeAreaDetails({
         if (wardPosition >= 0) {
           streetName = normalizeDisplayText(address)
             .slice(0, wardPosition)
+            .replace(/[,\s]+$/u, "")
             .trim();
         }
       }
