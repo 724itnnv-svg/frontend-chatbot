@@ -1,3 +1,110 @@
+<<<<<<< HEAD
+const APP_PERMISSIONS = {
+  groups: [
+    {
+      id: "business",
+      name: "Kinh doanh",
+      description: "Thống kê, công nợ, Page, tin nhắn, chatbot và đơn hàng",
+      screenIds: [
+        "business_stats",
+        "debt_tracking",
+        "pages",
+        "pagesmessage",
+        "donhang",
+        "tao_don_hang",
+        "so_quy",
+      ],
+    },
+    {
+      id: "attendance",
+      name: "Nhân viên",
+      description: "Công việc, chấm công, ca làm, KPI, tính lương và thông báo thiết bị",
+      screenIds: [
+        "work_tasks",
+        "attendance_self",
+        "attendance",
+        "approved_leave",
+        "attendance_shifts",
+        "attendance_locations",
+        "payroll",
+        "kpi_management",
+        "salary_advance_management",
+        "notifications",
+      ],
+    },
+    {
+      id: "people",
+      name: "Nhân sự",
+      description:
+        "Hồ sơ nhân sự, sức khỏe, vi phạm, kho thiết bị, người dùng và vai trò phân quyền",
+      screenIds: [
+        "employee_profiles",
+        "employee_health_records",
+        "employee_violations",
+        "employee_assets",
+        "operational_contracts",
+        "users",
+        "roles",
+      ],
+    },
+    {
+      id: "finance",
+      name: "Tính toán",
+      description: "Công cụ tính hoa hồng",
+      screenIds: ["commission_online", "commission_abc"],
+    },
+    {
+      id: "system",
+      name: "Hệ thống & AI",
+      description: "Quản trị hệ thống, AI, agent, chat webhook và log",
+      screenIds: [
+        "customer_care",
+        "admin_dashboard",
+        "meta_pages",
+        "admin_products_tool",
+        "admin_vectorstore_tool",
+        "admin_agent",
+        "admin_agent_intent",
+        "admin_agent_promo",
+        "admin_agent_response_templates",
+        "admin_logs",
+      ],
+    },
+    {
+      id: "experimental",
+      name: "Phiên bản thử nghiệm",
+      description: "FAQ theo Page và khuyến mãi",
+      screenIds: ["admin_event_promo", "admin_faq"],
+    },
+    {
+      id: "agriculture",
+      name: "Nông nghiệp",
+      description: "Quản lý nghiệp vụ nông nghiệp",
+      screenIds: ["dua_sap"],
+    },
+    {
+      id: "tools",
+      name: "Công cụ",
+      description: "Các công cụ tra cứu và chuyển đổi dữ liệu",
+      screenIds: ["dia_chi", "dia_chi_2"],
+    },
+  ],
+  screens: [
+    { id: "business_stats", name: "Thống kê kinh doanh" },
+    { id: "debt_tracking", name: "Theo dõi công nợ" },
+    { id: "pages", name: "Quản Lý Page" },
+    { id: "pagesmessage", name: "Tin Nhắn Page" },
+    { id: "donhang", name: "Đơn Hàng" },
+    { id: "tao_don_hang", name: "Tạo Đơn Hàng" },
+    { id: "so_quy", name: "Tính Sổ Quỹ" },
+    { id: "attendance_self", name: "Chấm công của tôi" },
+    { id: "attendance", name: "Quản lý chấm công" },
+    { id: "approved_leave", name: "Theo dõi đơn nghỉ phép" },
+    { id: "attendance_shifts", name: "Ca làm" },
+    { id: "attendance_locations", name: "Vị trí chấm công" },
+    { id: "payroll", name: "Chấm công tính lương" },
+    { id: "kpi_management", name: "Quản lý KPI" },
+=======
 const APP_PERMISSIONS = {
   groups: [
     {
@@ -105,6 +212,7 @@ const APP_PERMISSIONS = {
     { id: "attendance_locations", name: "Vị trí chấm công" },
     { id: "payroll", name: "Chấm công tính lương" },
     { id: "kpi_management", name: "Quản lý KPI" },
+>>>>>>> 1f3052d35221f355c771bfa478fe61c28184a14d
     { id: "notifications", name: "Thiết Bị Đăng Nhập & Thông Báo" },
     { id: "employee_profiles", name: "Hồ Sơ Nhân Sự" },
     { id: "employee_health_records", name: "Hồ Sơ Sức Khỏe Nhân Viên" },

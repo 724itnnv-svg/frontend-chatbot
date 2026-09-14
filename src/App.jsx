@@ -450,11 +450,24 @@ function LoginRoute() {
 }
 
 function AppLoader() {
-  return (
-    <div className="min-h-screen grid place-items-center bg-slate-50 text-sm font-medium text-slate-500">
-      Đang tải...
-    </div>
-  );
+  return <PageLoadingScreen message="Đang tải dữ liệu..." />;
+}
+
+function RouteTransitionLoader() {
+  const location = useLocation();
+  const previousPath = useRef(location.pathname);
+  const [visible, setVisible] = useState(false);
+
+  useLayoutEffect(() => {
+    if (previousPath.current === location.pathname) return undefined;
+    previousPath.current = location.pathname;
+    setVisible(true);
+    const timer = window.setTimeout(() => setVisible(false), 420);
+    return () => window.clearTimeout(timer);
+  }, [location.pathname]);
+
+  if (!visible) return null;
+  return <PageLoadingScreen message="Đang tải dữ liệu..." overlay />;
 }
 
 function AdminDefaultRedirect() {
@@ -525,6 +538,7 @@ export default function App() {
 
   return (
     <ErrorBoundary>
+      <RouteTransitionLoader />
       <Suspense fallback={<AppLoader />}>
         <Routes>
           <Route path="/" element={<HomeRoute />} />
