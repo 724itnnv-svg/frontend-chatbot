@@ -1,6 +1,11 @@
 import { api } from "./api";
 import axios from "axios";
 const tokenURL = "/api/cashflow";
+const KIOT_CASHFLOW_LIST_URL = "https://api-man1.kiotviet.vn/api/cashflow/list";
+const KIOT_CASHFLOW_URL = "https://api-man1.kiotviet.vn/api/cashflow";
+const KIOT_PAYMENTS_URL = "https://api-man1.kiotviet.vn/api/payments";
+const KIOT_PURCHASE_PAYMENTS_URL =
+  "https://api-man1.kiotviet.vn/api/purchasepayments";
 
 const cashflowApi = axios.create({
   baseURL: tokenURL,
@@ -118,8 +123,8 @@ export async function updateCustomerEInvoiceAddress(
     );
     const incomingGroupIds = hasIncomingGroups
       ? customerPayload.CustomerGroupDetails.map(
-          (item) => item?.GroupId,
-        ).filter((groupId) => groupId != null)
+        (item) => item?.GroupId,
+      ).filter((groupId) => groupId != null)
       : currentCustomer.CustomerGroupIds;
     const hasIncomingTaxCode = Object.prototype.hasOwnProperty.call(
       customerPayload,
@@ -136,18 +141,18 @@ export async function updateCustomerEInvoiceAddress(
       EmployeeInCharges: currentCustomer.EmployeeInCharges,
       Groups: hasIncomingGroups
         ? customerPayload.Groups ||
-          customerPayload.CustomerGroupNames?.join(", ") ||
-          ""
+        customerPayload.CustomerGroupNames?.join(", ") ||
+        ""
         : currentCustomer.Groups,
       CustomerGroupDetails: hasIncomingGroups
         ? customerPayload.CustomerGroupDetails.map((item) => ({
-            ...item,
-            CustomerId: currentCustomer.Id,
-          }))
+          ...item,
+          CustomerId: currentCustomer.Id,
+        }))
         : (currentCustomer.CustomerGroupIds || []).map((groupId) => ({
-            GroupId: groupId,
-            CustomerId: currentCustomer.Id,
-          })),
+          GroupId: groupId,
+          CustomerId: currentCustomer.Id,
+        })),
       CustomerType: currentCustomer.CustomerType,
       Organization: currentCustomer.Organization || "",
       Name: currentCustomer.Name,
@@ -200,6 +205,7 @@ const SAFE_RETRY_POST_PATHS = new Set([
   "/location-suggest",
   "/getProductByCode",
   "/getProductById",
+  KIOT_CASHFLOW_LIST_URL,
 ]);
 const KIOT_INVOICE_RATE_LIMIT_RETRIES = 3;
 
@@ -352,9 +358,9 @@ export async function getAccessToken(retailer = "kingfarm") {
       {};
     const enhancedError = new Error(
       responseStatus.message ||
-        responseStatus.Message ||
-        error.response?.data?.message ||
-        error.message,
+      responseStatus.Message ||
+      error.response?.data?.message ||
+      error.message,
     );
     enhancedError.status = error.response?.status || "";
     enhancedError.errorCode =
@@ -447,6 +453,351 @@ export async function getBankAccount(
   }
 }
 
+export async function getCashflowList(
+  retailer = "kingfarm",
+  accessPrivateToken,
+  filters = {},
+) {
+  try {
+    const config = getRetailerConfig(retailer);
+    const branchId = Number(config?.branchId);
+    const allowedTimeRanges = new Set([
+      "today",
+      "yesterday",
+      "week",
+      "lastweek",
+      "month",
+      "lastmonth",
+      "quarter",
+      "lastquarter",
+      "year",
+      "lastyear",
+      "7days",
+      "30days",
+      "alltime",
+    ]);
+    const timeRange = allowedTimeRanges.has(filters?.timeRange)
+      ? filters.timeRange
+      : "month";
+    const datePattern = /^\d{4}-\d{2}-\d{2}$/;
+    const startDate = String(filters?.startDate || "");
+    const endDate = String(filters?.endDate || "");
+    const parsedSkip = Number.parseInt(filters?.skip, 10);
+    const skip = Number.isFinite(parsedSkip) && parsedSkip > 0 ? parsedSkip : 0;
+    const transDateFilter =
+      filters?.timeRange === "custom" &&
+        datePattern.test(startDate) &&
+        datePattern.test(endDate)
+        ? `(TransDate ge datetime'${startDate}T00:00:00' and TransDate le datetime'${endDate}T23:59:59')`
+        : `TransDate eq '${timeRange}'`;
+    const filterParts = [
+      ...(Number.isFinite(branchId) ? [`BranchId eq ${branchId}`] : []),
+      transDateFilter,
+      "Status eq 0",
+      "(Method eq 'Card' or Method eq 'Transfer')",
+    ];
+    const requestPayload = {
+      $inlinecount: "allpages",
+      $format: "json",
+      $top: 100,
+      $skip: skip,
+      $filter: `(${filterParts.join(" and ")})`,
+      CalcDebtStatus: [1, 0, -1],
+      Description: null,
+      DescriptionKey: "",
+      IncludeAccount: true,
+      Version: 16,
+      group: [],
+    };
+    const response = await kiotDirectApi.post(
+      KIOT_CASHFLOW_LIST_URL,
+      requestPayload,
+      {
+        params: {
+          format: "json",
+          IncludeEmployee: "True",
+          IncludeTotal: "True",
+          IncludeBranch: "True",
+          IncludeUser: "True",
+          UsingTotalApi: "true",
+        },
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json, text/plain, */*",
+          Retailer: retailer,
+          Authorization: `Bearer ${accessPrivateToken}`,
+          ...(config?.branchId ? { BranchId: Number(config.branchId) } : {}),
+        },
+      },
+    );
+
+    return response.data;
+  } catch (error) {
+    throw new Error(
+      error.userMessage ||
+      error.response?.data?.error?.ResponseStatus?.Message ||
+      error.response?.data?.ResponseStatus?.Message ||
+      error.response?.data?.message ||
+      error.message ||
+      "Không tải được danh sách sổ quỹ",
+    );
+  }
+}
+
+const createEmptyPurchasePaymentsSource = () => ({
+  options: {
+    data: null,
+    schema: { type: "json", data: "Data", total: "Total", errors: "Errors" },
+    offlineStorage: null,
+    serverSorting: false,
+    serverPaging: false,
+    serverFiltering: false,
+    serverGrouping: false,
+    serverAggregates: false,
+    batch: false,
+    pageSize: 10,
+  },
+  reader: {},
+  select: null,
+  table: null,
+  transport: { options: {}, cache: {} },
+  _aggregate: [{ field: "Amount", aggregate: "sum" }],
+  _aggregateResult: {},
+  _data: [],
+  _destroyed: [],
+  _events: {},
+  _group: [],
+  _map: {},
+  _online: true,
+  _page: 1,
+  _pageSize: 10,
+  _prefetch: {},
+  _pristineData: [],
+  _pristineTotal: 1,
+  _ranges: [],
+  _requestInProgress: false,
+  _shouldDetachObservableParents: true,
+  _total: 1,
+  _view: [],
+});
+
+export async function updateCashflowDates(
+  retailer = "kingfarm",
+  accessPrivateToken,
+  cashflow,
+  updateOptions = {},
+) {
+  const legacyDateTime =
+    typeof updateOptions === "string" ? updateOptions : "";
+  const updateTransDate =
+    Boolean(legacyDateTime) || updateOptions?.updateTransDate === true;
+  const updateDescription = updateOptions?.updateDescription === true;
+  const dateTime = legacyDateTime || updateOptions?.dateTime || "";
+  const nextDescription = String(updateOptions?.description ?? "").trim();
+
+  if (!updateTransDate && !updateDescription) {
+    throw new Error("Chưa chọn trường cần cập nhật");
+  }
+
+  const selectedDate = updateTransDate ? new Date(dateTime) : null;
+  if (updateTransDate && Number.isNaN(selectedDate.getTime())) {
+    throw new Error("Ngày giờ cập nhật không hợp lệ");
+  }
+
+  if (updateDescription && !nextDescription) {
+    throw new Error("Ghi chú cập nhật không được để trống");
+  }
+
+  try {
+    const config = getRetailerConfig(retailer);
+    const originalValue = Number(
+      cashflow?.Plus ?? cashflow?.Amount ?? cashflow?.Value,
+    );
+    if (!Number.isFinite(originalValue) || originalValue === 0) {
+      throw new Error("Giá trị phiếu thu/chi không hợp lệ");
+    }
+    const originalPaymentDate =
+      cashflow?.ComparePaymentDate ||
+      cashflow?.PaymentDate ||
+      cashflow?.TransDate ||
+      cashflow?.transDate;
+    const cashflowGroupName =
+      cashflow?.CashflowGroupName ||
+      cashflow?.CashFlowGroupName ||
+      cashflow?.CashGroup ||
+      "";
+    const employeeName =
+      cashflow?.EmployeeName ||
+      cashflow?.CreatedName ||
+      (typeof cashflow?.User === "string" ? cashflow.User : "");
+    const code = String(cashflow?.Code || "");
+    const paymentMethod =
+      cashflow?.PaymentMedthod ||
+      cashflow?.PaymentMethod ||
+      cashflow?.Method ||
+      "Transfer";
+    const paymentMethodLabel =
+      cashflow?.PaymentMedthodLabel ||
+      cashflow?.ComparePaymentMethodLabel ||
+      (paymentMethod === "Transfer"
+        ? "Chuyển khoản"
+        : paymentMethod === "Card"
+          ? "Thẻ"
+          : "Tiền mặt");
+    const accountName = cashflow?.Account || cashflow?.AccountName || "";
+    const userId = cashflow?.UserId ?? cashflow?.CreatedBy;
+    const originalTransDate =
+      cashflow?.CompareTransDate ||
+      cashflow?.TransDate ||
+      cashflow?.transDate ||
+      cashflow?.PaymentDate;
+    const updatedTransDate = updateTransDate
+      ? selectedDate.toISOString()
+      : originalTransDate;
+    const updatedPaymentDate = updateTransDate
+      ? selectedDate.toISOString()
+      : originalPaymentDate;
+    const originalDescription = cashflow?.Description ?? cashflow?.description;
+    const updatedDescription = updateDescription
+      ? nextDescription
+      : originalDescription;
+    const cashflowPayload = {
+      AccountId: cashflow?.AccountId,
+      AutoCalcLiability: cashflow?.AutoCalcLiability ?? true,
+      BranchId: cashflow?.BranchId,
+      BranchName: cashflow?.BranchName || cashflow?.Branch || "",
+      CashFlowGroupId: cashflow?.CashFlowGroupId,
+      CashFlowType: cashflow?.CashFlowType ?? null,
+      ChangeDebtOnly: cashflow?.ChangeDebtOnly ?? true,
+      Code: cashflow?.Code,
+      ComparePaymentDate: originalPaymentDate,
+      CompareUsedForFinancialReporting: Boolean(
+        cashflow?.CompareUsedForFinancialReporting ??
+        cashflow?.UsedForFinancialReporting,
+      ),
+      CompareValue: Number(cashflow?.CompareValue ?? originalValue),
+      CreatedBy: cashflow?.CreatedBy,
+      CreatedDate: cashflow?.CreatedDate,
+      CreatedName: employeeName,
+      Description: updatedDescription,
+      EventAction: cashflow?.EventAction ?? 0,
+      EventId: cashflow?.EventId ?? 0,
+      ExchangeRate: cashflow?.ExchangeRate ?? 0,
+      ForVoucher: cashflow?.ForVoucher ?? false,
+      Id: cashflow?.Id,
+      IdOld: cashflow?.IdOld ?? 0,
+      ModifiedBy: cashflow?.ModifiedBy ?? cashflow?.UserId,
+      ModifiedDate: cashflow?.ModifiedDate,
+      PartnerDebt: cashflow?.PartnerDebt,
+      PartnerDelivery:
+        cashflow?.PartnerDelivery &&
+          typeof cashflow.PartnerDelivery === "object"
+          ? cashflow.PartnerDelivery
+          : undefined,
+      PartnerId: cashflow?.PartnerId,
+      PartnerName: cashflow?.PartnerName,
+      PartnerOldDebt: cashflow?.PartnerOldDebt,
+      PartnerType: cashflow?.PartnerType || cashflow?.partnerType,
+      PaymentDate: updatedPaymentDate,
+      PaymentMethod: cashflow?.PaymentMethod || cashflow?.Method || "Transfer",
+      Plus: originalValue,
+      RetailerId: cashflow?.RetailerId,
+      RetryCount: cashflow?.RetryCount ?? 0,
+      Status: cashflow?.Status ?? 0,
+      Total: cashflow?.Total ?? 0,
+      UsedForFinancialReporting: Boolean(cashflow?.UsedForFinancialReporting),
+      User:
+        cashflow?.User && typeof cashflow.User === "object"
+          ? cashflow.User
+          : undefined,
+      UserId: cashflow?.UserId ?? cashflow?.CreatedBy,
+      Value: originalValue,
+      outflow: cashflow?.outflow ?? originalValue < 0,
+      CashflowGroupName: cashflowGroupName,
+      CompareCashFlowGroupId:
+        cashflow?.CompareCashFlowGroupId ?? cashflow?.CashFlowGroupId,
+      CompareCashflowGroupName:
+        cashflow?.CompareCashflowGroupName || cashflowGroupName,
+      CompareDescription: cashflow?.CompareDescription ?? originalDescription,
+      ComparePartnerName: cashflow?.ComparePartnerName ?? "",
+      EmployeeName: employeeName,
+      IsFromPurchaseEInvoice: cashflow?.IsFromPurchaseEInvoice ?? false,
+      IsPartnerLiability:
+        cashflow?.IsPartnerLiability ??
+        (cashflow?.PartnerType || cashflow?.partnerType) === "D",
+      KeyCheckDup: cashflow?.KeyCheckDup,
+      TransDate: updatedTransDate,
+    };
+    const commonPaymentPayload = {
+      AccountId: cashflow?.AccountId,
+      AccountName: accountName,
+      Code: code,
+      CompareAccountName: cashflow?.CompareAccountName || accountName,
+      CompareDescription: cashflow?.CompareDescription ?? originalDescription,
+      ComparePaymentMethodLabel:
+        cashflow?.ComparePaymentMethodLabel || paymentMethodLabel,
+      CompareTransDate: originalTransDate,
+      CompareUserId: cashflow?.CompareUserId ?? userId,
+      Description: updatedDescription,
+      PaymentMedthod: paymentMethod,
+      PaymentMedthodLabel: paymentMethodLabel,
+      TransDate: updatedTransDate,
+      UserId: userId,
+    };
+    let requestUrl = KIOT_CASHFLOW_URL;
+    let requestPayload = {
+      AllowMakePaymentOnAnotherBranch: true,
+      Cashflow: cashflowPayload,
+    };
+
+    if (/^TTGH_/i.test(code)) {
+      requestUrl = KIOT_PAYMENTS_URL;
+      requestPayload = {
+        ...commonPaymentPayload,
+        IsUpdateCashflowDetail: cashflow?.IsUpdateCashflowDetail ?? false,
+      };
+    } else if (/^PCGH_/i.test(code)) {
+      requestUrl = KIOT_PURCHASE_PAYMENTS_URL;
+      requestPayload = {
+        ...commonPaymentPayload,
+        PartnerId: cashflow?.PartnerId,
+        UserName: cashflow?.UserName || employeeName,
+        payments:
+          cashflow?.payments && typeof cashflow.payments === "object"
+            ? cashflow.payments
+            : createEmptyPurchasePaymentsSource(),
+      };
+    }
+
+    const response = await kiotDirectApi.post(requestUrl, requestPayload, {
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json, text/plain, */*",
+        Retailer: retailer,
+        Authorization: `Bearer ${accessPrivateToken}`,
+        ...(config?.branchId ? { BranchId: Number(config.branchId) } : {}),
+      },
+    });
+
+    return response.data;
+  } catch (error) {
+    const responseStatus =
+      error.response?.data?.error?.responseStatus ||
+      error.response?.data?.error?.ResponseStatus ||
+      error.response?.data?.responseStatus ||
+      error.response?.data?.ResponseStatus ||
+      {};
+    throw new Error(
+      error.userMessage ||
+      responseStatus.message ||
+      responseStatus.Message ||
+      error.response?.data?.message ||
+      error.message ||
+      "Không cập nhật được phiếu sổ quỹ",
+    );
+  }
+}
+
 export async function getOrderDelivery(
   retailer = "kingfarm",
   accessPrivateToken,
@@ -471,9 +822,9 @@ export async function getOrderDelivery(
       {};
     const enhancedError = new Error(
       responseStatus.message ||
-        responseStatus.Message ||
-        error.response?.data?.message ||
-        error.message,
+      responseStatus.Message ||
+      error.response?.data?.message ||
+      error.message,
     );
     enhancedError.status = error.response?.status || "";
     enhancedError.errorCode =
@@ -561,8 +912,8 @@ export async function updateCustomerAddress(
     );
     const incomingGroupIds = hasIncomingGroups
       ? customerPayload.CustomerGroupDetails.map(
-          (item) => item?.GroupId,
-        ).filter((groupId) => groupId != null)
+        (item) => item?.GroupId,
+      ).filter((groupId) => groupId != null)
       : currentCustomer.CustomerGroupIds;
     const hasIncomingTaxCode = Object.prototype.hasOwnProperty.call(
       customerPayload,
@@ -587,36 +938,36 @@ export async function updateCustomerAddress(
       CustomerGroupIds: incomingGroupIds,
       EmployeeInChargeNames: hasIncomingEmployees
         ? mergeEmployeeValues(
-            currentCustomer.EmployeeInChargeNames,
-            customerPayload.EmployeeInChargeNames,
-          )
+          currentCustomer.EmployeeInChargeNames,
+          customerPayload.EmployeeInChargeNames,
+        )
         : currentCustomer.EmployeeInChargeNames,
       EmployeeInChargeIds: hasIncomingEmployees
         ? mergeEmployeeValues(
-            currentCustomer.EmployeeInChargeIds,
-            customerPayload.EmployeeInChargeIds,
-          )
+          currentCustomer.EmployeeInChargeIds,
+          customerPayload.EmployeeInChargeIds,
+        )
         : currentCustomer.EmployeeInChargeIds,
       EmployeeInCharges: hasIncomingEmployees
         ? mergeEmployeeValues(
-            currentCustomer.EmployeeInCharges,
-            customerPayload.EmployeeInCharges,
-          )
+          currentCustomer.EmployeeInCharges,
+          customerPayload.EmployeeInCharges,
+        )
         : currentCustomer.EmployeeInCharges,
       Groups: hasIncomingGroups
         ? customerPayload.Groups ||
-          customerPayload.CustomerGroupNames?.join(", ") ||
-          ""
+        customerPayload.CustomerGroupNames?.join(", ") ||
+        ""
         : currentCustomer.Groups,
       CustomerGroupDetails: hasIncomingGroups
         ? customerPayload.CustomerGroupDetails.map((item) => ({
-            ...item,
-            CustomerId: currentCustomer.Id,
-          }))
+          ...item,
+          CustomerId: currentCustomer.Id,
+        }))
         : (currentCustomer.CustomerGroupIds || []).map((groupId) => ({
-            GroupId: groupId,
-            CustomerId: currentCustomer.Id,
-          })),
+          GroupId: groupId,
+          CustomerId: currentCustomer.Id,
+        })),
       CustomerType: customerType,
       Organization,
       Name: currentCustomer.Name,
@@ -624,8 +975,8 @@ export async function updateCustomerAddress(
         ? { TaxCode: customerPayload.TaxCode }
         : currentCustomer?.TaxCode
           ? {
-              TaxCode: currentCustomer.TaxCode,
-            }
+            TaxCode: currentCustomer.TaxCode,
+          }
           : {}),
       NameEInvoice:
         customerPayload.NameEInvoice ||
@@ -2077,7 +2428,7 @@ export async function getCustomerInvoiceDebtAging(
       ? options.shouldContinue
       : () => true;
   const onProgress =
-    typeof options.onProgress === "function" ? options.onProgress : () => {};
+    typeof options.onProgress === "function" ? options.onProgress : () => { };
 
   const agingByCustomer = {};
   let nextCustomerIndex = 0;
@@ -2164,15 +2515,15 @@ export async function getCustomerInvoiceDebtAging(
 
       const invoiceCustomerCode = String(
         invoice.CustomerCode ??
-          invoice.customerCode ??
-          invoice.Customer?.Code ??
-          invoice.customer?.code ??
-          "",
+        invoice.customerCode ??
+        invoice.Customer?.Code ??
+        invoice.customer?.code ??
+        "",
       ).trim();
       if (
         invoiceCustomerCode &&
         invoiceCustomerCode.toLocaleLowerCase("vi-VN") !==
-          String(customer.code).trim().toLocaleLowerCase("vi-VN")
+        String(customer.code).trim().toLocaleLowerCase("vi-VN")
       ) {
         return;
       }
@@ -2191,19 +2542,19 @@ export async function getCustomerInvoiceDebtAging(
       ].find((key) => invoice?.[key] !== undefined && invoice?.[key] !== null);
       const total = Number(
         invoice.Total ??
-          invoice.total ??
-          invoice.NewInvoiceTotal ??
-          invoice.newInvoiceTotal ??
-          0,
+        invoice.total ??
+        invoice.NewInvoiceTotal ??
+        invoice.newInvoiceTotal ??
+        0,
       );
       const totalPaymentValue = invoice.TotalPayment ?? invoice.totalPayment;
       const paid =
         totalPaymentValue !== undefined && totalPaymentValue !== null
           ? Number(totalPaymentValue)
           : sumActiveAmounts(invoice.Payments ?? invoice.payments, [
-              "Amount",
-              "amount",
-            ]);
+            "Amount",
+            "amount",
+          ]);
       const returned = sumActiveAmounts(invoice.Returns ?? invoice.returns, [
         "ReturnTotal",
         "returnTotal",
@@ -2243,7 +2594,7 @@ export async function getCustomerInvoiceDebtAging(
       if (
         !existing ||
         new Date(purchaseDate).getTime() <
-          new Date(existing.oldestUnpaidDate).getTime()
+        new Date(existing.oldestUnpaidDate).getTime()
       ) {
         agingByCustomer[customerId] = {
           oldestUnpaidDate: purchaseDate,

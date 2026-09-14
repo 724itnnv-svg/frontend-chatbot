@@ -135,12 +135,12 @@ function getVtpServiceExtra(recipientPaysShipping = false) {
   return VTP_DEFAULT_SERVICE_EXTRA.map((item) =>
     item.Code === "PaymentBy"
       ? {
-          ...item,
-          Value: recipientPaysShipping ? "NGUOINHAN" : "NGUOIGUI",
-          Name: recipientPaysShipping
-            ? "Người nhận trả phí"
-            : "Người gửi trả phí",
-        }
+        ...item,
+        Value: recipientPaysShipping ? "NGUOINHAN" : "NGUOIGUI",
+        Name: recipientPaysShipping
+          ? "Người nhận trả phí"
+          : "Người gửi trả phí",
+      }
       : item,
   );
 }
@@ -478,7 +478,7 @@ function extractUnseparatedAdministrativeParts(value = "") {
   )
     ? "Tỉnh"
     : normalizedAddress.endsWith(`thanh pho ${normalizedProvince}`) ||
-        normalizedAddress.endsWith(`tp ${normalizedProvince}`)
+      normalizedAddress.endsWith(`tp ${normalizedProvince}`)
       ? "Thành phố"
       : "";
   const province = [provincePrefix, provinceName].filter(Boolean).join(" ");
@@ -487,8 +487,8 @@ function extractUnseparatedAdministrativeParts(value = "") {
   );
   const wardMatch = districtMatch
     ? text.match(
-        /(?:^|\s)(Phường|Xã|Thị trấn)\s+(.+?)(?=\s+(?:Quận|Huyện|Thị xã|Thành phố|TP\.?|Tỉnh)\s+)/iu,
-      )
+      /(?:^|\s)(Phường|Xã|Thị trấn)\s+(.+?)(?=\s+(?:Quận|Huyện|Thị xã|Thành phố|TP\.?|Tỉnh)\s+)/iu,
+    )
     : null;
   const firstAdministrativePosition = [wardMatch?.index, districtMatch?.index]
     .filter((index) => Number.isInteger(index) && index >= 0)
@@ -498,9 +498,9 @@ function extractUnseparatedAdministrativeParts(value = "") {
     street:
       firstAdministrativePosition != null
         ? text
-            .slice(0, firstAdministrativePosition)
-            .replace(/[,\s]+$/u, "")
-            .trim()
+          .slice(0, firstAdministrativePosition)
+          .replace(/[,\s]+$/u, "")
+          .trim()
         : text,
     ward: wardMatch ? `${wardMatch[1]} ${wardMatch[2]}`.trim() : "",
     district: districtMatch
@@ -518,11 +518,11 @@ function getAdministrativeAreaDisplayName(
   const originalName = normalizeDisplayText(value);
   const recordName = normalizeDisplayText(
     record?.Name ||
-      record?.FullName ||
-      record?.CompareName ||
-      record?.name ||
-      record?.fullName ||
-      "",
+    record?.FullName ||
+    record?.CompareName ||
+    record?.name ||
+    record?.fullName ||
+    "",
   );
   const hasAdministrativePrefix = (name) =>
     /^(Tỉnh|Thành phố|TP\.?|Quận|Huyện|Thị xã|Phường|Xã|Thị trấn)\s+/iu.test(
@@ -810,7 +810,7 @@ function findBestKeywordLocation(rows = [], address = "") {
           normalizedFullAddress === normalizedAddress ? 10000 : 0;
         const containsBonus =
           normalizedFullAddress.includes(normalizedAddress) ||
-          normalizedAddress.includes(normalizedFullAddress)
+            normalizedAddress.includes(normalizedFullAddress)
             ? 1000
             : 0;
         return {
@@ -899,14 +899,14 @@ function extractConvertedAddress(payload) {
 
   const convertedAddress = String(
     payload?.normalized_text ||
-      payload?.normalizedText ||
-      payload?.normalized_address ||
-      payload?.normalizedAddress ||
-      payload?.result?.display ||
-      payload?.mapping?.display ||
-      payload?.mapping?.address ||
-      payload?.displayAnalysis?.normalized_address ||
-      "",
+    payload?.normalizedText ||
+    payload?.normalized_address ||
+    payload?.normalizedAddress ||
+    payload?.result?.display ||
+    payload?.mapping?.display ||
+    payload?.mapping?.address ||
+    payload?.displayAnalysis?.normalized_address ||
+    "",
   ).trim();
 
   if (convertedAddress) return convertedAddress;
@@ -998,9 +998,9 @@ function findMatchingKiotUser(kiotUsers = [], userName = "") {
 function getKiotUserOptionKey(kiotUser = {}, index = 0) {
   return String(
     kiotUser?.Id ||
-      kiotUser?.UserId ||
-      kiotUser?.UserName ||
-      `kiot-user-${index}`,
+    kiotUser?.UserId ||
+    kiotUser?.UserName ||
+    `kiot-user-${index}`,
   );
 }
 
@@ -1251,9 +1251,9 @@ async function resolveAdministrativeAreaDetails({
       districtRows = [matchedDistrictRow];
       matchedDistrictLocationName = normalizeDisplayText(
         matchedDistrictRow?.Name ||
-          matchedDistrictRow?.FullName ||
-          matchedDistrictRow?.CompareName ||
-          "",
+        matchedDistrictRow?.FullName ||
+        matchedDistrictRow?.CompareName ||
+        "",
       );
       if (!wardName) {
         wardName = extractWardNameBeforeDistrict(address, districtName);
@@ -1271,6 +1271,7 @@ async function resolveAdministrativeAreaDetails({
         if (wardPosition >= 0) {
           streetName = normalizeDisplayText(address)
             .slice(0, wardPosition)
+            .replace(/[,\s]+$/u, "")
             .trim();
         }
       }
@@ -1317,9 +1318,9 @@ async function resolveAdministrativeAreaDetails({
     wardName =
       normalizeDisplayText(
         lookupRows[0]?.Name ||
-          lookupRows[0]?.FullName ||
-          lookupRows[0]?.CompareName ||
-          "",
+        lookupRows[0]?.FullName ||
+        lookupRows[0]?.CompareName ||
+        "",
       ) || wardLookupName;
 
     if (shouldInferStreetFromWard) {
@@ -1547,9 +1548,9 @@ async function buildNewCustomerPayloadV2({
   const branchId = retailerConfig?.branchId ?? null;
   const displayName = customerName || phoneNumber;
   const invoiceName = isAgency ? displayName : displayName || "Khách lẻ";
-  const customerAddress = isAgency
-    ? newAddress || oldAddress
-    : oldAddress || newAddress;
+  // Khi có ĐC MỚI, toàn bộ thông tin địa chỉ thường và địa chỉ hóa đơn phải
+  // cùng lấy từ địa chỉ này. Không ghép phần đường của ĐC CŨ với xã/tỉnh mới.
+  const customerAddress = newAddress || oldAddress;
   const invoiceAddress = newAddress || oldAddress;
   const customerAddressParts = parseVietnamAddressParts(customerAddress);
   const invoiceAddressDetails =
@@ -1563,42 +1564,45 @@ async function buildNewCustomerPayloadV2({
   const invoiceAddressParts = parseVietnamAddressParts(invoiceAddress);
   const provinceName = String(
     invoiceAddressParts.province ||
-      invoiceAddressDetails?.parts?.province ||
-      invoiceAddressDetails?.provinceName ||
-      "",
+    invoiceAddressDetails?.parts?.province ||
+    invoiceAddressDetails?.provinceName ||
+    "",
   ).trim();
   const districtName = String(
     invoiceAddressParts.district ||
-      invoiceAddressParts.ward ||
-      invoiceAddressDetails?.parts?.district ||
-      invoiceAddressDetails?.parts?.ward ||
-      invoiceAddressDetails?.districtName ||
-      invoiceAddressDetails?.wardName ||
-      "",
+    invoiceAddressParts.ward ||
+    invoiceAddressDetails?.parts?.district ||
+    invoiceAddressDetails?.parts?.ward ||
+    invoiceAddressDetails?.districtName ||
+    invoiceAddressDetails?.wardName ||
+    "",
   ).trim();
   const provinceIds = provinceName
     ? await lookupProvinceIdWithFallback({
-        lookup: getIdAdministrativearea,
-        retailer,
-        accessPrivateToken,
-        provinceName,
-      })
+      lookup: getIdAdministrativearea,
+      retailer,
+      accessPrivateToken,
+      provinceName,
+    })
     : [];
   const provinceRecord =
     provinceIds?.[0] || invoiceAddressDetails?.provinceRows?.[0] || null;
-  const provinceDisplayName = getAdministrativeAreaDisplayName(
+  const provinceLookupName = getAdministrativeAreaDisplayName(
     provinceName,
     provinceRecord,
   );
+  const provinceDisplayName = /^(Tỉnh|Thành phố|TP\.?)\s+/iu.test(provinceName)
+    ? normalizeDisplayText(provinceName)
+    : provinceLookupName;
   const wardIds =
-    provinceDisplayName && districtName
+    provinceLookupName && districtName
       ? await lookupLevelTwoIdWithFallback({
-          lookup: getIdAdministrativearea,
-          retailer,
-          accessPrivateToken,
-          areaName: districtName,
-          provinceName: provinceDisplayName,
-        })
+        lookup: getIdAdministrativearea,
+        retailer,
+        accessPrivateToken,
+        areaName: districtName,
+        provinceName: provinceLookupName,
+      })
       : [];
   const wardRecord =
     wardIds?.[0] || invoiceAddressDetails?.districtRows?.[0] || null;
@@ -1609,17 +1613,17 @@ async function buildNewCustomerPayloadV2({
   );
   const provinceSuggestion = provinceRecord
     ? {
-        ...provinceRecord,
-        Name: provinceDisplayName,
-        CompareName: provinceDisplayName,
-      }
+      ...provinceRecord,
+      Name: provinceDisplayName,
+      CompareName: provinceDisplayName,
+    }
     : null;
   const wardSuggestion = wardRecord
     ? {
-        ...wardRecord,
-        Name: districtDisplayName,
-        CompareName: districtDisplayName,
-      }
+      ...wardRecord,
+      Name: districtDisplayName,
+      CompareName: districtDisplayName,
+    }
     : null;
   const provinceId = provinceRecord?.Id ?? null;
   const wardId = wardRecord?.Id ?? null;
@@ -1642,7 +1646,6 @@ async function buildNewCustomerPayloadV2({
     newAddress: invoiceAddress,
     customerType,
   });
-  console.log("check", { invoiceAddressParts, invoiceAddressDetails });
   return {
     Customer: {
       Type: isAgency ? 1 : 0,
@@ -1656,15 +1659,17 @@ async function buildNewCustomerPayloadV2({
       Name: invoiceName,
       CompareName: invoiceName,
       ContactNumber: phoneNumber,
-      Address: customerAddressParts.street,
+      Address:
+        invoiceStreetAddress || customerAddressParts.street || invoiceAddress,
       LocationName: provinceDisplayName,
       WardName: districtDisplayName,
-      LastWard: customerAddressParts.ward || "",
+      LastWard:
+        invoiceAddressParts.ward ||
+        invoiceAddressDetails?.parts?.ward ||
+        districtDisplayName ||
+        "",
       LocationId: provinceId,
-      LastLocation: [
-        customerAddressParts.district || customerAddressParts.ward,
-        customerAddressParts.province,
-      ]
+      LastLocation: [districtDisplayName, provinceDisplayName]
         .filter(Boolean)
         .join(" - "),
       WardId: wardId,
@@ -1713,10 +1718,10 @@ function getCustomerProvinceName(customer = {}) {
     customer?.LocationItemsEInvoice || customer?.locationItemsEInvoice || {};
   const explicitProvince = normalizeDisplayText(
     locationItems?.[1]?.Name ||
-      locationItems?.["1"]?.Name ||
-      customer?.LocationNameEInvoiceLevel_1 ||
-      customer?.locationNameEInvoiceLevel_1 ||
-      "",
+    locationItems?.["1"]?.Name ||
+    customer?.LocationNameEInvoiceLevel_1 ||
+    customer?.locationNameEInvoiceLevel_1 ||
+    "",
   );
   if (explicitProvince) return explicitProvince;
 
@@ -1827,28 +1832,33 @@ async function buildExistingCustomerAddressUpdatePayload({
   const addressParts = parseVietnamAddressParts(newAddress);
   const provinceIds = addressParts.province
     ? await lookupProvinceIdWithFallback({
-        lookup: getIdAdministrativearea,
-        retailer,
-        accessPrivateToken,
-        provinceName: addressParts.province,
-      })
+      lookup: getIdAdministrativearea,
+      retailer,
+      accessPrivateToken,
+      provinceName: addressParts.province,
+    })
     : [];
   const provinceRecord = provinceIds?.[0] || null;
-  const provinceDisplayName = getAdministrativeAreaDisplayName(
+  const provinceLookupName = getAdministrativeAreaDisplayName(
     addressParts.province,
     provinceRecord,
     1,
   );
+  const provinceDisplayName = /^(Tỉnh|Thành phố|TP\.?)\s+/iu.test(
+    addressParts.province,
+  )
+    ? normalizeDisplayText(addressParts.province)
+    : provinceLookupName;
   const districtName = addressParts.district || addressParts.ward;
   const wardIds =
-    provinceDisplayName && districtName
+    provinceLookupName && districtName
       ? await lookupLevelTwoIdWithFallback({
-          lookup: getIdAdministrativearea,
-          retailer,
-          accessPrivateToken,
-          areaName: districtName,
-          provinceName: provinceDisplayName,
-        })
+        lookup: getIdAdministrativearea,
+        retailer,
+        accessPrivateToken,
+        areaName: districtName,
+        provinceName: provinceLookupName,
+      })
       : [];
   const wardRecord = wardIds?.[0] || null;
   if (!provinceRecord || (districtName && !wardRecord)) {
@@ -1863,17 +1873,17 @@ async function buildExistingCustomerAddressUpdatePayload({
   );
   const provinceSuggestion = provinceRecord
     ? {
-        ...provinceRecord,
-        Name: provinceDisplayName,
-        CompareName: provinceDisplayName,
-      }
+      ...provinceRecord,
+      Name: provinceDisplayName,
+      CompareName: provinceDisplayName,
+    }
     : null;
   const wardSuggestion = wardRecord
     ? {
-        ...wardRecord,
-        Name: districtDisplayName,
-        CompareName: districtDisplayName,
-      }
+      ...wardRecord,
+      Name: districtDisplayName,
+      CompareName: districtDisplayName,
+    }
     : null;
   const addressEInvoiceCombine = [
     addressParts.street,
@@ -2045,10 +2055,10 @@ function getProductPriceBook(product, customerType) {
     const matched = priceBooks.find((item) => {
       const priceBookName = normalizeLookupText(
         item?.priceBookName ||
-          item?.PriceBookName ||
-          item?.name ||
-          item?.Name ||
-          "",
+        item?.PriceBookName ||
+        item?.name ||
+        item?.Name ||
+        "",
       );
       return (
         priceBookName === targetName &&
@@ -2063,10 +2073,10 @@ function getProductPriceBook(product, customerType) {
     const matched = priceBooks.find((item) => {
       const priceBookName = normalizeLookupText(
         item?.priceBookName ||
-          item?.PriceBookName ||
-          item?.name ||
-          item?.Name ||
-          "",
+        item?.PriceBookName ||
+        item?.name ||
+        item?.Name ||
+        "",
       )
         .replace(/\s+/g, " ")
         .trim();
@@ -2092,14 +2102,14 @@ function getProductUnitPrice(product, item, customerType) {
     const customerLePriceBook = getProductPriceBook(product, "khach_le");
     const retailPrice = Number(
       priceBook?.price ??
-        priceBook?.Price ??
-        priceBook?.value ??
-        priceBook?.Value ??
-        customerLePriceBook?.price ??
-        customerLePriceBook?.Price ??
-        customerLePriceBook?.value ??
-        customerLePriceBook?.Value ??
-        outsidePrice,
+      priceBook?.Price ??
+      priceBook?.value ??
+      priceBook?.Value ??
+      customerLePriceBook?.price ??
+      customerLePriceBook?.Price ??
+      customerLePriceBook?.value ??
+      customerLePriceBook?.Value ??
+      outsidePrice,
     );
     return Number.isFinite(retailPrice) ? retailPrice : 0;
   }
@@ -2182,10 +2192,10 @@ function getProductWeightFromProduct(product = {}) {
 
   const numeric = Number(
     source?.weight ??
-      source?.Weight ??
-      source?.weightValue ??
-      source?.WeightValue ??
-      0,
+    source?.Weight ??
+    source?.weightValue ??
+    source?.WeightValue ??
+    0,
   );
 
   return Number.isFinite(numeric) && numeric >= 0 ? numeric : 0;
@@ -2268,9 +2278,9 @@ function getGhnItemPrice(invoiceDetail = {}) {
     Math.round(
       Number(
         invoiceDetail?.PriceByPromotion ??
-          invoiceDetail?.Price ??
-          invoiceDetail?.BasePrice ??
-          0,
+        invoiceDetail?.Price ??
+        invoiceDetail?.BasePrice ??
+        0,
       ),
     ),
   );
@@ -2689,7 +2699,7 @@ function buildGhnCreateOrderPayloads({
       (sum, product) =>
         sum +
         Math.max(0, Number(product?.price || 0)) *
-          Math.max(0, Number(product?.quantity || 0)),
+        Math.max(0, Number(product?.quantity || 0)),
       0,
     ),
   );
@@ -2754,9 +2764,9 @@ function buildGhnCreateOrderPayloads({
 function extractGhnOrderCode(response = {}) {
   return String(
     response?.data?.order_code ||
-      response?.Data?.OrderCode ||
-      response?.order_code ||
-      "",
+    response?.Data?.OrderCode ||
+    response?.order_code ||
+    "",
   ).trim();
 }
 
@@ -2795,9 +2805,9 @@ function buildInvoiceDeliveryPayload({
   const branchAddress = parseBranchTakingAddress(branchTakingAddressStr);
   const products = Array.isArray(invoice.InvoiceDetails)
     ? invoice.InvoiceDetails.map((item) => ({
-        Name: item?.ProductName || "",
-        Quantity: Number(item?.Quantity || 0) || 0,
-      })).filter((item) => item.Name)
+      Name: item?.ProductName || "",
+      Quantity: Number(item?.Quantity || 0) || 0,
+    })).filter((item) => item.Name)
     : [];
 
   const receiverAddress = String(deliveryDetail?.Address || "").trim();
@@ -2954,16 +2964,16 @@ function buildInvoiceDetailLine({
     }),
     DetailTaxIds: taxRate
       ? [
-          {
-            CountryId: 1,
-            Id: taxId ?? 0,
-            Name: taxName,
-            Type: 1,
-            Value: taxRate,
-            OldValue: taxRate,
-            OldName: taxName,
-          },
-        ]
+        {
+          CountryId: 1,
+          Id: taxId ?? 0,
+          Name: taxName,
+          Type: 1,
+          Value: taxRate,
+          OldValue: taxRate,
+          OldName: taxName,
+        },
+      ]
       : [],
     IsUndeclaredTax: null,
     __meta: {
@@ -3191,7 +3201,7 @@ function getPromotionAggregateContext({
         !candidateCampaign ||
         !candidatePromotion ||
         getPromotionAggregationKey(candidateCampaign, candidatePromotion) !==
-          promotionGroupKey
+        promotionGroupKey
       ) {
         return null;
       }
@@ -3244,10 +3254,10 @@ function getPromotionSelectionDetails({
       availableQuantities !== null
         ? Math.max(0, Number(availableQuantities[candidate.productCode] || 0))
         : Math.max(
-            0,
-            Number(candidate.quantity || 0) -
-              Number(consumedQuantities[candidate.productCode] || 0),
-          ),
+          0,
+          Number(candidate.quantity || 0) -
+          Number(consumedQuantities[candidate.productCode] || 0),
+        ),
   }));
   const purchasedQuantity = qualifyingItems.reduce(
     (sum, candidate) => sum + candidate.quantity,
@@ -3270,8 +3280,8 @@ function getPromotionSelectionDetails({
     (promotionType === 8
       ? Number(promotion?.ProductPrice || 0) > 0
       : promotionType === 6 &&
-        expectedGiftQuantity > 0 &&
-        selectedGiftQuantity === expectedGiftQuantity);
+      expectedGiftQuantity > 0 &&
+      selectedGiftQuantity === expectedGiftQuantity);
 
   return {
     promotion,
@@ -3571,11 +3581,11 @@ function applySelectedPromotions({
       const hasReservedQuantities = Object.keys(reservedQuantities).length > 0;
       const qualifyingItems = hasReservedQuantities
         ? aggregateContext.qualifyingItems
-            .map((candidate) => ({
-              ...candidate,
-              quantity: Number(reservedQuantities[candidate.productCode] || 0),
-            }))
-            .filter((candidate) => candidate.quantity > 0)
+          .map((candidate) => ({
+            ...candidate,
+            quantity: Number(reservedQuantities[candidate.productCode] || 0),
+          }))
+          .filter((candidate) => candidate.quantity > 0)
         : aggregateContext.qualifyingItems;
       const purchasedQuantity = qualifyingItems.reduce(
         (sum, candidate) => sum + Number(candidate.quantity || 0),
@@ -3727,7 +3737,7 @@ function applySelectedPromotions({
         nextLines.push(giftLine);
         productDiscount = roundMoney(
           productDiscount +
-            Number(giftLine.Discount || 0) * Number(giftLine.Quantity || 0),
+          Number(giftLine.Discount || 0) * Number(giftLine.Quantity || 0),
         );
         invoicePromotions.push({
           Type: promotionType,
@@ -3828,90 +3838,90 @@ function buildPartnerDeliverySnapshot({
 }) {
   const base = selectedPartnerDelivery
     ? {
-        ...selectedPartnerDelivery,
-        IdOld: selectedPartnerDelivery?.IdOld ?? 0,
-        TotalInvoiced: selectedPartnerDelivery?.TotalInvoiced ?? 0,
-        CompareCode: selectedPartnerDelivery?.CompareCode || partnerCode || "",
-        CompareName: selectedPartnerDelivery?.CompareName || partnerName || "",
-        Id: selectedPartnerDelivery?.id ?? selectedPartnerDelivery?.Id ?? 0,
-        RetailerId: selectedPartnerDelivery?.retailerId ?? retailerId,
-        Type: selectedPartnerDelivery?.Type ?? (isViettelPost ? 2 : 0),
-        Code: partnerCode,
-        Name: partnerName,
-        CustomName:
-          selectedPartnerDelivery?.CustomName ||
-          selectedPartnerDelivery?.name ||
-          partnerName,
-        ContactNumber: selectedPartnerDelivery?.ContactNumber || "",
-        Address: selectedPartnerDelivery?.Address || "",
-        Email: selectedPartnerDelivery?.Email || "",
-        Comments: selectedPartnerDelivery?.Comments || "",
-        CreatedDate:
-          selectedPartnerDelivery?.CreatedDate || new Date().toISOString(),
-        CreatedBy: soldById || selectedPartnerDelivery?.CreatedBy || 0,
-        ModifiedDate:
-          selectedPartnerDelivery?.ModifiedDate || new Date().toISOString(),
-        Debt: selectedPartnerDelivery?.Debt ?? 0,
-        ModifiedBy: selectedPartnerDelivery?.ModifiedBy ?? null,
-        Uuid: selectedPartnerDelivery?.Uuid ?? null,
-        LocationId: selectedPartnerDelivery?.LocationId ?? null,
-        LocationName: selectedPartnerDelivery?.LocationName || "",
-        WardName: selectedPartnerDelivery?.WardName || "",
-        isActive: selectedPartnerDelivery?.isActive ?? true,
-        isDeleted: selectedPartnerDelivery?.isDeleted ?? false,
-        SearchNumber: selectedPartnerDelivery?.SearchNumber || "",
-        IsOmniChannel: selectedPartnerDelivery?.IsOmniChannel ?? null,
-        AdministrativeAreaId:
-          selectedPartnerDelivery?.AdministrativeAreaId ?? null,
-        PartnerDeliveryGroupDetails:
-          selectedPartnerDelivery?.PartnerDeliveryGroupDetails || [],
-        ImageForMobile: selectedPartnerDelivery?.ImageForMobile || "",
-        ServiceCodeText: selectedPartnerDelivery?.ServiceCodeText ?? null,
-        ServiceCode: selectedPartnerDelivery?.ServiceCode ?? "0",
-        ServiceAdd: selectedPartnerDelivery?.ServiceAdd ?? null,
-        PartnerDeliveryImage:
-          selectedPartnerDelivery?.PartnerDeliveryImage || "",
-        Description: selectedPartnerDelivery?.Description || "",
-        ServiceAddInfor: selectedPartnerDelivery?.ServiceAddInfor ?? null,
-      }
+      ...selectedPartnerDelivery,
+      IdOld: selectedPartnerDelivery?.IdOld ?? 0,
+      TotalInvoiced: selectedPartnerDelivery?.TotalInvoiced ?? 0,
+      CompareCode: selectedPartnerDelivery?.CompareCode || partnerCode || "",
+      CompareName: selectedPartnerDelivery?.CompareName || partnerName || "",
+      Id: selectedPartnerDelivery?.id ?? selectedPartnerDelivery?.Id ?? 0,
+      RetailerId: selectedPartnerDelivery?.retailerId ?? retailerId,
+      Type: selectedPartnerDelivery?.Type ?? (isViettelPost ? 2 : 0),
+      Code: partnerCode,
+      Name: partnerName,
+      CustomName:
+        selectedPartnerDelivery?.CustomName ||
+        selectedPartnerDelivery?.name ||
+        partnerName,
+      ContactNumber: selectedPartnerDelivery?.ContactNumber || "",
+      Address: selectedPartnerDelivery?.Address || "",
+      Email: selectedPartnerDelivery?.Email || "",
+      Comments: selectedPartnerDelivery?.Comments || "",
+      CreatedDate:
+        selectedPartnerDelivery?.CreatedDate || new Date().toISOString(),
+      CreatedBy: soldById || selectedPartnerDelivery?.CreatedBy || 0,
+      ModifiedDate:
+        selectedPartnerDelivery?.ModifiedDate || new Date().toISOString(),
+      Debt: selectedPartnerDelivery?.Debt ?? 0,
+      ModifiedBy: selectedPartnerDelivery?.ModifiedBy ?? null,
+      Uuid: selectedPartnerDelivery?.Uuid ?? null,
+      LocationId: selectedPartnerDelivery?.LocationId ?? null,
+      LocationName: selectedPartnerDelivery?.LocationName || "",
+      WardName: selectedPartnerDelivery?.WardName || "",
+      isActive: selectedPartnerDelivery?.isActive ?? true,
+      isDeleted: selectedPartnerDelivery?.isDeleted ?? false,
+      SearchNumber: selectedPartnerDelivery?.SearchNumber || "",
+      IsOmniChannel: selectedPartnerDelivery?.IsOmniChannel ?? null,
+      AdministrativeAreaId:
+        selectedPartnerDelivery?.AdministrativeAreaId ?? null,
+      PartnerDeliveryGroupDetails:
+        selectedPartnerDelivery?.PartnerDeliveryGroupDetails || [],
+      ImageForMobile: selectedPartnerDelivery?.ImageForMobile || "",
+      ServiceCodeText: selectedPartnerDelivery?.ServiceCodeText ?? null,
+      ServiceCode: selectedPartnerDelivery?.ServiceCode ?? "0",
+      ServiceAdd: selectedPartnerDelivery?.ServiceAdd ?? null,
+      PartnerDeliveryImage:
+        selectedPartnerDelivery?.PartnerDeliveryImage || "",
+      Description: selectedPartnerDelivery?.Description || "",
+      ServiceAddInfor: selectedPartnerDelivery?.ServiceAddInfor ?? null,
+    }
     : {
-        IdOld: 0,
-        TotalInvoiced: 0,
-        CompareCode: partnerCode,
-        CompareName: partnerName,
-        Id: 0,
-        RetailerId: retailerId,
-        Type: isViettelPost ? 2 : 0,
-        Code: partnerCode,
-        Name: partnerName,
-        CustomName: partnerName,
-        ContactNumber: "",
-        Address: "",
-        Email: "",
-        Comments: "",
-        CreatedDate: new Date().toISOString(),
-        CreatedBy: soldById || 0,
-        ModifiedDate: new Date().toISOString(),
-        Debt: 0,
-        ModifiedBy: null,
-        Uuid: null,
-        LocationId: null,
-        LocationName: "",
-        WardName: "",
-        isActive: true,
-        isDeleted: false,
-        SearchNumber: "",
-        IsOmniChannel: null,
-        AdministrativeAreaId: null,
-        PartnerDeliveryGroupDetails: [],
-        ImageForMobile: "",
-        ServiceCodeText: null,
-        ServiceCode: "0",
-        ServiceAdd: null,
-        PartnerDeliveryImage: "",
-        Description: "",
-        ServiceAddInfor: null,
-      };
+      IdOld: 0,
+      TotalInvoiced: 0,
+      CompareCode: partnerCode,
+      CompareName: partnerName,
+      Id: 0,
+      RetailerId: retailerId,
+      Type: isViettelPost ? 2 : 0,
+      Code: partnerCode,
+      Name: partnerName,
+      CustomName: partnerName,
+      ContactNumber: "",
+      Address: "",
+      Email: "",
+      Comments: "",
+      CreatedDate: new Date().toISOString(),
+      CreatedBy: soldById || 0,
+      ModifiedDate: new Date().toISOString(),
+      Debt: 0,
+      ModifiedBy: null,
+      Uuid: null,
+      LocationId: null,
+      LocationName: "",
+      WardName: "",
+      isActive: true,
+      isDeleted: false,
+      SearchNumber: "",
+      IsOmniChannel: null,
+      AdministrativeAreaId: null,
+      PartnerDeliveryGroupDetails: [],
+      ImageForMobile: "",
+      ServiceCodeText: null,
+      ServiceCode: "0",
+      ServiceAdd: null,
+      PartnerDeliveryImage: "",
+      Description: "",
+      ServiceAddInfor: null,
+    };
 
   if (isViettelPost) {
     return {
@@ -4051,10 +4061,10 @@ async function buildDeliveryDetailPayload({
   // địa chỉ có thể vừa được sale chỉnh và ID không được phép lấy từ cache cũ.
   const resolvedAddress = isViettelPost
     ? await resolveAdministrativeAreaDetails({
-        retailer,
-        accessPrivateToken,
-        address: invoiceAddress,
-      })
+      retailer,
+      accessPrivateToken,
+      address: invoiceAddress,
+    })
     : (resolvedAddressDetails ??
       (await resolveAdministrativeAreaDetails({
         retailer,
@@ -4843,8 +4853,8 @@ function CreateOrderProgressPanel({ steps = [], error = "", isCreating }) {
   const completedShippingStep =
     successCount === steps.length
       ? steps.find(
-          (step) => step.id === "shipping" && step.status === "success",
-        )
+        (step) => step.id === "shipping" && step.status === "success",
+      )
       : null;
   const highlightedStep =
     steps.find((step) => step.status === "error") ||
@@ -4892,9 +4902,8 @@ function CreateOrderProgressPanel({ steps = [], error = "", isCreating }) {
         <div className="relative min-w-[700px]">
           <div className="absolute left-[8.33%] right-[8.33%] top-3.5 h-1 rounded-full bg-slate-200" />
           <div
-            className={`absolute left-[8.33%] top-3.5 h-1 max-w-[83.34%] rounded-full transition-all duration-500 ${
-              error ? "bg-rose-500" : "bg-cyan-500"
-            }`}
+            className={`absolute left-[8.33%] top-3.5 h-1 max-w-[83.34%] rounded-full transition-all duration-500 ${error ? "bg-rose-500" : "bg-cyan-500"
+              }`}
             style={{
               width: `${progressLinePercent}%`,
             }}
@@ -4917,15 +4926,14 @@ function CreateOrderProgressPanel({ steps = [], error = "", isCreating }) {
                   className="flex min-w-0 flex-col items-center px-1"
                 >
                   <div
-                    className={`relative z-10 flex h-8 w-8 items-center justify-center rounded-full border-2 bg-white transition-colors ${
-                      isLoading
-                        ? "border-amber-400 bg-amber-50 text-amber-600 shadow-[0_0_0_4px_rgba(245,158,11,0.14)]"
-                        : isSuccess
-                          ? "border-emerald-500 bg-emerald-50 text-emerald-600"
-                          : isError
-                            ? "border-rose-500 bg-rose-50 text-rose-600"
-                            : "border-slate-300 text-slate-400"
-                    }`}
+                    className={`relative z-10 flex h-8 w-8 items-center justify-center rounded-full border-2 bg-white transition-colors ${isLoading
+                      ? "border-amber-400 bg-amber-50 text-amber-600 shadow-[0_0_0_4px_rgba(245,158,11,0.14)]"
+                      : isSuccess
+                        ? "border-emerald-500 bg-emerald-50 text-emerald-600"
+                        : isError
+                          ? "border-rose-500 bg-rose-50 text-rose-600"
+                          : "border-slate-300 text-slate-400"
+                      }`}
                   >
                     {isLoading ? (
                       <LoaderCircle className="h-4 w-4 animate-spin" />
@@ -4938,15 +4946,14 @@ function CreateOrderProgressPanel({ steps = [], error = "", isCreating }) {
                     )}
                   </div>
                   <div
-                    className={`mt-1.5 text-center text-[11px] font-bold leading-4 ${
-                      isError
-                        ? "text-rose-700"
-                        : isSuccess
-                          ? "text-emerald-700"
-                          : isLoading
-                            ? "text-amber-700"
-                            : "text-slate-500"
-                    }`}
+                    className={`mt-1.5 text-center text-[11px] font-bold leading-4 ${isError
+                      ? "text-rose-700"
+                      : isSuccess
+                        ? "text-emerald-700"
+                        : isLoading
+                          ? "text-amber-700"
+                          : "text-slate-500"
+                      }`}
                   >
                     {step.label}
                   </div>
@@ -4958,13 +4965,12 @@ function CreateOrderProgressPanel({ steps = [], error = "", isCreating }) {
       </div>
 
       <div
-        className={`mx-4 mb-3 flex items-start gap-2 rounded-xl px-3 py-2 text-xs leading-5 ${
-          highlightedStep?.status === "error"
-            ? "bg-rose-50 text-rose-700"
-            : highlightedStep?.status === "success"
-              ? "bg-emerald-50 text-emerald-700"
-              : "bg-cyan-50 text-cyan-700"
-        }`}
+        className={`mx-4 mb-3 flex items-start gap-2 rounded-xl px-3 py-2 text-xs leading-5 ${highlightedStep?.status === "error"
+          ? "bg-rose-50 text-rose-700"
+          : highlightedStep?.status === "success"
+            ? "bg-emerald-50 text-emerald-700"
+            : "bg-cyan-50 text-cyan-700"
+          }`}
       >
         <span className="shrink-0 font-bold">{highlightedStep?.label}:</span>
         <span className="whitespace-pre-line">{highlightedStep?.message}</span>
@@ -5281,7 +5287,7 @@ export default function TaoDonHang() {
     orderPreparation.customerRecord &&
     normalizeTaxCode(agencyTaxCode) &&
     normalizeTaxCode(agencyTaxCode) !==
-      normalizeTaxCode(orderPreparation.customerRecord?.TaxCode),
+    normalizeTaxCode(orderPreparation.customerRecord?.TaxCode),
   );
   const enteredNewAddress = normalizeDisplayText(parsed.newAddress);
   const predictedNewAddress =
@@ -5340,10 +5346,10 @@ export default function TaoDonHang() {
           currentKiotUser?.Id ?? currentKiotUser?.UserId;
         const defaultOption = currentKiotUser
           ? options.find(
-              (option) =>
-                (option.kiotUser?.Id ?? option.kiotUser?.UserId) ===
-                currentKiotUserId,
-            ) || null
+            (option) =>
+              (option.kiotUser?.Id ?? option.kiotUser?.UserId) ===
+              currentKiotUserId,
+          ) || null
           : null;
 
         if (!active) return;
@@ -5503,10 +5509,10 @@ export default function TaoDonHang() {
         ] = await Promise.all([
           phoneNumber
             ? getCustomerByPhoneNumber(
-                selectedRetailerId,
-                accessPrivateToken,
-                phoneNumber,
-              )
+              selectedRetailerId,
+              accessPrivateToken,
+              phoneNumber,
+            )
             : Promise.resolve(null),
           getCustomerGroup(selectedRetailerId, accessPrivateToken),
           Promise.all(
@@ -5644,10 +5650,10 @@ export default function TaoDonHang() {
       String(selectedRetailerId || "").toLowerCase(),
       String(parsed.phoneNumber || "").trim(),
       customer?.Id ??
-        customer?.CustomerId ??
-        customer?.Code ??
-        customer?.CustomerCode ??
-        "not-found",
+      customer?.CustomerId ??
+      customer?.Code ??
+      customer?.CustomerCode ??
+      "not-found",
     ]);
     if (customerSelectionSyncRef.current === customerIdentity) return;
     customerSelectionSyncRef.current = customerIdentity;
@@ -6261,11 +6267,10 @@ export default function TaoDonHang() {
 
     return (
       <div
-        className={`mt-3 rounded-xl border px-3 py-3 ${
-          isSelected
-            ? "border-emerald-300 bg-white shadow-sm"
-            : "border-emerald-200 bg-white/75"
-        }`}
+        className={`mt-3 rounded-xl border px-3 py-3 ${isSelected
+          ? "border-emerald-300 bg-white shadow-sm"
+          : "border-emerald-200 bg-white/75"
+          }`}
       >
         <label className="flex cursor-pointer items-start gap-3">
           <input
@@ -6293,11 +6298,10 @@ export default function TaoDonHang() {
                 Áp dụng chương trình khuyến mãi
               </div>
               <div
-                className={`rounded-full px-2.5 py-1 text-xs font-bold ${
-                  details.applicationCount > 0
-                    ? "bg-emerald-100 text-emerald-800"
-                    : "bg-amber-100 text-amber-800"
-                }`}
+                className={`rounded-full px-2.5 py-1 text-xs font-bold ${details.applicationCount > 0
+                  ? "bg-emerald-100 text-emerald-800"
+                  : "bg-amber-100 text-amber-800"
+                  }`}
               >
                 Tổng {details.purchasedQuantity}/{details.prerequisiteQuantity}
                 {details.applicationCount > 0
@@ -6333,11 +6337,10 @@ export default function TaoDonHang() {
               return (
                 <label
                   key={productId}
-                  className={`flex items-center gap-3 rounded-xl border px-3 py-2 ${
-                    receivedProductDiscontinued
-                      ? "border-red-200 bg-red-50"
-                      : "border-emerald-100 bg-emerald-50/60"
-                  }`}
+                  className={`flex items-center gap-3 rounded-xl border px-3 py-2 ${receivedProductDiscontinued
+                    ? "border-red-200 bg-red-50"
+                    : "border-emerald-100 bg-emerald-50/60"
+                    }`}
                 >
                   <div className="min-w-0 flex-1">
                     <div className="text-xs font-semibold text-slate-800">
@@ -6376,9 +6379,8 @@ export default function TaoDonHang() {
               );
             })}
             <div
-              className={`text-xs font-medium ${
-                details.isComplete ? "text-emerald-700" : "text-amber-700"
-              }`}
+              className={`text-xs font-medium ${details.isComplete ? "text-emerald-700" : "text-amber-700"
+                }`}
             >
               {details.isComplete
                 ? "Đã đủ quà, chương trình sẽ được thêm vào hóa đơn."
@@ -6491,7 +6493,7 @@ export default function TaoDonHang() {
     ) {
       setCreateOrderError(
         shippingQuotePreview.error ||
-          "Chưa tính được phí GHN, vui lòng kiểm tra lại thông tin đơn hàng.",
+        "Chưa tính được phí GHN, vui lòng kiểm tra lại thông tin đơn hàng.",
       );
       return;
     }
@@ -6577,7 +6579,7 @@ export default function TaoDonHang() {
         const hasProvinceChanged =
           Boolean(nextProvince && currentProvince) &&
           normalizeProvinceForCompare(nextProvince) !==
-            normalizeProvinceForCompare(currentProvince);
+          normalizeProvinceForCompare(currentProvince);
 
         if (willChangeCustomerType) {
           if (!targetGroup?.Id && !targetGroup?.GroupId) {
@@ -6637,11 +6639,11 @@ export default function TaoDonHang() {
           const organization =
             selectedCustomerType === "dai_ly"
               ? normalizeDisplayText(
-                  conversionTaxInfo?.name ||
-                    customerRecord?.Organization ||
-                    customerRecord?.Name ||
-                    effectiveParsed.customerName,
-                )
+                conversionTaxInfo?.name ||
+                customerRecord?.Organization ||
+                customerRecord?.Name ||
+                effectiveParsed.customerName,
+              )
               : "";
           Object.assign(updatePayload, {
             Type: selectedCustomerType === "dai_ly" ? 1 : 0,
@@ -6690,7 +6692,7 @@ export default function TaoDonHang() {
           selectedCustomerType === "dai_ly" &&
           normalizeTaxCode(agencyTaxCode) &&
           normalizeTaxCode(agencyTaxCode) !==
-            normalizeTaxCode(customerRecord?.TaxCode)
+          normalizeTaxCode(customerRecord?.TaxCode)
         ) {
           const normalizedTaxCode = String(agencyTaxCode).trim();
           updateCreateOrderProgress(
@@ -6705,7 +6707,7 @@ export default function TaoDonHang() {
           if (
             agencyTaxInfo.status === "success" &&
             normalizeTaxCode(agencyTaxInfo.taxCode) ===
-              normalizeTaxCode(normalizedTaxCode) &&
+            normalizeTaxCode(normalizedTaxCode) &&
             agencyTaxInfo.data
           ) {
             updatedTaxCompanyInfo = agencyTaxInfo.data;
@@ -6797,7 +6799,7 @@ export default function TaoDonHang() {
             accessToken,
             updatePayload,
             customerRecord?.CustomerType ||
-              (effectiveCustomerType === "dai_ly" ? "Công ty" : "Cá nhân"),
+            (effectiveCustomerType === "dai_ly" ? "Công ty" : "Cá nhân"),
             customerRecord?.Organization || "",
           );
           const refreshedCustomerResponse = await getCustomerByPhoneNumber(
@@ -6839,8 +6841,8 @@ export default function TaoDonHang() {
           );
           const lookupCode = normalizeDisplayText(
             customerRecord?.Code ||
-              customerRecord?.CompareCode ||
-              customerRecord?.CustomerCode,
+            customerRecord?.CompareCode ||
+            customerRecord?.CustomerCode,
           );
           if (!lookupCode) {
             throw new Error(
@@ -6863,7 +6865,7 @@ export default function TaoDonHang() {
               ...buildEmployeeInChargeFields(matchedKiotUser),
             },
             customerRecord?.CustomerType ||
-              (effectiveCustomerType === "dai_ly" ? "Công ty" : "Cá nhân"),
+            (effectiveCustomerType === "dai_ly" ? "Công ty" : "Cá nhân"),
             customerRecord?.Organization || "",
           );
           const refreshedCustomerResponse = await getCustomerByPhoneNumber(
@@ -7438,12 +7440,11 @@ export default function TaoDonHang() {
                       ))}
                     </select>
                     <span
-                      className={`block text-[11px] ${
-                        kiotUsersError ||
+                      className={`block text-[11px] ${kiotUsersError ||
                         (!kiotUsersLoading && !matchedKiotUser)
-                          ? "text-rose-600"
-                          : "text-slate-500"
-                      }`}
+                        ? "text-rose-600"
+                        : "text-slate-500"
+                        }`}
                     >
                       {kiotUsersError ||
                         (matchedKiotUser
@@ -7574,13 +7575,12 @@ export default function TaoDonHang() {
 
                     {String(agencyTaxCode || "").trim() ? (
                       <div
-                        className={`rounded-2xl border px-4 py-3 ${
-                          agencyTaxInfo.status === "success"
-                            ? "border-emerald-200 bg-emerald-50/80"
-                            : agencyTaxInfo.status === "error"
-                              ? "border-rose-200 bg-rose-50/80"
-                              : "border-cyan-200 bg-cyan-50/70"
-                        }`}
+                        className={`rounded-2xl border px-4 py-3 ${agencyTaxInfo.status === "success"
+                          ? "border-emerald-200 bg-emerald-50/80"
+                          : agencyTaxInfo.status === "error"
+                            ? "border-rose-200 bg-rose-50/80"
+                            : "border-cyan-200 bg-cyan-50/70"
+                          }`}
                         aria-live="polite"
                       >
                         <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">
@@ -7655,25 +7655,24 @@ export default function TaoDonHang() {
                   />
                 </label>
 
-              <textarea
-                value={rawText}
-                onChange={(e) => {
-                  setRawText(e.target.value);
-                  if (completedOrderNotice) setCompletedOrderNotice(null);
-                }}
+                <textarea
+                  value={rawText}
+                  onChange={(e) => {
+                    setRawText(e.target.value);
+                    if (completedOrderNotice) setCompletedOrderNotice(null);
+                  }}
                   className="min-h-[280px] w-full resize-y rounded-3xl border border-slate-200 bg-slate-50 px-4 py-4 text-[15px] leading-7 text-slate-800 outline-none transition sm:min-h-[300px] focus:border-cyan-300 focus:bg-white focus:ring-4 focus:ring-cyan-100"
                   placeholder="Nhập dữ liệu đơn hàng thô..."
                   spellCheck={false}
                 />
 
                 <div
-                  className={`text-xs font-medium ${
-                    orderPreparation.status === "error"
-                      ? "text-rose-600"
-                      : isOrderPreparationReady
-                        ? "text-emerald-700"
-                        : "text-slate-500"
-                  }`}
+                  className={`text-xs font-medium ${orderPreparation.status === "error"
+                    ? "text-rose-600"
+                    : isOrderPreparationReady
+                      ? "text-emerald-700"
+                      : "text-slate-500"
+                    }`}
                 >
                   {orderPreparationMessage}
                 </div>
@@ -7687,13 +7686,12 @@ export default function TaoDonHang() {
                 ) : null}
 
                 <div
-                  className={`rounded-2xl border px-4 py-3 ${
-                    shippingQuotePreview.status === "success"
-                      ? "border-emerald-200 bg-emerald-50"
-                      : shippingQuotePreview.status === "error"
-                        ? "border-rose-200 bg-rose-50"
-                        : "border-sky-200 bg-sky-50"
-                  }`}
+                  className={`rounded-2xl border px-4 py-3 ${shippingQuotePreview.status === "success"
+                    ? "border-emerald-200 bg-emerald-50"
+                    : shippingQuotePreview.status === "error"
+                      ? "border-rose-200 bg-rose-50"
+                      : "border-sky-200 bg-sky-50"
+                    }`}
                   aria-live="polite"
                 >
                   <div className="flex items-center justify-between gap-3">
@@ -7734,7 +7732,7 @@ export default function TaoDonHang() {
                           đ
                         </div>
                         {shippingQuotePreview.serviceCode ||
-                        shippingQuotePreview.serviceName ? (
+                          shippingQuotePreview.serviceName ? (
                           <div className="mt-1 text-xs text-emerald-700/80">
                             Dịch vụ:{" "}
                             {shippingQuotePreview.serviceName || "VTPFW"}
@@ -7917,15 +7915,14 @@ export default function TaoDonHang() {
                 </div>
 
                 <div
-                  className={`mt-4 rounded-2xl border px-4 py-3 ${
-                    isOrderPreparationReady && existingCustomerPreview
-                      ? "border-emerald-200 bg-emerald-50/80"
-                      : isOrderPreparationReady
-                        ? "border-sky-200 bg-sky-50/80"
-                        : orderPreparation.status === "error"
-                          ? "border-rose-200 bg-rose-50/80"
-                          : "border-slate-200 bg-slate-50/80"
-                  }`}
+                  className={`mt-4 rounded-2xl border px-4 py-3 ${isOrderPreparationReady && existingCustomerPreview
+                    ? "border-emerald-200 bg-emerald-50/80"
+                    : isOrderPreparationReady
+                      ? "border-sky-200 bg-sky-50/80"
+                      : orderPreparation.status === "error"
+                        ? "border-rose-200 bg-rose-50/80"
+                        : "border-slate-200 bg-slate-50/80"
+                    }`}
                   aria-live="polite"
                 >
                   <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">
@@ -8115,20 +8112,18 @@ export default function TaoDonHang() {
                       productLineDisplayGroups.map((productGroup) => (
                         <div
                           key={productGroup.key}
-                          className={`rounded-2xl border p-3 ${
-                            productGroup.isPromotionGroup
-                              ? "border-emerald-200 bg-emerald-50/60"
-                              : "border-slate-200 bg-white/60"
-                          }`}
+                          className={`rounded-2xl border p-3 ${productGroup.isPromotionGroup
+                            ? "border-emerald-200 bg-emerald-50/60"
+                            : "border-slate-200 bg-white/60"
+                            }`}
                         >
                           <div className="flex flex-wrap items-start justify-between gap-2">
                             <div className="min-w-0">
                               <div
-                                className={`text-[10px] font-bold uppercase tracking-[0.16em] ${
-                                  productGroup.isPromotionGroup
-                                    ? "text-emerald-700"
-                                    : "text-slate-500"
-                                }`}
+                                className={`text-[10px] font-bold uppercase tracking-[0.16em] ${productGroup.isPromotionGroup
+                                  ? "text-emerald-700"
+                                  : "text-slate-500"
+                                  }`}
                               >
                                 {productGroup.isPromotionGroup
                                   ? "Chương trình khuyến mãi"
@@ -8144,11 +8139,10 @@ export default function TaoDonHang() {
                               ) : null}
                             </div>
                             <div
-                              className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-bold ${
-                                productGroup.isPromotionGroup
-                                  ? "bg-white text-emerald-700"
-                                  : "bg-slate-100 text-slate-600"
-                              }`}
+                              className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-bold ${productGroup.isPromotionGroup
+                                ? "bg-white text-emerald-700"
+                                : "bg-slate-100 text-slate-600"
+                                }`}
                             >
                               {productGroup.items.length} sản phẩm
                             </div>
@@ -8169,10 +8163,10 @@ export default function TaoDonHang() {
                                 product?.unit || "Chưa có";
                               const displayProductPrice = product
                                 ? getProductUnitPrice(
-                                    product,
-                                    item,
-                                    pricingCustomerType,
-                                  )
+                                  product,
+                                  item,
+                                  pricingCustomerType,
+                                )
                                 : null;
                               const displayProductWeight = product
                                 ? getProductWeightFromProduct(product)
@@ -8210,10 +8204,10 @@ export default function TaoDonHang() {
                                         <span>
                                           Giá:{" "}
                                           {typeof displayProductPrice ===
-                                          "number"
+                                            "number"
                                             ? displayProductPrice.toLocaleString(
-                                                "vi-VN",
-                                              )
+                                              "vi-VN",
+                                            )
                                             : "Chưa có"}
                                         </span>
                                         {displayProductWeight != null ? (
@@ -8362,11 +8356,10 @@ export default function TaoDonHang() {
                                           return (
                                             <div
                                               key={campaign.Id || campaign.Code}
-                                              className={`rounded-xl border px-3 py-2.5 ${
-                                                isSelected
-                                                  ? "border-emerald-300 bg-white"
-                                                  : "border-emerald-100 bg-emerald-50/40"
-                                              }`}
+                                              className={`rounded-xl border px-3 py-2.5 ${isSelected
+                                                ? "border-emerald-300 bg-white"
+                                                : "border-emerald-100 bg-emerald-50/40"
+                                                }`}
                                             >
                                               <label className="flex cursor-pointer items-start gap-2.5">
                                                 <input
@@ -8400,12 +8393,12 @@ export default function TaoDonHang() {
                                                       ),
                                                       details.promotionType ===
                                                         6 &&
-                                                      details.qualifyingItems
-                                                        .length > 1
+                                                        details.qualifyingItems
+                                                          .length > 1
                                                         ? `Cộng dồn ${details.purchasedQuantity}/${details.prerequisiteQuantity} từ ${details.qualifyingItems.length} sản phẩm`
                                                         : "",
                                                       details.applicationCount <
-                                                      1
+                                                        1
                                                         ? "Chưa đủ số lượng"
                                                         : "",
                                                     ]
@@ -8416,7 +8409,7 @@ export default function TaoDonHang() {
                                               </label>
 
                                               {isSelected &&
-                                              details.promotionType === 6 ? (
+                                                details.promotionType === 6 ? (
                                                 <div className="mt-3 space-y-2 border-t border-emerald-100 pt-2">
                                                   <div className="text-xs font-semibold text-emerald-900">
                                                     Chọn sản phẩm tặng: đã chọn{" "}
@@ -8441,32 +8434,31 @@ export default function TaoDonHang() {
                                                       const quantity = Number(
                                                         selection
                                                           ?.giftQuantities?.[
-                                                          productId
+                                                        productId
                                                         ] || 0,
                                                       );
 
                                                       return (
                                                         <label
                                                           key={productId}
-                                                          className={`flex items-start gap-2 rounded-xl border px-2.5 py-2 ${
-                                                            receivedProductDiscontinued
-                                                              ? "border-red-200 bg-red-50"
-                                                              : "border-emerald-100 bg-white"
-                                                          }`}
+                                                          className={`flex items-start gap-2 rounded-xl border px-2.5 py-2 ${receivedProductDiscontinued
+                                                            ? "border-red-200 bg-red-50"
+                                                            : "border-emerald-100 bg-white"
+                                                            }`}
                                                         >
                                                           <div className="min-w-0 flex-1">
                                                             <div className="break-words text-xs font-semibold leading-4 text-slate-800">
                                                               {receivedProduct
                                                                 ? getProductDisplayName(
-                                                                    receivedProduct,
-                                                                  )
+                                                                  receivedProduct,
+                                                                )
                                                                 : `Sản phẩm #${productId}`}
                                                             </div>
                                                             <div className="text-[11px] text-slate-500">
                                                               {receivedProduct
                                                                 ? getProductDisplayCode(
-                                                                    receivedProduct,
-                                                                  )
+                                                                  receivedProduct,
+                                                                )
                                                                 : "Không tải được thông tin"}
                                                             </div>
                                                             {receivedProductDiscontinued ? (
@@ -8501,11 +8493,10 @@ export default function TaoDonHang() {
                                                     },
                                                   )}
                                                   <div
-                                                    className={`text-xs font-medium ${
-                                                      details.isComplete
-                                                        ? "text-emerald-700"
-                                                        : "text-amber-700"
-                                                    }`}
+                                                    className={`text-xs font-medium ${details.isComplete
+                                                      ? "text-emerald-700"
+                                                      : "text-amber-700"
+                                                      }`}
                                                   >
                                                     {details.isComplete
                                                       ? "Đã đủ quà, chương trình sẽ được thêm vào payload."
@@ -8536,8 +8527,8 @@ export default function TaoDonHang() {
                           </div>
                           {productGroup.isPromotionGroup
                             ? renderPromotionGroupControl(
-                                productGroup.promotionGroup,
-                              )
+                              productGroup.promotionGroup,
+                            )
                             : null}
                         </div>
                       ))

@@ -122,7 +122,6 @@ const MENU_CONFIG = [
   },
   {
     id: "roas_dashboard",
-    accessId: "business_stats",
     path: "/admin/roas",
     label: "Hiệu quả quảng cáo",
     icon: MousePointerClick,
@@ -842,8 +841,8 @@ const Sidebar = memo(() => {
                 setIsOpen(false);
               }}
               className={`flex min-w-0 cursor-pointer items-center gap-3 rounded-2xl border bg-white/90 p-2 transition shadow-[0_12px_28px_rgba(8,145,178,0.10)] hover:border-cyan-200 hover:bg-cyan-50/60 ${isProfileActive
-                  ? "border-cyan-200 ring-2 ring-cyan-100"
-                  : "border-cyan-100"
+                ? "border-cyan-200 ring-2 ring-cyan-100"
+                : "border-cyan-100"
                 } ${isCollapsed ? "md:justify-center md:gap-0" : ""}`}
             >
               <img
@@ -901,8 +900,8 @@ const Sidebar = memo(() => {
                       }))
                     }
                     className={`flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-xs font-bold transition ${groupActive
-                        ? "bg-cyan-50 text-cyan-950"
-                        : "text-slate-500 hover:bg-cyan-50/70 hover:text-cyan-900"
+                      ? "bg-cyan-50 text-cyan-950"
+                      : "text-slate-500 hover:bg-cyan-50/70 hover:text-cyan-900"
                       } ${isCollapsed ? "md:justify-center" : ""}`}
                     title={group.label}
                   >
