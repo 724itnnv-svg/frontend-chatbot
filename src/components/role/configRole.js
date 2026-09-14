@@ -6,6 +6,7 @@ const APP_PERMISSIONS = {
       description: "Thống kê, công nợ, Page, tin nhắn, chatbot và đơn hàng",
       screenIds: [
         "business_stats",
+        "roas_dashboard",
         "debt_tracking",
         "pages",
         "pagesmessage",
@@ -90,6 +91,7 @@ const APP_PERMISSIONS = {
   ],
   screens: [
     { id: "business_stats", name: "Thống kê kinh doanh" },
+    { id: "roas_dashboard", name: "Hiệu quả quảng cáo" },
     { id: "debt_tracking", name: "Theo dõi công nợ" },
     { id: "pages", name: "Quản Lý Page" },
     { id: "pagesmessage", name: "Tin Nhắn Page" },
