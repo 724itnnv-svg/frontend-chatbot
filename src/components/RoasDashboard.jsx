@@ -42,19 +42,31 @@ const RETAILER_LABELS = {
   abctv: "ABC",
 };
 
-const ALLOWED_AD_ACCOUNT_IDS = new Set([
-  "727099283175561",
-  "1365025578067205",
-  "731525842964747",
-  "4132336063652746",
-]);
+const RETAILER_BY_AD_ACCOUNT_ID = {
+  "727099283175561": "vietnhattv",
+  "1365025578067205": "kingfarm",
+  "731525842964747": "nnvtv",
+  "4132336063652746": "abctv",
+};
+
+const ALLOWED_AD_ACCOUNT_IDS = new Set(
+  Object.keys(RETAILER_BY_AD_ACCOUNT_ID),
+);
+
+function normalizedAdAccountId(account) {
+  return String(account?.accountId || account?.id || "").replace(/^act_/, "");
+}
 
 function isAllowedAdAccount(account) {
-  const accountId = String(account?.accountId || account?.id || "").replace(
-    /^act_/,
-    "",
+  return ALLOWED_AD_ACCOUNT_IDS.has(normalizedAdAccountId(account));
+}
+
+function retailerForAdAccount(account) {
+  return (
+    RETAILER_BY_AD_ACCOUNT_ID[normalizedAdAccountId(account)] ||
+    account?.suggestedRetailerName ||
+    ""
   );
-  return ALLOWED_AD_ACCOUNT_IDS.has(accountId);
 }
 
 const EMPTY_SUMMARY = {
@@ -1145,8 +1157,9 @@ export default function RoasDashboard() {
       setAccountId((current) => {
         const selectedAccount =
           accounts.find((item) => item.id === current) || accounts[0];
-        if (selectedAccount?.suggestedRetailerName) {
-          setRetailerName(selectedAccount.suggestedRetailerName);
+        const selectedRetailerName = retailerForAdAccount(selectedAccount);
+        if (selectedRetailerName) {
+          setRetailerName(selectedRetailerName);
         } else {
           setRetailerName((selectedRetailer) =>
             retailers.includes(selectedRetailer)
@@ -1347,22 +1360,52 @@ export default function RoasDashboard() {
     const nextAccountId = event.target.value;
     const account = options.accounts.find((item) => item.id === nextAccountId);
     setAccountId(nextAccountId);
-    if (account?.suggestedRetailerName)
-      setRetailerName(account.suggestedRetailerName);
+    const nextRetailerName = retailerForAdAccount(account);
+    if (nextRetailerName) setRetailerName(nextRetailerName);
   };
 
   const handleExport = async () => {
-    if (exporting || (!groups.length && !unmatchedAds.length)) return;
+    if (exporting || !report || !options.accounts.length) return;
     setExporting(true);
     try {
       const [{ default: ExcelJS }, { saveAs }] = await Promise.all([
         import("exceljs"),
         import("file-saver"),
       ]);
+      const companyReports = await Promise.all(
+        options.accounts.map(async (account) => {
+          const companyRetailerName = retailerForAdAccount(account);
+          const isCurrentReport =
+            account.id === accountId &&
+            report &&
+            report.retailerName === companyRetailerName;
+          const companyReport = isCurrentReport
+            ? report
+            : (
+                await api.get("/roas/report", {
+                  params: {
+                    accountId: account.id,
+                    retailerName: companyRetailerName,
+                    since: dateRange.since,
+                    until: dateRange.until,
+                  },
+                })
+              ).data;
+          return {
+            report: companyReport,
+            retailerName: companyReport?.retailerName || companyRetailerName,
+            retailerLabel:
+              RETAILER_LABELS[
+                companyReport?.retailerName || companyRetailerName
+              ] || companyRetailerName,
+          };
+        }),
+      );
       await downloadRoasWorkbook(ExcelJS, saveAs, {
         groups,
         unmatchedAds,
         report,
+        companyReports,
         dateRange,
         retailerName,
         retailerLabel: RETAILER_LABELS[retailerName] || retailerName,
@@ -1440,7 +1483,7 @@ export default function RoasDashboard() {
               <button
                 type="button"
                 onClick={handleExport}
-                disabled={exporting || (!groups.length && !unmatchedAds.length)}
+                disabled={exporting || !report || !options.accounts.length}
                 className="inline-flex h-10 items-center gap-2 rounded-xl bg-slate-950 px-4 text-xs font-extrabold text-white shadow-lg shadow-slate-300/70 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {exporting ? (

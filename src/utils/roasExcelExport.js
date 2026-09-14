@@ -1,3 +1,5 @@
+import { addMarketingAnalysisSheets } from "./roasMarketingSheets.js";
+
 const COLORS = {
   navy: "FF0F172A",
   cyan: "FF06B6D4",
@@ -220,6 +222,8 @@ export function createRoasExportWorkbook(ExcelJS, options = {}) {
   workbook.modified = new Date();
   workbook.title = "Báo cáo ROAS quảng cáo Meta";
   workbook.subject = `ROAS ${dateRange.since || ""} - ${dateRange.until || ""}`;
+
+  addMarketingAnalysisSheets(workbook, options);
 
   const sheet = workbook.addWorksheet("Báo cáo ROAS", {
     properties: { defaultRowHeight: 20 },
@@ -466,7 +470,7 @@ export async function downloadRoasWorkbook(ExcelJS, saveAs, options = {}) {
   const workbook = createRoasExportWorkbook(ExcelJS, options);
   const buffer = await workbook.xlsx.writeBuffer();
   const dateRange = options.dateRange || {};
-  const filename = `Bao-cao-ROAS-${options.retailerName || "retailer"}-${dateRange.since || "tu-ngay"}-${dateRange.until || "den-ngay"}.xlsx`;
+  const filename = `Bao-cao-MKT-${dateRange.since || "tu-ngay"}-${dateRange.until || "den-ngay"}.xlsx`;
   saveAs(
     new Blob([buffer], {
       type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
