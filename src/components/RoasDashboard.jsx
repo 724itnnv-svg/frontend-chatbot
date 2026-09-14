@@ -113,14 +113,49 @@ const EMPTY_COMPANY_OVERVIEW = {
   ctr: 0,
 };
 
+function countUniqueEmployeeSkuAds(report, reportIndex) {
+  const uniqueKeys = new Set();
+  const companyKey =
+    normalizedAdAccountId(report?.account) ||
+    report?.retailerName ||
+    `company-${reportIndex}`;
+
+  (report?.groups || []).forEach((group, groupIndex) => {
+    const userName = String(group.userName || "")
+      .trim()
+      .toLocaleLowerCase("vi");
+    const employeeKey = group.userId
+      ? `id:${group.userId}`
+      : group.userCode
+        ? `code:${String(group.userCode).trim().toLocaleLowerCase("vi")}`
+        : userName && !/^chưa xác định/i.test(userName)
+          ? `name:${userName}`
+          : "";
+    const productCode = String(group.productCode || "")
+      .trim()
+      .toUpperCase();
+    const hasKnownSku = productCode && productCode !== "CHƯA-CÓ-SKU";
+
+    if (employeeKey && hasKnownSku) {
+      uniqueKeys.add(`${companyKey}:${employeeKey}:sku:${productCode}`);
+      return;
+    }
+
+    (group.ads || []).forEach((ad, adIndex) => {
+      uniqueKeys.add(
+        `${companyKey}:ad:${ad.id || `${group.key || groupIndex}:${adIndex}`}`,
+      );
+    });
+  });
+
+  return uniqueKeys.size;
+}
+
 function summarizeCompanyReports(reports = []) {
   const totals = reports.reduce(
-    (current, report) => {
+    (current, report, reportIndex) => {
       const summary = report?.summary || {};
-      current.adCount += (report?.groups || []).reduce(
-        (count, group) => count + (Array.isArray(group.ads) ? group.ads.length : 0),
-        0,
-      );
+      current.adCount += countUniqueEmployeeSkuAds(report, reportIndex);
       current.totalSpend += Number(summary.totalSpend) || 0;
       current.netRevenue += Number(summary.netRevenue) || 0;
       current.estimatedRevenue += Number(summary.estimatedRevenue) || 0;
@@ -598,9 +633,9 @@ function DetailMetric({ icon: Icon, label, value, helper, tone }) {
 }
 
 function AggregateMetricCells({ item, emphasized = false }) {
-  const good = item.roas >= 3;
+  const good = item.roas >= 4;
   const estimatedRoas = Number(item.estimatedRoas) || 0;
-  const estimatedGood = estimatedRoas >= 3;
+  const estimatedGood = estimatedRoas >= 4;
   const textWeight = emphasized ? "font-extrabold" : "font-bold";
 
   return (
@@ -712,18 +747,29 @@ function RoasGroupChart({ groups }) {
       {data.map((item) => {
         const estimatedRoas = Number(item.estimatedRoas) || 0;
         const cashRoas = Number(item.roas) || 0;
+        const productName =
+          item.ads?.find((ad) => ad.productName)?.productName ||
+          item.productCode ||
+          "Chưa xác định sản phẩm";
         const width = Math.max(2, (Math.max(estimatedRoas, 0) / max) * 100);
         return (
           <div
             key={item.key}
             className="grid grid-cols-[minmax(120px,0.8fr)_minmax(160px,2fr)_minmax(132px,0.7fr)] items-center gap-3"
+            title={`${productName} · ${item.productCode} · ${item.userName}`}
           >
             <div className="min-w-0">
               <p className="truncate text-xs font-extrabold text-slate-700">
-                {item.userName}
+                {productName}
               </p>
-              <p className="mt-0.5 text-[10px] font-bold text-cyan-600">
-                {item.productCode}
+              <p className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[10px] font-semibold">
+                <span className="shrink-0 font-extrabold text-cyan-600">
+                  {item.productCode}
+                </span>
+                <span className="shrink-0 text-slate-300">—</span>
+                <span className="truncate text-slate-400">
+                  {item.userName}
+                </span>
               </p>
             </div>
             <div className="h-3 overflow-hidden rounded-full bg-slate-100">
@@ -1108,7 +1154,7 @@ function EfficiencyMatrix({ groups }) {
   const maxSpend = Math.max(...data.map((item) => item.totalSpend), 1);
   const maxPurchases = Math.max(...data.map((item) => item.purchases), 1);
   const maxRoas = Math.max(
-    3.5,
+    5,
     Math.min(
       8,
       Math.ceil(
@@ -1119,18 +1165,18 @@ function EfficiencyMatrix({ groups }) {
     ),
   );
   const thresholdY =
-    chart.top + plotHeight - (Math.min(2.5, maxRoas) / maxRoas) * plotHeight;
+    chart.top + plotHeight - (Math.min(4, maxRoas) / maxRoas) * plotHeight;
   const efficientCount = source.filter(
-    (item) => (Number(item.estimatedRoas) || 0) >= 2.5,
+    (item) => (Number(item.estimatedRoas) || 0) >= 4,
   ).length;
   const watchCount = source.filter(
     (item) =>
       (Number(item.estimatedRoas) || 0) >= 1 &&
-      (Number(item.estimatedRoas) || 0) < 2.5,
+      (Number(item.estimatedRoas) || 0) < 4,
   ).length;
   const riskCount = source.length - efficientCount - watchCount;
   const colorFor = (roas) =>
-    roas >= 2.5 ? "#10b981" : roas >= 1 ? "#f59e0b" : "#f43f5e";
+    roas >= 4 ? "#10b981" : roas >= 1 ? "#f59e0b" : "#f43f5e";
 
   return (
     <div className="mt-4 grid items-start gap-4 lg:grid-cols-[minmax(0,1.45fr)_minmax(270px,0.55fr)]">
@@ -1219,7 +1265,7 @@ function EfficiencyMatrix({ groups }) {
             fontSize="9"
             fontWeight="800"
           >
-            Mốc 2.5x
+            Mốc 4x
           </text>
 
           {data.map((item, index) => {
@@ -2143,10 +2189,10 @@ export default function RoasDashboard() {
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <h2 className="text-base font-extrabold text-slate-900">
-                  ROAS theo nhân viên và sản phẩm
+                  ROAS theo sản phẩm
                 </h2>
                 <p className="mt-1 text-xs text-slate-400">
-                  Xếp theo ROAS doanh thu dự kiến; kèm ROAS tiền về để đối chiếu
+                  Tên sản phẩm là thông tin chính; tên nhân viên hiển thị bên dưới
                 </p>
               </div>
               <span className="inline-flex w-fit items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-[11px] font-bold text-slate-500">

@@ -563,7 +563,7 @@ function applyBorder(cell, color = COLORS.border) {
 }
 
 function roasStyle(value) {
-  if (number(value) >= 2.5) {
+  if (number(value) >= 4) {
     return { fill: COLORS.greenSoft, font: COLORS.green };
   }
   if (number(value) >= 1) {
