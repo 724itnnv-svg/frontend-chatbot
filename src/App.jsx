@@ -1,5 +1,13 @@
 // src/App.jsx
-import { lazy, Suspense, useEffect, Component } from "react";
+import {
+  lazy,
+  Suspense,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  Component,
+} from "react";
 import { Capacitor } from "@capacitor/core";
 import { App as CapacitorApp } from "@capacitor/app";
 import {
@@ -14,6 +22,7 @@ import { canAccessScreen, getAllowedScreens } from "./utils/screenAccess";
 import { requestStartupNativePermissions } from "./utils/nativeAppPermissions";
 
 import DashboardLayout from "./components/DashboardLayout";
+import PageLoadingScreen from "./components/PageLoadingScreen";
 
 const CashFlowApp = lazy(() => import("./components/CashFlowApp"));
 const Login = lazy(() => import("./components/auth/Login"));
