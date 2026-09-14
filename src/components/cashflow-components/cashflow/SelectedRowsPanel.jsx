@@ -334,9 +334,9 @@ export default function SelectedRowsPanel({
   const sendProgressPercent =
     sendProgressTotal > 0
       ? Math.min(
-          100,
-          Math.round((sendProgressCompleted / sendProgressTotal) * 100),
-        )
+        100,
+        Math.round((sendProgressCompleted / sendProgressTotal) * 100),
+      )
       : 0;
 
   return (
