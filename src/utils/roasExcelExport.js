@@ -34,12 +34,12 @@ const REPORT_COLUMNS = [
   { header: "Phiếu thu", key: "receipt", width: 16, numFmt: MONEY_FORMAT },
   { header: "Phiếu chi", key: "expense", width: 16, numFmt: MONEY_FORMAT },
   { header: "Doanh số ròng", key: "netRevenue", width: 18, numFmt: MONEY_FORMAT },
-  { header: "Doanh số ước tính", key: "estimatedRevenue", width: 19, numFmt: MONEY_FORMAT },
+  { header: "Doanh thu dự kiến", key: "estimatedRevenue", width: 19, numFmt: MONEY_FORMAT },
   { header: "Chi Meta", key: "spend", width: 16, numFmt: MONEY_FORMAT },
   { header: "VAT 10%", key: "vat", width: 14, numFmt: MONEY_FORMAT },
   { header: "Tổng chi sau VAT", key: "totalSpend", width: 18, numFmt: MONEY_FORMAT },
-  { header: "ROAS", key: "roas", width: 11, numFmt: ROAS_FORMAT },
-  { header: "ROAS ước tính", key: "estimatedRoas", width: 14, numFmt: ROAS_FORMAT },
+  { header: "ROAS tiền về", key: "roas", width: 15, numFmt: ROAS_FORMAT },
+  { header: "ROAS doanh thu dự kiến", key: "estimatedRoas", width: 22, numFmt: ROAS_FORMAT },
   { header: "Tên quảng cáo", key: "adTitle", width: 68 },
   { header: "Click vào liên kết", key: "linkClicks", width: 17, numFmt: NUMBER_FORMAT },
   { header: "CTR (click liên kết)", key: "ctr", width: 17, numFmt: PERCENT_FORMAT },
@@ -283,7 +283,7 @@ export function createRoasExportWorkbook(ExcelJS, options = {}) {
     color: COLORS.green,
     fill: COLORS.greenSoft,
   });
-  addSummaryTile(sheet, "E3:H4", "DOANH SỐ ƯỚC TÍNH", formattedMoney(summary.estimatedRevenue), {
+  addSummaryTile(sheet, "E3:H4", "DOANH THU DỰ KIẾN", formattedMoney(summary.estimatedRevenue), {
     color: "FF4338CA",
     fill: "FFEEF2FF",
   });
@@ -291,11 +291,11 @@ export function createRoasExportWorkbook(ExcelJS, options = {}) {
     color: COLORS.rose,
     fill: COLORS.roseSoft,
   });
-  addSummaryTile(sheet, "M3:P4", "ROAS SAU VAT", formattedRoas(summary.roas), {
+  addSummaryTile(sheet, "M3:P4", "ROAS TIỀN VỀ", formattedRoas(summary.roas), {
     color: roasStyle(summary.roas).font,
     fill: roasStyle(summary.roas).fill,
   });
-  addSummaryTile(sheet, "Q3:T4", "ROAS ƯỚC TÍNH", formattedRoas(summary.estimatedRoas), {
+  addSummaryTile(sheet, "Q3:T4", "ROAS DOANH THU DỰ KIẾN", formattedRoas(summary.estimatedRoas), {
     color: roasStyle(summary.estimatedRoas).font,
     fill: roasStyle(summary.estimatedRoas).fill,
   });

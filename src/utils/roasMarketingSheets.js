@@ -323,7 +323,7 @@ function buildCompanyRows(sources) {
     const summary = source.report.summary || {};
     const ads = uniqueAds(source.groups);
     const meta = summarizeAds(ads);
-    const revenue = number(summary.netRevenue);
+    const revenue = number(summary.estimatedRevenue);
     return {
       companyCode: source.companyCode,
       campaignCount: countAdsets(ads),
@@ -368,7 +368,7 @@ function buildEmployeeRows(sources) {
       const ads = uniqueAds(employee.groups);
       const meta = summarizeAds(ads);
       const revenue = employee.groups.reduce(
-        (sum, group) => sum + number(group.netRevenue),
+        (sum, group) => sum + number(group.estimatedRevenue),
         0,
       );
       const budget = summarizeBudget(ads);
@@ -419,7 +419,7 @@ function buildAdsetRows(sources) {
           text(group.userName || firstAd.employeeName || "Chưa xác định"),
         );
         current.ads.push(...adsetAds);
-        current.revenue += number(group.netRevenue) * share;
+        current.revenue += number(group.estimatedRevenue) * share;
         adsets.set(mapKey, current);
       });
     });
@@ -448,10 +448,10 @@ function addCompanySheet(workbook, rows, context) {
     { header: "Lượt mua", width: 13, numFmt: NUMBER_FORMAT },
     { header: "Mua/Tin", width: 13, numFmt: PERCENT_FORMAT },
     { header: "Tổng chi", width: 18, numFmt: MONEY_FORMAT },
-    { header: "Doanh thu", width: 19, numFmt: MONEY_FORMAT },
+    { header: "Doanh thu dự kiến", width: 20, numFmt: MONEY_FORMAT },
     { header: "CP/Tin", width: 17, numFmt: MONEY_FORMAT },
     { header: "CP/Mua", width: 17, numFmt: MONEY_FORMAT },
-    { header: "ROAS", width: 12, numFmt: DECIMAL_FORMAT },
+    { header: "ROAS dự kiến", width: 14, numFmt: DECIMAL_FORMAT },
     { header: "CTR", width: 12, numFmt: PERCENT_FORMAT },
     { header: "Tần suất", width: 12, numFmt: DECIMAL_FORMAT },
   ];
@@ -492,13 +492,13 @@ function addEmployeeRoasSheet(workbook, rows, context) {
     { header: "Ngân sách", width: 17, numFmt: MONEY_FORMAT },
     { header: "Chi phí Ads gốc", width: 20, numFmt: MONEY_FORMAT },
     { header: "Tổng chi", width: 18, numFmt: MONEY_FORMAT },
-    { header: "Doanh thu", width: 19, numFmt: MONEY_FORMAT },
-    { header: "ROAS tổng", width: 14, numFmt: ROAS_FORMAT },
+    { header: "Doanh thu dự kiến", width: 20, numFmt: MONEY_FORMAT },
+    { header: "ROAS dự kiến", width: 14, numFmt: ROAS_FORMAT },
   ];
   const sheet = setupAnalysisSheet(workbook, {
     ...context,
     name: SHEET_NAMES.employeeRoas,
-    title: "ROAS TỔNG THEO CHIẾN DỊCH / NHÂN SỰ",
+    title: "ROAS DỰ KIẾN THEO CHIẾN DỊCH / NHÂN SỰ",
     columns,
   });
   rows.forEach((item, index) => {
@@ -526,12 +526,12 @@ function addAdsetSheet(workbook, rows, context) {
     { header: "Tên nhóm quảng cáo", width: 58 },
     { header: "Ngân sách", width: 17, numFmt: MONEY_FORMAT },
     { header: "Tổng chi", width: 18, numFmt: MONEY_FORMAT },
-    { header: "Doanh thu", width: 19, numFmt: MONEY_FORMAT },
+    { header: "Doanh thu dự kiến", width: 20, numFmt: MONEY_FORMAT },
     { header: "Mua/Tin", width: 13, numFmt: PERCENT_FORMAT },
     { header: "CPA", width: 17, numFmt: MONEY_FORMAT },
     { header: "CTR", width: 12, numFmt: PERCENT_FORMAT },
     { header: "Tần suất", width: 12, numFmt: DECIMAL_FORMAT },
-    { header: "ROAS", width: 12, numFmt: DECIMAL_FORMAT },
+    { header: "ROAS dự kiến", width: 14, numFmt: DECIMAL_FORMAT },
   ];
   const sheet = setupAnalysisSheet(workbook, {
     ...context,
@@ -586,8 +586,8 @@ function addCapabilitySheet(workbook, employeeRows, context) {
     { header: "Mua", width: 11, numFmt: NUMBER_FORMAT },
     { header: "Mua/Tin", width: 13, numFmt: PERCENT_FORMAT },
     { header: "Tổng chi", width: 18, numFmt: MONEY_FORMAT },
-    { header: "Doanh thu", width: 19, numFmt: MONEY_FORMAT },
-    { header: "ROAS", width: 12, numFmt: DECIMAL_FORMAT },
+    { header: "Doanh thu dự kiến", width: 20, numFmt: MONEY_FORMAT },
+    { header: "ROAS dự kiến", width: 14, numFmt: DECIMAL_FORMAT },
   ];
   const sheet = setupAnalysisSheet(workbook, {
     ...context,
@@ -735,7 +735,7 @@ export function addMarketingAnalysisSheets(workbook, options = {}) {
         count: companyRows.length,
       },
       {
-        label: "ROAS tổng theo Chiến dịch / Nhân sự",
+        label: "ROAS dự kiến theo Chiến dịch / Nhân sự",
         sheetName: SHEET_NAMES.employeeRoas,
         count: employeeRows.length,
       },
