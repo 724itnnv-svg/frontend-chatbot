@@ -2,13 +2,10 @@
 import { Suspense } from "react";
 import { Outlet } from "react-router-dom";
 import Sidebar from "./Sidebar";
+import PageLoadingScreen from "./PageLoadingScreen";
 
 function PageLoader() {
-  return (
-    <div className="min-h-screen grid place-items-center bg-slate-50 text-sm font-medium text-slate-500">
-      Đang tải chức năng...
-    </div>
-  );
+  return <PageLoadingScreen message="Đang tải dữ liệu..." />;
 }
 
 export default function DashboardLayout() {
