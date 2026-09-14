@@ -73,8 +73,8 @@ const getOrderDelivery = (row = {}) => row.__orderDelivery || {};
 export const getCashflowInvoiceId = (row = {}) =>
   normalizeText(
     getOrderDelivery(row).invoiceId ||
-      getOrderDelivery(row).invoiceIdCode ||
-      row["Mã HD Kiot"],
+    getOrderDelivery(row).invoiceIdCode ||
+    row["Mã HD Kiot"],
   );
 
 export const hasCashflowInvoiceId = (row = {}) =>
@@ -109,20 +109,20 @@ const buildSinglePayload = ({
   const accountId = getAccountId(bankAccounts);
   const rawPaymentMethod = normalizeText(
     row["Phương thức thanh toán"] ||
-      row["PaymentMethod"] ||
-      row["Payment method"] ||
-      row["Phương thức"] ||
-      "Transfer",
+    row["PaymentMethod"] ||
+    row["Payment method"] ||
+    row["Phương thức"] ||
+    "Transfer",
   );
   const paymentMethod = /thẻ|card/i.test(rawPaymentMethod)
     ? "Card"
     : "Transfer";
   const description = normalizeText(
     row["GHI CHÚ"] ||
-      row["Ghi chú"] ||
-      row["Description"] ||
-      orderDelivery.description ||
-      "",
+    row["Ghi chú"] ||
+    row["Description"] ||
+    orderDelivery.description ||
+    "",
   );
   const invoiceCode =
     normalizeText(orderDelivery.invoiceId || orderDelivery.invoiceIdCode) ||
@@ -172,10 +172,10 @@ const buildSinglePayload = ({
       bankAccountInfo: getBankAccountDisplay(bankAccounts),
       ...(invoiceCode
         ? {
-            invoiceId: invoiceCode,
-            InvoiceId: invoiceCode,
-            invoiceIdCode: orderDelivery.invoiceIdCode,
-          }
+          invoiceId: invoiceCode,
+          InvoiceId: invoiceCode,
+          invoiceIdCode: orderDelivery.invoiceIdCode,
+        }
         : {}),
     },
   };
@@ -196,7 +196,7 @@ const buildCashflowPayloadEntriesForRow = ({
   }
 
   const isGhnRow = normalizeText(row.__sourceFormat).toLowerCase() === "ghn";
-  if (isGhnRow && row.__orderDeliveryFeeMismatch === true) {
+  if (row.__orderDeliveryFeeMismatch === true) {
     return [];
   }
 

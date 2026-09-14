@@ -281,10 +281,13 @@ export default function SelectedRowsPanel({
   onSendPayloads,
   onRetryFailedPayloads,
   onExportExcel,
+  onExportOrderDeliveryDescriptions,
+  onOpenCashflowList,
   isSendingPayloads,
   isLoadingOrderDeliveries,
   sendPayloadProgress,
   isExportingExcel,
+  orderDeliveryDescriptionCount,
   failedPayloadCount,
   missingInvoiceRows,
 }) {
@@ -331,9 +334,9 @@ export default function SelectedRowsPanel({
   const sendProgressPercent =
     sendProgressTotal > 0
       ? Math.min(
-          100,
-          Math.round((sendProgressCompleted / sendProgressTotal) * 100),
-        )
+        100,
+        Math.round((sendProgressCompleted / sendProgressTotal) * 100),
+      )
       : 0;
 
   return (
@@ -484,6 +487,24 @@ export default function SelectedRowsPanel({
               disabled={isExportingExcel}
             >
               {isExportingExcel ? "Đang xuất..." : "Xuất Excel"}
+            </button>
+            <button
+              type="button"
+              className={buttonClass}
+              onClick={onExportOrderDeliveryDescriptions}
+              disabled={
+                isLoadingOrderDeliveries || orderDeliveryDescriptionCount === 0
+              }
+            >
+              Xuất mô tả ({orderDeliveryDescriptionCount})
+            </button>
+            <button
+              type="button"
+              className={buttonClass}
+              onClick={onOpenCashflowList}
+              disabled={isLoadingOrderDeliveries}
+            >
+              Xem danh sách sổ quỹ
             </button>
           </div>
         </div>

@@ -4,6 +4,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import {
@@ -34,6 +35,7 @@ import Calendar from "react-calendar";
 import "react-calendar/dist/Calendar.css";
 import { useAuth } from "../context/AuthContext";
 import { downloadRoasWorkbook } from "../utils/roasExcelExport";
+import PageLoadingScreen from "./PageLoadingScreen";
 
 const RETAILER_LABELS = {
   nnvtv: "NNV",
@@ -41,6 +43,33 @@ const RETAILER_LABELS = {
   vietnhattv: "Việt Nhật",
   abctv: "ABC",
 };
+
+const RETAILER_BY_AD_ACCOUNT_ID = {
+  "727099283175561": "vietnhattv",
+  "1365025578067205": "kingfarm",
+  "731525842964747": "nnvtv",
+  "4132336063652746": "abctv",
+};
+
+const ALLOWED_AD_ACCOUNT_IDS = new Set(
+  Object.keys(RETAILER_BY_AD_ACCOUNT_ID),
+);
+
+function normalizedAdAccountId(account) {
+  return String(account?.accountId || account?.id || "").replace(/^act_/, "");
+}
+
+function isAllowedAdAccount(account) {
+  return ALLOWED_AD_ACCOUNT_IDS.has(normalizedAdAccountId(account));
+}
+
+function retailerForAdAccount(account) {
+  return (
+    RETAILER_BY_AD_ACCOUNT_ID[normalizedAdAccountId(account)] ||
+    account?.suggestedRetailerName ||
+    ""
+  );
+}
 
 const EMPTY_SUMMARY = {
   receiptAmount: 0,
@@ -71,6 +100,86 @@ const EMPTY_SUMMARY = {
   unmatchedCashflowGroupCount: 0,
 };
 
+const EMPTY_COMPANY_OVERVIEW = {
+  companyCount: 0,
+  adCount: 0,
+  totalSpend: 0,
+  netRevenue: 0,
+  estimatedRevenue: 0,
+  roas: 0,
+  estimatedRoas: 0,
+  linkClicks: 0,
+  impressions: 0,
+  ctr: 0,
+};
+
+function countUniqueEmployeeSkuAds(report, reportIndex) {
+  const uniqueKeys = new Set();
+  const companyKey =
+    normalizedAdAccountId(report?.account) ||
+    report?.retailerName ||
+    `company-${reportIndex}`;
+
+  (report?.groups || []).forEach((group, groupIndex) => {
+    const userName = String(group.userName || "")
+      .trim()
+      .toLocaleLowerCase("vi");
+    const employeeKey = group.userId
+      ? `id:${group.userId}`
+      : group.userCode
+        ? `code:${String(group.userCode).trim().toLocaleLowerCase("vi")}`
+        : userName && !/^chưa xác định/i.test(userName)
+          ? `name:${userName}`
+          : "";
+    const productCode = String(group.productCode || "")
+      .trim()
+      .toUpperCase();
+    const hasKnownSku = productCode && productCode !== "CHƯA-CÓ-SKU";
+
+    if (employeeKey && hasKnownSku) {
+      uniqueKeys.add(`${companyKey}:${employeeKey}:sku:${productCode}`);
+      return;
+    }
+
+    (group.ads || []).forEach((ad, adIndex) => {
+      uniqueKeys.add(
+        `${companyKey}:ad:${ad.id || `${group.key || groupIndex}:${adIndex}`}`,
+      );
+    });
+  });
+
+  return uniqueKeys.size;
+}
+
+function summarizeCompanyReports(reports = []) {
+  const totals = reports.reduce(
+    (current, report, reportIndex) => {
+      const summary = report?.summary || {};
+      current.adCount += countUniqueEmployeeSkuAds(report, reportIndex);
+      current.totalSpend += Number(summary.totalSpend) || 0;
+      current.netRevenue += Number(summary.netRevenue) || 0;
+      current.estimatedRevenue += Number(summary.estimatedRevenue) || 0;
+      current.linkClicks += Number(summary.linkClicks) || 0;
+      current.impressions += Number(summary.impressions) || 0;
+      return current;
+    },
+    { ...EMPTY_COMPANY_OVERVIEW, companyCount: reports.length },
+  );
+
+  return {
+    ...totals,
+    roas: totals.totalSpend > 0 ? totals.netRevenue / totals.totalSpend : 0,
+    estimatedRoas:
+      totals.totalSpend > 0
+        ? totals.estimatedRevenue / totals.totalSpend
+        : 0,
+    ctr:
+      totals.impressions > 0
+        ? (totals.linkClicks / totals.impressions) * 100
+        : 0,
+  };
+}
+
 const AD_COLORS = [
   "from-cyan-500 to-blue-600",
   "from-violet-500 to-fuchsia-600",
@@ -99,6 +208,7 @@ function formatDateLabel(value) {
     day: "2-digit",
     month: "2-digit",
     year: "numeric",
+    timeZone: "Asia/Ho_Chi_Minh",
   }).format(date);
 }
 
@@ -150,6 +260,131 @@ const formatNumber = (value) =>
 
 const formatPercent = (value, digits = 2) =>
   `${(Number(value) || 0).toFixed(digits)}%`;
+
+const INACTIVE_AD_STATUS_LABELS = {
+  PAUSED: "Đã tắt",
+  STOPPED: "Đã tắt",
+  INACTIVE: "Đã tắt",
+  CAMPAIGN_PAUSED: "Đã tắt theo chiến dịch",
+  ADSET_PAUSED: "Đã tắt theo nhóm",
+  ARCHIVED: "Đã lưu trữ",
+  DELETED: "Đã xóa",
+  DISAPPROVED: "Không được duyệt",
+  PENDING_REVIEW: "Đang xét duyệt",
+  IN_PROCESS: "Đang xử lý",
+  WITH_ISSUES: "Có lỗi phân phối",
+  PENDING_BILLING_INFO: "Chờ thanh toán",
+  PREAPPROVED: "Chờ kích hoạt",
+};
+
+function getAdDeliveryStatus(ad = {}) {
+  const explicitRunning = ad.isRunning ?? ad.isActive;
+  const rawStatus = String(
+    ad.effectiveStatus ??
+    ad.effective_status ??
+    ad.deliveryStatus ??
+    ad.delivery_status ??
+    ad.status ??
+    ad.configuredStatus ??
+    ad.configured_status ??
+    "",
+  )
+    .trim()
+    .toUpperCase();
+
+  if (explicitRunning === true || ["ACTIVE", "RUNNING"].includes(rawStatus)) {
+    return { running: true, label: "Đang chạy" };
+  }
+
+  if (explicitRunning === false || rawStatus) {
+    return {
+      running: false,
+      label: INACTIVE_AD_STATUS_LABELS[rawStatus] || "Không chạy",
+    };
+  }
+
+  return { running: null, label: "Chưa có trạng thái" };
+}
+
+function getAdStoppedAt(ad = {}) {
+  return (
+    ad.stoppedAt ??
+    ad.stopped_at ??
+    ad.pausedAt ??
+    ad.paused_at ??
+    ad.deactivatedAt ??
+    ad.deactivated_at ??
+    ad.statusChangedAt ??
+    ad.status_changed_at ??
+    null
+  );
+}
+
+function getAdStatusUpdatedAt(ad = {}) {
+  return (
+    ad.statusUpdatedAt ??
+    ad.status_updated_at ??
+    ad.updatedTime ??
+    ad.updated_time ??
+    null
+  );
+}
+
+function formatAdStatusDate(value) {
+  if (!value) return "";
+  const numericValue = Number(value);
+  const date = Number.isFinite(numericValue) && numericValue > 0
+    ? new Date(numericValue < 1000000000000 ? numericValue * 1000 : numericValue)
+    : new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat("vi-VN", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  }).format(date);
+}
+
+function AdDeliveryStatus({ ad }) {
+  const status = getAdDeliveryStatus(ad);
+  const stoppedAt = status.running === false
+    ? formatAdStatusDate(getAdStoppedAt(ad))
+    : "";
+  const statusUpdatedAt = status.running === false && !stoppedAt
+    ? formatAdStatusDate(getAdStatusUpdatedAt(ad))
+    : "";
+
+  return (
+    <span className="inline-flex flex-wrap items-center gap-1.5">
+      <span
+        className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-extrabold ring-1 ${status.running === true
+            ? "bg-emerald-50 text-emerald-700 ring-emerald-200"
+            : status.running === false
+              ? "bg-rose-50 text-rose-700 ring-rose-200"
+              : "bg-slate-50 text-slate-500 ring-slate-200"
+          }`}
+      >
+        <span
+          className={`h-1.5 w-1.5 rounded-full ${status.running === true
+              ? "bg-emerald-500"
+              : status.running === false
+                ? "bg-rose-500"
+                : "bg-slate-400"
+            }`}
+        />
+        {status.label}
+      </span>
+      {status.running === false && (
+        <span className="text-[9px] font-semibold text-slate-400">
+          {stoppedAt
+            ? `Tắt ngày ${stoppedAt}`
+            : statusUpdatedAt
+              ? `Cập nhật gần nhất ${statusUpdatedAt}`
+              : "Chưa có ngày tắt"}
+        </span>
+      )}
+    </span>
+  );
+}
 
 function groupProductsByUser(productGroups = []) {
   const users = new Map();
@@ -339,7 +574,7 @@ const ROAS_CALENDAR_TAILWIND = [
   "[&_[class*='tile']:disabled]:text-slate-200",
 ].join(" ");
 
-function MetricCard({ title, value, helper, icon: Icon, tone = "cyan" }) {
+function MetricCard({ title, value, secondary, icon: Icon, tone = "cyan" }) {
   const palette = METRIC_TONES[tone] || METRIC_TONES.cyan;
 
   return (
@@ -358,6 +593,11 @@ function MetricCard({ title, value, helper, icon: Icon, tone = "cyan" }) {
           <p className="mt-1.5 text-xl font-black tracking-[-0.035em] text-slate-950 sm:text-[22px]">
             {value}
           </p>
+          {secondary && (
+            <p className="mt-1 text-[10px] font-bold text-slate-400">
+              {secondary}
+            </p>
+          )}
         </div>
         <span
           className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl ring-1 ${palette.icon}`}
@@ -365,9 +605,6 @@ function MetricCard({ title, value, helper, icon: Icon, tone = "cyan" }) {
           {createElement(Icon, { size: 17, strokeWidth: 2.2 })}
         </span>
       </div>
-      <p className="relative mt-3 border-t border-slate-100 pt-2.5 text-[10px] leading-4 text-slate-400">
-        {helper}
-      </p>
     </article>
   );
 }
@@ -396,9 +633,9 @@ function DetailMetric({ icon: Icon, label, value, helper, tone }) {
 }
 
 function AggregateMetricCells({ item, emphasized = false }) {
-  const good = item.roas >= 3;
+  const good = item.roas >= 4;
   const estimatedRoas = Number(item.estimatedRoas) || 0;
-  const estimatedGood = estimatedRoas >= 3;
+  const estimatedGood = estimatedRoas >= 4;
   const textWeight = emphasized ? "font-extrabold" : "font-bold";
 
   return (
@@ -486,15 +723,21 @@ function AggregateMetricCells({ item, emphasized = false }) {
 
 function RoasGroupChart({ groups }) {
   const data = [...groups]
-    .filter((group) => group.matched)
-    .sort((a, b) => b.roas - a.roas)
+    .filter((group) => group.totalSpend > 0)
+    .sort(
+      (a, b) =>
+        (Number(b.estimatedRoas) || 0) - (Number(a.estimatedRoas) || 0),
+    )
     .slice(0, 8);
-  const max = Math.max(...data.map((item) => Math.max(item.roas, 0)), 1);
+  const max = Math.max(
+    ...data.map((item) => Math.max(Number(item.estimatedRoas) || 0, 0)),
+    1,
+  );
 
   if (!data.length) {
     return (
       <div className="grid h-64 place-items-center text-sm text-slate-400">
-        Chưa có nhóm sổ quỹ khớp bài quảng cáo Meta.
+        Chưa có nhóm đủ dữ liệu doanh thu và chi phí Meta.
       </div>
     );
   }
@@ -502,18 +745,31 @@ function RoasGroupChart({ groups }) {
   return (
     <div className="mt-6 space-y-4">
       {data.map((item) => {
-        const width = Math.max(2, (Math.max(item.roas, 0) / max) * 100);
+        const estimatedRoas = Number(item.estimatedRoas) || 0;
+        const cashRoas = Number(item.roas) || 0;
+        const productName =
+          item.ads?.find((ad) => ad.productName)?.productName ||
+          item.productCode ||
+          "Chưa xác định sản phẩm";
+        const width = Math.max(2, (Math.max(estimatedRoas, 0) / max) * 100);
         return (
           <div
             key={item.key}
-            className="grid grid-cols-[minmax(120px,0.8fr)_minmax(160px,2fr)_58px] items-center gap-3"
+            className="grid grid-cols-[minmax(120px,0.8fr)_minmax(160px,2fr)_minmax(132px,0.7fr)] items-center gap-3"
+            title={`${productName} · ${item.productCode} · ${item.userName}`}
           >
             <div className="min-w-0">
               <p className="truncate text-xs font-extrabold text-slate-700">
-                {item.userName}
+                {productName}
               </p>
-              <p className="mt-0.5 text-[10px] font-bold text-cyan-600">
-                {item.productCode}
+              <p className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[10px] font-semibold">
+                <span className="shrink-0 font-extrabold text-cyan-600">
+                  {item.productCode}
+                </span>
+                <span className="shrink-0 text-slate-300">—</span>
+                <span className="truncate text-slate-400">
+                  {item.userName}
+                </span>
               </p>
             </div>
             <div className="h-3 overflow-hidden rounded-full bg-slate-100">
@@ -522,10 +778,140 @@ function RoasGroupChart({ groups }) {
                 style={{ width: `${width}%` }}
               />
             </div>
-            <p className="text-right text-xs font-extrabold text-slate-800">
-              {item.roas.toFixed(2)}x
-            </p>
+            <div className="space-y-0.5 text-right text-[9px] font-bold text-slate-400">
+              <p>
+                Dự kiến{" "}
+                <strong className="text-xs font-black text-indigo-700">
+                  {estimatedRoas.toFixed(2)}x
+                </strong>
+              </p>
+              <p>
+                Tiền về{" "}
+                <strong className="text-[10px] font-extrabold text-slate-600">
+                  {cashRoas.toFixed(2)}x
+                </strong>
+              </p>
+            </div>
           </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function EmployeeRoasChart({ groups }) {
+  const data = groupProductsByUser(groups)
+    .filter(
+      (employee) =>
+        employee.totalSpend > 0 &&
+        employee.userName &&
+        !/^chưa xác định/i.test(employee.userName),
+    )
+    .sort(
+      (left, right) =>
+        right.estimatedRoas - left.estimatedRoas ||
+        right.estimatedRevenue - left.estimatedRevenue,
+    )
+    .slice(0, 12);
+  const maxRoas = Math.max(
+    ...data.map((employee) => Math.max(employee.estimatedRoas, 0)),
+    1,
+  );
+
+  if (!data.length) {
+    return (
+      <div className="grid min-h-52 place-items-center text-center text-sm text-slate-400">
+        Chưa có nhân viên đủ dữ liệu doanh thu dự kiến và chi phí Meta.
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-5 grid gap-3 lg:grid-cols-2">
+      {data.map((employee, index) => {
+        const width = Math.max(
+          2,
+          (Math.max(employee.estimatedRoas, 0) / maxRoas) * 100,
+        );
+        const tone =
+          employee.estimatedRoas >= 8
+            ? {
+              bar: "from-emerald-400 to-emerald-600",
+              badge: "bg-emerald-50 text-emerald-700 ring-emerald-200",
+            }
+            : employee.estimatedRoas >= 4
+              ? {
+                bar: "from-amber-400 to-orange-500",
+                badge: "bg-amber-50 text-amber-700 ring-amber-200",
+              }
+              : {
+                bar: "from-rose-400 to-rose-600",
+                badge: "bg-rose-50 text-rose-700 ring-rose-200",
+              };
+
+        return (
+          <article
+            key={employee.key}
+            className="rounded-xl border border-slate-100 bg-slate-50/70 p-3.5 transition hover:border-sky-200 hover:bg-white hover:shadow-sm"
+          >
+            <div className="flex items-start gap-3">
+              <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-slate-900 text-[10px] font-black text-white">
+                {index + 1}
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-xs font-extrabold text-slate-800">
+                      {employee.userName}
+                    </p>
+                    <p className="mt-0.5 text-[9px] font-semibold text-slate-400">
+                      {employee.productGroups.length} SKU ·{" "}
+                      {formatNumber(employee.estimatedInvoiceCount)} hóa đơn QC
+                    </p>
+                  </div>
+                  <div className="grid shrink-0 gap-1 text-right">
+                    <span
+                      className={`rounded-lg px-2.5 py-1 text-xs font-black ring-1 ${tone.badge}`}
+                      title="Tổng doanh thu dự kiến / tổng chi Meta gồm VAT của nhân viên"
+                    >
+                      Dự kiến {employee.estimatedRoas.toFixed(2)}x
+                    </span>
+                    <span
+                      className="text-[9px] font-bold text-slate-400"
+                      title="Tổng tiền về từ sổ quỹ / tổng chi Meta gồm VAT của nhân viên"
+                    >
+                      Tiền về {employee.roas.toFixed(2)}x
+                    </span>
+                  </div>
+                </div>
+                <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-200/80">
+                  <div
+                    className={`h-full rounded-full bg-gradient-to-r ${tone.bar}`}
+                    style={{ width: `${width}%` }}
+                    role="progressbar"
+                    aria-label={`ROAS dự kiến của ${employee.userName}`}
+                    aria-valuenow={employee.estimatedRoas}
+                    aria-valuemin="0"
+                    aria-valuemax={maxRoas}
+                  />
+                </div>
+                <div className="mt-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-[9px] font-semibold text-slate-400">
+                  <span>
+                    Doanh thu dự kiến{" "}
+                    <strong className="text-indigo-600">
+                      {formatCompactCurrency(employee.estimatedRevenue)}
+                    </strong>
+                  </span>
+                  <span>
+                    Chi sau VAT{" "}
+                    <strong className="text-slate-600">
+                      {formatCompactCurrency(employee.totalSpend)}
+                    </strong>
+                  </span>
+                </div>
+              </div>
+            </div>
+          </article>
         );
       })}
     </div>
@@ -534,22 +920,22 @@ function RoasGroupChart({ groups }) {
 
 function RevenueSpendChart({ groups }) {
   const data = [...groups]
-    .filter((group) => group.matched && (group.netRevenue || group.totalSpend))
+    .filter((group) => group.estimatedRevenue || group.totalSpend)
     .sort(
       (a, b) =>
-        Math.max(b.netRevenue, b.totalSpend) -
-        Math.max(a.netRevenue, a.totalSpend),
+        Math.max(b.estimatedRevenue, b.totalSpend) -
+        Math.max(a.estimatedRevenue, a.totalSpend),
     )
     .slice(0, 6);
   const maxValue = Math.max(
-    ...data.flatMap((item) => [item.netRevenue, item.totalSpend]),
+    ...data.flatMap((item) => [item.estimatedRevenue, item.totalSpend]),
     1,
   );
 
   if (!data.length) {
     return (
       <div className="grid h-60 place-items-center text-sm text-slate-400">
-        Chưa có dữ liệu doanh số đã ghép.
+        Chưa có dữ liệu doanh thu dự kiến.
       </div>
     );
   }
@@ -562,25 +948,29 @@ function RevenueSpendChart({ groups }) {
             <p className="min-w-0 truncate text-[11px] font-extrabold text-slate-700">
               {item.userName} · {item.productCode}
             </p>
-            <p className="shrink-0 text-[10px] font-bold text-slate-400">
-              {item.roas.toFixed(2)}x
-            </p>
+            <div className="shrink-0 text-right text-[9px] font-bold text-slate-400">
+              <span className="text-indigo-600">
+                Dự kiến {(Number(item.estimatedRoas) || 0).toFixed(2)}x
+              </span>
+              <span className="mx-1 text-slate-300">·</span>
+              <span>Tiền về {item.roas.toFixed(2)}x</span>
+            </div>
           </div>
           <div className="space-y-1.5">
             <div className="flex items-center gap-2">
               <span className="w-12 text-[9px] font-bold uppercase text-cyan-600">
-                Doanh số
+                Dự kiến
               </span>
               <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-slate-100">
                 <div
                   className="h-full rounded-full bg-gradient-to-r from-cyan-400 to-blue-500"
                   style={{
-                    width: `${Math.max(2, (Math.max(item.netRevenue, 0) / maxValue) * 100)}%`,
+                    width: `${Math.max(2, (Math.max(item.estimatedRevenue, 0) / maxValue) * 100)}%`,
                   }}
                 />
               </div>
               <span className="w-16 text-right text-[10px] font-bold text-slate-600">
-                {formatCompactCurrency(item.netRevenue)}
+                {formatCompactCurrency(item.estimatedRevenue)}
               </span>
             </div>
             <div className="flex items-center gap-2">
@@ -764,21 +1154,29 @@ function EfficiencyMatrix({ groups }) {
   const maxSpend = Math.max(...data.map((item) => item.totalSpend), 1);
   const maxPurchases = Math.max(...data.map((item) => item.purchases), 1);
   const maxRoas = Math.max(
-    3.5,
+    5,
     Math.min(
       8,
-      Math.ceil(Math.max(...data.map((item) => Math.max(item.roas, 0)))),
+      Math.ceil(
+        Math.max(
+          ...data.map((item) => Math.max(Number(item.estimatedRoas) || 0, 0)),
+        ),
+      ),
     ),
   );
   const thresholdY =
-    chart.top + plotHeight - (Math.min(2.5, maxRoas) / maxRoas) * plotHeight;
-  const efficientCount = source.filter((item) => item.roas >= 2.5).length;
+    chart.top + plotHeight - (Math.min(4, maxRoas) / maxRoas) * plotHeight;
+  const efficientCount = source.filter(
+    (item) => (Number(item.estimatedRoas) || 0) >= 4,
+  ).length;
   const watchCount = source.filter(
-    (item) => item.roas >= 1 && item.roas < 2.5,
+    (item) =>
+      (Number(item.estimatedRoas) || 0) >= 1 &&
+      (Number(item.estimatedRoas) || 0) < 4,
   ).length;
   const riskCount = source.length - efficientCount - watchCount;
   const colorFor = (roas) =>
-    roas >= 2.5 ? "#10b981" : roas >= 1 ? "#f59e0b" : "#f43f5e";
+    roas >= 4 ? "#10b981" : roas >= 1 ? "#f59e0b" : "#f43f5e";
 
   return (
     <div className="mt-4 grid items-start gap-4 lg:grid-cols-[minmax(0,1.45fr)_minmax(270px,0.55fr)]">
@@ -787,7 +1185,7 @@ function EfficiencyMatrix({ groups }) {
           viewBox={`0 0 ${chart.width} ${chart.height}`}
           className="h-[220px] w-full"
           role="img"
-          aria-label="Biểu đồ tương quan chi phí Meta sau VAT và ROAS"
+          aria-label="Biểu đồ tương quan chi phí Meta gồm VAT và ROAS doanh thu dự kiến"
         >
           <rect
             x={chart.left}
@@ -867,23 +1265,24 @@ function EfficiencyMatrix({ groups }) {
             fontSize="9"
             fontWeight="800"
           >
-            Mốc 2.5x
+            Mốc 4x
           </text>
 
           {data.map((item, index) => {
+            const estimatedRoas = Number(item.estimatedRoas) || 0;
             const x = chart.left + (item.totalSpend / maxSpend) * plotWidth;
             const y =
               chart.top +
               plotHeight -
-              (Math.min(Math.max(item.roas, 0), maxRoas) / maxRoas) *
-                plotHeight;
+              (Math.min(Math.max(estimatedRoas, 0), maxRoas) / maxRoas) *
+              plotHeight;
             const radius =
               8 + Math.sqrt(Math.max(item.purchases, 0) / maxPurchases) * 5;
-            const color = colorFor(item.roas);
+            const color = colorFor(estimatedRoas);
             return (
               <g key={item.key}>
                 <title>
-                  {`${item.userName} · ${item.productCode}\nChi sau VAT: ${formatCurrency(item.totalSpend)}\nROAS: ${item.roas.toFixed(2)}x\nLượt mua: ${formatNumber(item.purchases)}`}
+                  {`${item.userName} · ${item.productCode}\nChi gồm VAT: ${formatCurrency(item.totalSpend)}\nROAS doanh thu dự kiến: ${estimatedRoas.toFixed(2)}x\nROAS tiền về: ${item.roas.toFixed(2)}x\nLượt mua: ${formatNumber(item.purchases)}`}
                 </title>
                 <circle
                   cx={x}
@@ -935,16 +1334,23 @@ function EfficiencyMatrix({ groups }) {
             >
               <span
                 className="grid h-5 w-5 shrink-0 place-items-center rounded-full text-[8px] font-extrabold text-white"
-                style={{ backgroundColor: colorFor(item.roas) }}
+                style={{
+                  backgroundColor: colorFor(Number(item.estimatedRoas) || 0),
+                }}
               >
                 {index + 1}
               </span>
               <p className="min-w-0 flex-1 truncate text-[9px] font-bold text-slate-600">
                 {item.userName} · {item.productCode}
               </p>
-              <p className="shrink-0 text-[9px] font-extrabold text-slate-800">
-                {item.roas.toFixed(2)}x
-              </p>
+              <div className="shrink-0 text-right text-[8px] font-bold">
+                <p className="text-indigo-700">
+                  Dự kiến {(Number(item.estimatedRoas) || 0).toFixed(2)}x
+                </p>
+                <p className="text-slate-400">
+                  Tiền về {item.roas.toFixed(2)}x
+                </p>
+              </div>
             </div>
           ))}
         </div>
@@ -971,22 +1377,57 @@ export default function RoasDashboard() {
   const [retailerName, setRetailerName] = useState("nnvtv");
   const [accountId, setAccountId] = useState("");
   const [report, setReport] = useState(null);
+  const [companyOverview, setCompanyOverview] = useState(null);
   const [query, setQuery] = useState("");
-  const [sortBy, setSortBy] = useState("roas");
+  const [sortBy, setSortBy] = useState("estimatedRoas");
   const [onlyEfficient, setOnlyEfficient] = useState(false);
   const [expandedKeys, setExpandedKeys] = useState(() => new Set());
   const [loadingOptions, setLoadingOptions] = useState(true);
   const [loadingReport, setLoadingReport] = useState(false);
+  const [loadingCompanyOverview, setLoadingCompanyOverview] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState("");
+  const [companyOverviewError, setCompanyOverviewError] = useState("");
   const [lastUpdated, setLastUpdated] = useState("");
+  const companyOverviewRequestId = useRef(0);
+  const reportRequests = useRef(new Map());
+
+  const fetchRoasReport = useCallback(
+    ({ requestedAccountId, requestedRetailerName, since, until }) => {
+      const requestKey = [
+        normalizedAdAccountId({ id: requestedAccountId }),
+        requestedRetailerName,
+        since,
+        until,
+      ].join(":");
+      const pendingRequest = reportRequests.current.get(requestKey);
+      if (pendingRequest) return pendingRequest;
+
+      const request = api
+        .get("/roas/report", {
+          params: {
+            accountId: requestedAccountId,
+            retailerName: requestedRetailerName,
+            since,
+            until,
+          },
+        })
+        .then((response) => response.data || null)
+        .finally(() => reportRequests.current.delete(requestKey));
+      reportRequests.current.set(requestKey, request);
+      return request;
+    },
+    [api],
+  );
 
   const loadOptions = useCallback(async () => {
     setLoadingOptions(true);
     try {
       const response = await api.get("/roas/options");
       const data = response.data || {};
-      const accounts = Array.isArray(data.accounts) ? data.accounts : [];
+      const accounts = Array.isArray(data.accounts)
+        ? data.accounts.filter(isAllowedAdAccount)
+        : [];
       const retailers = Array.isArray(data.retailers) ? data.retailers : [];
       const months = Array.isArray(data.months) ? data.months : [];
       setOptions({
@@ -1000,8 +1441,9 @@ export default function RoasDashboard() {
       setAccountId((current) => {
         const selectedAccount =
           accounts.find((item) => item.id === current) || accounts[0];
-        if (selectedAccount?.suggestedRetailerName) {
-          setRetailerName(selectedAccount.suggestedRetailerName);
+        const selectedRetailerName = retailerForAdAccount(selectedAccount);
+        if (selectedRetailerName) {
+          setRetailerName(selectedRetailerName);
         } else {
           setRetailerName((selectedRetailer) =>
             retailers.includes(selectedRetailer)
@@ -1019,7 +1461,7 @@ export default function RoasDashboard() {
     } catch (requestError) {
       setError(
         requestError.response?.data?.message ||
-          "Không lấy được bộ lọc báo cáo ROAS.",
+        "Không lấy được bộ lọc báo cáo ROAS.",
       );
     } finally {
       setLoadingOptions(false);
@@ -1040,20 +1482,17 @@ export default function RoasDashboard() {
     setLoadingReport(true);
     setError("");
     try {
-      const response = await api.get("/roas/report", {
-        params: {
-          accountId,
-          retailerName,
-          since: dateRange.since,
-          until: dateRange.until,
-        },
+      const data = await fetchRoasReport({
+        requestedAccountId: accountId,
+        requestedRetailerName: retailerName,
+        since: dateRange.since,
+        until: dateRange.until,
       });
-      const data = response.data || null;
       setReport(data);
       if (data?.retailerAutoMatched && data.retailerName !== retailerName) {
         setRetailerName(data.retailerName);
       }
-      setExpandedKeys(new Set((data?.groups || []).map((group) => group.key)));
+      setExpandedKeys(new Set());
       setLastUpdated(
         new Date().toLocaleTimeString("vi-VN", {
           hour: "2-digit",
@@ -1068,7 +1507,75 @@ export default function RoasDashboard() {
     } finally {
       setLoadingReport(false);
     }
-  }, [accountId, api, dateRange.since, dateRange.until, retailerName]);
+  }, [
+    accountId,
+    dateRange.since,
+    dateRange.until,
+    fetchRoasReport,
+    retailerName,
+  ]);
+
+  const loadCompanyOverview = useCallback(async () => {
+    const requestId = companyOverviewRequestId.current + 1;
+    companyOverviewRequestId.current = requestId;
+    const accounts = [...ALLOWED_AD_ACCOUNT_IDS]
+      .map((allowedId) =>
+        options.accounts.find(
+          (account) => normalizedAdAccountId(account) === allowedId,
+        ),
+      )
+      .filter(Boolean);
+
+    if (
+      accounts.length !== ALLOWED_AD_ACCOUNT_IDS.size ||
+      !dateRange.since ||
+      !dateRange.until ||
+      dateRange.since > dateRange.until
+    ) {
+      setLoadingCompanyOverview(false);
+      setCompanyOverview(null);
+      setCompanyOverviewError(
+        accounts.length
+          ? `Chỉ truy cập được ${accounts.length}/${ALLOWED_AD_ACCOUNT_IDS.size} công ty nên chưa thể tính số tổng.`
+          : "Chưa có đủ tài khoản Meta để tính số tổng 4 công ty.",
+      );
+      return;
+    }
+
+    setLoadingCompanyOverview(true);
+    setCompanyOverview(null);
+    setCompanyOverviewError("");
+    try {
+      const reports = await Promise.all(
+        accounts.map(async (account) => {
+          return fetchRoasReport({
+            requestedAccountId: account.id,
+            requestedRetailerName: retailerForAdAccount(account),
+            since: dateRange.since,
+            until: dateRange.until,
+          });
+        }),
+      );
+      if (companyOverviewRequestId.current !== requestId) return;
+      setCompanyOverview(summarizeCompanyReports(reports));
+    } catch (requestError) {
+      if (companyOverviewRequestId.current !== requestId) return;
+      setCompanyOverview(null);
+      setCompanyOverviewError(
+        requestError.response?.data?.message ||
+        "Không tổng hợp được dữ liệu của đủ 4 công ty.",
+      );
+    } finally {
+      if (companyOverviewRequestId.current === requestId) {
+        setLoadingCompanyOverview(false);
+      }
+    }
+  }, [
+    dateRange.since,
+    dateRange.until,
+    fetchRoasReport,
+    options.accounts,
+  ]);
 
   useEffect(() => {
     void loadOptions();
@@ -1077,6 +1584,10 @@ export default function RoasDashboard() {
   useEffect(() => {
     if (!loadingOptions && accountId) void loadReport();
   }, [accountId, loadReport, loadingOptions, retailerName]);
+
+  useEffect(() => {
+    if (!loadingOptions) void loadCompanyOverview();
+  }, [loadCompanyOverview, loadingOptions]);
 
   const groups = useMemo(() => {
     const keyword = query.trim().toLowerCase();
@@ -1095,7 +1606,10 @@ export default function RoasDashboard() {
           .toLowerCase();
         return !keyword || searchable.includes(keyword);
       })
-      .filter((group) => !onlyEfficient || group.roas >= 2.5)
+      .filter(
+        (group) =>
+          !onlyEfficient || (Number(group.estimatedRoas) || 0) >= 2.5,
+      )
       .sort((a, b) => {
         if (sortBy === "estimatedRoas")
           return (b.estimatedRoas || 0) - (a.estimatedRoas || 0);
@@ -1124,6 +1638,7 @@ export default function RoasDashboard() {
   );
 
   const summary = report?.summary || EMPTY_SUMMARY;
+  const allCompanies = companyOverview || EMPTY_COMPANY_OVERVIEW;
   const unmatchedAds = useMemo(() => {
     const groupedAdIds = new Set(
       (report?.groups || [])
@@ -1140,6 +1655,20 @@ export default function RoasDashboard() {
       const next = new Set(current);
       if (next.has(key)) next.delete(key);
       else next.add(key);
+      return next;
+    });
+  };
+
+  const toggleUserGroup = (userGroup) => {
+    setExpandedKeys((current) => {
+      const next = new Set(current);
+      const shouldExpand = !next.has(userGroup.key);
+
+      if (shouldExpand) next.add(userGroup.key);
+      else next.delete(userGroup.key);
+
+      // Mỗi lần đổi trạng thái nhân viên, thu các SKU con để chỉ mở từng cấp.
+      userGroup.productGroups.forEach((group) => next.delete(group.key));
       return next;
     });
   };
@@ -1188,22 +1717,52 @@ export default function RoasDashboard() {
     const nextAccountId = event.target.value;
     const account = options.accounts.find((item) => item.id === nextAccountId);
     setAccountId(nextAccountId);
-    if (account?.suggestedRetailerName)
-      setRetailerName(account.suggestedRetailerName);
+    const nextRetailerName = retailerForAdAccount(account);
+    if (nextRetailerName) setRetailerName(nextRetailerName);
   };
 
   const handleExport = async () => {
-    if (exporting || (!groups.length && !unmatchedAds.length)) return;
+    if (exporting || !report || !options.accounts.length) return;
     setExporting(true);
     try {
       const [{ default: ExcelJS }, { saveAs }] = await Promise.all([
         import("exceljs"),
         import("file-saver"),
       ]);
+      const companyReports = await Promise.all(
+        options.accounts.map(async (account) => {
+          const companyRetailerName = retailerForAdAccount(account);
+          const isCurrentReport =
+            account.id === accountId &&
+            report &&
+            report.retailerName === companyRetailerName;
+          const companyReport = isCurrentReport
+            ? report
+            : (
+              await api.get("/roas/report", {
+                params: {
+                  accountId: account.id,
+                  retailerName: companyRetailerName,
+                  since: dateRange.since,
+                  until: dateRange.until,
+                },
+              })
+            ).data;
+          return {
+            report: companyReport,
+            retailerName: companyReport?.retailerName || companyRetailerName,
+            retailerLabel:
+              RETAILER_LABELS[
+              companyReport?.retailerName || companyRetailerName
+              ] || companyRetailerName,
+          };
+        }),
+      );
       await downloadRoasWorkbook(ExcelJS, saveAs, {
         groups,
         unmatchedAds,
         report,
+        companyReports,
         dateRange,
         retailerName,
         retailerLabel: RETAILER_LABELS[retailerName] || retailerName,
@@ -1218,6 +1777,9 @@ export default function RoasDashboard() {
 
   return (
     <div className="min-h-full w-full bg-[radial-gradient(circle_at_top_left,rgba(14,165,233,0.14),transparent_34%),radial-gradient(circle_at_top_right,rgba(16,185,129,0.10),transparent_28%),linear-gradient(180deg,#f8fbff_0%,#f3f8ff_46%,#eef6f4_100%)] font-display text-slate-900">
+      {(loadingOptions || loadingReport || loadingCompanyOverview) && (
+        <PageLoadingScreen message="Đang tải dữ liệu..." overlay />
+      )}
       <div className="mx-auto max-w-[1600px] px-3.5 py-4 sm:px-6 sm:py-6">
         <header className="sticky top-2 z-40 overflow-hidden rounded-[22px] border border-slate-400/20 bg-white/90 p-4 shadow-[0_18px_55px_rgba(15,23,42,0.09)] backdrop-blur-xl sm:rounded-[26px] sm:p-5">
           <div className="pointer-events-none absolute -left-20 -top-24 h-52 w-52 rounded-full bg-sky-200/40 blur-3xl" />
@@ -1267,13 +1829,17 @@ export default function RoasDashboard() {
               <button
                 type="button"
                 onClick={handleRefresh}
-                disabled={loadingOptions || loadingReport}
+                disabled={
+                  loadingOptions || loadingReport || loadingCompanyOverview
+                }
                 className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 text-xs font-extrabold text-slate-600 shadow-sm transition hover:border-sky-200 hover:bg-sky-50 hover:text-sky-700 disabled:opacity-60"
               >
                 <RefreshCw
                   size={15}
                   className={
-                    loadingOptions || loadingReport ? "animate-spin" : ""
+                    loadingOptions || loadingReport || loadingCompanyOverview
+                      ? "animate-spin"
+                      : ""
                   }
                 />
                 <span className="hidden sm:inline">Làm mới</span>
@@ -1281,7 +1847,7 @@ export default function RoasDashboard() {
               <button
                 type="button"
                 onClick={handleExport}
-                disabled={exporting || (!groups.length && !unmatchedAds.length)}
+                disabled={exporting || !report || !options.accounts.length}
                 className="inline-flex h-10 items-center gap-2 rounded-xl bg-slate-950 px-4 text-xs font-extrabold text-white shadow-lg shadow-slate-300/70 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {exporting ? (
@@ -1417,6 +1983,104 @@ export default function RoasDashboard() {
           </div>
         )}
 
+        <section className="mt-4 overflow-hidden rounded-[22px] border border-indigo-200/70 border-t-2 border-t-indigo-500 bg-white/90 p-4 shadow-[0_14px_38px_rgba(15,23,42,0.07)] backdrop-blur-xl sm:p-5">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="grid h-9 w-9 place-items-center rounded-xl bg-indigo-50 text-indigo-600">
+                  <TrendingUp size={17} />
+                </span>
+                <div>
+                  <p className="text-[10px] font-extrabold uppercase tracking-[0.18em] text-indigo-600">
+                    Toàn hệ thống
+                  </p>
+                  <h2 className="mt-0.5 text-base font-black text-slate-950">
+                    Tổng quan 4 công ty
+                  </h2>
+                </div>
+              </div>
+            </div>
+            <span className="inline-flex w-fit items-center gap-1.5 rounded-lg bg-slate-50 px-3 py-2 text-[10px] font-bold text-slate-500 ring-1 ring-slate-200/70">
+              {loadingCompanyOverview ? (
+                <Loader2 size={13} className="animate-spin text-indigo-500" />
+              ) : (
+                <Check
+                  size={13}
+                  className={
+                    companyOverview ? "text-emerald-500" : "text-amber-500"
+                  }
+                />
+              )}
+              {loadingCompanyOverview
+                ? "Đang tổng hợp 4 công ty..."
+                : companyOverview
+                  ? `${allCompanies.companyCount}/4 công ty`
+                  : "Chưa đủ dữ liệu"}
+            </span>
+          </div>
+
+          {companyOverviewError && !loadingCompanyOverview ? (
+            <div className="mt-4 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-3 text-[11px] font-semibold text-amber-800">
+              <AlertTriangle size={15} className="mt-0.5 shrink-0" />
+              {companyOverviewError}
+            </div>
+          ) : (
+            <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+              <MetricCard
+                title="Số bài quảng cáo"
+                value={
+                  loadingCompanyOverview
+                    ? "..."
+                    : formatNumber(allCompanies.adCount)
+                }
+                icon={Megaphone}
+                tone="sky"
+              />
+              <MetricCard
+                title="Chi phí đã gồm VAT"
+                value={
+                  loadingCompanyOverview
+                    ? "..."
+                    : formatCompactCurrency(allCompanies.totalSpend)
+                }
+                icon={CircleDollarSign}
+                tone="amber"
+              />
+              <MetricCard
+                title="Doanh thu dự kiến"
+                value={
+                  loadingCompanyOverview
+                    ? "..."
+                    : formatCompactCurrency(allCompanies.estimatedRevenue)
+                }
+                icon={BadgeDollarSign}
+                tone="emerald"
+              />
+              <MetricCard
+                title="ROAS tổng dự kiến"
+                value={
+                  loadingCompanyOverview
+                    ? "..."
+                    : `${allCompanies.estimatedRoas.toFixed(2)}x`
+                }
+                secondary={`Tiền về ${allCompanies.roas.toFixed(2)}x`}
+                icon={TrendingUp}
+                tone="violet"
+              />
+              <MetricCard
+                title="CTR tổng"
+                value={
+                  loadingCompanyOverview
+                    ? "..."
+                    : formatPercent(allCompanies.ctr)
+                }
+                icon={MousePointerClick}
+                tone="cyan"
+              />
+            </div>
+          )}
+        </section>
+
         <section className="relative z-30 mb-4 mt-3 flex flex-col gap-3 rounded-[20px] border border-slate-400/20 bg-white/90 p-3 shadow-[0_12px_34px_rgba(15,23,42,0.08)] backdrop-blur-xl lg:flex-row lg:items-center xl:sticky xl:top-[158px]">
           <div className="flex flex-1 flex-wrap items-center gap-2">
             <div className="relative min-w-[210px] flex-1 lg:max-w-[330px]">
@@ -1463,7 +2127,7 @@ export default function RoasDashboard() {
               className={`inline-flex h-10 items-center gap-2 rounded-xl border px-3 text-xs font-extrabold transition ${onlyEfficient ? "border-slate-950 bg-slate-950 text-white shadow-md shadow-slate-200" : "border-slate-200 bg-white text-slate-600 hover:border-sky-200 hover:bg-sky-50 hover:text-sky-700"}`}
             >
               <Filter size={15} />{" "}
-              {onlyEfficient ? "ROAS ≥ 2.5x" : "Lọc hiệu quả"}
+              {onlyEfficient ? "ROAS dự kiến ≥ 2.5x" : "Lọc hiệu quả"}
             </button>
           </div>
           <p className="flex w-fit items-center gap-1.5 rounded-full bg-slate-50 px-3 py-1.5 text-[10px] font-bold text-slate-400 ring-1 ring-slate-200/70">
@@ -1477,51 +2141,44 @@ export default function RoasDashboard() {
 
         <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-7">
           <MetricCard
-            title="ROAS sau VAT"
+            title="ROAS tiền về"
             value={`${summary.roas.toFixed(2)}x`}
-            helper="Doanh số đã ghép / toàn bộ chi Meta sau VAT"
             icon={TrendingUp}
             tone="violet"
           />
           <MetricCard
-            title="ROAS ước tính"
+            title="ROAS doanh thu dự kiến"
             value={`${(Number(summary.estimatedRoas) || 0).toFixed(2)}x`}
-            helper="Doanh số hóa đơn backup / toàn bộ chi Meta sau VAT"
             icon={TrendingUp}
             tone="sky"
           />
           <MetricCard
-            title="Doanh số ròng"
+            title="Tiền về sổ quỹ"
             value={formatCompactCurrency(summary.netRevenue)}
-            helper={`Phiếu thu ${formatCompactCurrency(summary.receiptAmount)} − phiếu chi ${formatCompactCurrency(summary.expenseAmount)}`}
             icon={BadgeDollarSign}
             tone="cyan"
           />
           <MetricCard
-            title="Doanh số ước tính"
+            title="Doanh thu dự kiến"
             value={formatCompactCurrency(summary.estimatedRevenue)}
-            helper={`${formatNumber(summary.estimatedInvoiceCount)} hóa đơn QC đã ghép theo nhân viên và SKU`}
             icon={BadgeDollarSign}
             tone="emerald"
           />
           <MetricCard
             title="Chi Meta gốc"
             value={formatCompactCurrency(summary.spend)}
-            helper="Số chi tiêu thực Meta trả về, chưa gồm VAT"
             icon={CircleDollarSign}
             tone="sky"
           />
           <MetricCard
             title="Chi Meta gồm VAT"
             value={formatCompactCurrency(summary.totalSpend)}
-            helper={`Chi gốc + VAT 10% (${formatCompactCurrency(summary.vat)})`}
             icon={CircleDollarSign}
             tone="amber"
           />
           <MetricCard
             title="Kết quả – Lượt mua"
             value={formatNumber(summary.purchases)}
-            helper={`Chi phí gốc Meta trên mỗi kết quả ${formatCompactCurrency(summary.costPerPurchase)}`}
             icon={ShoppingBag}
             tone="emerald"
           />
@@ -1532,10 +2189,10 @@ export default function RoasDashboard() {
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <h2 className="text-base font-extrabold text-slate-900">
-                  ROAS theo nhân viên và sản phẩm
+                  ROAS theo sản phẩm
                 </h2>
                 <p className="mt-1 text-xs text-slate-400">
-                  Top nhóm đã ghép được giữa sổ quỹ và bài quảng cáo Meta
+                  Tên sản phẩm là thông tin chính; tên nhân viên hiển thị bên dưới
                 </p>
               </div>
               <span className="inline-flex w-fit items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-[11px] font-bold text-slate-500">
@@ -1599,9 +2256,9 @@ export default function RoasDashboard() {
                     Quy tắc tính
                   </p>
                   <p className="mt-1 text-[11px] leading-5 text-violet-700">
-                    Tổng chi và ROAS dùng chi Meta sau VAT 10%. Chi phí trên mỗi
+                    Tổng chi và cả hai ROAS dùng chi Meta sau VAT 10%. Chi phí trên mỗi
                     kết quả và mỗi người liên hệ dùng số gốc Meta, không gồm
-                    VAT. Doanh số ước tính chỉ lấy hóa đơn có mô tả bắt đầu bằng
+                    VAT. Doanh thu dự kiến chỉ lấy hóa đơn có mô tả bắt đầu bằng
                     QC và ghép theo nhân viên + SKU trong mô tả; người gửi trả
                     phí ĐTGH thì trừ phí, người nhận trả thì giữ nguyên tổng
                     tiền.
@@ -1610,6 +2267,42 @@ export default function RoasDashboard() {
               </div>
             </div>
           </article>
+        </section>
+
+        <section className="mt-4 rounded-[22px] border border-slate-400/20 border-t-2 border-t-indigo-500 bg-white/90 p-4 shadow-[0_14px_38px_rgba(15,23,42,0.06)] backdrop-blur-xl sm:p-5">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="grid h-9 w-9 place-items-center rounded-xl bg-indigo-50 text-indigo-600">
+                  <Users size={17} />
+                </span>
+                <div>
+                  <h2 className="text-base font-extrabold text-slate-900">
+                    ROAS theo nhân viên
+                  </h2>
+                  <p className="mt-0.5 text-xs text-slate-400">
+                    ROAS dự kiến = tổng doanh thu dự kiến các bài / tổng chi
+                    Meta gồm VAT các bài của nhân viên
+                  </p>
+                </div>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 text-[9px] font-extrabold uppercase tracking-wide">
+              <span className="mr-1 text-slate-400">
+                Màu theo ROAS dự kiến:
+              </span>
+              <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-emerald-700 ring-1 ring-emerald-200">
+                Từ 8x
+              </span>
+              <span className="rounded-full bg-amber-50 px-2.5 py-1 text-amber-700 ring-1 ring-amber-200">
+                4x – dưới 8x
+              </span>
+              <span className="rounded-full bg-rose-50 px-2.5 py-1 text-rose-700 ring-1 ring-rose-200">
+                Dưới 4x
+              </span>
+            </div>
+          </div>
+          <EmployeeRoasChart groups={report?.groups || []} />
         </section>
 
         <section className="mt-6">
@@ -1645,7 +2338,7 @@ export default function RoasDashboard() {
                     Doanh số và chi phí
                   </h2>
                   <p className="mt-1 text-[11px] text-slate-400">
-                    So sánh doanh số ròng với chi Meta sau VAT
+                    So sánh doanh thu dự kiến với chi Meta gồm VAT
                   </p>
                 </div>
                 <span className="grid h-9 w-9 place-items-center rounded-xl bg-cyan-50 text-cyan-600">
@@ -1655,7 +2348,7 @@ export default function RoasDashboard() {
               <div className="relative mt-3 flex items-center gap-4 text-[9px] font-bold uppercase tracking-wide text-slate-400">
                 <span className="flex items-center gap-1.5">
                   <span className="h-2 w-4 rounded-full bg-gradient-to-r from-cyan-400 to-blue-500" />
-                  Doanh số
+                  Doanh thu dự kiến
                 </span>
                 <span className="flex items-center gap-1.5">
                   <span className="h-2 w-4 rounded-full bg-gradient-to-r from-amber-400 to-orange-500" />
@@ -1711,15 +2404,15 @@ export default function RoasDashboard() {
 
         {(summary.unmatchedAdCount > 0 ||
           summary.unmatchedCashflowGroupCount > 0) && (
-          <div className="mt-5 rounded-2xl border border-orange-200 bg-orange-50 px-4 py-3 text-xs text-orange-800">
-            <strong>
-              {summary.unmatchedAdCount} bài Meta và{" "}
-              {summary.unmatchedCashflowGroupCount} nhóm sổ quỹ chưa ghép được.
-            </strong>{" "}
-            Chi phí của bài chưa ghép ({formatCurrency(summary.unmatchedSpend)})
-            vẫn được tính vào tổng chi Meta và ROAS.
-          </div>
-        )}
+            <div className="mt-5 rounded-2xl border border-orange-200 bg-orange-50 px-4 py-3 text-xs text-orange-800">
+              <strong>
+                {summary.unmatchedAdCount} bài Meta và{" "}
+                {summary.unmatchedCashflowGroupCount} nhóm sổ quỹ chưa ghép được.
+              </strong>{" "}
+              Chi phí của bài chưa ghép ({formatCurrency(summary.unmatchedSpend)})
+              vẫn được tính vào tổng chi Meta và cả hai ROAS tổng.
+            </div>
+          )}
 
         <section className="mt-5 overflow-hidden rounded-[22px] border border-slate-400/20 border-t-2 border-t-slate-900 bg-white/90 shadow-[0_14px_38px_rgba(15,23,42,0.06)] backdrop-blur-xl">
           <div className="flex flex-col gap-4 border-b border-slate-100 p-5 sm:flex-row sm:items-center sm:justify-between sm:px-6">
@@ -1742,11 +2435,13 @@ export default function RoasDashboard() {
                 onChange={(event) => setSortBy(event.target.value)}
                 className="appearance-none rounded-lg border border-slate-200 bg-white py-2 pl-3 pr-8 text-[11px] font-bold text-slate-600 outline-none focus:border-cyan-400"
               >
-                <option value="roas">ROAS cao nhất</option>
-                <option value="estimatedRoas">ROAS ước tính cao nhất</option>
-                <option value="revenue">Doanh số cao nhất</option>
+                <option value="estimatedRoas">
+                  ROAS doanh thu dự kiến cao nhất
+                </option>
+                <option value="roas">ROAS tiền về cao nhất</option>
+                <option value="revenue">Tiền về sổ quỹ cao nhất</option>
                 <option value="estimatedRevenue">
-                  Doanh số ước tính cao nhất
+                  Doanh thu dự kiến cao nhất
                 </option>
                 <option value="spend">Tổng chi cao nhất</option>
                 <option value="purchases">Lượt mua cao nhất</option>
@@ -1766,9 +2461,9 @@ export default function RoasDashboard() {
                   </th>
                   <th className="px-4 py-3.5 text-right">Phiếu thu</th>
                   <th className="px-4 py-3.5 text-right">Phiếu chi</th>
-                  <th className="px-4 py-3.5 text-right">Doanh số ròng</th>
+                  <th className="px-4 py-3.5 text-right">Tiền về sổ quỹ</th>
                   <th className="px-4 py-3.5 text-right">
-                    Doanh số ước tính
+                    Doanh thu dự kiến
                     <span className="mt-0.5 block text-[9px] normal-case tracking-normal text-slate-300">
                       Hóa đơn backup · đã xử lý phí ĐTGH
                     </span>
@@ -1785,11 +2480,16 @@ export default function RoasDashboard() {
                       Chi gốc + VAT 10%
                     </span>
                   </th>
-                  <th className="px-4 py-3.5 text-right">ROAS</th>
                   <th className="px-4 py-3.5 text-right">
-                    ROAS ước tính
+                    ROAS tiền về
                     <span className="mt-0.5 block text-[9px] normal-case tracking-normal text-slate-300">
-                      Doanh số ước tính / chi sau VAT
+                      Tiền về sổ quỹ / chi gồm VAT
+                    </span>
+                  </th>
+                  <th className="px-4 py-3.5 text-right">
+                    ROAS doanh thu dự kiến
+                    <span className="mt-0.5 block text-[9px] normal-case tracking-normal text-slate-300">
+                      Doanh thu dự kiến / chi gồm VAT
                     </span>
                   </th>
                   <th className="px-4 py-3.5 text-right">
@@ -1837,7 +2537,7 @@ export default function RoasDashboard() {
                   return (
                     <Fragment key={userGroup.key}>
                       <tr
-                        onClick={() => toggleGroup(userGroup.key)}
+                        onClick={() => toggleUserGroup(userGroup)}
                         className="cursor-pointer bg-cyan-50/70 font-bold transition-colors hover:bg-cyan-100/60"
                         title="Bấm vào hàng để xem chi tiết SKU"
                       >
@@ -1846,7 +2546,7 @@ export default function RoasDashboard() {
                             type="button"
                             onClick={(event) => {
                               event.stopPropagation();
-                              toggleGroup(userGroup.key);
+                              toggleUserGroup(userGroup);
                             }}
                             className="flex w-full items-center gap-3 text-left"
                           >
@@ -1960,13 +2660,16 @@ export default function RoasDashboard() {
                                         <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-slate-100 text-slate-500">
                                           <Megaphone size={14} />
                                         </span>
-                                        <div className="min-w-0">
+                                        <div className="min-w-0 flex-1">
                                           <p className="truncate text-xs font-bold text-slate-700">
                                             {ad.title}
                                           </p>
-                                          <p className="mt-1 truncate text-[10px] text-slate-400">
-                                            {ad.campaignName} · {ad.adsetName}
-                                          </p>
+                                          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
+                                            <p className="min-w-0 truncate text-[10px] text-slate-400">
+                                              {ad.campaignName} · {ad.adsetName}
+                                            </p>
+                                            <AdDeliveryStatus ad={ad} />
+                                          </div>
                                         </div>
                                       </div>
                                     </td>
@@ -2132,9 +2835,12 @@ export default function RoasDashboard() {
                         <p className="truncate text-xs font-extrabold text-slate-800">
                           {ad.title}
                         </p>
-                        <p className="mt-1 truncate text-[10px] text-slate-400">
-                          {ad.campaignName} · {ad.adsetName}
-                        </p>
+                        <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
+                          <p className="min-w-0 truncate text-[10px] text-slate-400">
+                            {ad.campaignName} · {ad.adsetName}
+                          </p>
+                          <AdDeliveryStatus ad={ad} />
+                        </div>
                       </td>
                       <td className="px-4 py-4">
                         <p className="text-xs font-extrabold text-cyan-700">
