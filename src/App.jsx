@@ -97,7 +97,6 @@ const NotificationManager = lazy(
   () => import("./components/NotificationManager"),
 );
 const AccountSecurity = lazy(() => import("./components/security/AccountSecurity"));
-<<<<<<< HEAD
 const PayrollManager = lazy(() => import("./components/PayrollManager"));
 const KpiManager = lazy(() => import("./components/KpiManager"));
 const SalaryAdvanceManager = lazy(
@@ -277,7 +276,7 @@ const adminRoutes = [
   },
   {
     path: "roas",
-    screenId: "business_stats",
+    screenId: "roas_dashboard",
     element: <RoasDashboard />,
   },
   {
@@ -451,11 +450,24 @@ function LoginRoute() {
 }
 
 function AppLoader() {
-  return (
-    <div className="min-h-screen grid place-items-center bg-slate-50 text-sm font-medium text-slate-500">
-      Đang tải...
-    </div>
-  );
+  return <PageLoadingScreen message="Đang tải dữ liệu..." />;
+}
+
+function RouteTransitionLoader() {
+  const location = useLocation();
+  const previousPath = useRef(location.pathname);
+  const [visible, setVisible] = useState(false);
+
+  useLayoutEffect(() => {
+    if (previousPath.current === location.pathname) return undefined;
+    previousPath.current = location.pathname;
+    setVisible(true);
+    const timer = window.setTimeout(() => setVisible(false), 420);
+    return () => window.clearTimeout(timer);
+  }, [location.pathname]);
+
+  if (!visible) return null;
+  return <PageLoadingScreen message="Đang tải dữ liệu..." overlay />;
 }
 
 function AdminDefaultRedirect() {
@@ -526,530 +538,84 @@ export default function App() {
 
   return (
     <ErrorBoundary>
+      <RouteTransitionLoader />
       <Suspense fallback={<AppLoader />}>
         <Routes>
           <Route path="/" element={<HomeRoute />} />
-=======
-const PayrollManager = lazy(() => import("./components/PayrollManager"));
-const KpiManager = lazy(() => import("./components/KpiManager"));
-const SalaryAdvanceManager = lazy(
-  () => import("./components/SalaryAdvanceManager"),
-);
-const RouteManager = lazy(() => import("./components/RouteManager"));
-const AttendancePage = lazy(
-  () => import("./components/attendance/AttendancePage"),
-);
-const AttendanceShiftManager = lazy(
-  () => import("./components/attendance/AttendanceShiftManager"),
-);
-const WorkLocationManager = lazy(
-  () => import("./components/attendance/WorkLocationManager"),
-);
-const AttendanceManager = lazy(
-  () => import("./components/attendance/AttendanceManager"),
-);
-const ApprovedLeaveViewer = lazy(
-  () => import("./components/attendance/ApprovedLeaveViewer"),
-);
-const StandaloneAttendance = lazy(
-  () => import("./components/attendance/StandaloneAttendance"),
-);
-const DuaSapPublicPage = lazy(
-  () => import("./components/duasap/DuaSapPublicPage"),
-);
-const DuaSapDetailPage = lazy(
-  () => import("./components/duasap/DuaSapDetailPage"),
-);
-const DuaSapManager = lazy(() => import("./components/duasap/DuaSapManager"));
-
-class ErrorBoundary extends Component {
-            constructor(props) {
-            super(props);
-          this.state = {hasError: false, error: null };
-  }
-          static getDerivedStateFromError(error) {
-    return {hasError: true, error };
-  }
-          componentDidCatch(error, info) {
-            console.error("App ErrorBoundary caught:", error, info);
-  }
-          render() {
-    if (this.state.hasError) {
-      return (
-          <div
-            style={{
-              minHeight: "100vh",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              background: "#f0fdf4",
-              padding: "16px",
-            }}
-          >
-            <div
-              style={{
-                background: "#fff",
-                borderRadius: "16px",
-                padding: "32px",
-                maxWidth: "360px",
-                width: "100%",
-                textAlign: "center",
-                boxShadow: "0 4px 20px rgba(0,0,0,0.08)",
-              }}
-            >
-              <p style={{ fontSize: "32px", marginBottom: "12px" }}>⚠️</p>
-              <p
-                style={{
-                  color: "#374151",
-                  fontSize: "15px",
-                  fontWeight: 600,
-                  marginBottom: "8px",
-                }}
-              >
-                Đã xảy ra lỗi
-              </p>
-              <p
-                style={{
-                  color: "#6b7280",
-                  fontSize: "13px",
-                  marginBottom: "20px",
-                }}
-              >
-                Vui lòng tải lại trang hoặc thử lại sau.
-              </p>
-              <button
-                onClick={() => window.location.reload()}
-                style={{
-                  background: "#059669",
-                  color: "#fff",
-                  border: "none",
-                  borderRadius: "10px",
-                  padding: "10px 24px",
-                  fontSize: "14px",
-                  cursor: "pointer",
-                }}
-              >
-                Tải lại trang
-              </button>
-            </div>
-          </div>
-          );
-    }
-          return this.props.children;
-  }
-}
-
-          const ADMIN_ROUTE_BY_SCREEN = {
-            pages: "/admin/pages",
-          meta_pages: "/admin/meta-pages",
-          pagesmessage: "/admin/page-messages",
-          webmessage: "/admin/web-messages",
-          customer_care: "/admin/customer-care",
-          donhang: "/admin/orders",
-          weborder: "/admin/web-orders",
-          tao_don_hang: "/admin/tao-don-hang",
-          business_stats: "/admin/business-stats",
-          roas_dashboard: "/admin/roas",
-          debt_tracking: "/admin/debt-tracking",
-          employee_profiles: "/admin/employee-profiles",
-          employee_assets: "/admin/employee-assets",
-          operational_contracts: "/admin/operational-contracts",
-          work_tasks: "/admin/work-tasks",
-          users: "/admin/users",
-          roles: "/admin/roles",
-          profile: "/admin/profile",
-          commission_online: "/admin/commission-online",
-          commission_abc: "/admin/commission-abc",
-          admin_dashboard: "/admin/dashboard",
-          admin_products_tool: "/admin/products",
-          admin_event_promo: "/admin/promotions",
-          admin_vectorstore_tool: "/admin/vector-stores",
-          admin_agent: "/admin/agents",
-          admin_agent_intent: "/admin/agent-intents",
-          admin_agent_promo: "/admin/agent-promotions",
-          admin_agent_response_templates: "/admin/intent-response-templates",
-          admin_faq: "/admin/faqs",
-          admin_logs: "/admin/logs",
-          admin_event_simulator: "/admin/event-simulator",
-          notifications: "/admin/notifications",
-          attendance: "/admin/attendance",
-          approved_leave: "/admin/approved-leaves",
-          attendance_shifts: "/admin/attendance-shifts",
-          attendance_locations: "/admin/attendance-locations",
-          attendance_self: "/admin/my-attendance",
-          payroll: "/admin/payroll",
-          kpi_management: "/admin/kpi",
-          salary_advance_management: "/admin/salary-advances",
-          dua_sap: "/admin/dua-sap",
-          so_quy: "/admin/so-quy",
-          dia_chi: "/admin/dia-chi",
-};
-
-          const adminRoutes = [
-          {path: "pages", screenId: "pages", element: <PageManager /> },
-          {path: "meta-pages", screenId: "meta_pages", element: <MetaPageConnect /> },
-          {path: "page-messages", screenId: "pagesmessage", element: <PageMessage /> },
-          {path: "web-messages", screenId: "pagesmessage", element: <WebMessage /> },
-          {
-            path: "customer-care",
-          screenId: "customer_care",
-          element: <CustomerCareManager />,
-  },
-          {path: "orders", screenId: "donhang", element: <DonHang /> },
-          {path: "web-orders", screenId: "donhang", element: <WebOrder /> },
-          {
-            path: "tao-don-hang",
-          screenId: "tao_don_hang",
-          element: <TaoDonHang />,
-  },
-          {
-            path: "business-stats",
-          screenId: "business_stats",
-          element: <BusinessStats />,
-  },
-          {
-            path: "roas",
-          screenId: "roas_dashboard",
-          element: <RoasDashboard />,
-  },
-          {
-            path: "debt-tracking",
-          screenId: "debt_tracking",
-          element: <DebtTracking />,
-  },
-          {
-            path: "employee-profiles",
-          screenId: "employee_profiles",
-          element: <EmployeeProfileManager standalone />,
-  },
-          {
-            path: "employee-assets",
-          screenId: "employee_assets",
-          element: <EmployeeAssetManager standalone />,
-  },
-          {
-            path: "operational-contracts",
-          screenId: "operational_contracts",
-          element: <OperationalContractManager />,
-  },
-          {
-            path: "work-tasks",
-          screenId: "work_tasks",
-          element: <WorkTaskManager />,
-  },
-          {path: "users", screenId: "users", element: <UsersPage /> },
-          {path: "roles", screenId: "roles", element: <RolePage /> },
-          {path: "profile", screenId: "profile", element: <UserProfile /> },
-          {
-            path: "commission-online",
-          screenId: "commission_online",
-          element: <CommissionOnlineCalculator />,
-  },
-          {
-            path: "commission-abc",
-          screenId: "commission_abc",
-          element: <CommissionABCCalculator />,
-  },
-          {
-            path: "dashboard",
-          screenId: "admin_dashboard",
-          element: <AdminDashboard />,
-  },
-          {
-            path: "products",
-          screenId: "admin_products_tool",
-          element: <ProductTool />,
-  },
-          {
-            path: "promotions",
-          screenId: "admin_event_promo",
-          element: <PromoManager />,
-  },
-          {
-            path: "vector-stores",
-          screenId: "admin_vectorstore_tool",
-          element: <VectorStoreManage />,
-  },
-          {path: "agents", screenId: "admin_agent", element: <AgentManage /> }, // New route
-          {
-            path: "agent-intents",
-          screenId: "admin_agent_intent",
-          element: <AgentIntentManage />,
-  },
-          {
-            path: "agent-promotions",
-          screenId: "admin_agent_promo",
-          element: <AgentPromoManage />,
-  },
-          {
-            path: "intent-response-templates",
-          screenId: "admin_agent_response_templates",
-          element: <AgentResponseTemplatesManager />,
-  },
-          {
-            path: "agent-response-templates",
-          screenId: "admin_agent_response_templates",
-          element: <Navigate to="/admin/intent-response-templates" replace />,
-  },
-          {path: "faqs", screenId: "admin_faq", element: <FAQManager /> },
-          {path: "logs", screenId: "admin_logs", element: <LogsManage /> },
-          {
-            path: "event-simulator",
-          screenId: "admin_dashboard",
-          element: <EventSimulator />,
-  },
-          {
-            path: "notifications",
-          screenId: "notifications",
-          element: <NotificationManager />,
-  },
-          {
-            path: "my-attendance",
-          screenId: "attendance_self",
-          element: <AttendancePage />,
-  },
-          {
-            path: "attendance",
-          screenId: "attendance",
-          element: <AttendanceManager />,
-  },
-          {
-            path: "approved-leaves",
-          screenId: "approved_leave",
-          element: <ApprovedLeaveViewer />,
-  },
-          {
-            path: "attendance-shifts",
-          screenId: "attendance_shifts",
-          element: <AttendanceShiftManager />,
-  },
-          {
-            path: "attendance-locations",
-          screenId: "attendance_locations",
-          element: <WorkLocationManager />,
-  },
-          {path: "payroll", screenId: "payroll", element: <PayrollManager /> },
-          {path: "kpi", screenId: "kpi_management", element: <KpiManager /> },
-          {
-            path: "salary-advances",
-          screenId: "salary_advance_management",
-          element: <SalaryAdvanceManager />,
-  },
-          {path: "dua-sap", screenId: "dua_sap", element: <DuaSapManager /> },
-          {path: "so-quy", screenId: "so_quy", element: <CashFlowApp /> },
-          {path: "dia-chi", screenId: "dia_chi", element: <AddressManager /> },
-          {path: "dia-chi-2", screenId: "dia_chi_2", element: <Address2Manager /> },
-          ];
-
-// Guard cho trang độc lập: chưa login → /login?redirect=<current>
-            function getSafeRedirect(search) {
-  try {
-    const redirect = new URLSearchParams(search).get("redirect");
-            if (!redirect || !redirect.startsWith("/") || redirect.startsWith("//"))
-            return null;
-            return redirect;
-  } catch {
-    return null;
-  }
-}
-
-            function RequireAuth({children}) {
-  const {isLoggedIn, isAuthReady} = useAuth();
-            const location = useLocation();
-            if (!isAuthReady) return <AppLoader />;
-            if (!isLoggedIn) {
-    const currentPath = `${location.pathname}${location.search || ""}${location.hash || ""}`;
-            return (
-            <Navigate
-              to={`/login?redirect=${encodeURIComponent(currentPath)}`}
-              replace
-            />
-            );
-  }
-            return children;
-}
-
-            function LoginRoute() {
-  const {isLoggedIn, isAuthReady} = useAuth();
-            const location = useLocation();
-            const redirectTo = getSafeRedirect(location.search);
-
-            if (!isAuthReady) return <AppLoader />;
-            if (isLoggedIn) {
-    return <Navigate to={redirectTo || "/admin"} replace />;
-  }
-
-            return <Login />;
-}
-
-            function AppLoader() {
-  return <PageLoadingScreen message="Đang tải dữ liệu..." />;
-}
-
-            function RouteTransitionLoader() {
-  const location = useLocation();
-            const previousPath = useRef(location.pathname);
-            const [visible, setVisible] = useState(false);
-
-  useLayoutEffect(() => {
-    if (previousPath.current === location.pathname) return undefined;
-            previousPath.current = location.pathname;
-            setVisible(true);
-    const timer = window.setTimeout(() => setVisible(false), 420);
-    return () => window.clearTimeout(timer);
-  }, [location.pathname]);
-
-            if (!visible) return null;
-            return <PageLoadingScreen message="Đang tải dữ liệu..." overlay />;
-}
-
-            function AdminDefaultRedirect() {
-  const {user} = useAuth();
-            const saved = localStorage.getItem("dashboard_active_tab");
-            const preferred = saved || user?.screenDefault || "pages";
-
-            if (ADMIN_ROUTE_BY_SCREEN[preferred] && canAccessScreen(user, preferred)) {
-    return <Navigate to={ADMIN_ROUTE_BY_SCREEN[preferred]} replace />;
-  }
-
-            const firstAllowed = getAllowedScreens(user).find(
-    (screenId) => ADMIN_ROUTE_BY_SCREEN[screenId],
-            );
-            return (
-            <Navigate to={ADMIN_ROUTE_BY_SCREEN[firstAllowed] || "/404"} replace />
-            );
-}
-
-            function RequireScreen({screenId, children}) {
-  const {user} = useAuth();
-
-            if (canAccessScreen(user, screenId)) {
-    return children;
-  }
-
-            return <Navigate to="/404" replace />;
-}
-
-            function HomeRoute() {
-  if (Capacitor.isNativePlatform()) {
-    return <Navigate to="/cham-cong" replace />;
-  }
-
-            return <WelcomePage />;
-}
-
-            export default function App() {
-  const {isLoggedIn, isAuthReady} = useAuth();
-            const navigate = useNavigate();
-
-  useEffect(() => {
-              requestStartupNativePermissions();
-  }, []);
-
-  useEffect(() => {
-    if (!Capacitor.isNativePlatform()) return;
-            let listenerHandle;
-    CapacitorApp.addListener("appUrlOpen", (event) => {
-      const raw = event?.url || "";
-            if (!raw.startsWith("nnvchamcong://")) return;
-            try {
-        const url = new URL(raw);
-            const path = `/${url.hostname}${url.pathname !== "/" ? url.pathname : ""}${url.search}`;
-            navigate(path, {replace: true });
-      } catch {
-              // ignore malformed URL
+          <Route path="/user" element={<UserDashboard />} />
+          <Route path="/account-security" element={<RequireAuth><AccountSecurity /></RequireAuth>} />
+          <Route
+            path="/tao-don-hang"
+            element={
+              <RequireAuth>
+                <TaoDonHang />
+              </RequireAuth>
             }
-    }).then((handle) => {
-              listenerHandle = handle;
-    });
-    return () => {
-              listenerHandle?.remove();
-    };
-  }, [navigate]);
+          />
 
-            if (!isAuthReady) return <AppLoader />;
+          <Route path="/forgot-password" element={<ForgotPassword />} />
+          <Route path="/reset-password" element={<ResetPassword />} />
+          <Route path="/qr-login" element={<QrLogin />} />
+          <Route path="/app-login" element={<QrLogin />} />
+          <Route path="/cham-cong-qr" element={<AttendancePunchQr />} />
 
-            return (
-            <ErrorBoundary>
-              <RouteTransitionLoader />
-              <Suspense fallback={<AppLoader />}>
-                <Routes>
-                  <Route path="/" element={<HomeRoute />} />
->>>>>>> 1f3052d35221f355c771bfa478fe61c28184a14d
-                  <Route path="/user" element={<UserDashboard />} />
-                  <Route path="/account-security" element={<RequireAuth><AccountSecurity /></RequireAuth>} />
-                  <Route
-                    path="/tao-don-hang"
-                    element={
-                      <RequireAuth>
-                        <TaoDonHang />
-                      </RequireAuth>
-                    }
-                  />
+          <Route path="/login" element={<LoginRoute />} />
+          <Route
+            path="/register"
+            element={
+              !isLoggedIn ? <Register /> : <Navigate to="/admin" replace />
+            }
+          />
 
-                  <Route path="/forgot-password" element={<ForgotPassword />} />
-                  <Route path="/reset-password" element={<ResetPassword />} />
-                  <Route path="/qr-login" element={<QrLogin />} />
-                  <Route path="/app-login" element={<QrLogin />} />
-                  <Route path="/cham-cong-qr" element={<AttendancePunchQr />} />
+          <Route
+            path="/admin"
+            element={
+              isLoggedIn ? (
+                <DashboardLayout />
+              ) : (
+                <Navigate to="/login" replace />
+              )
+            }
+          >
+            <Route index element={<AdminDefaultRedirect />} />
+            {adminRoutes.map((route) => (
+              <Route
+                key={route.path}
+                path={route.path}
+                element={
+                  <RequireScreen screenId={route.screenId}>
+                    {route.element}
+                  </RequireScreen>
+                }
+              />
+            ))}
+          </Route>
 
-                  <Route path="/login" element={<LoginRoute />} />
-                  <Route
-                    path="/register"
-                    element={
-                      !isLoggedIn ? <Register /> : <Navigate to="/admin" replace />
-                    }
-                  />
+          {/* Trang chấm công độc lập — không cần sidebar admin */}
+          <Route
+            path="/cham-cong"
+            element={
+              <RequireAuth>
+                <StandaloneAttendance />
+              </RequireAuth>
+            }
+          />
 
-                  <Route
-                    path="/admin"
-                    element={
-                      isLoggedIn ? (
-                        <DashboardLayout />
-                      ) : (
-                        <Navigate to="/login" replace />
-                      )
-                    }
-                  >
-                    <Route index element={<AdminDefaultRedirect />} />
-                    {adminRoutes.map((route) => (
-                      <Route
-                        key={route.path}
-                        path={route.path}
-                        element={
-                          <RequireScreen screenId={route.screenId}>
-                            {route.element}
-                          </RequireScreen>
-                        }
-                      />
-                    ))}
-                  </Route>
+          {/* Trang công khai cây dừa sáp — không cần đăng nhập */}
+          <Route path="/dua-sap" element={<DuaSapPublicPage />} />
+          <Route path="/dua-sap/:maCay" element={<DuaSapDetailPage />} />
 
-                  {/* Trang chấm công độc lập — không cần sidebar admin */}
-                  <Route
-                    path="/cham-cong"
-                    element={
-                      <RequireAuth>
-                        <StandaloneAttendance />
-                      </RequireAuth>
-                    }
-                  />
+          <Route path="/policy" element={<PolicyPage />} />
+          <Route path="/terms-of-service" element={<TermsOfServicePage />} />
+          <Route
+            path="/data-deletion-guide"
+            element={<DataDeletionGuidePage />}
+          />
 
-                  {/* Trang công khai cây dừa sáp — không cần đăng nhập */}
-                  <Route path="/dua-sap" element={<DuaSapPublicPage />} />
-                  <Route path="/dua-sap/:maCay" element={<DuaSapDetailPage />} />
-
-                  <Route path="/policy" element={<PolicyPage />} />
-                  <Route path="/terms-of-service" element={<TermsOfServicePage />} />
-                  <Route
-                    path="/data-deletion-guide"
-                    element={<DataDeletionGuidePage />}
-                  />
-
-                  <Route path="/404" element={<NotFoundPage />} />
-                  <Route path="*" element={<NotFoundPage />} />
-                </Routes>
-              </Suspense>
-            </ErrorBoundary>
-            );
+          <Route path="/404" element={<NotFoundPage />} />
+          <Route path="*" element={<NotFoundPage />} />
+        </Routes>
+      </Suspense>
+    </ErrorBoundary>
+  );
 }

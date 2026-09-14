@@ -357,18 +357,18 @@ function AdDeliveryStatus({ ad }) {
     <span className="inline-flex flex-wrap items-center gap-1.5">
       <span
         className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-extrabold ring-1 ${status.running === true
-            ? "bg-emerald-50 text-emerald-700 ring-emerald-200"
-            : status.running === false
-              ? "bg-rose-50 text-rose-700 ring-rose-200"
-              : "bg-slate-50 text-slate-500 ring-slate-200"
+          ? "bg-emerald-50 text-emerald-700 ring-emerald-200"
+          : status.running === false
+            ? "bg-rose-50 text-rose-700 ring-rose-200"
+            : "bg-slate-50 text-slate-500 ring-slate-200"
           }`}
       >
         <span
           className={`h-1.5 w-1.5 rounded-full ${status.running === true
-              ? "bg-emerald-500"
-              : status.running === false
-                ? "bg-rose-500"
-                : "bg-slate-400"
+            ? "bg-emerald-500"
+            : status.running === false
+              ? "bg-rose-500"
+              : "bg-slate-400"
             }`}
         />
         {status.label}
