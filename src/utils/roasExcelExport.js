@@ -85,10 +85,10 @@ function applyBorder(cell, color = COLORS.border) {
 }
 
 function roasStyle(value) {
-  if (number(value) >= 4) {
+  if (number(value) >= 8) {
     return { fill: COLORS.greenSoft, font: COLORS.green };
   }
-  if (number(value) >= 1) {
+  if (number(value) >= 4) {
     return { fill: COLORS.amberSoft, font: COLORS.amber };
   }
   return { fill: COLORS.roseSoft, font: COLORS.rose };
