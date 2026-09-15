@@ -16,6 +16,8 @@ import {
   ChevronRight,
   CircleDollarSign,
   Download,
+  Eye,
+  EyeOff,
   Filter,
   Info,
   Loader2,
@@ -45,14 +47,51 @@ const RETAILER_LABELS = {
 };
 
 const RETAILER_BY_AD_ACCOUNT_ID = {
-  "727099283175561": "vietnhattv",
-  "1365025578067205": "kingfarm",
-  "731525842964747": "nnvtv",
-  "4132336063652746": "abctv",
+  727099283175561: "vietnhattv",
+  1365025578067205: "kingfarm",
+  731525842964747: "nnvtv",
+  4132336063652746: "abctv",
 };
 
-const ALLOWED_AD_ACCOUNT_IDS = new Set(
-  Object.keys(RETAILER_BY_AD_ACCOUNT_ID),
+const ALLOWED_AD_ACCOUNT_IDS = new Set(Object.keys(RETAILER_BY_AD_ACCOUNT_ID));
+
+const CASHFLOW_COLUMN_OPTIONS = [
+  { key: "receipt", label: "Phiếu thu" },
+  { key: "expense", label: "Phiếu chi" },
+  { key: "netRevenue", label: "Tiền về sổ quỹ" },
+  { key: "roas", label: "ROAS tiền về" },
+];
+
+const TABLE_COLUMN_OPTIONS = [
+  { key: "spend", label: "Chi Meta gốc", defaultVisible: true },
+  { key: "totalSpend", label: "Chi Meta gồm VAT", defaultVisible: true },
+  {
+    key: "estimatedRevenue",
+    label: "Doanh thu dự kiến",
+    defaultVisible: true,
+  },
+  { key: "estimatedRoas", label: "ROAS dự kiến", defaultVisible: true },
+  ...CASHFLOW_COLUMN_OPTIONS.map((column) => ({
+    ...column,
+    defaultVisible: false,
+    cashflow: true,
+  })),
+  { key: "ctr", label: "CTR", defaultVisible: true },
+  { key: "impressions", label: "Lượt hiển thị", defaultVisible: true },
+  { key: "purchases", label: "Kết quả", defaultVisible: true },
+  { key: "frequency", label: "Tần suất", defaultVisible: true },
+  { key: "messages", label: "Người liên hệ", defaultVisible: true },
+  { key: "costPerPurchase", label: "CP / Kết quả", defaultVisible: true },
+  { key: "costPerMessage", label: "CP / Người liên hệ", defaultVisible: true },
+  {
+    key: "purchaseToMessageRate",
+    label: "Tỷ lệ mua / liên hệ",
+    defaultVisible: true,
+  },
+];
+
+const DEFAULT_VISIBLE_TABLE_COLUMNS = Object.fromEntries(
+  TABLE_COLUMN_OPTIONS.map(({ key, defaultVisible }) => [key, defaultVisible]),
 );
 
 function normalizedAdAccountId(account) {
@@ -170,9 +209,7 @@ function summarizeCompanyReports(reports = []) {
     ...totals,
     roas: totals.totalSpend > 0 ? totals.netRevenue / totals.totalSpend : 0,
     estimatedRoas:
-      totals.totalSpend > 0
-        ? totals.estimatedRevenue / totals.totalSpend
-        : 0,
+      totals.totalSpend > 0 ? totals.estimatedRevenue / totals.totalSpend : 0,
     ctr:
       totals.impressions > 0
         ? (totals.linkClicks / totals.impressions) * 100
@@ -281,13 +318,13 @@ function getAdDeliveryStatus(ad = {}) {
   const explicitRunning = ad.isRunning ?? ad.isActive;
   const rawStatus = String(
     ad.effectiveStatus ??
-    ad.effective_status ??
-    ad.deliveryStatus ??
-    ad.delivery_status ??
-    ad.status ??
-    ad.configuredStatus ??
-    ad.configured_status ??
-    "",
+      ad.effective_status ??
+      ad.deliveryStatus ??
+      ad.delivery_status ??
+      ad.status ??
+      ad.configuredStatus ??
+      ad.configured_status ??
+      "",
   )
     .trim()
     .toUpperCase();
@@ -333,9 +370,12 @@ function getAdStatusUpdatedAt(ad = {}) {
 function formatAdStatusDate(value) {
   if (!value) return "";
   const numericValue = Number(value);
-  const date = Number.isFinite(numericValue) && numericValue > 0
-    ? new Date(numericValue < 1000000000000 ? numericValue * 1000 : numericValue)
-    : new Date(value);
+  const date =
+    Number.isFinite(numericValue) && numericValue > 0
+      ? new Date(
+          numericValue < 1000000000000 ? numericValue * 1000 : numericValue,
+        )
+      : new Date(value);
   if (Number.isNaN(date.getTime())) return "";
   return new Intl.DateTimeFormat("vi-VN", {
     day: "2-digit",
@@ -346,30 +386,32 @@ function formatAdStatusDate(value) {
 
 function AdDeliveryStatus({ ad }) {
   const status = getAdDeliveryStatus(ad);
-  const stoppedAt = status.running === false
-    ? formatAdStatusDate(getAdStoppedAt(ad))
-    : "";
-  const statusUpdatedAt = status.running === false && !stoppedAt
-    ? formatAdStatusDate(getAdStatusUpdatedAt(ad))
-    : "";
+  const stoppedAt =
+    status.running === false ? formatAdStatusDate(getAdStoppedAt(ad)) : "";
+  const statusUpdatedAt =
+    status.running === false && !stoppedAt
+      ? formatAdStatusDate(getAdStatusUpdatedAt(ad))
+      : "";
 
   return (
     <span className="inline-flex flex-wrap items-center gap-1.5">
       <span
-        className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-extrabold ring-1 ${status.running === true
-          ? "bg-emerald-50 text-emerald-700 ring-emerald-200"
-          : status.running === false
-            ? "bg-rose-50 text-rose-700 ring-rose-200"
-            : "bg-slate-50 text-slate-500 ring-slate-200"
-          }`}
+        className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-extrabold ring-1 ${
+          status.running === true
+            ? "bg-emerald-50 text-emerald-700 ring-emerald-200"
+            : status.running === false
+              ? "bg-rose-50 text-rose-700 ring-rose-200"
+              : "bg-slate-50 text-slate-500 ring-slate-200"
+        }`}
       >
         <span
-          className={`h-1.5 w-1.5 rounded-full ${status.running === true
-            ? "bg-emerald-500"
-            : status.running === false
-              ? "bg-rose-500"
-              : "bg-slate-400"
-            }`}
+          className={`h-1.5 w-1.5 rounded-full ${
+            status.running === true
+              ? "bg-emerald-500"
+              : status.running === false
+                ? "bg-rose-500"
+                : "bg-slate-400"
+          }`}
         />
         {status.label}
       </span>
@@ -458,8 +500,7 @@ function groupProductsByUser(productGroups = []) {
       vat: spend * 0.1,
       totalSpend,
       roas: totalSpend > 0 ? netRevenue / totalSpend : 0,
-      estimatedRoas:
-        totalSpend > 0 ? estimatedRevenue / totalSpend : 0,
+      estimatedRoas: totalSpend > 0 ? estimatedRevenue / totalSpend : 0,
       purchases,
       messages,
       linkClicks,
@@ -632,91 +673,220 @@ function DetailMetric({ icon: Icon, label, value, helper, tone }) {
   );
 }
 
-function AggregateMetricCells({ item, emphasized = false }) {
+function AggregateMetricCells({
+  item,
+  emphasized = false,
+  visibleColumns = DEFAULT_VISIBLE_TABLE_COLUMNS,
+}) {
   const good = item.roas >= 4;
   const estimatedRoas = Number(item.estimatedRoas) || 0;
   const estimatedGood = estimatedRoas >= 4;
   const textWeight = emphasized ? "font-extrabold" : "font-bold";
+  const enabledCashflowKeys = CASHFLOW_COLUMN_OPTIONS.filter(
+    ({ key }) => visibleColumns[key],
+  ).map(({ key }) => key);
+  const cashflowCellClass = (key) => {
+    const first = enabledCashflowKeys[0] === key;
+    const last = enabledCashflowKeys.at(-1) === key;
+    return `${first ? "border-l-2 border-l-amber-300" : ""} ${last ? "border-r-2 border-r-amber-300" : ""} bg-amber-50/70`;
+  };
 
   return (
     <>
-      <td
-        className={`px-4 py-4 text-right text-xs text-emerald-700 ${textWeight}`}
-      >
-        {formatCurrency(item.receiptAmount)}
-      </td>
-      <td
-        className={`px-4 py-4 text-right text-xs text-rose-600 ${textWeight}`}
-      >
-        {formatCurrency(item.expenseAmount)}
-      </td>
-      <td
-        className={`px-4 py-4 text-right text-xs font-extrabold ${item.netRevenue < 0 ? "text-rose-600" : "text-slate-900"}`}
-      >
-        {formatCurrency(item.netRevenue)}
-      </td>
-      <td
-        className={`px-4 py-4 text-right text-xs text-indigo-700 ${textWeight}`}
-        title={`${formatNumber(item.estimatedInvoiceCount)} hóa đơn backup đã ghép`}
-      >
-        {formatCurrency(item.estimatedRevenue)}
-      </td>
-      <td
-        className={`px-4 py-4 text-right text-xs text-cyan-700 ${textWeight}`}
-        title="Số tiền chi tiêu gốc do Meta trả về, chưa gồm VAT"
-      >
-        {formatCurrency(item.spend)}
-      </td>
-      <td
-        className={`px-4 py-4 text-right text-xs text-slate-700 ${textWeight}`}
-        title={`Chi Meta ${formatCurrency(item.spend)} + VAT ${formatCurrency(item.vat)}`}
-      >
-        {formatCurrency(item.totalSpend)}
-      </td>
-      <td className="px-4 py-4 text-right">
-        <span
-          className={`inline-flex rounded-lg px-2.5 py-1.5 text-xs font-extrabold ${good ? "bg-emerald-50 text-emerald-700" : item.roas >= 2 ? "bg-amber-50 text-amber-700" : "bg-rose-50 text-rose-700"}`}
+      {visibleColumns.spend && (
+        <td
+          className={`px-4 py-4 text-right text-xs text-cyan-700 ${textWeight}`}
+          title="Số tiền chi tiêu gốc do Meta trả về, chưa gồm VAT"
         >
-          {item.roas.toFixed(2)}x
-        </span>
-      </td>
-      <td className="px-4 py-4 text-right">
-        <span
-          className={`inline-flex rounded-lg px-2.5 py-1.5 text-xs font-extrabold ${estimatedGood ? "bg-emerald-50 text-emerald-700" : estimatedRoas >= 2 ? "bg-amber-50 text-amber-700" : "bg-indigo-50 text-indigo-700"}`}
+          {formatCurrency(item.spend)}
+        </td>
+      )}
+      {visibleColumns.totalSpend && (
+        <td
+          className={`px-4 py-4 text-right text-xs text-slate-700 ${textWeight}`}
+          title={`Chi Meta ${formatCurrency(item.spend)} + VAT ${formatCurrency(item.vat)}`}
         >
-          {estimatedRoas.toFixed(2)}x
-        </span>
-      </td>
-      <td className="px-4 py-4 text-right text-xs text-slate-600">
-        {formatPercent(item.ctr)}
-      </td>
-      <td
-        className={`px-4 py-4 text-right text-xs text-slate-700 ${textWeight}`}
-      >
-        {formatNumber(item.impressions)}
-      </td>
-      <td
-        className={`px-4 py-4 text-right text-xs text-slate-800 ${textWeight}`}
-      >
-        {formatNumber(item.purchases)}
-      </td>
-      <td className="px-4 py-4 text-right text-xs text-slate-600">
-        {item.frequency.toFixed(2)}x
-      </td>
-      <td
-        className={`px-4 py-4 text-right text-xs text-slate-800 ${textWeight}`}
-      >
-        {formatNumber(item.messages)}
-      </td>
-      <td className="px-4 py-4 text-right text-xs text-slate-600">
-        {item.costPerPurchase ? formatCurrency(item.costPerPurchase) : "—"}
-      </td>
-      <td className="px-4 py-4 text-right text-xs text-slate-600">
-        {item.costPerMessage ? formatCurrency(item.costPerMessage) : "—"}
-      </td>
-      <td className="px-6 py-4 text-right text-xs font-bold text-blue-700">
-        {formatPercent(item.purchaseToMessageRate * 100)}
-      </td>
+          {formatCurrency(item.totalSpend)}
+        </td>
+      )}
+      {visibleColumns.estimatedRevenue && (
+        <td
+          className={`px-4 py-4 text-right text-xs text-indigo-700 ${textWeight}`}
+          title={`${formatNumber(item.estimatedInvoiceCount)} hóa đơn backup đã ghép`}
+        >
+          {formatCurrency(item.estimatedRevenue)}
+        </td>
+      )}
+      {visibleColumns.estimatedRoas && (
+        <td className="px-4 py-4 text-right">
+          <span
+            className={`inline-flex rounded-lg px-2.5 py-1.5 text-xs font-extrabold ${estimatedGood ? "bg-emerald-50 text-emerald-700" : estimatedRoas >= 2 ? "bg-amber-50 text-amber-700" : "bg-indigo-50 text-indigo-700"}`}
+          >
+            {estimatedRoas.toFixed(2)}x
+          </span>
+        </td>
+      )}
+      {visibleColumns.receipt && (
+        <td
+          className={`${cashflowCellClass("receipt")} px-4 py-4 text-right text-xs text-emerald-700 ${textWeight}`}
+        >
+          {formatCurrency(item.receiptAmount)}
+        </td>
+      )}
+      {visibleColumns.expense && (
+        <td
+          className={`${cashflowCellClass("expense")} px-4 py-4 text-right text-xs text-rose-600 ${textWeight}`}
+        >
+          {formatCurrency(item.expenseAmount)}
+        </td>
+      )}
+      {visibleColumns.netRevenue && (
+        <td
+          className={`${cashflowCellClass("netRevenue")} px-4 py-4 text-right text-xs font-extrabold ${item.netRevenue < 0 ? "text-rose-600" : "text-slate-900"}`}
+        >
+          {formatCurrency(item.netRevenue)}
+        </td>
+      )}
+      {visibleColumns.roas && (
+        <td className={`${cashflowCellClass("roas")} px-4 py-4 text-right`}>
+          <span
+            className={`inline-flex rounded-lg px-2.5 py-1.5 text-xs font-extrabold ${good ? "bg-emerald-50 text-emerald-700" : item.roas >= 2 ? "bg-amber-50 text-amber-700" : "bg-rose-50 text-rose-700"}`}
+          >
+            {item.roas.toFixed(2)}x
+          </span>
+        </td>
+      )}
+      {visibleColumns.ctr && (
+        <td className="px-4 py-4 text-right text-xs text-slate-600">
+          {formatPercent(item.ctr)}
+        </td>
+      )}
+      {visibleColumns.impressions && (
+        <td
+          className={`px-4 py-4 text-right text-xs text-slate-700 ${textWeight}`}
+        >
+          {formatNumber(item.impressions)}
+        </td>
+      )}
+      {visibleColumns.purchases && (
+        <td
+          className={`px-4 py-4 text-right text-xs text-slate-800 ${textWeight}`}
+        >
+          {formatNumber(item.purchases)}
+        </td>
+      )}
+      {visibleColumns.frequency && (
+        <td className="px-4 py-4 text-right text-xs text-slate-600">
+          {item.frequency.toFixed(2)}x
+        </td>
+      )}
+      {visibleColumns.messages && (
+        <td
+          className={`px-4 py-4 text-right text-xs text-slate-800 ${textWeight}`}
+        >
+          {formatNumber(item.messages)}
+        </td>
+      )}
+      {visibleColumns.costPerPurchase && (
+        <td className="px-4 py-4 text-right text-xs text-slate-600">
+          {item.costPerPurchase ? formatCurrency(item.costPerPurchase) : "—"}
+        </td>
+      )}
+      {visibleColumns.costPerMessage && (
+        <td className="px-4 py-4 text-right text-xs text-slate-600">
+          {item.costPerMessage ? formatCurrency(item.costPerMessage) : "—"}
+        </td>
+      )}
+      {visibleColumns.purchaseToMessageRate && (
+        <td className="px-6 py-4 text-right text-xs font-bold text-blue-700">
+          {formatPercent(item.purchaseToMessageRate * 100)}
+        </td>
+      )}
+    </>
+  );
+}
+
+function AdMetricCells({ ad, visibleColumns = DEFAULT_VISIBLE_TABLE_COLUMNS }) {
+  const enabledCashflowKeys = CASHFLOW_COLUMN_OPTIONS.filter(
+    ({ key }) => visibleColumns[key],
+  ).map(({ key }) => key);
+  const cashflowCellClass = (key) => {
+    const first = enabledCashflowKeys[0] === key;
+    const last = enabledCashflowKeys.at(-1) === key;
+    return `${first ? "border-l-2 border-l-amber-300" : ""} ${last ? "border-r-2 border-r-amber-300" : ""} bg-amber-50/70`;
+  };
+  const emptyCell = (key, cashflow = false) => (
+    <td
+      className={`${cashflow ? cashflowCellClass(key) : ""} px-4 py-3 text-right text-xs ${cashflow ? "text-amber-300" : "text-slate-300"}`}
+    >
+      —
+    </td>
+  );
+
+  return (
+    <>
+      {visibleColumns.spend && (
+        <td
+          className="px-4 py-3 text-right text-xs font-bold text-cyan-700"
+          title="Số tiền chi tiêu gốc do Meta trả về"
+        >
+          {formatCurrency(ad.spend)}
+        </td>
+      )}
+      {visibleColumns.totalSpend && (
+        <td
+          className="px-4 py-3 text-right text-xs font-bold text-slate-600"
+          title={`Chi Meta ${formatCurrency(ad.spend)} + VAT ${formatCurrency(ad.vat)}`}
+        >
+          {formatCurrency(ad.totalSpend)}
+        </td>
+      )}
+      {visibleColumns.estimatedRevenue && emptyCell("estimatedRevenue")}
+      {visibleColumns.estimatedRoas && emptyCell("estimatedRoas")}
+      {visibleColumns.receipt && emptyCell("receipt", true)}
+      {visibleColumns.expense && emptyCell("expense", true)}
+      {visibleColumns.netRevenue && emptyCell("netRevenue", true)}
+      {visibleColumns.roas && emptyCell("roas", true)}
+      {visibleColumns.ctr && (
+        <td className="px-4 py-3 text-right text-xs font-bold text-slate-600">
+          {formatPercent(ad.ctr)}
+        </td>
+      )}
+      {visibleColumns.impressions && (
+        <td className="px-4 py-3 text-right text-xs font-bold text-slate-700">
+          {formatNumber(ad.impressions)}
+        </td>
+      )}
+      {visibleColumns.purchases && (
+        <td className="px-4 py-3 text-right text-xs font-bold text-slate-700">
+          {formatNumber(ad.purchases)}
+        </td>
+      )}
+      {visibleColumns.frequency && (
+        <td className="px-4 py-3 text-right text-xs text-slate-600">
+          {ad.frequency.toFixed(2)}x
+        </td>
+      )}
+      {visibleColumns.messages && (
+        <td className="px-4 py-3 text-right text-xs font-bold text-slate-700">
+          {formatNumber(ad.messages)}
+        </td>
+      )}
+      {visibleColumns.costPerPurchase && (
+        <td className="px-4 py-3 text-right text-xs text-slate-600">
+          {ad.costPerPurchase ? formatCurrency(ad.costPerPurchase) : "—"}
+        </td>
+      )}
+      {visibleColumns.costPerMessage && (
+        <td className="px-4 py-3 text-right text-xs text-slate-600">
+          {ad.costPerMessage ? formatCurrency(ad.costPerMessage) : "—"}
+        </td>
+      )}
+      {visibleColumns.purchaseToMessageRate && (
+        <td className="px-6 py-3 text-right text-xs font-bold text-blue-700">
+          {formatPercent(ad.purchaseToMessageRate * 100)}
+        </td>
+      )}
     </>
   );
 }
@@ -725,8 +895,7 @@ function RoasGroupChart({ groups }) {
   const data = [...groups]
     .filter((group) => group.totalSpend > 0)
     .sort(
-      (a, b) =>
-        (Number(b.estimatedRoas) || 0) - (Number(a.estimatedRoas) || 0),
+      (a, b) => (Number(b.estimatedRoas) || 0) - (Number(a.estimatedRoas) || 0),
     )
     .slice(0, 8);
   const max = Math.max(
@@ -767,9 +936,7 @@ function RoasGroupChart({ groups }) {
                   {item.productCode}
                 </span>
                 <span className="shrink-0 text-slate-300">—</span>
-                <span className="truncate text-slate-400">
-                  {item.userName}
-                </span>
+                <span className="truncate text-slate-400">{item.userName}</span>
               </p>
             </div>
             <div className="h-3 overflow-hidden rounded-full bg-slate-100">
@@ -836,18 +1003,18 @@ function EmployeeRoasChart({ groups }) {
         const tone =
           employee.estimatedRoas >= 8
             ? {
-              bar: "from-emerald-400 to-emerald-600",
-              badge: "bg-emerald-50 text-emerald-700 ring-emerald-200",
-            }
+                bar: "from-emerald-400 to-emerald-600",
+                badge: "bg-emerald-50 text-emerald-700 ring-emerald-200",
+              }
             : employee.estimatedRoas >= 4
               ? {
-                bar: "from-amber-400 to-orange-500",
-                badge: "bg-amber-50 text-amber-700 ring-amber-200",
-              }
+                  bar: "from-amber-400 to-orange-500",
+                  badge: "bg-amber-50 text-amber-700 ring-amber-200",
+                }
               : {
-                bar: "from-rose-400 to-rose-600",
-                badge: "bg-rose-50 text-rose-700 ring-rose-200",
-              };
+                  bar: "from-rose-400 to-rose-600",
+                  badge: "bg-rose-50 text-rose-700 ring-rose-200",
+                };
 
         return (
           <article
@@ -918,80 +1085,159 @@ function EmployeeRoasChart({ groups }) {
   );
 }
 
-function RevenueSpendChart({ groups }) {
-  const data = [...groups]
-    .filter((group) => group.estimatedRevenue || group.totalSpend)
+function ProductRoasChart({ groups }) {
+  const products = new Map();
+
+  groups.forEach((group) => {
+    const productCode = String(group.productCode || "")
+      .trim()
+      .toUpperCase();
+    if (!productCode || productCode === "CHƯA-CÓ-SKU") return;
+
+    const current = products.get(productCode) || {
+      productCode,
+      productName: "",
+      estimatedRevenue: 0,
+      totalSpend: 0,
+      adCount: 0,
+      employees: new Set(),
+    };
+    current.productName ||=
+      (group.ads || []).find((ad) => ad.productName)?.productName || "";
+    current.estimatedRevenue += Number(group.estimatedRevenue) || 0;
+    current.totalSpend += Number(group.totalSpend) || 0;
+    current.adCount += (group.ads || []).length;
+    if (group.userName) current.employees.add(group.userName);
+    products.set(productCode, current);
+  });
+
+  const data = [...products.values()]
+    .filter((product) => product.totalSpend > 0)
+    .map((product) => ({
+      ...product,
+      estimatedRoas: product.estimatedRevenue / product.totalSpend,
+      employeeCount: product.employees.size,
+    }))
     .sort(
       (a, b) =>
-        Math.max(b.estimatedRevenue, b.totalSpend) -
-        Math.max(a.estimatedRevenue, a.totalSpend),
-    )
-    .slice(0, 6);
-  const maxValue = Math.max(
-    ...data.flatMap((item) => [item.estimatedRevenue, item.totalSpend]),
-    1,
+        b.estimatedRoas - a.estimatedRoas || b.totalSpend - a.totalSpend,
+    );
+  const maxRoas = Math.max(...data.map((product) => product.estimatedRoas), 1);
+  const totalEstimatedRevenue = data.reduce(
+    (sum, product) => sum + product.estimatedRevenue,
+    0,
   );
+  const totalSpend = data.reduce((sum, product) => sum + product.totalSpend, 0);
+  const combinedRoas = totalSpend > 0 ? totalEstimatedRevenue / totalSpend : 0;
 
   if (!data.length) {
     return (
-      <div className="grid h-60 place-items-center text-sm text-slate-400">
-        Chưa có dữ liệu doanh thu dự kiến.
+      <div className="grid h-64 place-items-center text-sm text-slate-400">
+        Chưa có dữ liệu ROAS theo sản phẩm.
       </div>
     );
   }
 
+  const chartTone = (roas) => {
+    if (roas >= 8)
+      return {
+        bar: "from-emerald-300 via-emerald-400 to-emerald-600",
+        badge: "bg-emerald-50 text-emerald-700 ring-emerald-200",
+      };
+    if (roas >= 4)
+      return {
+        bar: "from-amber-300 via-amber-400 to-orange-500",
+        badge: "bg-amber-50 text-amber-700 ring-amber-200",
+      };
+    return {
+      bar: "from-rose-300 via-rose-400 to-rose-600",
+      badge: "bg-rose-50 text-rose-700 ring-rose-200",
+    };
+  };
+
   return (
-    <div className="mt-5 space-y-4">
-      {data.map((item) => (
-        <div key={item.key}>
-          <div className="mb-1.5 flex items-center justify-between gap-3">
-            <p className="min-w-0 truncate text-[11px] font-extrabold text-slate-700">
-              {item.userName} · {item.productCode}
-            </p>
-            <div className="shrink-0 text-right text-[9px] font-bold text-slate-400">
-              <span className="text-indigo-600">
-                Dự kiến {(Number(item.estimatedRoas) || 0).toFixed(2)}x
-              </span>
-              <span className="mx-1 text-slate-300">·</span>
-              <span>Tiền về {item.roas.toFixed(2)}x</span>
-            </div>
-          </div>
-          <div className="space-y-1.5">
-            <div className="flex items-center gap-2">
-              <span className="w-12 text-[9px] font-bold uppercase text-cyan-600">
-                Dự kiến
-              </span>
-              <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-slate-100">
-                <div
-                  className="h-full rounded-full bg-gradient-to-r from-cyan-400 to-blue-500"
-                  style={{
-                    width: `${Math.max(2, (Math.max(item.estimatedRevenue, 0) / maxValue) * 100)}%`,
-                  }}
-                />
-              </div>
-              <span className="w-16 text-right text-[10px] font-bold text-slate-600">
-                {formatCompactCurrency(item.estimatedRevenue)}
-              </span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="w-12 text-[9px] font-bold uppercase text-orange-500">
-                Chi phí
-              </span>
-              <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-slate-100">
-                <div
-                  className="h-full rounded-full bg-gradient-to-r from-amber-400 to-orange-500"
-                  style={{
-                    width: `${Math.max(2, (item.totalSpend / maxValue) * 100)}%`,
-                  }}
-                />
-              </div>
-              <span className="w-16 text-right text-[10px] font-bold text-slate-600">
-                {formatCompactCurrency(item.totalSpend)}
-              </span>
-            </div>
-          </div>
+    <div className="mt-4 flex min-h-0 flex-1 flex-col">
+      <div className="grid grid-cols-3 gap-2">
+        <div className="rounded-xl border border-cyan-100 bg-cyan-50/60 px-3 py-2.5">
+          <p className="text-[9px] font-extrabold uppercase tracking-wide text-cyan-600">
+            Sản phẩm
+          </p>
+          <p className="mt-1 text-sm font-black text-slate-900">
+            {formatNumber(data.length)} SKU
+          </p>
         </div>
-      ))}
+        <div className="rounded-xl border border-indigo-100 bg-indigo-50/60 px-3 py-2.5">
+          <p className="text-[9px] font-extrabold uppercase tracking-wide text-indigo-600">
+            ROAS tổng
+          </p>
+          <p className="mt-1 text-sm font-black text-slate-900">
+            {combinedRoas.toFixed(2)}x
+          </p>
+        </div>
+        <div className="rounded-xl border border-violet-100 bg-violet-50/60 px-3 py-2.5">
+          <p className="text-[9px] font-extrabold uppercase tracking-wide text-violet-600">
+            Cao nhất
+          </p>
+          <p className="mt-1 text-sm font-black text-slate-900">
+            {data[0].estimatedRoas.toFixed(2)}x
+          </p>
+        </div>
+      </div>
+      <div className="mt-4 flex flex-wrap items-center gap-2 text-[9px] font-extrabold uppercase tracking-wide">
+        <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-emerald-700 ring-1 ring-emerald-200">
+          Từ 8x
+        </span>
+        <span className="rounded-full bg-amber-50 px-2.5 py-1 text-amber-700 ring-1 ring-amber-200">
+          4x – dưới 8x
+        </span>
+        <span className="rounded-full bg-rose-50 px-2.5 py-1 text-rose-700 ring-1 ring-rose-200">
+          Dưới 4x
+        </span>
+      </div>
+      <div className="mt-3 min-h-0 flex-1 overflow-x-auto pb-2">
+        <div
+          className="relative flex h-[310px] items-end justify-around gap-3 border-b border-slate-200 px-3"
+          style={{ minWidth: Math.max(560, data.length * 94) }}
+        >
+          <div className="pointer-events-none absolute inset-x-3 bottom-[72px] top-6 flex flex-col justify-between">
+            {[0, 1, 2, 3].map((line) => (
+              <span
+                key={line}
+                className="block border-t border-dashed border-slate-200/80"
+              />
+            ))}
+          </div>
+          {data.map((product) => (
+            <div
+              key={product.productCode}
+              className="group relative z-10 flex h-full w-20 shrink-0 flex-col justify-end text-center"
+              title={`${product.productName || product.productCode}\nDoanh thu dự kiến: ${formatCurrency(product.estimatedRevenue)}\nChi Meta gồm VAT: ${formatCurrency(product.totalSpend)}\n${product.employeeCount} nhân viên · ${product.adCount} bài`}
+            >
+              <div className="flex h-[238px] flex-col items-center justify-end">
+                <strong
+                  className={`mb-2 rounded-full px-2 py-1 text-[10px] font-black ring-1 ${chartTone(product.estimatedRoas).badge}`}
+                >
+                  {product.estimatedRoas.toFixed(2)}x
+                </strong>
+                <div
+                  className={`relative w-9 overflow-hidden rounded-t-[14px] border border-white/60 bg-gradient-to-t ${chartTone(product.estimatedRoas).bar} shadow-[0_8px_20px_rgba(15,23,42,0.12)] transition-all duration-300 group-hover:w-10 group-hover:brightness-105`}
+                  style={{
+                    height: `${Math.max(7, (product.estimatedRoas / maxRoas) * 82)}%`,
+                  }}
+                >
+                  <span className="absolute inset-y-2 left-1.5 w-1 rounded-full bg-white/30 blur-[1px]" />
+                </div>
+              </div>
+              <p className="mt-2 truncate text-[10px] font-black text-cyan-700">
+                {product.productCode}
+              </p>
+              <p className="h-7 overflow-hidden text-[9px] leading-3 text-slate-400">
+                {product.productName || "Sản phẩm"}
+              </p>
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
@@ -1275,7 +1521,7 @@ function EfficiencyMatrix({ groups }) {
               chart.top +
               plotHeight -
               (Math.min(Math.max(estimatedRoas, 0), maxRoas) / maxRoas) *
-              plotHeight;
+                plotHeight;
             const radius =
               8 + Math.sqrt(Math.max(item.purchases, 0) / maxPurchases) * 5;
             const color = colorFor(estimatedRoas);
@@ -1381,6 +1627,10 @@ export default function RoasDashboard() {
   const [query, setQuery] = useState("");
   const [sortBy, setSortBy] = useState("estimatedRoas");
   const [onlyEfficient, setOnlyEfficient] = useState(false);
+  const [visibleColumns, setVisibleColumns] = useState(
+    DEFAULT_VISIBLE_TABLE_COLUMNS,
+  );
+  const [showColumnControls, setShowColumnControls] = useState(false);
   const [expandedKeys, setExpandedKeys] = useState(() => new Set());
   const [loadingOptions, setLoadingOptions] = useState(true);
   const [loadingReport, setLoadingReport] = useState(false);
@@ -1461,7 +1711,7 @@ export default function RoasDashboard() {
     } catch (requestError) {
       setError(
         requestError.response?.data?.message ||
-        "Không lấy được bộ lọc báo cáo ROAS.",
+          "Không lấy được bộ lọc báo cáo ROAS.",
       );
     } finally {
       setLoadingOptions(false);
@@ -1563,19 +1813,14 @@ export default function RoasDashboard() {
       setCompanyOverview(null);
       setCompanyOverviewError(
         requestError.response?.data?.message ||
-        "Không tổng hợp được dữ liệu của đủ 4 công ty.",
+          "Không tổng hợp được dữ liệu của đủ 4 công ty.",
       );
     } finally {
       if (companyOverviewRequestId.current === requestId) {
         setLoadingCompanyOverview(false);
       }
     }
-  }, [
-    dateRange.since,
-    dateRange.until,
-    fetchRoasReport,
-    options.accounts,
-  ]);
+  }, [dateRange.since, dateRange.until, fetchRoasReport, options.accounts]);
 
   useEffect(() => {
     void loadOptions();
@@ -1607,8 +1852,7 @@ export default function RoasDashboard() {
         return !keyword || searchable.includes(keyword);
       })
       .filter(
-        (group) =>
-          !onlyEfficient || (Number(group.estimatedRoas) || 0) >= 2.5,
+        (group) => !onlyEfficient || (Number(group.estimatedRoas) || 0) >= 2.5,
       )
       .sort((a, b) => {
         if (sortBy === "estimatedRoas")
@@ -1650,6 +1894,34 @@ export default function RoasDashboard() {
       (ad) => !ad.id || !groupedAdIds.has(ad.id),
     );
   }, [report?.groups, report?.unmatchedAds]);
+  const visibleColumnCount = TABLE_COLUMN_OPTIONS.filter(
+    ({ key }) => visibleColumns[key],
+  ).length;
+  const allColumnsVisible = visibleColumnCount === TABLE_COLUMN_OPTIONS.length;
+  const cashflowColumnBoundaryClass = (key) => {
+    const enabledKeys = CASHFLOW_COLUMN_OPTIONS.filter(
+      ({ key: optionKey }) => visibleColumns[optionKey],
+    ).map(({ key: optionKey }) => optionKey);
+    const first = enabledKeys[0] === key;
+    const last = enabledKeys.at(-1) === key;
+    return `${first ? "border-l-2 border-l-amber-300" : ""} ${last ? "border-r-2 border-r-amber-300" : ""}`;
+  };
+  const cashflowColumnClass = (key) =>
+    `${cashflowColumnBoundaryClass(key)} bg-amber-100/80 text-amber-800`;
+  const toggleTableColumn = (key) => {
+    setVisibleColumns((current) => ({
+      ...current,
+      [key]: !current[key],
+    }));
+  };
+  const toggleAllTableColumns = () => {
+    const nextVisible = !allColumnsVisible;
+    setVisibleColumns(
+      Object.fromEntries(
+        TABLE_COLUMN_OPTIONS.map(({ key }) => [key, nextVisible]),
+      ),
+    );
+  };
   const toggleGroup = (key) => {
     setExpandedKeys((current) => {
       const next = new Set(current);
@@ -1739,21 +2011,21 @@ export default function RoasDashboard() {
           const companyReport = isCurrentReport
             ? report
             : (
-              await api.get("/roas/report", {
-                params: {
-                  accountId: account.id,
-                  retailerName: companyRetailerName,
-                  since: dateRange.since,
-                  until: dateRange.until,
-                },
-              })
-            ).data;
+                await api.get("/roas/report", {
+                  params: {
+                    accountId: account.id,
+                    retailerName: companyRetailerName,
+                    since: dateRange.since,
+                    until: dateRange.until,
+                  },
+                })
+              ).data;
           return {
             report: companyReport,
             retailerName: companyReport?.retailerName || companyRetailerName,
             retailerLabel:
               RETAILER_LABELS[
-              companyReport?.retailerName || companyRetailerName
+                companyReport?.retailerName || companyRetailerName
               ] || companyRetailerName,
           };
         }),
@@ -2189,10 +2461,11 @@ export default function RoasDashboard() {
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <h2 className="text-base font-extrabold text-slate-900">
-                  ROAS theo sản phẩm
+                  ROAS nhóm sản phẩm theo nhân viên
                 </h2>
                 <p className="mt-1 text-xs text-slate-400">
-                  Tên sản phẩm là thông tin chính; tên nhân viên hiển thị bên dưới
+                  Tên sản phẩm là thông tin chính; tên nhân viên hiển thị bên
+                  dưới
                 </p>
               </div>
               <span className="inline-flex w-fit items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-[11px] font-bold text-slate-500">
@@ -2256,12 +2529,12 @@ export default function RoasDashboard() {
                     Quy tắc tính
                   </p>
                   <p className="mt-1 text-[11px] leading-5 text-violet-700">
-                    Tổng chi và cả hai ROAS dùng chi Meta sau VAT 10%. Chi phí trên mỗi
-                    kết quả và mỗi người liên hệ dùng số gốc Meta, không gồm
-                    VAT. Doanh thu dự kiến chỉ lấy hóa đơn có mô tả bắt đầu bằng
-                    QC và ghép theo nhân viên + SKU trong mô tả; người gửi trả
-                    phí ĐTGH thì trừ phí, người nhận trả thì giữ nguyên tổng
-                    tiền.
+                    Tổng chi và cả hai ROAS dùng chi Meta sau VAT 10%. Chi phí
+                    trên mỗi kết quả và mỗi người liên hệ dùng số gốc Meta,
+                    không gồm VAT. Doanh thu dự kiến chỉ lấy hóa đơn có mô tả
+                    bắt đầu bằng QC và ghép theo nhân viên + SKU trong mô tả;
+                    người gửi trả phí ĐTGH thì trừ phí, người nhận trả thì giữ
+                    nguyên tổng tiền.
                   </p>
                 </div>
               </div>
@@ -2314,10 +2587,6 @@ export default function RoasDashboard() {
               <h2 className="mt-1 text-lg font-extrabold tracking-tight text-slate-900">
                 Bức tranh hiệu quả quảng cáo
               </h2>
-              <p className="mt-1 text-xs text-slate-400">
-                Đọc nhanh hiệu quả đầu tư, cơ cấu chi phí và hành trình chuyển
-                đổi
-              </p>
             </div>
             <div className="flex w-fit items-center gap-3 rounded-xl border border-slate-200/80 bg-white/80 px-3.5 py-2 text-[10px] font-bold text-slate-500 shadow-sm backdrop-blur">
               <span className="flex items-center gap-1.5">
@@ -2329,33 +2598,23 @@ export default function RoasDashboard() {
             </div>
           </div>
 
-          <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1.18fr)_minmax(400px,0.82fr)]">
-            <article className="relative overflow-hidden rounded-[22px] border border-slate-400/20 border-t-2 border-t-cyan-400 bg-white/90 p-4 shadow-[0_14px_38px_rgba(15,23,42,0.06)] backdrop-blur-xl sm:p-5">
+          <div className="grid items-stretch gap-4 xl:grid-cols-[minmax(0,1.18fr)_minmax(400px,0.82fr)]">
+            <article className="relative flex h-full flex-col overflow-hidden rounded-[22px] border border-slate-400/20 border-t-2 border-t-cyan-400 bg-white/90 p-4 shadow-[0_14px_38px_rgba(15,23,42,0.06)] backdrop-blur-xl sm:p-5">
               <div className="absolute -right-16 -top-16 h-40 w-40 rounded-full bg-cyan-100/40 blur-3xl" />
               <div className="relative flex items-start justify-between gap-3">
                 <div>
                   <h2 className="text-sm font-extrabold text-slate-900">
-                    Doanh số và chi phí
+                    ROAS theo sản phẩm
                   </h2>
                   <p className="mt-1 text-[11px] text-slate-400">
-                    So sánh doanh thu dự kiến với chi Meta gồm VAT
+                    Gộp cùng SKU ở tất cả nhân viên · xếp theo ROAS dự kiến
                   </p>
                 </div>
                 <span className="grid h-9 w-9 place-items-center rounded-xl bg-cyan-50 text-cyan-600">
                   <TrendingUp size={17} />
                 </span>
               </div>
-              <div className="relative mt-3 flex items-center gap-4 text-[9px] font-bold uppercase tracking-wide text-slate-400">
-                <span className="flex items-center gap-1.5">
-                  <span className="h-2 w-4 rounded-full bg-gradient-to-r from-cyan-400 to-blue-500" />
-                  Doanh thu dự kiến
-                </span>
-                <span className="flex items-center gap-1.5">
-                  <span className="h-2 w-4 rounded-full bg-gradient-to-r from-amber-400 to-orange-500" />
-                  Chi phí
-                </span>
-              </div>
-              <RevenueSpendChart groups={report?.groups || []} />
+              <ProductRoasChart groups={report?.groups || []} />
             </article>
 
             <div className="grid gap-4">
@@ -2404,15 +2663,15 @@ export default function RoasDashboard() {
 
         {(summary.unmatchedAdCount > 0 ||
           summary.unmatchedCashflowGroupCount > 0) && (
-            <div className="mt-5 rounded-2xl border border-orange-200 bg-orange-50 px-4 py-3 text-xs text-orange-800">
-              <strong>
-                {summary.unmatchedAdCount} bài Meta và{" "}
-                {summary.unmatchedCashflowGroupCount} nhóm sổ quỹ chưa ghép được.
-              </strong>{" "}
-              Chi phí của bài chưa ghép ({formatCurrency(summary.unmatchedSpend)})
-              vẫn được tính vào tổng chi Meta và cả hai ROAS tổng.
-            </div>
-          )}
+          <div className="mt-5 rounded-2xl border border-orange-200 bg-orange-50 px-4 py-3 text-xs text-orange-800">
+            <strong>
+              {summary.unmatchedAdCount} bài Meta và{" "}
+              {summary.unmatchedCashflowGroupCount} nhóm sổ quỹ chưa ghép được.
+            </strong>{" "}
+            Chi phí của bài chưa ghép ({formatCurrency(summary.unmatchedSpend)})
+            vẫn được tính vào tổng chi Meta và cả hai ROAS tổng.
+          </div>
+        )}
 
         <section className="mt-5 overflow-hidden rounded-[22px] border border-slate-400/20 border-t-2 border-t-slate-900 bg-white/90 shadow-[0_14px_38px_rgba(15,23,42,0.06)] backdrop-blur-xl">
           <div className="flex flex-col gap-4 border-b border-slate-100 p-5 sm:flex-row sm:items-center sm:justify-between sm:px-6">
@@ -2426,109 +2685,192 @@ export default function RoasDashboard() {
                 </span>
               </div>
             </div>
-            <label className="relative w-fit">
-              <span className="mr-2 text-[11px] font-semibold text-slate-400">
-                Sắp xếp:
-              </span>
-              <select
-                value={sortBy}
-                onChange={(event) => setSortBy(event.target.value)}
-                className="appearance-none rounded-lg border border-slate-200 bg-white py-2 pl-3 pr-8 text-[11px] font-bold text-slate-600 outline-none focus:border-cyan-400"
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShowColumnControls((current) => !current)}
+                aria-expanded={showColumnControls}
+                className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-[11px] font-bold transition-colors ${
+                  showColumnControls
+                    ? "border-cyan-300 bg-cyan-50 text-cyan-700"
+                    : "border-slate-200 bg-white text-slate-600 hover:border-cyan-200 hover:text-cyan-700"
+                }`}
               >
-                <option value="estimatedRoas">
-                  ROAS doanh thu dự kiến cao nhất
-                </option>
-                <option value="roas">ROAS tiền về cao nhất</option>
-                <option value="revenue">Tiền về sổ quỹ cao nhất</option>
-                <option value="estimatedRevenue">
-                  Doanh thu dự kiến cao nhất
-                </option>
-                <option value="spend">Tổng chi cao nhất</option>
-                <option value="purchases">Lượt mua cao nhất</option>
-              </select>
-              <ChevronDown
-                size={13}
-                className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400"
-              />
-            </label>
+                {showColumnControls ? <EyeOff size={14} /> : <Eye size={14} />}
+                Tùy chỉnh cột
+                <span className="rounded-md bg-white/80 px-1.5 py-0.5 text-[9px]">
+                  {visibleColumnCount}/{TABLE_COLUMN_OPTIONS.length}
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={toggleAllTableColumns}
+                className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-[11px] font-bold transition-colors ${
+                  allColumnsVisible
+                    ? "border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100"
+                    : "border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100"
+                }`}
+              >
+                {allColumnsVisible ? <EyeOff size={14} /> : <Eye size={14} />}
+                {allColumnsVisible ? "Tắt tất cả" : "Bật tất cả"}
+              </button>
+              <label className="relative w-fit">
+                <span className="mr-2 text-[11px] font-semibold text-slate-400">
+                  Sắp xếp:
+                </span>
+                <select
+                  value={sortBy}
+                  onChange={(event) => setSortBy(event.target.value)}
+                  className="appearance-none rounded-lg border border-slate-200 bg-white py-2 pl-3 pr-8 text-[11px] font-bold text-slate-600 outline-none focus:border-cyan-400"
+                >
+                  <option value="estimatedRoas">
+                    ROAS doanh thu dự kiến cao nhất
+                  </option>
+                  <option value="roas">ROAS tiền về cao nhất</option>
+                  <option value="revenue">Tiền về sổ quỹ cao nhất</option>
+                  <option value="estimatedRevenue">
+                    Doanh thu dự kiến cao nhất
+                  </option>
+                  <option value="spend">Tổng chi cao nhất</option>
+                  <option value="purchases">Lượt mua cao nhất</option>
+                </select>
+                <ChevronDown
+                  size={13}
+                  className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400"
+                />
+              </label>
+            </div>
           </div>
+          {showColumnControls && (
+            <div className="border-b border-slate-100 bg-slate-50/70 px-5 py-3 sm:px-6">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="mr-1 text-[10px] font-extrabold uppercase tracking-wide text-slate-400">
+                  Chọn cột hiển thị
+                </span>
+                {TABLE_COLUMN_OPTIONS.map((column) => {
+                  const active = visibleColumns[column.key];
+                  return (
+                    <button
+                      key={column.key}
+                      type="button"
+                      onClick={() => toggleTableColumn(column.key)}
+                      aria-pressed={active}
+                      className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[10px] font-bold transition-colors ${
+                        active
+                          ? column.cashflow
+                            ? "border-amber-300 bg-amber-100 text-amber-800"
+                            : "border-cyan-300 bg-cyan-50 text-cyan-700"
+                          : "border-slate-200 bg-white text-slate-400 hover:border-slate-300 hover:text-slate-600"
+                      }`}
+                    >
+                      <span
+                        className={`grid h-3.5 w-3.5 place-items-center rounded border ${
+                          active
+                            ? column.cashflow
+                              ? "border-amber-500 bg-amber-500 text-white"
+                              : "border-cyan-500 bg-cyan-500 text-white"
+                            : "border-slate-300 bg-white"
+                        }`}
+                      >
+                        {active && <Check size={10} strokeWidth={3} />}
+                      </span>
+                      {column.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
           <div className="max-h-[72vh] overflow-auto overscroll-contain">
-            <table className="w-full min-w-[2420px] border-collapse text-left">
+            <table
+              className="w-full border-collapse text-left"
+              style={{
+                minWidth: Math.max(700, 420 + visibleColumnCount * 125),
+              }}
+            >
               <thead className="sticky top-0 z-30 shadow-[0_1px_0_0_#e2e8f0]">
                 <tr className="bg-slate-50 text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
                   <th className="sticky left-0 z-40 bg-slate-50 px-6 py-3.5">
                     Nhân viên / SKU / Bài quảng cáo
                   </th>
-                  <th className="px-4 py-3.5 text-right">Phiếu thu</th>
-                  <th className="px-4 py-3.5 text-right">Phiếu chi</th>
-                  <th className="px-4 py-3.5 text-right">Tiền về sổ quỹ</th>
-                  <th className="px-4 py-3.5 text-right">
-                    Doanh thu dự kiến
-                    <span className="mt-0.5 block text-[9px] normal-case tracking-normal text-slate-300">
-                      Hóa đơn backup · đã xử lý phí ĐTGH
-                    </span>
-                  </th>
-                  <th className="px-4 py-3.5 text-right">
-                    Chi Meta gốc
-                    <span className="mt-0.5 block text-[9px] normal-case tracking-normal text-slate-300">
-                      Số thực Meta · chưa VAT
-                    </span>
-                  </th>
-                  <th className="px-4 py-3.5 text-right">
-                    Chi Meta gồm VAT
-                    <span className="mt-0.5 block text-[9px] normal-case tracking-normal text-slate-300">
-                      Chi gốc + VAT 10%
-                    </span>
-                  </th>
-                  <th className="px-4 py-3.5 text-right">
-                    ROAS tiền về
-                    <span className="mt-0.5 block text-[9px] normal-case tracking-normal text-slate-300">
-                      Tiền về sổ quỹ / chi gồm VAT
-                    </span>
-                  </th>
-                  <th className="px-4 py-3.5 text-right">
-                    ROAS doanh thu dự kiến
-                    <span className="mt-0.5 block text-[9px] normal-case tracking-normal text-slate-300">
-                      Doanh thu dự kiến / chi gồm VAT
-                    </span>
-                  </th>
-                  <th className="px-4 py-3.5 text-right">
-                    CTR (tỷ lệ click vào liên kết)
-                  </th>
-                  <th className="px-4 py-3.5 text-right">
-                    Lượt hiển thị
-                    <span className="mt-0.5 block text-[9px] normal-case tracking-normal text-slate-300">
-                      Số thực Meta
-                    </span>
-                  </th>
-                  <th className="px-4 py-3.5 text-right">
-                    Kết quả
-                    <span className="mt-0.5 block text-[9px] normal-case tracking-normal text-slate-300">
-                      Lượt mua trên Meta
-                    </span>
-                  </th>
-                  <th className="px-4 py-3.5 text-right">Tần suất</th>
-                  <th className="px-4 py-3.5 text-right">
-                    Tổng số người liên hệ nhắn tin
-                  </th>
-                  <th className="px-4 py-3.5 text-right">
-                    Chi phí trên mỗi kết quả
-                    <span className="mt-0.5 block text-[9px] normal-case tracking-normal text-slate-300">
-                      Lượt mua · Meta không VAT
-                    </span>
-                  </th>
-                  <th className="px-4 py-3.5 text-right">
-                    Chi phí trên mỗi người liên hệ nhắn tin
-                    <span className="mt-0.5 block text-[9px] normal-case tracking-normal text-slate-300">
-                      Số gốc Meta · không VAT
-                    </span>
-                  </th>
-                  <th className="px-6 py-3.5 text-right">
-                    Tỷ lệ mua / người liên hệ
-                    <span className="mt-0.5 block text-[9px] normal-case tracking-normal text-slate-300">
-                      Chỉ số tự tính
-                    </span>
-                  </th>
+                  {visibleColumns.spend && (
+                    <th className="px-4 py-3.5 text-right">Chi Meta gốc</th>
+                  )}
+                  {visibleColumns.totalSpend && (
+                    <th className="px-4 py-3.5 text-right">Chi Meta gồm VAT</th>
+                  )}
+                  {visibleColumns.estimatedRevenue && (
+                    <th className="px-4 py-3.5 text-right">
+                      Doanh thu dự kiến
+                    </th>
+                  )}
+                  {visibleColumns.estimatedRoas && (
+                    <th className="px-4 py-3.5 text-right">ROAS dự kiến</th>
+                  )}
+                  {visibleColumns.receipt && (
+                    <th
+                      className={`${cashflowColumnClass("receipt")} cursor-pointer px-4 py-3.5 text-right`}
+                      onClick={() => toggleTableColumn("receipt")}
+                      title="Bấm để ẩn cột Phiếu thu"
+                    >
+                      Phiếu thu
+                    </th>
+                  )}
+                  {visibleColumns.expense && (
+                    <th
+                      className={`${cashflowColumnClass("expense")} cursor-pointer px-4 py-3.5 text-right`}
+                      onClick={() => toggleTableColumn("expense")}
+                      title="Bấm để ẩn cột Phiếu chi"
+                    >
+                      Phiếu chi
+                    </th>
+                  )}
+                  {visibleColumns.netRevenue && (
+                    <th
+                      className={`${cashflowColumnClass("netRevenue")} cursor-pointer px-4 py-3.5 text-right`}
+                      onClick={() => toggleTableColumn("netRevenue")}
+                      title="Bấm để ẩn cột Tiền về sổ quỹ"
+                    >
+                      Tiền về sổ quỹ
+                    </th>
+                  )}
+                  {visibleColumns.roas && (
+                    <th
+                      className={`${cashflowColumnClass("roas")} cursor-pointer px-4 py-3.5 text-right`}
+                      onClick={() => toggleTableColumn("roas")}
+                      title="Bấm để ẩn cột ROAS tiền về"
+                    >
+                      ROAS tiền về
+                    </th>
+                  )}
+                  {visibleColumns.ctr && (
+                    <th className="px-4 py-3.5 text-right">CTR</th>
+                  )}
+                  {visibleColumns.impressions && (
+                    <th className="px-4 py-3.5 text-right">Lượt hiển thị</th>
+                  )}
+                  {visibleColumns.purchases && (
+                    <th className="px-4 py-3.5 text-right">Kết quả</th>
+                  )}
+                  {visibleColumns.frequency && (
+                    <th className="px-4 py-3.5 text-right">Tần suất</th>
+                  )}
+                  {visibleColumns.messages && (
+                    <th className="px-4 py-3.5 text-right">Người liên hệ</th>
+                  )}
+                  {visibleColumns.costPerPurchase && (
+                    <th className="px-4 py-3.5 text-right">CP / Kết quả</th>
+                  )}
+                  {visibleColumns.costPerMessage && (
+                    <th className="px-4 py-3.5 text-right">
+                      CP / Người liên hệ
+                    </th>
+                  )}
+                  {visibleColumns.purchaseToMessageRate && (
+                    <th className="px-6 py-3.5 text-right">
+                      Tỷ lệ mua / liên hệ
+                    </th>
+                  )}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -2593,7 +2935,11 @@ export default function RoasDashboard() {
                             </span>
                           </button>
                         </td>
-                        <AggregateMetricCells item={userGroup} emphasized />
+                        <AggregateMetricCells
+                          item={userGroup}
+                          emphasized
+                          visibleColumns={visibleColumns}
+                        />
                       </tr>
                       {userExpanded &&
                         userGroup.productGroups.map((group) => {
@@ -2647,7 +2993,10 @@ export default function RoasDashboard() {
                                     </span>
                                   </button>
                                 </td>
-                                <AggregateMetricCells item={group} />
+                                <AggregateMetricCells
+                                  item={group}
+                                  visibleColumns={visibleColumns}
+                                />
                               </tr>
                               {expanded &&
                                 group.ads.map((ad, adIndex) => (
@@ -2673,66 +3022,10 @@ export default function RoasDashboard() {
                                         </div>
                                       </div>
                                     </td>
-                                    <td className="px-4 py-3 text-right text-xs text-slate-300">
-                                      —
-                                    </td>
-                                    <td className="px-4 py-3 text-right text-xs text-slate-300">
-                                      —
-                                    </td>
-                                    <td className="px-4 py-3 text-right text-xs text-slate-300">
-                                      —
-                                    </td>
-                                    <td className="px-4 py-3 text-right text-xs text-slate-300">
-                                      —
-                                    </td>
-                                    <td
-                                      className="px-4 py-3 text-right text-xs font-bold text-cyan-700"
-                                      title="Số tiền chi tiêu gốc do Meta trả về"
-                                    >
-                                      {formatCurrency(ad.spend)}
-                                    </td>
-                                    <td
-                                      className="px-4 py-3 text-right text-xs font-bold text-slate-600"
-                                      title={`Chi Meta ${formatCurrency(ad.spend)} + VAT ${formatCurrency(ad.vat)}`}
-                                    >
-                                      {formatCurrency(ad.totalSpend)}
-                                    </td>
-                                    <td className="px-4 py-3 text-right text-xs text-slate-300">
-                                      —
-                                    </td>
-                                    <td className="px-4 py-3 text-right text-xs text-slate-300">
-                                      —
-                                    </td>
-                                    <td className="px-4 py-3 text-right text-xs font-bold text-slate-600">
-                                      {formatPercent(ad.ctr)}
-                                    </td>
-                                    <td className="px-4 py-3 text-right text-xs font-bold text-slate-700">
-                                      {formatNumber(ad.impressions)}
-                                    </td>
-                                    <td className="px-4 py-3 text-right text-xs font-bold text-slate-700">
-                                      {formatNumber(ad.purchases)}
-                                    </td>
-                                    <td className="px-4 py-3 text-right text-xs text-slate-600">
-                                      {ad.frequency.toFixed(2)}x
-                                    </td>
-                                    <td className="px-4 py-3 text-right text-xs font-bold text-slate-700">
-                                      {formatNumber(ad.messages)}
-                                    </td>
-                                    <td className="px-4 py-3 text-right text-xs text-slate-600">
-                                      {ad.costPerPurchase
-                                        ? formatCurrency(ad.costPerPurchase)
-                                        : "—"}
-                                    </td>
-                                    <td className="px-4 py-3 text-right text-xs text-slate-600">
-                                      {ad.costPerMessage
-                                        ? formatCurrency(ad.costPerMessage)
-                                        : "—"}
-                                    </td>
-                                    <td className="px-6 py-3 text-right text-xs font-bold text-blue-700">
-                                      {formatPercent(
-                                        ad.purchaseToMessageRate * 100,
-                                      )}
-                                    </td>
+                                    <AdMetricCells
+                                      ad={ad}
+                                      visibleColumns={visibleColumns}
+                                    />
                                   </tr>
                                 ))}
                             </Fragment>
