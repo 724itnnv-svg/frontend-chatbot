@@ -134,7 +134,25 @@ const employmentStatusValue = (v) => {
   return "unknown";
 };
 const durationMonths = (v) => Number(String(v || "").match(/\d+/)?.[0] || 0) || null;
-const salaryNumber = (v) => Number(String(v ?? "").replace(/[^\d-]/g, "")) || 0;
+const salaryNumber = (value) => {
+  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+  // Parse one monetary amount only; never concatenate numbers from allowance descriptions.
+  const text = String(value ?? "").trim().replace(/\s*(?:đồng|vnd|vnđ|đ|₫)$/i, "").trim();
+  let normalized = text;
+  if (/^-?\d{1,3}(\.\d{3})+(,\d+)?$/.test(text)) {
+    normalized = text.replace(/\./g, "").replace(",", ".");
+  } else if (/^-?\d{1,3}(,\d{3})+(\.\d+)?$/.test(text)) {
+    normalized = text.replace(/,/g, "");
+  } else if (/^-?\d{1,3}( \d{3})+([.,]\d+)?$/.test(text)) {
+    normalized = text.replace(/ /g, "").replace(",", ".");
+  } else if (/^-?\d+(,\d+)?$/.test(text)) {
+    normalized = text.replace(",", ".");
+  } else if (!/^-?\d+(\.\d+)?([eE][+-]?\d+)?$/.test(text)) {
+    return 0;
+  }
+  const amount = Number(normalized);
+  return Number.isFinite(amount) ? amount : 0;
+};
 const ALLOWANCE_FIELDS = [
   ["phuCapCom", "PC cơm"],
   ["phuCapChuyenCan", "PC chuyên cần"],
@@ -144,6 +162,9 @@ const ALLOWANCE_FIELDS = [
 ];
 const normalizeCompensation = (value = {}) => {
   const compensation = { ...emptyProfile.compensation, ...value };
+  ["baseSalary", ...ALLOWANCE_FIELDS.map(([key]) => key)].forEach((key) => {
+    compensation[key] = salaryNumber(compensation[key]);
+  });
   const hasDetailedAllowance = ALLOWANCE_FIELDS.some(([key]) => salaryNumber(compensation[key]) > 0);
   if (!hasDetailedAllowance && salaryNumber(compensation.allowances) > 0) {
     compensation.phuCapNhiemVu = salaryNumber(compensation.allowances);
@@ -183,7 +204,9 @@ function parseEmployeeRow(row, index) {
       phuCapChuyenCan: salaryNumber(cell(row, "PC CHUYÊN CẦN")),
       phuCapXangXe: salaryNumber(cell(row, "PC XĂNG XE")),
       phuCapDienThoai: salaryNumber(cell(row, "PC ĐIỆN THOẠI")),
-      phuCapNhiemVu: salaryNumber(cell(row, "PC NHIỆM VỤ") || cell(row, "PHỤ CẤP")),
+      phuCapNhiemVu: salaryNumber(cell(row, "PC NHIỆM VỤ") !== ""
+        ? cell(row, "PC NHIỆM VỤ")
+        : ALLOWANCE_FIELDS.some(([, label]) => salaryNumber(cell(row, label)) > 0) ? 0 : cell(row, "PHỤ CẤP")),
       allowances: String(cell(row, "PHỤ CẤP") || ""),
     },
     education: { level: String(cell(row, "HỌC VẤN") || ""), major: String(cell(row, "NGÀNH NGHỀ") || "") },
@@ -303,6 +326,7 @@ function profileToExcelRow(profile) {
   const appendix = [...(contract.appendices || [])].sort((a, b) => new Date(b.signedDate || 0) - new Date(a.signedDate || 0))[0] || {};
   const address = profile.permanentAddress || {};
   const seniority = profile.seniority || {};
+  const compensation = normalizeCompensation(profile.compensation);
   return {
     "MSNV": profile.employeeCode || "",
     "HỌ VÀ TÊN": profile.personal?.fullName || "",
@@ -330,12 +354,12 @@ function profileToExcelRow(profile) {
     "NGÀY ĐẾN HẠN HỢP ĐỒNG LAO ĐỘNG": excelDate(contract.renewalDueDate || contract.expiryDate),
     "TÌNH TRẠNG": exportEmploymentStatus[profile.employment?.employmentStatus] || profile.employment?.employmentStatus || "",
     "CTY": profile.employment?.company || "",
-    "LƯƠNG CĂN BẢN": Number(profile.compensation?.baseSalary || 0) || "",
-    "PC CƠM": Number(profile.compensation?.phuCapCom || 0) || "",
-    "PC CHUYÊN CẦN": Number(profile.compensation?.phuCapChuyenCan || 0) || "",
-    "PC XĂNG XE": Number(profile.compensation?.phuCapXangXe || 0) || "",
-    "PC ĐIỆN THOẠI": Number(profile.compensation?.phuCapDienThoai || 0) || "",
-    "PC NHIỆM VỤ": Number(profile.compensation?.phuCapNhiemVu || salaryNumber(profile.compensation?.allowances) || 0) || "",
+    "LƯƠNG CĂN BẢN": compensation.baseSalary,
+    "PC CƠM": compensation.phuCapCom,
+    "PC CHUYÊN CẦN": compensation.phuCapChuyenCan,
+    "PC XĂNG XE": compensation.phuCapXangXe,
+    "PC ĐIỆN THOẠI": compensation.phuCapDienThoai,
+    "PC NHIỆM VỤ": compensation.phuCapNhiemVu,
     "SỐ PHỤ LỤC HỢP ĐỒNG": appendix.appendixNumber || "",
     "TỪ NGÀY KÝ PL": excelDate(appendix.signedDate || appendix.effectiveDate),
     "NGÀY HẾT HẠN PL": excelDate(appendix.expiryDate),
@@ -594,7 +618,7 @@ function ContractEditorModal({
         <Field label="Nơi làm việc" value={draft.workplace} onChange={(v) => updateField("workplace", v)} />
         <Field label="Người đại diện" value={draft.companyRepresentative.fullName} onChange={(v) => updateDraft((current) => ({ ...current, companyRepresentative: { ...current.companyRepresentative, fullName: v } }))} />
         <Field label="Chức vụ đại diện" value={draft.companyRepresentative.title} onChange={(v) => updateDraft((current) => ({ ...current, companyRepresentative: { ...current.companyRepresentative, title: v } }))} />
-        <MoneyField label="Phụ cấp" value={draft.allowances} onChange={(v) => updateField("allowances", v)} />
+        <Field label="Phụ cấp" value={draft.allowances} onChange={(v) => updateField("allowances", v)} />
       </div>
       <ContractTemplateDynamicFields definitions={draft.templateFieldDefinitions || []} values={draft.templateFieldValues || {}} onChange={(key, fieldValue) => updateDraft((current) => ({ ...current, templateFieldValues: { ...(current.templateFieldValues || {}), [key]: fieldValue } }))} />
       <div className="mt-5 rounded-xl border border-cyan-100 bg-cyan-50/50 p-3"><div className="mb-3 flex items-center"><b className="mr-auto text-sm text-cyan-800">Phụ lục hợp đồng</b><button onClick={() => updateDraft((current) => ({ ...current, appendices: [...(current.appendices || []), { appendixNumber: "", signedDate: "", effectiveDate: "", expiryDate: "", summary: "", status: "draft" }] }))} className="rounded-lg bg-cyan-600 px-2.5 py-1.5 text-xs font-bold text-white">+ Thêm phụ lục</button></div>
@@ -1707,7 +1731,7 @@ export default function EmployeeProfileManager({ users, onClose, standalone = fa
         {editor._id && <EmployeeHealthSection profile={editor} request={request} permissions={{ view: canHealthAction("view"), create: canHealthAction("create"), edit: canHealthAction("edit"), delete: canHealthAction("delete"), download: canHealthAction("export") }} notify={notify} confirmAction={confirmAction} />}
         {editor._id && <EmployeeViolationSection profile={editor} request={request} token={token} permissions={{ view: canViolationAction("view"), edit: canViolationAction("edit"), export: canViolationAction("export") }} notify={notify} />}
         <section className="rounded-2xl border border-cyan-100 bg-white p-4"><h3 className="mb-4 font-black text-cyan-800">CCCD, BHXH và công việc</h3><div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4"><Field label="Số CCCD/CMND" value={editor.identityDocument.number} onChange={(v) => setNested("identityDocument", "number", v)} /><Field label="Ngày cấp" type="date" value={editor.identityDocument.issuedDate} onChange={(v) => setNested("identityDocument", "issuedDate", v)} /><Field label="Nơi cấp" value={editor.identityDocument.issuedPlace} onChange={(v) => setNested("identityDocument", "issuedPlace", v)} /><Field label="Mã số BHXH" value={editor.socialInsuranceNumber} onChange={(v) => setEditor({ ...editor, socialInsuranceNumber: v })} /><SelectField label="Công ty" value={editor.employment.company} onChange={(v) => setNested("employment", "company", v)} options={COMPANY_OPTIONS} /><Field label="Bộ phận" value={editor.employment.department} onChange={(v) => setNested("employment", "department", v)} /><Field label="Chức danh" value={editor.employment.jobTitle} onChange={(v) => setNested("employment", "jobTitle", v)} /><Field label="Ngày vào làm" type="date" value={editor.employment.startDate} onChange={(v) => setNested("employment", "startDate", v)} /><Field label="Ngày chính thức" type="date" value={editor.employment.officialDate} onChange={(v) => setNested("employment", "officialDate", v)} /><SelectField label="Tình trạng" value={editor.employment.employmentStatus} onChange={(v) => setNested("employment", "employmentStatus", v)} options={[["unknown", "Chưa xác định"], ["probation", "Thử việc"], ["official", "Chính thức"], ["leave", "Tạm nghỉ"], ["resigned", "Nghỉ việc"], ["terminated", "Chấm dứt"]]} /><Field label="Ngày nghỉ việc" type="date" immediate value={editor.employment.endDate} onChange={(v) => setNested("employment", "endDate", v)} /><Field label="Học vấn" value={editor.education.level} onChange={(v) => setNested("education", "level", v)} /><Field label="Ngành nghề" value={editor.education.major} onChange={(v) => setNested("education", "major", v)} /><label className="md:col-span-2 lg:col-span-4"><span className={labelClass}>Mô tả công việc</span><textarea rows={4} maxLength={5000} value={editor.employment.jobDescription || ""} onChange={(event) => setNested("employment", "jobDescription", event.target.value)} placeholder="Nhập nhiệm vụ, trách nhiệm và phạm vi công việc của nhân viên..." className={`${inputClass} resize-y`} /></label></div></section>
-        <section className="rounded-2xl border border-emerald-100 bg-white p-4"><h3 className="mb-1 font-black text-emerald-800">Lương và phụ cấp</h3><p className="mb-4 text-xs text-slate-500">Các khoản phụ cấp dùng cùng cấu trúc với bảng lương và được tự động tổng hợp khi tạo hợp đồng lao động mới.</p><div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3"><MoneyField label="Lương căn bản" numeric value={editor.compensation.baseSalary} onChange={(v) => setNested("compensation", "baseSalary", v)} /><MoneyField label="PC cơm" numeric value={editor.compensation.phuCapCom} onChange={(v) => setNested("compensation", "phuCapCom", v)} /><MoneyField label="PC chuyên cần" numeric value={editor.compensation.phuCapChuyenCan} onChange={(v) => setNested("compensation", "phuCapChuyenCan", v)} /><MoneyField label="PC xăng xe" numeric value={editor.compensation.phuCapXangXe} onChange={(v) => setNested("compensation", "phuCapXangXe", v)} /><MoneyField label="PC điện thoại" numeric value={editor.compensation.phuCapDienThoai} onChange={(v) => setNested("compensation", "phuCapDienThoai", v)} /><MoneyField label="PC nhiệm vụ" numeric value={editor.compensation.phuCapNhiemVu} onChange={(v) => setNested("compensation", "phuCapNhiemVu", v)} /></div></section>
+        <section className="rounded-2xl border border-emerald-100 bg-white p-4"><h3 className="mb-1 font-black text-emerald-800">Lương và phụ cấp</h3><p className="mb-4 text-xs text-slate-500">Lương và phụ cấp tại đây tự động cập nhật vào bảng lương chưa chốt ở kỳ đang mở, đồng thời dùng khi tạo hợp đồng lao động mới.</p><div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3"><MoneyField label="Lương căn bản" numeric value={editor.compensation.baseSalary} onChange={(v) => setNested("compensation", "baseSalary", v)} /><MoneyField label="PC cơm" numeric value={editor.compensation.phuCapCom} onChange={(v) => setNested("compensation", "phuCapCom", v)} /><MoneyField label="PC chuyên cần" numeric value={editor.compensation.phuCapChuyenCan} onChange={(v) => setNested("compensation", "phuCapChuyenCan", v)} /><MoneyField label="PC xăng xe" numeric value={editor.compensation.phuCapXangXe} onChange={(v) => setNested("compensation", "phuCapXangXe", v)} /><MoneyField label="PC điện thoại" numeric value={editor.compensation.phuCapDienThoai} onChange={(v) => setNested("compensation", "phuCapDienThoai", v)} /><MoneyField label="PC nhiệm vụ" numeric value={editor.compensation.phuCapNhiemVu} onChange={(v) => setNested("compensation", "phuCapNhiemVu", v)} /></div></section>
         <section className="rounded-2xl border border-sky-100 bg-white p-4">
           <h3 className="mb-1 font-black text-sky-800">Nguyên quán</h3>
           <p className="mb-4 text-xs text-slate-500">Thông tin quê quán theo giấy tờ của nhân viên.</p>
