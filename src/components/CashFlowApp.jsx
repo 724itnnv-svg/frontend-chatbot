@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import { useAuth } from "../context/AuthContext";
 import {
@@ -45,9 +45,9 @@ const TEAM_ID_TO_RETAILER = {
 
 const getRetailerFromTeamId = (teamId) =>
   TEAM_ID_TO_RETAILER[
-    String(teamId || "")
-      .trim()
-      .toUpperCase()
+  String(teamId || "")
+    .trim()
+    .toUpperCase()
   ] || "";
 
 const PRIVATE_TOKEN_COOKIE_PREFIX = "kiot_private_token_";
@@ -198,12 +198,12 @@ const formatKiotErrorMessage = (error) => {
   const message =
     normalizeText(
       responseStatus.Message ||
-        responseStatus.message ||
-        error?.response?.data?.error?.responseStatus?.message ||
-        error?.response?.data?.error?.ResponseStatus?.Message ||
-        error?.response?.data?.error?.message ||
-        error?.response?.data?.message ||
-        error?.message,
+      responseStatus.message ||
+      error?.response?.data?.error?.responseStatus?.message ||
+      error?.response?.data?.error?.ResponseStatus?.Message ||
+      error?.response?.data?.error?.message ||
+      error?.response?.data?.message ||
+      error?.message,
     ) || "Không gửi được payload";
 
   return shortenPaidKiotMessage(message);
@@ -224,10 +224,10 @@ const buildPayloadErrorSummary = (detailRows = []) => {
           const deliveryCode = normalizeText(detail.deliveryCode || "");
           const detailMessage = normalizeText(
             detail.message ||
-              detail.Message ||
-              detail.error?.ResponseStatus?.Message ||
-              detail.error?.message ||
-              "Không gửi được payload",
+            detail.Message ||
+            detail.error?.ResponseStatus?.Message ||
+            detail.error?.message ||
+            "Không gửi được payload",
           );
           return `${deliveryCode ? `Mã vận đơn ${deliveryCode}: ` : ""}${detailMessage}`;
         }),
@@ -576,10 +576,10 @@ export default function CashFlowApp() {
       const cashflow = cashflows[index];
       const rowId = String(
         cashflow?.Id ??
-          cashflow?.id ??
-          cashflow?.Code ??
-          cashflow?.code ??
-          index,
+        cashflow?.id ??
+        cashflow?.Code ??
+        cashflow?.code ??
+        index,
       );
       const invoiceId = getInvoiceIdFromCashflowCode(cashflow);
       const nextDescription = normalizeText(
@@ -726,11 +726,11 @@ export default function CashFlowApp() {
           currentRows.map((item) =>
             getOrderDeliveryCode(item) === deliveryCode
               ? {
-                  ...item,
-                  __orderDelivery: null,
-                  __orderDeliveryLoaded: true,
-                  __orderDeliveryMissingInvoice: true,
-                }
+                ...item,
+                __orderDelivery: null,
+                __orderDeliveryLoaded: true,
+                __orderDeliveryMissingInvoice: true,
+              }
               : item,
           ),
         );
@@ -764,12 +764,12 @@ export default function CashFlowApp() {
           currentRows.map((item) =>
             getOrderDeliveryCode(item) === deliveryCode
               ? {
-                  ...item,
-                  __orderDelivery: null,
-                  __orderDeliveryLoaded: true,
-                  __orderDeliveryMissingInvoice: true,
-                  __orderDeliveryNotFound: true,
-                }
+                ...item,
+                __orderDelivery: null,
+                __orderDeliveryLoaded: true,
+                __orderDeliveryMissingInvoice: true,
+                __orderDeliveryNotFound: true,
+              }
               : item,
           ),
         );
@@ -811,11 +811,11 @@ export default function CashFlowApp() {
         setOrderDeliveryLoadProgress((current) =>
           current.runId === runId
             ? {
-                ...current,
-                active: completed < total,
-                total,
-                completed,
-              }
+              ...current,
+              active: completed < total,
+              total,
+              completed,
+            }
             : current,
         );
 
@@ -834,11 +834,11 @@ export default function CashFlowApp() {
       setOrderDeliveryLoadProgress((current) =>
         current.runId === runId
           ? {
-              ...current,
-              active: false,
-              total,
-              completed: Math.min(current.completed || 0, total),
-            }
+            ...current,
+            active: false,
+            total,
+            completed: Math.min(current.completed || 0, total),
+          }
           : current,
       );
     }
@@ -1192,11 +1192,11 @@ export default function CashFlowApp() {
         setSendPayloadProgress((current) =>
           current.runId === runId
             ? {
-                ...current,
-                active: false,
-                total: 0,
-                completed: 0,
-              }
+              ...current,
+              active: false,
+              total: 0,
+              completed: 0,
+            }
             : current,
         );
         addToast({
@@ -1275,11 +1275,11 @@ export default function CashFlowApp() {
         setSendPayloadProgress((current) =>
           current.runId === runId
             ? {
-                ...current,
-                active: true,
-                total: payloadEntries.length,
-                completed: index + 1,
-              }
+              ...current,
+              active: true,
+              total: payloadEntries.length,
+              completed: index + 1,
+            }
             : current,
         );
 
@@ -1408,11 +1408,11 @@ export default function CashFlowApp() {
         setSendPayloadProgress((current) =>
           current.runId === runId
             ? {
-                ...current,
-                active: false,
-                total: payloads.length,
-                completed: payloads.length,
-              }
+              ...current,
+              active: false,
+              total: payloads.length,
+              completed: payloads.length,
+            }
             : current,
         );
       }

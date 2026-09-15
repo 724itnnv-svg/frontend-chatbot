@@ -322,13 +322,13 @@ function getAdDeliveryStatus(ad = {}) {
   const explicitRunning = ad.isRunning ?? ad.isActive;
   const rawStatus = String(
     ad.effectiveStatus ??
-      ad.effective_status ??
-      ad.deliveryStatus ??
-      ad.delivery_status ??
-      ad.status ??
-      ad.configuredStatus ??
-      ad.configured_status ??
-      "",
+    ad.effective_status ??
+    ad.deliveryStatus ??
+    ad.delivery_status ??
+    ad.status ??
+    ad.configuredStatus ??
+    ad.configured_status ??
+    "",
   )
     .trim()
     .toUpperCase();
@@ -397,22 +397,20 @@ function AdDeliveryStatus({ ad }) {
   return (
     <span className="inline-flex flex-wrap items-center gap-1.5">
       <span
-        className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-extrabold ring-1 ${
-          status.running === true
-            ? "bg-emerald-50 text-emerald-700 ring-emerald-200"
-            : status.running === false
-              ? "bg-rose-50 text-rose-700 ring-rose-200"
-              : "bg-slate-50 text-slate-500 ring-slate-200"
-        }`}
+        className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-extrabold ring-1 ${status.running === true
+          ? "bg-emerald-50 text-emerald-700 ring-emerald-200"
+          : status.running === false
+            ? "bg-rose-50 text-rose-700 ring-rose-200"
+            : "bg-slate-50 text-slate-500 ring-slate-200"
+          }`}
       >
         <span
-          className={`h-1.5 w-1.5 rounded-full ${
-            status.running === true
-              ? "bg-emerald-500"
-              : status.running === false
-                ? "bg-rose-500"
-                : "bg-slate-400"
-          }`}
+          className={`h-1.5 w-1.5 rounded-full ${status.running === true
+            ? "bg-emerald-500"
+            : status.running === false
+              ? "bg-rose-500"
+              : "bg-slate-400"
+            }`}
         />
         {status.label}
       </span>
@@ -1008,18 +1006,18 @@ function EmployeeRoasChart({ groups }) {
         const tone =
           employee.estimatedRoas >= 8
             ? {
-                bar: "from-emerald-400 to-emerald-600",
-                badge: "bg-emerald-50 text-emerald-700 ring-emerald-200",
-              }
+              bar: "from-emerald-400 to-emerald-600",
+              badge: "bg-emerald-50 text-emerald-700 ring-emerald-200",
+            }
             : employee.estimatedRoas >= 4
               ? {
-                  bar: "from-amber-400 to-orange-500",
-                  badge: "bg-amber-50 text-amber-700 ring-amber-200",
-                }
+                bar: "from-amber-400 to-orange-500",
+                badge: "bg-amber-50 text-amber-700 ring-amber-200",
+              }
               : {
-                  bar: "from-rose-400 to-rose-600",
-                  badge: "bg-rose-50 text-rose-700 ring-rose-200",
-                };
+                bar: "from-rose-400 to-rose-600",
+                badge: "bg-rose-50 text-rose-700 ring-rose-200",
+              };
 
         return (
           <article
@@ -1531,7 +1529,7 @@ function EfficiencyMatrix({ groups }) {
               chart.top +
               plotHeight -
               (Math.min(Math.max(estimatedRoas, 0), maxRoas) / maxRoas) *
-                plotHeight;
+              plotHeight;
             const radius =
               8 + Math.sqrt(Math.max(item.purchases, 0) / maxPurchases) * 5;
             const color = colorFor(estimatedRoas);
@@ -1721,7 +1719,7 @@ export default function RoasDashboard() {
     } catch (requestError) {
       setError(
         requestError.response?.data?.message ||
-          "Không lấy được bộ lọc báo cáo ROAS.",
+        "Không lấy được bộ lọc báo cáo ROAS.",
       );
     } finally {
       setLoadingOptions(false);
@@ -1823,7 +1821,7 @@ export default function RoasDashboard() {
       setCompanyOverview(null);
       setCompanyOverviewError(
         requestError.response?.data?.message ||
-          "Không tổng hợp được dữ liệu của đủ 4 công ty.",
+        "Không tổng hợp được dữ liệu của đủ 4 công ty.",
       );
     } finally {
       if (companyOverviewRequestId.current === requestId) {
@@ -2027,21 +2025,21 @@ export default function RoasDashboard() {
           const companyReport = isCurrentReport
             ? report
             : (
-                await api.get("/roas/report", {
-                  params: {
-                    accountId: account.id,
-                    retailerName: companyRetailerName,
-                    since: dateRange.since,
-                    until: dateRange.until,
-                  },
-                })
-              ).data;
+              await api.get("/roas/report", {
+                params: {
+                  accountId: account.id,
+                  retailerName: companyRetailerName,
+                  since: dateRange.since,
+                  until: dateRange.until,
+                },
+              })
+            ).data;
           return {
             report: companyReport,
             retailerName: companyReport?.retailerName || companyRetailerName,
             retailerLabel:
               RETAILER_LABELS[
-                companyReport?.retailerName || companyRetailerName
+              companyReport?.retailerName || companyRetailerName
               ] || companyRetailerName,
           };
         }),
@@ -2679,15 +2677,15 @@ export default function RoasDashboard() {
 
         {(summary.unmatchedAdCount > 0 ||
           summary.unmatchedCashflowGroupCount > 0) && (
-          <div className="mt-5 rounded-2xl border border-orange-200 bg-orange-50 px-4 py-3 text-xs text-orange-800">
-            <strong>
-              {summary.unmatchedAdCount} bài Meta và{" "}
-              {summary.unmatchedCashflowGroupCount} nhóm sổ quỹ chưa ghép được.
-            </strong>{" "}
-            Chi phí của bài chưa ghép ({formatCurrency(summary.unmatchedSpend)})
-            vẫn được tính vào tổng chi Meta và cả hai ROAS tổng.
-          </div>
-        )}
+            <div className="mt-5 rounded-2xl border border-orange-200 bg-orange-50 px-4 py-3 text-xs text-orange-800">
+              <strong>
+                {summary.unmatchedAdCount} bài Meta và{" "}
+                {summary.unmatchedCashflowGroupCount} nhóm sổ quỹ chưa ghép được.
+              </strong>{" "}
+              Chi phí của bài chưa ghép ({formatCurrency(summary.unmatchedSpend)})
+              vẫn được tính vào tổng chi Meta và cả hai ROAS tổng.
+            </div>
+          )}
 
         <section className="mt-5 overflow-hidden rounded-[22px] border border-slate-400/20 border-t-2 border-t-slate-900 bg-white/90 shadow-[0_14px_38px_rgba(15,23,42,0.06)] backdrop-blur-xl">
           <div className="flex flex-col gap-4 border-b border-slate-100 p-5 sm:flex-row sm:items-center sm:justify-between sm:px-6">

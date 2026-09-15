@@ -123,8 +123,8 @@ export async function updateCustomerEInvoiceAddress(
     );
     const incomingGroupIds = hasIncomingGroups
       ? customerPayload.CustomerGroupDetails.map(
-          (item) => item?.GroupId,
-        ).filter((groupId) => groupId != null)
+        (item) => item?.GroupId,
+      ).filter((groupId) => groupId != null)
       : currentCustomer.CustomerGroupIds;
     const hasIncomingTaxCode = Object.prototype.hasOwnProperty.call(
       customerPayload,
@@ -141,18 +141,18 @@ export async function updateCustomerEInvoiceAddress(
       EmployeeInCharges: currentCustomer.EmployeeInCharges,
       Groups: hasIncomingGroups
         ? customerPayload.Groups ||
-          customerPayload.CustomerGroupNames?.join(", ") ||
-          ""
+        customerPayload.CustomerGroupNames?.join(", ") ||
+        ""
         : currentCustomer.Groups,
       CustomerGroupDetails: hasIncomingGroups
         ? customerPayload.CustomerGroupDetails.map((item) => ({
-            ...item,
-            CustomerId: currentCustomer.Id,
-          }))
+          ...item,
+          CustomerId: currentCustomer.Id,
+        }))
         : (currentCustomer.CustomerGroupIds || []).map((groupId) => ({
-            GroupId: groupId,
-            CustomerId: currentCustomer.Id,
-          })),
+          GroupId: groupId,
+          CustomerId: currentCustomer.Id,
+        })),
       CustomerType: currentCustomer.CustomerType,
       Organization: currentCustomer.Organization || "",
       Name: currentCustomer.Name,
@@ -358,9 +358,9 @@ export async function getAccessToken(retailer = "kingfarm") {
       {};
     const enhancedError = new Error(
       responseStatus.message ||
-        responseStatus.Message ||
-        error.response?.data?.message ||
-        error.message,
+      responseStatus.Message ||
+      error.response?.data?.message ||
+      error.message,
     );
     enhancedError.status = error.response?.status || "";
     enhancedError.errorCode =
@@ -486,8 +486,8 @@ export async function getCashflowList(
     const skip = Number.isFinite(parsedSkip) && parsedSkip > 0 ? parsedSkip : 0;
     const transDateFilter =
       filters?.timeRange === "custom" &&
-      datePattern.test(startDate) &&
-      datePattern.test(endDate)
+        datePattern.test(startDate) &&
+        datePattern.test(endDate)
         ? `(TransDate ge datetime'${startDate}T00:00:00' and TransDate le datetime'${endDate}T23:59:59')`
         : `TransDate eq '${timeRange}'`;
     const filterParts = [
@@ -535,11 +535,11 @@ export async function getCashflowList(
   } catch (error) {
     throw new Error(
       error.userMessage ||
-        error.response?.data?.error?.ResponseStatus?.Message ||
-        error.response?.data?.ResponseStatus?.Message ||
-        error.response?.data?.message ||
-        error.message ||
-        "Không tải được danh sách sổ quỹ",
+      error.response?.data?.error?.ResponseStatus?.Message ||
+      error.response?.data?.ResponseStatus?.Message ||
+      error.response?.data?.message ||
+      error.message ||
+      "Không tải được danh sách sổ quỹ",
     );
   }
 }
@@ -691,7 +691,7 @@ export async function updateCashflowDates(
       PartnerDebt: cashflow?.PartnerDebt,
       PartnerDelivery:
         cashflow?.PartnerDelivery &&
-        typeof cashflow.PartnerDelivery === "object"
+          typeof cashflow.PartnerDelivery === "object"
           ? cashflow.PartnerDelivery
           : undefined,
       PartnerId: cashflow?.PartnerId,
@@ -789,11 +789,11 @@ export async function updateCashflowDates(
       {};
     throw new Error(
       error.userMessage ||
-        responseStatus.message ||
-        responseStatus.Message ||
-        error.response?.data?.message ||
-        error.message ||
-        "Không cập nhật được phiếu sổ quỹ",
+      responseStatus.message ||
+      responseStatus.Message ||
+      error.response?.data?.message ||
+      error.message ||
+      "Không cập nhật được phiếu sổ quỹ",
     );
   }
 }
@@ -822,9 +822,9 @@ export async function getOrderDelivery(
       {};
     const enhancedError = new Error(
       responseStatus.message ||
-        responseStatus.Message ||
-        error.response?.data?.message ||
-        error.message,
+      responseStatus.Message ||
+      error.response?.data?.message ||
+      error.message,
     );
     enhancedError.status = error.response?.status || "";
     enhancedError.errorCode =
@@ -912,8 +912,8 @@ export async function updateCustomerAddress(
     );
     const incomingGroupIds = hasIncomingGroups
       ? customerPayload.CustomerGroupDetails.map(
-          (item) => item?.GroupId,
-        ).filter((groupId) => groupId != null)
+        (item) => item?.GroupId,
+      ).filter((groupId) => groupId != null)
       : currentCustomer.CustomerGroupIds;
     const hasIncomingTaxCode = Object.prototype.hasOwnProperty.call(
       customerPayload,
@@ -938,36 +938,36 @@ export async function updateCustomerAddress(
       CustomerGroupIds: incomingGroupIds,
       EmployeeInChargeNames: hasIncomingEmployees
         ? mergeEmployeeValues(
-            currentCustomer.EmployeeInChargeNames,
-            customerPayload.EmployeeInChargeNames,
-          )
+          currentCustomer.EmployeeInChargeNames,
+          customerPayload.EmployeeInChargeNames,
+        )
         : currentCustomer.EmployeeInChargeNames,
       EmployeeInChargeIds: hasIncomingEmployees
         ? mergeEmployeeValues(
-            currentCustomer.EmployeeInChargeIds,
-            customerPayload.EmployeeInChargeIds,
-          )
+          currentCustomer.EmployeeInChargeIds,
+          customerPayload.EmployeeInChargeIds,
+        )
         : currentCustomer.EmployeeInChargeIds,
       EmployeeInCharges: hasIncomingEmployees
         ? mergeEmployeeValues(
-            currentCustomer.EmployeeInCharges,
-            customerPayload.EmployeeInCharges,
-          )
+          currentCustomer.EmployeeInCharges,
+          customerPayload.EmployeeInCharges,
+        )
         : currentCustomer.EmployeeInCharges,
       Groups: hasIncomingGroups
         ? customerPayload.Groups ||
-          customerPayload.CustomerGroupNames?.join(", ") ||
-          ""
+        customerPayload.CustomerGroupNames?.join(", ") ||
+        ""
         : currentCustomer.Groups,
       CustomerGroupDetails: hasIncomingGroups
         ? customerPayload.CustomerGroupDetails.map((item) => ({
-            ...item,
-            CustomerId: currentCustomer.Id,
-          }))
+          ...item,
+          CustomerId: currentCustomer.Id,
+        }))
         : (currentCustomer.CustomerGroupIds || []).map((groupId) => ({
-            GroupId: groupId,
-            CustomerId: currentCustomer.Id,
-          })),
+          GroupId: groupId,
+          CustomerId: currentCustomer.Id,
+        })),
       CustomerType: customerType,
       Organization,
       Name: currentCustomer.Name,
@@ -975,8 +975,8 @@ export async function updateCustomerAddress(
         ? { TaxCode: customerPayload.TaxCode }
         : currentCustomer?.TaxCode
           ? {
-              TaxCode: currentCustomer.TaxCode,
-            }
+            TaxCode: currentCustomer.TaxCode,
+          }
           : {}),
       NameEInvoice:
         customerPayload.NameEInvoice ||
@@ -2428,7 +2428,7 @@ export async function getCustomerInvoiceDebtAging(
       ? options.shouldContinue
       : () => true;
   const onProgress =
-    typeof options.onProgress === "function" ? options.onProgress : () => {};
+    typeof options.onProgress === "function" ? options.onProgress : () => { };
 
   const agingByCustomer = {};
   let nextCustomerIndex = 0;
@@ -2515,15 +2515,15 @@ export async function getCustomerInvoiceDebtAging(
 
       const invoiceCustomerCode = String(
         invoice.CustomerCode ??
-          invoice.customerCode ??
-          invoice.Customer?.Code ??
-          invoice.customer?.code ??
-          "",
+        invoice.customerCode ??
+        invoice.Customer?.Code ??
+        invoice.customer?.code ??
+        "",
       ).trim();
       if (
         invoiceCustomerCode &&
         invoiceCustomerCode.toLocaleLowerCase("vi-VN") !==
-          String(customer.code).trim().toLocaleLowerCase("vi-VN")
+        String(customer.code).trim().toLocaleLowerCase("vi-VN")
       ) {
         return;
       }
@@ -2542,19 +2542,19 @@ export async function getCustomerInvoiceDebtAging(
       ].find((key) => invoice?.[key] !== undefined && invoice?.[key] !== null);
       const total = Number(
         invoice.Total ??
-          invoice.total ??
-          invoice.NewInvoiceTotal ??
-          invoice.newInvoiceTotal ??
-          0,
+        invoice.total ??
+        invoice.NewInvoiceTotal ??
+        invoice.newInvoiceTotal ??
+        0,
       );
       const totalPaymentValue = invoice.TotalPayment ?? invoice.totalPayment;
       const paid =
         totalPaymentValue !== undefined && totalPaymentValue !== null
           ? Number(totalPaymentValue)
           : sumActiveAmounts(invoice.Payments ?? invoice.payments, [
-              "Amount",
-              "amount",
-            ]);
+            "Amount",
+            "amount",
+          ]);
       const returned = sumActiveAmounts(invoice.Returns ?? invoice.returns, [
         "ReturnTotal",
         "returnTotal",
@@ -2594,7 +2594,7 @@ export async function getCustomerInvoiceDebtAging(
       if (
         !existing ||
         new Date(purchaseDate).getTime() <
-          new Date(existing.oldestUnpaidDate).getTime()
+        new Date(existing.oldestUnpaidDate).getTime()
       ) {
         agingByCustomer[customerId] = {
           oldestUnpaidDate: purchaseDate,
