@@ -347,10 +347,53 @@ function comparisonGroupKey(group = {}) {
 }
 
 /**
+ * Lấy danh sách chiến dịch duy nhất từ các nhóm SKU.
+ * Reach cấp chiến dịch do Meta trả về đã khử trùng lặp giữa các bài quảng cáo.
+ */
+function collectUniqueCampaignMetrics(items = []) {
+  const campaigns = new Map();
+  const addCampaign = (campaign) => {
+    if (!campaign?.id) return;
+    campaigns.set(String(campaign.id), campaign);
+  };
+
+  items.forEach((item) => {
+    if (Array.isArray(item?.campaignMetrics)) {
+      item.campaignMetrics.forEach(addCampaign);
+    }
+    (item?.ads || []).forEach((ad) => addCampaign(ad?.campaignMetrics));
+  });
+  return [...campaigns.values()];
+}
+
+/** Tính tần suất cấp nhân viên từ Insights chiến dịch, có fallback cho dữ liệu cũ. */
+function calculateEmployeeFrequency(items, impressions, reach) {
+  const campaigns = collectUniqueCampaignMetrics(items);
+  if (campaigns.length === 1) {
+    return Number(campaigns[0].frequency) || 0;
+  }
+  if (campaigns.length > 1) {
+    const campaignImpressions = campaigns.reduce(
+      (sum, campaign) => sum + (Number(campaign.impressions) || 0),
+      0,
+    );
+    const campaignReach = campaigns.reduce(
+      (sum, campaign) => sum + (Number(campaign.reach) || 0),
+      0,
+    );
+    if (campaignReach > 0) return campaignImpressions / campaignReach;
+  }
+  return reach > 0 ? impressions / reach : 0;
+}
+
+/**
  * Cộng dữ liệu kỳ so sánh theo số gốc rồi tính lại các tỷ lệ.
  * Không cộng trung bình ROAS/CTR/CP vì sẽ làm sai kết quả cấp nhân viên.
  */
-function summarizeComparableMetrics(items = []) {
+function summarizeComparableMetrics(
+  items = [],
+  { useCampaignFrequency = false } = {},
+) {
   const totals = items.reduce(
     (result, item) => {
       result.receiptAmount += Number(item?.receiptAmount) || 0;
@@ -394,7 +437,12 @@ function summarizeComparableMetrics(items = []) {
     totals.impressions > 0
       ? (totals.linkClicks / totals.impressions) * 100
       : 0;
-  totals.frequency = totals.reach > 0 ? totals.impressions / totals.reach : 0;
+  totals.campaignMetrics = collectUniqueCampaignMetrics(items);
+  totals.frequency = useCampaignFrequency
+    ? calculateEmployeeFrequency(items, totals.impressions, totals.reach)
+    : totals.reach > 0
+      ? totals.impressions / totals.reach
+      : 0;
   totals.costPerPurchase =
     totals.purchases > 0 ? totals.spend / totals.purchases : 0;
   totals.costPerMessage =
@@ -731,6 +779,7 @@ function groupProductsByUser(productGroups = []) {
       productGroupsForUser.map(
         (group) => group.comparisonMetrics || EMPTY_SUMMARY,
       ),
+      { useCampaignFrequency: true },
     );
     const spend = productGroupsForUser.reduce(
       (sum, group) => sum + group.spend,
@@ -778,7 +827,11 @@ function groupProductsByUser(productGroups = []) {
       impressions,
       reach,
       ctr: impressions > 0 ? (linkClicks / impressions) * 100 : 0,
-      frequency: reach > 0 ? impressions / reach : 0,
+      frequency: calculateEmployeeFrequency(
+        productGroupsForUser,
+        impressions,
+        reach,
+      ),
       costPerPurchase: purchases > 0 ? spend / purchases : 0,
       costPerMessage: messages > 0 ? spend / messages : 0,
       purchaseToMessageRate: messages > 0 ? purchases / messages : 0,
@@ -1020,19 +1073,21 @@ function DetailMetric({ icon: Icon, label, value, helper, tone }) {
   );
 }
 
-/** Hiển thị % thay đổi nhỏ bên dưới từng số liệu của bảng chi tiết. */
-function MetricGrowth({ current, previous, available }) {
+/** Hiển thị % thay đổi nhỏ; `lowerIsBetter` đảo màu cho các chỉ số chi phí/tần suất. */
+function MetricGrowth({ current, previous, available, lowerIsBetter = false }) {
   if (!available) {
     return <span className="text-[8px] font-bold text-slate-300">—</span>;
   }
 
   const growth = calculateGrowthPercent(current, previous);
+  const improved =
+    growth === null ? !lowerIsBetter : lowerIsBetter ? growth < 0 : growth > 0;
   const colorClass =
-    growth === null || growth > 0
-      ? "text-emerald-600"
-      : growth < 0
-        ? "text-rose-600"
-        : "text-slate-400";
+    growth === 0
+      ? "text-slate-400"
+      : improved
+        ? "text-emerald-600"
+        : "text-rose-600";
   const prefix =
     growth === null ? "▲ " : growth > 0 ? "▲ " : growth < 0 ? "▼ " : "● ";
 
@@ -1044,7 +1099,13 @@ function MetricGrowth({ current, previous, available }) {
 }
 
 /** Xếp giá trị chính và % tăng trưởng thành hai dòng trong cùng một ô. */
-function MetricValue({ children, current, previous, available }) {
+function MetricValue({
+  children,
+  current,
+  previous,
+  available,
+  lowerIsBetter = false,
+}) {
   return (
     <span className="inline-flex flex-col items-end gap-1 whitespace-nowrap">
       <span>{children}</span>
@@ -1052,6 +1113,7 @@ function MetricValue({ children, current, previous, available }) {
         current={current}
         previous={previous}
         available={available}
+        lowerIsBetter={lowerIsBetter}
       />
     </span>
   );
@@ -1233,6 +1295,7 @@ function AggregateMetricCells({
             current={item.frequency}
             previous={previous.frequency}
             available={comparisonAvailable}
+            lowerIsBetter
           >
             {item.frequency.toFixed(2)}x
           </MetricValue>
@@ -1257,6 +1320,7 @@ function AggregateMetricCells({
             current={item.costPerPurchase}
             previous={previous.costPerPurchase}
             available={comparisonAvailable}
+            lowerIsBetter
           >
             {item.costPerPurchase ? formatCurrency(item.costPerPurchase) : "—"}
           </MetricValue>
@@ -1268,6 +1332,7 @@ function AggregateMetricCells({
             current={item.costPerMessage}
             previous={previous.costPerMessage}
             available={comparisonAvailable}
+            lowerIsBetter
           >
             {item.costPerMessage ? formatCurrency(item.costPerMessage) : "—"}
           </MetricValue>
@@ -1385,6 +1450,7 @@ function AdMetricCells({ ad, visibleColumns = DEFAULT_VISIBLE_TABLE_COLUMNS }) {
             current={ad.frequency}
             previous={previous.frequency}
             available={comparisonAvailable}
+            lowerIsBetter
           >
             {ad.frequency.toFixed(2)}x
           </MetricValue>
@@ -1407,6 +1473,7 @@ function AdMetricCells({ ad, visibleColumns = DEFAULT_VISIBLE_TABLE_COLUMNS }) {
             current={ad.costPerPurchase}
             previous={previous.costPerPurchase}
             available={comparisonAvailable}
+            lowerIsBetter
           >
             {ad.costPerPurchase ? formatCurrency(ad.costPerPurchase) : "—"}
           </MetricValue>
@@ -1418,6 +1485,7 @@ function AdMetricCells({ ad, visibleColumns = DEFAULT_VISIBLE_TABLE_COLUMNS }) {
             current={ad.costPerMessage}
             previous={previous.costPerMessage}
             available={comparisonAvailable}
+            lowerIsBetter
           >
             {ad.costPerMessage ? formatCurrency(ad.costPerMessage) : "—"}
           </MetricValue>
