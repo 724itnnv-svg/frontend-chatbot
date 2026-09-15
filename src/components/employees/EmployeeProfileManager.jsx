@@ -134,7 +134,25 @@ const employmentStatusValue = (v) => {
   return "unknown";
 };
 const durationMonths = (v) => Number(String(v || "").match(/\d+/)?.[0] || 0) || null;
-const salaryNumber = (v) => Number(String(v ?? "").replace(/[^\d-]/g, "")) || 0;
+const salaryNumber = (value) => {
+  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+  // Parse one monetary amount only; never concatenate numbers from allowance descriptions.
+  const text = String(value ?? "").trim().replace(/\s*(?:đồng|vnd|vnđ|đ|₫)$/i, "").trim();
+  let normalized = text;
+  if (/^-?\d{1,3}(\.\d{3})+(,\d+)?$/.test(text)) {
+    normalized = text.replace(/\./g, "").replace(",", ".");
+  } else if (/^-?\d{1,3}(,\d{3})+(\.\d+)?$/.test(text)) {
+    normalized = text.replace(/,/g, "");
+  } else if (/^-?\d{1,3}( \d{3})+([.,]\d+)?$/.test(text)) {
+    normalized = text.replace(/ /g, "").replace(",", ".");
+  } else if (/^-?\d+(,\d+)?$/.test(text)) {
+    normalized = text.replace(",", ".");
+  } else if (!/^-?\d+(\.\d+)?([eE][+-]?\d+)?$/.test(text)) {
+    return 0;
+  }
+  const amount = Number(normalized);
+  return Number.isFinite(amount) ? amount : 0;
+};
 const ALLOWANCE_FIELDS = [
   ["phuCapCom", "PC cơm"],
   ["phuCapChuyenCan", "PC chuyên cần"],
@@ -144,6 +162,9 @@ const ALLOWANCE_FIELDS = [
 ];
 const normalizeCompensation = (value = {}) => {
   const compensation = { ...emptyProfile.compensation, ...value };
+  ["baseSalary", ...ALLOWANCE_FIELDS.map(([key]) => key)].forEach((key) => {
+    compensation[key] = salaryNumber(compensation[key]);
+  });
   const hasDetailedAllowance = ALLOWANCE_FIELDS.some(([key]) => salaryNumber(compensation[key]) > 0);
   if (!hasDetailedAllowance && salaryNumber(compensation.allowances) > 0) {
     compensation.phuCapNhiemVu = salaryNumber(compensation.allowances);
@@ -183,7 +204,9 @@ function parseEmployeeRow(row, index) {
       phuCapChuyenCan: salaryNumber(cell(row, "PC CHUYÊN CẦN")),
       phuCapXangXe: salaryNumber(cell(row, "PC XĂNG XE")),
       phuCapDienThoai: salaryNumber(cell(row, "PC ĐIỆN THOẠI")),
-      phuCapNhiemVu: salaryNumber(cell(row, "PC NHIỆM VỤ") || cell(row, "PHỤ CẤP")),
+      phuCapNhiemVu: salaryNumber(cell(row, "PC NHIỆM VỤ") !== ""
+        ? cell(row, "PC NHIỆM VỤ")
+        : ALLOWANCE_FIELDS.some(([, label]) => salaryNumber(cell(row, label)) > 0) ? 0 : cell(row, "PHỤ CẤP")),
       allowances: String(cell(row, "PHỤ CẤP") || ""),
     },
     education: { level: String(cell(row, "HỌC VẤN") || ""), major: String(cell(row, "NGÀNH NGHỀ") || "") },
@@ -303,6 +326,7 @@ function profileToExcelRow(profile) {
   const appendix = [...(contract.appendices || [])].sort((a, b) => new Date(b.signedDate || 0) - new Date(a.signedDate || 0))[0] || {};
   const address = profile.permanentAddress || {};
   const seniority = profile.seniority || {};
+  const compensation = normalizeCompensation(profile.compensation);
   return {
     "MSNV": profile.employeeCode || "",
     "HỌ VÀ TÊN": profile.personal?.fullName || "",
@@ -330,12 +354,12 @@ function profileToExcelRow(profile) {
     "NGÀY ĐẾN HẠN HỢP ĐỒNG LAO ĐỘNG": excelDate(contract.renewalDueDate || contract.expiryDate),
     "TÌNH TRẠNG": exportEmploymentStatus[profile.employment?.employmentStatus] || profile.employment?.employmentStatus || "",
     "CTY": profile.employment?.company || "",
-    "LƯƠNG CĂN BẢN": Number(profile.compensation?.baseSalary || 0) || "",
-    "PC CƠM": Number(profile.compensation?.phuCapCom || 0) || "",
-    "PC CHUYÊN CẦN": Number(profile.compensation?.phuCapChuyenCan || 0) || "",
-    "PC XĂNG XE": Number(profile.compensation?.phuCapXangXe || 0) || "",
-    "PC ĐIỆN THOẠI": Number(profile.compensation?.phuCapDienThoai || 0) || "",
-    "PC NHIỆM VỤ": Number(profile.compensation?.phuCapNhiemVu || salaryNumber(profile.compensation?.allowances) || 0) || "",
+    "LƯƠNG CĂN BẢN": compensation.baseSalary,
+    "PC CƠM": compensation.phuCapCom,
+    "PC CHUYÊN CẦN": compensation.phuCapChuyenCan,
+    "PC XĂNG XE": compensation.phuCapXangXe,
+    "PC ĐIỆN THOẠI": compensation.phuCapDienThoai,
+    "PC NHIỆM VỤ": compensation.phuCapNhiemVu,
     "SỐ PHỤ LỤC HỢP ĐỒNG": appendix.appendixNumber || "",
     "TỪ NGÀY KÝ PL": excelDate(appendix.signedDate || appendix.effectiveDate),
     "NGÀY HẾT HẠN PL": excelDate(appendix.expiryDate),
@@ -594,7 +618,7 @@ function ContractEditorModal({
         <Field label="Nơi làm việc" value={draft.workplace} onChange={(v) => updateField("workplace", v)} />
         <Field label="Người đại diện" value={draft.companyRepresentative.fullName} onChange={(v) => updateDraft((current) => ({ ...current, companyRepresentative: { ...current.companyRepresentative, fullName: v } }))} />
         <Field label="Chức vụ đại diện" value={draft.companyRepresentative.title} onChange={(v) => updateDraft((current) => ({ ...current, companyRepresentative: { ...current.companyRepresentative, title: v } }))} />
-        <MoneyField label="Phụ cấp" value={draft.allowances} onChange={(v) => updateField("allowances", v)} />
+        <Field label="Phụ cấp" value={draft.allowances} onChange={(v) => updateField("allowances", v)} />
       </div>
       <ContractTemplateDynamicFields definitions={draft.templateFieldDefinitions || []} values={draft.templateFieldValues || {}} onChange={(key, fieldValue) => updateDraft((current) => ({ ...current, templateFieldValues: { ...(current.templateFieldValues || {}), [key]: fieldValue } }))} />
       <div className="mt-5 rounded-xl border border-cyan-100 bg-cyan-50/50 p-3"><div className="mb-3 flex items-center"><b className="mr-auto text-sm text-cyan-800">Phụ lục hợp đồng</b><button onClick={() => updateDraft((current) => ({ ...current, appendices: [...(current.appendices || []), { appendixNumber: "", signedDate: "", effectiveDate: "", expiryDate: "", summary: "", status: "draft" }] }))} className="rounded-lg bg-cyan-600 px-2.5 py-1.5 text-xs font-bold text-white">+ Thêm phụ lục</button></div>

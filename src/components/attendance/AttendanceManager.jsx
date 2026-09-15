@@ -1725,11 +1725,11 @@ export default function AttendanceManager() {
       };
 
       if (editingRecord?._id) {
-        await api.put(`/attendance/${editingRecord._id}`, payload);
-        showFlash(true, "Đã cập nhật bản ghi chấm công.");
+        const res = await api.put(`/attendance/${editingRecord._id}`, payload);
+        showFlash(true, res.data?.message || "Đã cập nhật bản ghi chấm công.");
       } else {
-        await api.post("/attendance", payload);
-        showFlash(true, "Đã thêm bản ghi chấm công.");
+        const res = await api.post("/attendance", payload);
+        showFlash(true, res.data?.message || "Đã thêm bản ghi chấm công.");
       }
 
       const nextPage = editingRecord?._id ? page : 1;
